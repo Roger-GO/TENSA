@@ -316,7 +316,12 @@ beforeEach(() => {
   drawn.onInteractiveChange = null;
   useSessionStore.setState({ sessionId: parseSessionId('sess-arrange') });
   useCaseStore.getState().clearCase();
-  useSldStore.setState({ selectedNodeId: null, pickedNodeIds: [], diagramLocked: false });
+  useSldStore.setState({
+    selectedNodeId: null,
+    pickedNodeIds: [],
+    pickedCount: 0,
+    diagramLocked: false,
+  });
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePflowStore.setState({ lastRun: null });
   history().clear();
@@ -702,6 +707,36 @@ describe('picking several nodes, and lining them up', () => {
     act(() => useSldStore.getState().setSelectedNodeId('3'));
     await waitFor(() => expect(screen.queryByTestId('sld-selection-bar')).not.toBeInTheDocument());
     expect(drawn.nodes.filter((n) => n.selected).map((n) => n.id)).toEqual(['3']);
+  });
+
+  it('tells the commands how many it shows as picked, and lets go of them when it goes away', async () => {
+    open('square.xlsx');
+    await draw();
+    expect(useSldStore.getState().pickedCount).toBe(0);
+    pick('1', '2', 'load-PQ_1');
+    await waitFor(() => expect(useSldStore.getState().pickedCount).toBe(3));
+    // An id that is no node of this diagram is not one of them.
+    act(() => useSldStore.getState().setPickedNodeIds(['1', '2', 'gone']));
+    await waitFor(() => expect(useSldStore.getState().pickedCount).toBe(2));
+    expect(screen.getByTestId('sld-selection-count')).toHaveTextContent('2 picked');
+
+    // Another view takes the place of the diagram: nothing is left picked.
+    cleanup();
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+    expect(useSldStore.getState().pickedCount).toBe(0);
+  });
+
+  it('starts another case with nothing picked', async () => {
+    open('square.xlsx');
+    await draw();
+    pick('1', '2');
+    await waitFor(() => expect(screen.getByTestId('sld-selection-bar')).toBeInTheDocument());
+
+    // A case whose buses go by the same idx values.
+    act(() => open('other.xlsx'));
+    await waitFor(() => expect(screen.queryByTestId('sld-selection-bar')).not.toBeInTheDocument());
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+    expect(drawn.nodes.filter((n) => n.selected)).toEqual([]);
   });
 
   it('aligns the picked buses, takes their devices along, and takes it back in one step', async () => {

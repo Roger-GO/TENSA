@@ -919,6 +919,20 @@ function SldCanvasInner({
     return picked.length >= 2 ? new Set(picked) : null;
   }, [pickedNodeIds, nodes]);
   const pickedCount = pickedSet?.size ?? 0;
+  // The commands that line the picked nodes up are listed by how many there
+  // are to line up, so that count is kept where they can read it. The picked
+  // nodes are this diagram's: they go when it does.
+  const setPickedCount = useSldStore((s) => s.setPickedCount);
+  useEffect(() => {
+    setPickedCount(pickedCount);
+  }, [pickedCount, setPickedCount]);
+  useEffect(
+    () => () => {
+      setPickedNodeIds([]);
+      setPickedCount(0);
+    },
+    [setPickedNodeIds, setPickedCount],
+  );
 
   // Sync React Flow's `selected` state with the case store so a
   // selection driven from the results table (Unit 9) reflects on the

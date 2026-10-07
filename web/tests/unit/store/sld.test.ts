@@ -19,6 +19,8 @@ import {
   subscribeSldCommand,
   subscribeUnitExpanded,
 } from '@/store/sld';
+import { useCaseStore } from '@/store/case';
+import { parseWorkspacePath } from '@/api/types';
 
 beforeEach(() => {
   // Reset the store to initial defaults before each test.
@@ -26,8 +28,10 @@ beforeEach(() => {
     selectedNodeId: null,
     selectedOnDiagram: false,
     pickedNodeIds: [],
+    pickedCount: 0,
     diagramLocked: false,
   });
+  useCaseStore.getState().clearCase();
 });
 
 afterEach(() => {
@@ -103,6 +107,43 @@ describe('useSldStore: the nodes picked together', () => {
     // A table row or the search asks for one node.
     useSldStore.getState().setSelectedNodeId('3');
     expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+  });
+});
+
+describe('useSldStore: the nodes picked together are those of one diagram', () => {
+  const open = (path: string): void =>
+    useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath(path), addfiles: [] });
+
+  it('lets go of them when another case is opened', () => {
+    open('ieee14.xlsx');
+    useSldStore.getState().setPickedNodeIds(['1', '2', '3']);
+    useSldStore.getState().setPickedCount(3);
+    // Another case has buses 1, 2 and 3 as well.
+    open('wscc9.xlsx');
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+    expect(useSldStore.getState().pickedCount).toBe(0);
+  });
+
+  it('lets go of them when the case is closed', () => {
+    open('ieee14.xlsx');
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    useCaseStore.getState().clearCase();
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+  });
+
+  it('keeps them through a change of the case store that is not another case', () => {
+    open('ieee14.xlsx');
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    useCaseStore.getState().setDragOverrides({ '1': { x: 10, y: 20 } });
+    expect(useSldStore.getState().pickedNodeIds).toEqual(['1', '2']);
+  });
+
+  it('counts none until the canvas says how many it shows as picked', () => {
+    expect(useSldStore.getState().pickedCount).toBe(0);
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    expect(useSldStore.getState().pickedCount).toBe(0);
+    useSldStore.getState().setPickedCount(2);
+    expect(useSldStore.getState().pickedCount).toBe(2);
   });
 });
 

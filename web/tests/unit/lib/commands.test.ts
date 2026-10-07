@@ -133,7 +133,7 @@ beforeEach(() => {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useEditJournalStore.getState().reset();
   useLayoutHistoryStore.getState().clear();
-  useSldStore.setState({ pickedNodeIds: [], diagramLocked: false });
+  useSldStore.setState({ pickedNodeIds: [], pickedCount: 0, diagramLocked: false });
 });
 
 afterEach(() => {
@@ -1310,14 +1310,21 @@ describe('useCommandRegistry: Tidy diagram, Snap to grid, Align and Distribute',
     expect(find(none.result.current, 'view.distribute-horizontal')).toBeUndefined();
     none.unmount();
 
+    // The ids alone do not list them: a node of another diagram, or one that
+    // cannot be moved, is not there to line up. The canvas says how many are.
     act(() => useSldStore.getState().setPickedNodeIds(['1', '2']));
+    const unseen = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(unseen.result.current, 'view.align-left')).toBeUndefined();
+    unseen.unmount();
+
+    act(() => useSldStore.getState().setPickedCount(2));
     const two = renderHook(() => useCommandRegistry(), { wrapper });
     expect(find(two.result.current, 'view.align-left')?.label).toBe('Align left (2 picked)');
     expect(find(two.result.current, 'view.align-middle')).toBeDefined();
     expect(find(two.result.current, 'view.distribute-horizontal')).toBeUndefined();
     two.unmount();
 
-    act(() => useSldStore.getState().setPickedNodeIds(['1', '2', '3']));
+    act(() => useSldStore.getState().setPickedCount(3));
     const seen: SldCommand[] = [];
     const unsubscribe = subscribeSldCommand((c) => seen.push(c));
     try {

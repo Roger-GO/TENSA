@@ -23,6 +23,7 @@
  * `SldCanvas`'s `onNodeClick` already produces.
  */
 import { create } from 'zustand';
+import { useCaseStore } from './case';
 
 export interface SldState {
   /**
@@ -64,6 +65,14 @@ export interface SldState {
   pickedNodeIds: string[];
   setPickedNodeIds: (ids: string[]) => void;
   /**
+   * How many of them the diagram shows as picked: the ones that are drawn
+   * and can be moved, counted from two. It is what Align and Distribute have
+   * to act on, so the commands that offer them read this and not the ids.
+   * Written by the mounted canvas, and 0 with none mounted.
+   */
+  pickedCount: number;
+  setPickedCount: (count: number) => void;
+  /**
    * The lock of the diagram's controls is on: nothing can be dragged or
    * selected, and the commands that arrange the diagram say so and do
    * nothing. Written by the mounted canvas, and false with none mounted.
@@ -89,9 +98,24 @@ export const useSldStore = create<SldState>((set) => ({
         ? s
         : { pickedNodeIds: ids },
     ),
+  pickedCount: 0,
+  setPickedCount: (count: number) => set({ pickedCount: count }),
   diagramLocked: false,
   setDiagramLocked: (locked: boolean) => set({ diagramLocked: locked }),
 }));
+
+// The nodes picked together are those of one diagram. A bus goes by its idx,
+// which the next case has as well, so another case (or none) starts with
+// nothing picked. Wired here, as the layout history wires its own reset, so
+// it holds wherever the store is in use.
+let wiredSelection: unknown = useCaseStore.getState().selection;
+useCaseStore.subscribe((state) => {
+  if (state.selection === wiredSelection) return;
+  wiredSelection = state.selection;
+  if (useSldStore.getState().pickedNodeIds.length > 0) {
+    useSldStore.setState({ pickedNodeIds: [], pickedCount: 0 });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // SLD search popover bridge.

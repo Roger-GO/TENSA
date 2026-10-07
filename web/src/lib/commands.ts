@@ -333,7 +333,7 @@ function useCommandSets(): CommandSets {
   const layoutUndoLabel = undoes === 'layout' ? (layoutUndoStep?.label ?? null) : null;
   const layoutRedoLabel = redoes === 'layout' ? (layoutRedoStep?.label ?? null) : null;
   const diagramLocked = useSldStore((s) => s.diagramLocked);
-  const pickedCount = useSldStore((s) => s.pickedNodeIds.length);
+  const pickedCount = useSldStore((s) => s.pickedCount);
   const snapToGrid = useLayoutStore((s) => s.sldSnapToGrid);
 
   return useMemo<CommandSets>(() => {
