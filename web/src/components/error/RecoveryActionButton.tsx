@@ -90,7 +90,7 @@ function useRecoveryHandler(
   const setSubMode = useAnalyzeStore((s) => s.setSubMode);
   const setActiveBottomDrawerTab = useLayoutStore((s) => s.setActiveBottomDrawerTab);
   const setBottomDrawerCollapsed = useLayoutStore((s) => s.setBottomDrawerCollapsed);
-  const setLeftSidebarCollapsed = useLayoutStore((s) => s.setLeftSidebarCollapsed);
+  const showLeftSidebarTab = useLayoutStore((s) => s.showLeftSidebarTab);
   const setActivityPanelCollapsed = useLayoutStore((s) => s.setActivityPanelCollapsed);
   const setActivityPanelTab = useLayoutStore((s) => s.setActivityPanelTab);
   const setSelectedJobId = useLayoutStore((s) => s.setSelectedJobId);
@@ -146,11 +146,11 @@ function useRecoveryHandler(
       };
 
     case 'load-case':
-      // Focus the case picker — reveal the left sidebar where the workspace
-      // file picker lives.
+      // Focus the case picker — reveal the left sidebar on its Project tab,
+      // where the workspace file picker lives.
       return {
         onActivate: () => {
-          setLeftSidebarCollapsed(false);
+          showLeftSidebarTab('project');
         },
         pending: false,
       };

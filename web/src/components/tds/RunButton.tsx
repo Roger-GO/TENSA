@@ -332,7 +332,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     ) {
       toast.info('No fault is set', {
         description:
-          'Neither the sidebar nor the case schedules a fault, a trip or a parameter change, so nothing disturbs this run. Add a fault under Disturbances in the left sidebar and run again.',
+          'Neither the sidebar nor the case schedules a fault, a trip or a parameter change, so nothing disturbs this run. Add a fault under Disturbances in the left sidebar (Project tab) and run again.',
         duration: 8000,
       });
     }

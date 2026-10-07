@@ -19,7 +19,9 @@ import {
   BOTTOM_DRAWER_TABS,
   DEFAULT_LAYOUT,
   LAYOUT_STORAGE_KEY,
+  LEFT_SIDEBAR_TABS,
   isAnalyzeBackedSubTab,
+  isLeftSidebarTab,
   useLayoutStore,
 } from '@/store/layout';
 
@@ -47,6 +49,7 @@ describe('useLayoutStore — defaults', () => {
   it('exposes the v3 defaults out of the box', () => {
     const state = useLayoutStore.getState();
     expect(state.leftSidebarCollapsed).toBe(false);
+    expect(state.leftSidebarTab).toBe('project');
     expect(state.bottomDrawerCollapsed).toBe(false);
     expect(state.bottomDrawerHeightPct).toBe(35);
     expect(state.rightInspectorCollapsed).toBe(false);
@@ -82,6 +85,14 @@ describe('useLayoutStore — defaults', () => {
   it('says which sub-tabs have an Analyze sub-mode to be written in step: not Plot, PF or Compare', () => {
     expect(ANALYSIS_SUB_TABS.filter(isAnalyzeBackedSubTab)).toEqual(['eig', 'cpf', 'se', 'tds']);
   });
+
+  it('exposes LEFT_SIDEBAR_TABS in the order the sidebar shows them, and tells a tab from anything else', () => {
+    expect(LEFT_SIDEBAR_TABS).toEqual(['project', 'components']);
+    expect(LEFT_SIDEBAR_TABS.every(isLeftSidebarTab)).toBe(true);
+    for (const other of ['library', 'Project', '', null, undefined, 0]) {
+      expect(isLeftSidebarTab(other)).toBe(false);
+    }
+  });
 });
 
 describe('useLayoutStore — actions', () => {
@@ -99,6 +110,26 @@ describe('useLayoutStore — actions', () => {
     useLayoutStore.getState().toggleLeftSidebar();
     expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(true);
     useLayoutStore.getState().toggleLeftSidebar();
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+  });
+
+  it('setLeftSidebarTab swaps the tab and leaves a collapsed sidebar collapsed', () => {
+    useLayoutStore.getState().setLeftSidebarCollapsed(true);
+    useLayoutStore.getState().setLeftSidebarTab('components');
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('components');
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(true);
+    useLayoutStore.getState().setLeftSidebarTab('project');
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('project');
+  });
+
+  it('showLeftSidebarTab swaps the tab and opens a collapsed sidebar', () => {
+    useLayoutStore.getState().setLeftSidebarCollapsed(true);
+    useLayoutStore.getState().showLeftSidebarTab('components');
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('components');
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
+    // Already open: only the tab changes.
+    useLayoutStore.getState().showLeftSidebarTab('project');
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('project');
     expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(false);
   });
 
@@ -243,6 +274,34 @@ describe('useLayoutStore — persistence', () => {
     );
     await useLayoutStore.persist.rehydrate();
     expect(useLayoutStore.getState().sldSnapToGrid).toBe(true);
+  });
+
+  it('keeps the tab of the left sidebar across a reload: it is where the user works', async () => {
+    useLayoutStore.getState().setLeftSidebarTab('components');
+    await Promise.resolve();
+    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> };
+    expect(parsed.state.leftSidebarTab).toBe('components');
+
+    resetLayoutStore();
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('project');
+    window.localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({ state: { ...DEFAULT_LAYOUT, leftSidebarTab: 'components' }, version: 0 }),
+    );
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('components');
+  });
+
+  it('opens on Project for a layout kept before the sidebar had tabs', async () => {
+    const { leftSidebarTab: _tab, ...before } = DEFAULT_LAYOUT;
+    window.localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({ state: { ...before, leftSidebarCollapsed: true }, version: 0 }),
+    );
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().leftSidebarCollapsed).toBe(true);
+    expect(useLayoutStore.getState().leftSidebarTab).toBe('project');
   });
 
   it('round-trips resultsViewActive via rehydrate()', async () => {

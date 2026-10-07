@@ -835,6 +835,35 @@ function useCommandSets(): CommandSets {
         },
         shortcut: SHORTCUTS.toggleLeftSidebar,
       },
+      // The two tabs of the left sidebar. Each always opens: it shows the
+      // sidebar when that is hidden, and leaves the results view, which has
+      // no sidebar.
+      {
+        id: 'view.openProject',
+        label: 'Open Project',
+        description:
+          'The left sidebar on its Project tab: the open case, its disturbances, the saved cases and the snapshots.',
+        group: 'view',
+        keywords: ['project', 'case', 'saved', 'recent', 'snapshots', 'disturbances', 'sidebar'],
+        action: () => {
+          const layout = useLayoutStore.getState();
+          layout.setResultsViewActive(false);
+          layout.showLeftSidebarTab('project');
+        },
+      },
+      {
+        id: 'view.openComponents',
+        label: 'Open Components',
+        description:
+          'The left sidebar on its Components tab: the searchable list of what can be added to a system.',
+        group: 'view',
+        keywords: ['components', 'library', 'palette', 'catalog', 'models', 'add', 'sidebar'],
+        action: () => {
+          const layout = useLayoutStore.getState();
+          layout.setResultsViewActive(false);
+          layout.showLeftSidebarTab('components');
+        },
+      },
       {
         id: 'view.toggleBottomDrawer',
         label: 'Toggle bottom drawer',

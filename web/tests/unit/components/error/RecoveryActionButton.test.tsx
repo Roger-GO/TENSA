@@ -23,7 +23,7 @@ const setActiveRoutineMock = vi.fn();
 const setSubModeMock = vi.fn();
 const setActiveBottomDrawerTabMock = vi.fn();
 const setBottomDrawerCollapsedMock = vi.fn();
-const setLeftSidebarCollapsedMock = vi.fn();
+const showLeftSidebarTabMock = vi.fn();
 const setActivityPanelCollapsedMock = vi.fn();
 const setActivityPanelTabMock = vi.fn();
 const setSelectedJobIdMock = vi.fn();
@@ -56,7 +56,7 @@ vi.mock('@/store/layout', () => ({
     selector: (s: {
       setActiveBottomDrawerTab: typeof setActiveBottomDrawerTabMock;
       setBottomDrawerCollapsed: typeof setBottomDrawerCollapsedMock;
-      setLeftSidebarCollapsed: typeof setLeftSidebarCollapsedMock;
+      showLeftSidebarTab: typeof showLeftSidebarTabMock;
       setActivityPanelCollapsed: typeof setActivityPanelCollapsedMock;
       setActivityPanelTab: typeof setActivityPanelTabMock;
       setSelectedJobId: typeof setSelectedJobIdMock;
@@ -65,7 +65,7 @@ vi.mock('@/store/layout', () => ({
     selector({
       setActiveBottomDrawerTab: setActiveBottomDrawerTabMock,
       setBottomDrawerCollapsed: setBottomDrawerCollapsedMock,
-      setLeftSidebarCollapsed: setLeftSidebarCollapsedMock,
+      showLeftSidebarTab: showLeftSidebarTabMock,
       setActivityPanelCollapsed: setActivityPanelCollapsedMock,
       setActivityPanelTab: setActivityPanelTabMock,
       setSelectedJobId: setSelectedJobIdMock,
@@ -169,10 +169,10 @@ describe('<RecoveryActionButton />', () => {
     expect(setBottomDrawerCollapsedMock).toHaveBeenCalledWith(false);
   });
 
-  it('load-case → reveals the left sidebar (case picker)', async () => {
+  it('load-case → reveals the left sidebar on its Project tab (case picker)', async () => {
     render(<RecoveryActionButton recovery={desc('load-case', 'Load a case')} />);
     await userEvent.click(screen.getByTestId('recovery-action'));
-    expect(setLeftSidebarCollapsedMock).toHaveBeenCalledWith(false);
+    expect(showLeftSidebarTabMock).toHaveBeenCalledWith('project');
   });
 
   it('wait-for-job → opens the Activity panel + selects the job', async () => {

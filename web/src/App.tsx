@@ -151,7 +151,7 @@ function AppInner({ children }: { children: React.ReactNode }) {
  *
  * - no case → EmptyState ("No case loaded"), wrapped in a
  *   ComponentDropZone — directs the user to the left sidebar AND accepts
- *   a dragged Component Library tile, which spins up a blank system and
+ *   a row dragged from the Components palette, which spins up a blank system and
  *   opens that kind's add form (the build-from-scratch entry the sidebar
  *   advertises but which previously did nothing on drop).
  * - case loaded → SldCanvas (which itself shows the layout-skeleton
@@ -175,7 +175,7 @@ function CanvasSlot() {
   }
 
   // Drop = "start a blank system seeded with this element": the same as a click on
-  // a Component library tile, which says why when it cannot.
+  // a row of the Components palette, which says why when it cannot.
   const handleDropComponent = (kind: string) => {
     setDropError(null);
     addComponent(kind, setDropError);
@@ -203,7 +203,7 @@ function CanvasSlot() {
           title="No case loaded"
           description={
             dropError ??
-            'Pick a case file from the left sidebar, drop one anywhere in this window, or click or drag a component from the Component library to start a blank system.'
+            'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.'
           }
           emptyStateKey="app-shell-no-case"
         >

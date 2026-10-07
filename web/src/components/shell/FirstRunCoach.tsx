@@ -22,8 +22,9 @@ import { cn } from '@/lib/cn';
  *   to block.
  * - **Anchored copy, simple positioning.** The card lives in a fixed
  *   corner per step (top-left for step 1, top-right for steps 2 and
- *   3) with copy that names the target ("Look at the left rail to
- *   pick a case…"). No intersection observer, no connector arrow.
+ *   3) with copy that names the target ("Look at the Project tab of
+ *   the left rail to pick a case…"). No intersection observer, no
+ *   connector arrow.
  *   From step 2 on a case is open, and the card keeps off its
  *   diagram: under the Run button it covered the top of the diagram,
  *   where the first bus of the example cases is drawn, and took the
@@ -52,13 +53,13 @@ interface StepCopy {
 const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
   1: {
     title: 'Pick a case',
-    body: 'Look at the left rail to pick a case file (try kundur or IEEE 14). Loading sets up the topology and brings up the diagram.',
+    body: 'Look at the Project tab of the left rail to pick a case file under Saved cases (try kundur or IEEE 14). Loading sets up the topology and brings up the diagram.',
     anchor: 'top-left',
     cta: 'Got it',
   },
   2: {
     title: 'Run power flow',
-    body: 'Use the Run button at the top of the screen to compute the operating point. The Inspector and Results table populate when PF converges. To simulate a fault instead, add it under Disturbances in the left rail and switch the Run mode to TDS.',
+    body: 'Use the Run button at the top of the screen to compute the operating point. The Inspector and Results table populate when PF converges. To simulate a fault instead, add it under Disturbances in the left rail (Project tab) and switch the Run mode to TDS.',
     anchor: 'top-right',
     cta: 'Got it',
   },
@@ -74,11 +75,13 @@ const ANCHOR_CLASS: Record<StepCopy['anchor'], string> = {
   // ``top-16`` clears the 44 px TopBar plus a few pixels of breathing
   // room. ``max-w-xs`` keeps the card under 320 px so it never
   // overflows narrow viewports. Step 1 ('top-left') sits just RIGHT of
-  // the left rail (~240 px) instead of on top of it — the card must
-  // never cover the Saved-cases list it is pointing the user at.
+  // the left rail instead of on top of it — the card must never cover
+  // the Saved-cases list it is pointing the user at, nor the tabs over
+  // it. The rail opens at a fifth of the window, so the card starts a
+  // little past that, and no further left than it used to.
   // 'top-right' sits over the Inspector, which has nothing in it until
   // an element is selected.
-  'top-left': 'top-16 left-[260px]',
+  'top-left': 'top-16 left-[max(260px,calc(20vw_+_12px))]',
   'top-right': 'top-16 right-4',
 };
 

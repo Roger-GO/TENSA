@@ -2,12 +2,13 @@ import { Button } from '@/components/ui/button';
 import { useCaseStore } from '@/store/case';
 
 /**
- * "+ Add element" button of the Case card, at the top of the left sidebar.
+ * "+ Add element" button of the Case card, at the top of the left sidebar's
+ * Project tab.
  *
  * Clicking opens the AddElementPanel slide-over with no kind pre-selected. It
- * is the way in that is always in view: the Component library's tiles do the
- * same for one kind each, but sit at the foot of the sidebar, below the fold of
- * a short window, and the Workspace menu's entry is behind a click.
+ * is the way in beside the case itself: the rows of the Components palette do
+ * the same for one kind each, but are on the sidebar's other tab, and the
+ * Workspace menu's entry is behind a click.
  *
  * `blockedReason` is why nothing can be added now (`useAddComponent`), or
  * `null`. The caller shows it as text and passes its id as `describedBy`, so

@@ -991,7 +991,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
       const [title, opts] = toastInfoMock.mock.calls[0] as [string, { description: string }];
       expect(title).toBe('No fault is set');
       expect(opts.description).toMatch(
-        /Neither the sidebar nor the case schedules.*Disturbances in the left sidebar/,
+        /Neither the sidebar nor the case schedules.*Disturbances in the left sidebar \(Project tab\)/,
       );
       // It claims nothing about the curves.
       expect(opts.description).not.toMatch(/flat/);

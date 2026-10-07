@@ -575,6 +575,53 @@ describe('useCommandRegistry — v3 Unit 2 view commands', () => {
   });
 });
 
+describe('useCommandRegistry: the tabs of the left sidebar', () => {
+  it('has a command for each tab, in the view group, findable by what the tab holds', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const project = result.current.find((c) => c.id === 'view.openProject');
+    expect(project?.group).toBe('view');
+    expect(project?.label).toBe('Open Project');
+    expect(project?.keywords).toEqual(expect.arrayContaining(['case', 'saved', 'snapshots']));
+    const components = result.current.find((c) => c.id === 'view.openComponents');
+    expect(components?.group).toBe('view');
+    expect(components?.label).toBe('Open Components');
+    expect(components?.keywords).toEqual(expect.arrayContaining(['library', 'palette', 'add']));
+    // Each says in the palette where it goes.
+    expect(project?.description).toMatch(/left sidebar.*Project tab/);
+    expect(components?.description).toMatch(/left sidebar.*Components tab/);
+  });
+
+  it('shows the tab, from a collapsed sidebar or the results view', () => {
+    useLayoutStore.setState({
+      leftSidebarCollapsed: true,
+      leftSidebarTab: 'project',
+      resultsViewActive: true,
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    result.current.find((c) => c.id === 'view.openComponents')?.action();
+    expect(useLayoutStore.getState()).toMatchObject({
+      leftSidebarTab: 'components',
+      leftSidebarCollapsed: false,
+      resultsViewActive: false,
+    });
+
+    useLayoutStore.setState({ leftSidebarCollapsed: true, resultsViewActive: true });
+    result.current.find((c) => c.id === 'view.openProject')?.action();
+    expect(useLayoutStore.getState()).toMatchObject({
+      leftSidebarTab: 'project',
+      leftSidebarCollapsed: false,
+      resultsViewActive: false,
+    });
+  });
+
+  it('is there with no case open: the palette is how a blank system is started', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const ids = result.current.map((c) => c.id);
+    expect(ids).toContain('view.openProject');
+    expect(ids).toContain('view.openComponents');
+  });
+});
+
 describe('useCommandRegistry: Open Messages command', () => {
   it('is in the view group and findable by what a user would call it', () => {
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });

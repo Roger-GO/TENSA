@@ -98,6 +98,20 @@ export function isAnalyzeBackedSubTab(sub: AnalysisSubTab): sub is 'eig' | 'cpf'
 }
 
 /**
+ * Tab of the left sidebar. ``project`` holds the open case, its disturbances,
+ * the saved cases (the recent ones first) and the snapshots; ``components``
+ * holds the palette of what can be added to a system.
+ */
+export type LeftSidebarTab = 'project' | 'components';
+
+export const LEFT_SIDEBAR_TABS: readonly LeftSidebarTab[] = ['project', 'components'] as const;
+
+/** Whether `value` names a tab of the left sidebar: what the browser kept may not. */
+export function isLeftSidebarTab(value: unknown): value is LeftSidebarTab {
+  return (LEFT_SIDEBAR_TABS as readonly unknown[]).includes(value);
+}
+
+/**
  * Active tab in the Activity panel (Unit 11). ``active`` shows in-flight +
  * pending jobs; ``history`` shows the terminal (done/failed/cancelled)
  * rolling log, in a tab that reads "Finished" (the id is kept for the stored
@@ -126,6 +140,16 @@ export interface LayoutState {
   leftSidebarCollapsed: boolean;
   setLeftSidebarCollapsed: (collapsed: boolean) => void;
   toggleLeftSidebar: () => void;
+
+  /**
+   * The tab the left sidebar shows. A preference of the user, kept across
+   * reloads: someone building a system leaves it on Components, someone
+   * running studies on Project.
+   */
+  leftSidebarTab: LeftSidebarTab;
+  setLeftSidebarTab: (tab: LeftSidebarTab) => void;
+  /** Show `tab`, opening the sidebar when it is collapsed: for what sends the user there. */
+  showLeftSidebarTab: (tab: LeftSidebarTab) => void;
 
   /** Bottom drawer collapse state (driven by Unit 2 toggle + ⌘J). */
   bottomDrawerCollapsed: boolean;
@@ -241,6 +265,7 @@ export interface LayoutState {
 export const DEFAULT_LAYOUT: Pick<
   LayoutState,
   | 'leftSidebarCollapsed'
+  | 'leftSidebarTab'
   | 'bottomDrawerCollapsed'
   | 'bottomDrawerHeightPct'
   | 'rightInspectorCollapsed'
@@ -256,6 +281,8 @@ export const DEFAULT_LAYOUT: Pick<
   | 'sldSnapToGrid'
 > = {
   leftSidebarCollapsed: false,
+  // Project first: a first-time user opens a case before adding to one.
+  leftSidebarTab: 'project',
   bottomDrawerCollapsed: false,
   bottomDrawerHeightPct: 35,
   rightInspectorCollapsed: false,
@@ -284,6 +311,9 @@ export const useLayoutStore = create<LayoutState>()(
       setLeftSidebarCollapsed: (collapsed) => set({ leftSidebarCollapsed: collapsed }),
       toggleLeftSidebar: () =>
         set((state) => ({ leftSidebarCollapsed: !state.leftSidebarCollapsed })),
+
+      setLeftSidebarTab: (tab) => set({ leftSidebarTab: tab }),
+      showLeftSidebarTab: (tab) => set({ leftSidebarTab: tab, leftSidebarCollapsed: false }),
 
       setBottomDrawerCollapsed: (collapsed) => set({ bottomDrawerCollapsed: collapsed }),
       toggleBottomDrawer: () =>
@@ -328,6 +358,7 @@ export const useLayoutStore = create<LayoutState>()(
       // bit that should not survive a reload).
       partialize: (state) => ({
         leftSidebarCollapsed: state.leftSidebarCollapsed,
+        leftSidebarTab: state.leftSidebarTab,
         bottomDrawerCollapsed: state.bottomDrawerCollapsed,
         bottomDrawerHeightPct: state.bottomDrawerHeightPct,
         rightInspectorCollapsed: state.rightInspectorCollapsed,

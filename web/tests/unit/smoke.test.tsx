@@ -68,6 +68,20 @@ describe('App scaffold', () => {
     expect(within(page).getByRole('button', { name: 'Open run history' })).toBeInTheDocument();
   });
 
+  it('names on the "No case loaded" page the tabs of the sidebar that the ways in are on', () => {
+    render(<App />);
+    const page = screen
+      .getAllByTestId('empty-state')
+      .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-no-case')!;
+    expect(page).toHaveTextContent('Pick a case file in the Project tab of the left sidebar');
+    expect(page).toHaveTextContent(
+      'click or drag a component from its Components tab to start a blank system',
+    );
+    // The sidebar has the tabs the page names, and is on the one with the case files.
+    expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Components' })).toBeInTheDocument();
+  });
+
   it('has no such note while nothing is kept', () => {
     render(<App />);
     expect(screen.getByText('No case loaded')).toBeInTheDocument();

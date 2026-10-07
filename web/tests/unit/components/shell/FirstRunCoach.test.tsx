@@ -114,6 +114,14 @@ describe('<FirstRunCoach />', () => {
     expect(screen.getByTestId('first-run-coach').getAttribute('data-step')).toBe('3');
   });
 
+  it('step 1 says which tab of the left rail has the case files', async () => {
+    const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
+    render(<FirstRunCoach />);
+    const card = screen.getByTestId('first-run-coach');
+    expect(card.getAttribute('data-step')).toBe('1');
+    expect(card).toHaveTextContent(/Project tab of the left rail.*case file under Saved cases/);
+  });
+
   it('step 2 says where a fault is added and which Run mode plays it, for a first run that is a TDS one', async () => {
     const { FirstRunCoach } = await import('@/components/shell/FirstRunCoach');
     const { useFirstRunStore } = await import('@/store/firstRun');
@@ -123,7 +131,9 @@ describe('<FirstRunCoach />', () => {
     render(<FirstRunCoach />);
     const card = screen.getByTestId('first-run-coach');
     expect(card.getAttribute('data-step')).toBe('2');
-    expect(card).toHaveTextContent(/fault.*under Disturbances in the left rail.*Run mode to TDS/i);
+    expect(card).toHaveTextContent(
+      /fault.*under Disturbances in the left rail \(Project tab\).*Run mode to TDS/i,
+    );
   });
 
   it('keeps off the diagram once a case is open: steps 2 and 3 sit at the right', async () => {

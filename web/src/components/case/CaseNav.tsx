@@ -13,6 +13,7 @@ import { AddElementButton } from '@/components/elements/AddElementButton';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
+import { useLayoutStore } from '@/store/layout';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { baseName } from '@/lib/paths';
@@ -165,6 +166,7 @@ export function CaseNav({ className }: CaseNavProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const pflowRunning = usePflowStore((s) => s.isRunning);
   const clearPflow = usePflowStore((s) => s.clearPflow);
+  const showLeftSidebarTab = useLayoutStore((s) => s.showLeftSidebarTab);
 
   const deleteSession = useDeleteSession();
 
@@ -216,7 +218,9 @@ export function CaseNav({ className }: CaseNavProps) {
         // v3 LeftSidebar mounts SavedCasesList in a sibling section, so
         // the full WorkspaceFilePicker UI here would duplicate the file
         // list. Render a brief inline hint instead — the user finds the
-        // canonical loader in the Saved Cases section below.
+        // canonical loader in the Saved Cases section below, and the
+        // palette that starts a blank system on the sidebar's other tab,
+        // which the hint's last words open.
         <div
           data-testid="case-nav-empty"
           aria-busy={loadingPath !== null ? 'true' : undefined}
@@ -230,8 +234,22 @@ export function CaseNav({ className }: CaseNavProps) {
           ) : (
             <>
               No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
-              below, drop a case file anywhere in this window, or click or drag a component from the
-              Component library to start a blank system.
+              below, drop a case file anywhere in this window, or start a blank system with a
+              component from the{' '}
+              <button
+                type="button"
+                onClick={() => showLeftSidebarTab('components')}
+                data-testid="case-nav-open-components"
+                className={cn(
+                  'text-foreground underline underline-offset-2',
+                  'hover:text-primary focus-visible:outline-none',
+                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  'rounded-[var(--radius-sm)]',
+                )}
+              >
+                Components tab
+              </button>
+              .
             </>
           )}
         </div>
