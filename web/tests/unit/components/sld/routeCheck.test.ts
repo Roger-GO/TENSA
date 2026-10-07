@@ -11,7 +11,12 @@ import { describe, expect, it } from 'vitest';
 import type { ConnectionEdge, Point } from '@/components/sld/connections';
 import type { LabelNode } from '@/components/sld/labels';
 import { pictureOf } from '@/components/sld/picture';
-import { HAND_CLEARANCE, HAND_LABEL_CLEARANCE, routeChecker } from '@/components/sld/routeCheck';
+import {
+  HAND_CLEARANCE,
+  HAND_LABEL_CLEARANCE,
+  HAND_TAP_CLEARANCE,
+  routeChecker,
+} from '@/components/sld/routeCheck';
 
 function bus(id: string, x: number, y: number): LabelNode {
   return { id, type: 'bus', position: { x, y }, data: { name: `BUS${id}` } };
@@ -265,6 +270,103 @@ describe('routeChecker', () => {
         [130, 3],
       ]),
     ).toBe('it would run along the edge of its own symbol and not leave it');
+  });
+
+  it('has the connector of a device leave the face of its symbol, and not slant away along its edge', () => {
+    const check = checkerFor('stub-load-PQ_1');
+    // Out of the middle of the bottom face at 15 degrees: a few pixels under
+    // the edge, out past the corner.
+    expect(
+      check([
+        [80, -40],
+        [51, -32],
+        [32, 3],
+      ]),
+    ).toBe('it would run along the edge of its own symbol and not leave it');
+    // At 45 degrees it goes away from the face.
+    expect(
+      check([
+        [80, -40],
+        [60, -20],
+        [32, -20],
+        [32, 3],
+      ]),
+    ).toBeNull();
+  });
+
+  it('has a route come to its bar, and not along it over the ends beside its own', () => {
+    const check = checkerFor('stub-load-PQ_1');
+    // Round by the left and back along the bar to its tap, a few pixels over
+    // it: across the dots of the lines that end there.
+    expect(
+      check([
+        [80, -40],
+        [80, -24],
+        [10, -24],
+        [10, -8],
+        [80, 3],
+      ]),
+    ).toMatch(/^it would run over the end of (line L2|transformer T1) on the bar$/);
+    // From the right, over the tip of the bar: over no other end, but along the bar.
+    expect(
+      check([
+        [80, -40],
+        [80, -24],
+        [150, -24],
+        [150, -8],
+        [80, 3],
+      ]),
+    ).toBe(
+      'it would run along the bar of bus BUS1 before it ends on it: a line comes to its bar at 30 degrees or steeper',
+    );
+    // A line is held to it as the connector of a device is.
+    expect(
+      checkerFor('line-L1')([
+        [16, 3],
+        [-60, 14],
+        [-60, 200],
+        [16, 200],
+        [16, 243],
+      ]),
+    ).toMatch(/^it would run along the bar of bus BUS1 before it ends on it/);
+  });
+
+  it('keeps a slanted end off the dot of the end beside its own', () => {
+    const check = checkerFor('stub-load-PQ_1');
+    expect(HAND_TAP_CLEARANCE).toBe(10);
+    // Down to its tap at 34 degrees, right past the end of the transformer 16 along the bar.
+    expect(
+      check([
+        [80, -40],
+        [80, -28],
+        [50, -28],
+        [50, -17],
+        [80, 3],
+      ]),
+    ).toBe('it would pass too close to the end of transformer T1 on the bar');
+    // At 45 degrees it keeps off it.
+    expect(
+      check([
+        [80, -40],
+        [80, -28],
+        [62, -28],
+        [62, -15],
+        [80, 3],
+      ]),
+    ).toBeNull();
+  });
+
+  it('refuses a route that doubles back on the run before', () => {
+    const check = checkerFor('stub-load-PQ_1');
+    // Clear of its symbol and of everything else, out to the left and back to its tap.
+    expect(
+      check([
+        [80, -40],
+        [80, -24],
+        [140, -14],
+        [80, 3],
+      ]),
+    ).toBe('it would fold back on itself');
   });
 
   it('refuses a route that folds back on itself', () => {

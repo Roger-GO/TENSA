@@ -84,8 +84,9 @@
  *   (`ConnectionPass.byHand` says which were kept). So is one that does not
  *   hold as a connector by itself, moved or not, wherever it came from (a
  *   layout that was written for a device somewhere else): one that folds
- *   back on itself (`routeFolds`), or that runs into, along or right beside
- *   the symbol it leaves (`onOwnSymbol`).
+ *   back on itself (`routeFolds`), that runs into, along or right beside
+ *   the symbol it leaves (`onOwnSymbol`), or that comes to its bar so flat
+ *   that it runs along it (`meetsBarFlat`).
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -114,6 +115,31 @@ export const TAP_INSET = BAR_THICKNESS / 2;
 
 /** The shortest bar a layout can ask for: room for two taps. */
 export const MIN_BAR_LENGTH = 2 * TAP_INSET + TAP_SPACING;
+
+/**
+ * Radius of the dot that marks a tap (`BusNode`). A little more than half
+ * the bar's thickness, so the dot shows on either side of the bar.
+ */
+export const TAP_DOT_RADIUS = 4;
+
+/**
+ * How near a line may pass the dot of a tap that is not its own, measured
+ * from the middle of the dot: nearer, it reads as ending there. What the
+ * overlap checker holds every line to (`overlapCheck.ts`).
+ */
+export const TAP_CLEAR = TAP_DOT_RADIUS + 2;
+
+/** How near a bar a line may pass, on any side, before it reads as running along it. */
+export const BAR_CLEAR = 6;
+
+/**
+ * The least angle, in degrees, at which a line comes to the bar it ends on,
+ * and at which the connector of a device leaves the face of its symbol.
+ * Flatter than this, the line runs along the bar or the face before it gets
+ * there, and reads as ending somewhere else: on the tap beside its own, or
+ * on a corner of the symbol.
+ */
+export const MEET_ANGLE = 30;
 
 /** The box a device is taken to have when it carries no size hint. */
 const DEVICE_SIZE: NodeSize = { width: 40, height: 41 };
@@ -687,32 +713,43 @@ export function lengthInside(
 }
 
 /**
- * Whether a route folds back on itself: a run of it turns straight back
- * along the one before, or two runs that are not neighbours cross, touch,
- * or run side by side nearer than two different lines may (`RUN_GAP`). Such
- * a route reads as two lines, or as a loop hanging off one. No route the
- * diagram makes does; one drawn by hand is held to it, and so is one that
- * was brought along with an end that moved.
+ * The sharpest turn a route takes from one run to the next, in degrees:
+ * past it the line doubles back on itself, and the two runs read as a spike
+ * and not as a bend.
+ */
+export const SHARPEST_TURN = 135;
+
+/**
+ * Whether a route folds back on itself: a run of it doubles back on the one
+ * before (a turn of more than `SHARPEST_TURN`), or two runs that are not
+ * neighbours cross, touch, or run side by side nearer than two different
+ * lines may (`RUN_GAP`). Such a route reads as two lines, or as a loop or a
+ * spike hanging off one. No route the diagram makes does; one drawn by hand
+ * is held to it, and so is one that was brought along with an end that
+ * moved. A point that repeats the one before it makes no run: the runs
+ * either side of it are neighbours.
  */
 export function routeFolds(points: readonly (readonly [number, number])[]): boolean {
+  // The runs that have a length, in order.
+  const runs: { a: readonly [number, number]; ux: number; uy: number; length: number }[] = [];
   for (let i = 1; i < points.length; i += 1) {
     const [a, b] = [points[i - 1]!, points[i]!];
-    const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
-    const lu = Math.hypot(ux, uy);
-    if (lu < 1e-6) continue;
-    for (let k = i + 1; k < points.length; k += 1) {
-      const [c, d] = [points[k - 1]!, points[k]!];
-      const [vx, vy] = [d[0] - c[0], d[1] - c[1]];
-      const lv = Math.hypot(vx, vy);
-      if (lv < 1e-6) continue;
-      const cross = ux * vy - uy * vx;
-      const inLine = Math.abs(cross) <= 0.035 * lu * lv;
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (length >= 1e-6) runs.push({ a, ux: b[0] - a[0], uy: b[1] - a[1], length });
+  }
+  const back = Math.cos((SHARPEST_TURN * Math.PI) / 180) - 1e-3;
+  for (let i = 0; i < runs.length; i += 1) {
+    const { a, ux, uy, length: lu } = runs[i]!;
+    for (let k = i + 1; k < runs.length; k += 1) {
+      const { a: c, ux: vx, uy: vy, length: lv } = runs[k]!;
       if (k === i + 1) {
-        // The run after it: straight back the way it came.
-        if (inLine && ux * vx + uy * vy < 0) return true;
+        // The run after it: back the way it came, or nearly.
+        if ((ux * vx + uy * vy) / (lu * lv) < back) return true;
         continue;
       }
-      if (inLine) {
+      const d: readonly [number, number] = [c[0] + vx, c[1] + vy];
+      const cross = ux * vy - uy * vx;
+      if (Math.abs(cross) <= 0.035 * lu * lv) {
         const along = (p: readonly [number, number]): number =>
           ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) / lu;
         const off = (p: readonly [number, number]): number =>
@@ -732,6 +769,30 @@ export function routeFolds(points: readonly (readonly [number, number])[]): bool
 }
 
 /**
+ * Whether the run from `outer` to `tap`, which ends on a bar at `tap`,
+ * comes to that bar too flat: at less than `MEET_ANGLE` to it. Such a run
+ * lies along its own bar, over the taps beside its own, before it ends. One
+ * that runs into the tap at a tip of the bar from beyond that tip is beside
+ * the bar for its last few pixels only, at any angle: the connector of a
+ * device that stands beside its bar. `bar` is the bar as it is drawn: its
+ * two tips and the height of its centre line.
+ */
+export function meetsBarFlat(
+  outer: readonly [number, number],
+  tap: readonly [number, number],
+  bar: { left: number; right: number; y: number },
+): boolean {
+  const across = Math.abs(outer[0] - tap[0]);
+  const down = Math.abs(outer[1] - tap[1]);
+  // Half a degree of grace: a run at the angle itself is not under it.
+  if (down >= across * Math.tan(((MEET_ANGLE - 0.5) * Math.PI) / 180)) return false;
+  const atTip = (tip: number): boolean => Math.abs(tap[0] - tip) <= 2 * TAP_INSET + EPS;
+  const intoTip =
+    (outer[0] >= bar.right && atTip(bar.right)) || (outer[0] <= bar.left && atTip(bar.left));
+  return !intoTip;
+}
+
+/**
  * The least room the runs of a device connector keep to the symbol of their
  * own device, all but the first, which leaves it: the connector that steps
  * round something (`detourFor`) turns no nearer to it than this.
@@ -745,9 +806,12 @@ const ALONG_EDGE = 2;
  * How the connector of a device, drawn through `points` from the middle of
  * a face of `box`, is on the symbol it leaves; `null` when it leaves it
  * cleanly. `through`: a run of it passes through the symbol. `along`: its
- * first run stays on the edge of the symbol and does not leave it. `beside`:
- * a later run comes nearer than `room` to the symbol, where it reads as
- * drawn along its edge or as hanging off a corner of it.
+ * first run stays on the edge of the symbol, or slants away from the face
+ * so flat (under `MEET_ANGLE`) that it runs beside the edge, within `room`
+ * of it, and comes out past a corner: it does not read as leaving the
+ * middle of the face. `beside`: a later run comes nearer than `room` to the
+ * symbol, where it reads as drawn along its edge or as hanging off a corner
+ * of it.
  */
 export function onOwnSymbol(
   points: readonly (readonly [number, number])[],
@@ -760,11 +824,14 @@ export function onOwnSymbol(
     top: box.top - by,
     bottom: box.bottom + by,
   });
+  // As far as a first run that leaves at the least angle stays within `room`.
+  const flat = room / Math.sin((MEET_ANGLE * Math.PI) / 180) + EPS;
   for (let k = 1; k < points.length; k += 1) {
     const [a, b] = [points[k - 1]!, points[k]!];
     if (lengthInside(a, b, grown(-EPS)) > 0) return 'through';
     if (k === 1) {
       if (lengthInside(a, b, grown(EPS)) > ALONG_EDGE) return 'along';
+      if (lengthInside(a, b, grown(room - EPS)) > flat) return 'along';
     } else if (lengthInside(a, b, grown(room - EPS)) > 0) return 'beside';
   }
   return null;
@@ -1451,7 +1518,8 @@ function layoutPass(
       points = bringAlong(points, [from[0] - points[0]![0], from[1] - points[0]![1]], [0, 0]);
     }
     // Whatever it was drawn for, it holds as a connector by itself: it does
-    // not fold back on itself, and it leaves its own symbol.
+    // not fold back on itself, it leaves its own symbol, and it comes to
+    // its bar and not along it.
     const own: Rect = {
       left: box.cx - box.hw,
       right: box.cx + box.hw,
@@ -1459,6 +1527,14 @@ function layoutPass(
       bottom: box.cy + box.hh,
     };
     if (routeFolds(points) || onOwnSymbol(points, own) !== null) continue;
+    const tips = tipsOf(bar, true);
+    const [before, end] = [points[points.length - 2]!, points[points.length - 1]!];
+    if (
+      !sameY(before, end) &&
+      meetsBarFlat(before, end, { left: tips.start, right: tips.end, y: bar.cy })
+    ) {
+      continue;
+    }
     if (loose) {
       const lands = points[points.length - 1]!;
       const away =
@@ -2547,9 +2623,11 @@ const LABEL_ROUNDS = 2;
 /**
  * How far a label keeps from a line that is not its own. Without it a
  * label may stand with its edge on a line that passes it, which is on
- * nothing but reads as joined to it.
+ * nothing but reads as joined to it. As far as a line that is moved by
+ * hand keeps from a label (`HAND_LABEL_CLEARANCE` in `routeCheck.ts`), so a
+ * label that is placed again beside such a line is not tucked against it.
  */
-const LABEL_LINE_MARGIN = 3;
+const LABEL_LINE_MARGIN = 4;
 
 /**
  * How far the flow label of a line keeps from the symbol of a device

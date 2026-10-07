@@ -57,11 +57,12 @@
  * dropped on it) stays on it for the canvas to refuse. The one exception is
  * a route whose own bus has moved since it was drawn. It is brought along
  * with the bus (`bringAlong`, in the connection pass), and where that leaves
- * it on something, or folded back on itself (`routeFolds`), it is routed
- * afresh like any other and is the user's no longer
- * (`RoutedDiagram.released`). The connector of a device that was drawn by
- * hand goes the same way: the connection pass says which of them it could
- * keep.
+ * it on something it is routed afresh like any other and is the user's no
+ * longer (`RoutedDiagram.released`). So is one that does not hold as a line
+ * by itself, whether its bus has moved or not: one that folds back on
+ * itself (`routeFolds`) or comes to its bar so flat that it runs along it
+ * (`meetsBarFlat`). The connector of a device that was drawn by hand goes
+ * the same way: the connection pass says which of them it could keep.
  *
  * A pass in a drag has a fraction of those bounds (`DRAG_STEPS`,
  * `DRAG_GRID_POINTS`), which is enough for nearly every move. Where it is
@@ -80,6 +81,7 @@ import {
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
   layoutConnections,
+  meetsBarFlat,
   routeFolds,
   simplifyRoute,
   stepRoute,
@@ -467,6 +469,7 @@ function routeOnce<E extends ConnectionEdge>(
     if (!sits(source, anchors.source) || !sits(target, anchors.target)) loose.add(edge.id);
   }
   const fixed = (id: string): boolean => byHand.has(id) && !loose.has(id);
+  const edgeOf = new Map(edges.map((edge) => [edge.id, edge]));
 
   // ---- the routes whose buses have moved ----
   // Each brought along with its buses. While a node is dragged on a large
@@ -498,19 +501,44 @@ function routeOnce<E extends ConnectionEdge>(
       })
     : [...edges];
   let connections = layoutConnections(nodes, drawn, connectionOptions);
+  /**
+   * Whether the branch `edge`, drawn through `points`, does not hold as a
+   * line by itself: it folds back on itself, or it comes to one of its two
+   * bars so flat that it runs along it. No route to draw, whoever drew it.
+   */
+  const unfit = (edge: ConnectionEdge, points: readonly Point[], pass: ConnectionPass): boolean => {
+    if (routeFolds(points)) return true;
+    const last = points.length - 1;
+    if (last < 1) return false;
+    const flat = (bus: string, tap: Point, outer: Point): boolean => {
+      const origin = at.get(bus);
+      if (origin === undefined || Math.abs(tap[1] - outer[1]) <= EPS) return false;
+      const bar = pass.bars.get(bus);
+      return meetsBarFlat(outer, tap, {
+        left: origin.x + (bar?.start ?? 0),
+        right: origin.x + (bar?.end ?? BAR_LENGTH),
+        y: origin.y + BAR_THICKNESS / 2,
+      });
+    };
+    return (
+      flat(edge.source, points[0]!, points[1]!) ||
+      flat(edge.target, points[last]!, points[last - 1]!)
+    );
+  };
   // A route drawn by hand whose bus has moved, as it is brought along: what
   // is left for it where no other way is found. Not one that is folded back
-  // on itself there, which is no route to draw.
+  // on itself there or lies along its bar, which is no route to draw.
   for (const id of loose) {
     const brought = connections.routes.get(id)?.points;
-    if (brought !== undefined && !routeFolds(brought)) followed.set(id, brought);
+    if (brought !== undefined && !unfit(edgeOf.get(id)!, brought, connections)) {
+      followed.set(id, brought);
+    }
   }
   const isBranch = new Set(
     edges
       .filter((edge) => edge.type !== 'stub' && connections.routes.has(edge.id))
       .map((e) => e.id),
   );
-  const edgeOf = new Map(edges.map((edge) => [edge.id, edge]));
   // Where the connector of each device lands with no line about.
   const stubEdges = edges.filter((edge) => edge.type === 'stub');
   const alone = layoutConnections(nodes, stubEdges, connectionOptions);
@@ -609,11 +637,15 @@ function routeOnce<E extends ConnectionEdge>(
     // A route whose end has moved the tap of a device aside is routed
     // again, to a tap that leaves the connector of the device where it was.
     for (const id of crowdingTaps(drawn, connections)) if (mayGo(id)) broken.add(id);
-    // A route drawn by hand that was brought along with its bus to where it
-    // folds back on itself reads as two lines: it is routed again.
-    for (const id of loose) {
-      const brought = connections.routes.get(id)?.points;
-      if (mayGo(id) && brought !== undefined && routeFolds(brought)) broken.add(id);
+    // A route drawn by hand that folds back on itself reads as two lines,
+    // and one that comes to its bar too flat as ending on the tap beside its
+    // own: it is routed again, whether it was brought along with its bus to
+    // where it does or was kept that way (a layout of an earlier version).
+    for (const id of byHand) {
+      const points = connections.routes.get(id)?.points;
+      if (kept(id) && points !== undefined && unfit(edgeOf.get(id)!, points, connections)) {
+        broken.add(id);
+      }
     }
     for (const overlap of overlapsOn(drawn, connections, symbols)) {
       if (overlap.kind === 'line-box' && overlap.b.startsWith(SYMBOL)) {

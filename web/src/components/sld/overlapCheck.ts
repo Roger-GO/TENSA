@@ -14,11 +14,16 @@
  * - Every end of a line on a bar has a place of its own there: on the bar,
  *   and `TAP_SPACING` from every other end on that bar, whichever face each
  *   comes to. Two that came to one place from above and from below would
- *   read as one line running through the bus.
+ *   read as one line running through the bus. No line passes over the dot
+ *   that marks the end of another either (`TAP_CLEAR` from its middle),
+ *   where it would read as ending there.
  * - A line runs through no bar and along none: not one it has nothing to do
  *   with, not a second time through one of its own, and not up to the tip
  *   of one in line with it. A branch leaves its own bar by a face; only the
- *   connector of a device that stands beside its bar runs into the tip.
+ *   connector of a device that stands beside its bar runs into the tip. The
+ *   run that ends on a bar comes to it, at `MEET_ANGLE` or more, and does
+ *   not lie along it on the way to its tap (`meetsBarFlat`); only into the
+ *   tap at a tip, from beyond that tip, it may come flatter.
  * - A line runs through no box but the one it is drawn from (the device of
  *   a connector) and the ones that are drawn on it (its own label, the
  *   symbol of a transformer).
@@ -30,10 +35,13 @@
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
+  BAR_CLEAR,
   BAR_THICKNESS,
+  TAP_CLEAR,
   TAP_INSET,
   TAP_SPACING,
   lengthInside,
+  meetsBarFlat,
   type Point,
   type Rect,
 } from './connections';
@@ -85,6 +93,7 @@ export interface DrawnDiagram {
 export type OverlapKind =
   | 'line-line'
   | 'shared-tap'
+  | 'line-tap'
   | 'loose-end'
   | 'line-bar'
   | 'line-box'
@@ -93,7 +102,11 @@ export type OverlapKind =
 /** One place where two things are drawn on each other. */
 export interface Overlap {
   kind: OverlapKind;
-  /** The two things, by id: for a `loose-end` the line and the bar it should end on. */
+  /**
+   * The two things, by id: for a `loose-end` the line and the bar it should
+   * end on, for a `line-tap` the line that passes and the line whose end it
+   * passes over.
+   */
   a: string;
   b: string;
   /** What is wrong, in words. */
@@ -122,9 +135,6 @@ const SHARED = 1;
 
 /** A point nearer than this to a run is on it. */
 const TOUCH = 1;
-
-/** How near a bar a line may pass, on any side, before it reads as running along it. */
-const BAR_CLEAR = 6;
 
 /**
  * A level run within `TIP_BAND` of the height of a bar, that comes nearer
@@ -271,6 +281,7 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
 
   // ---- the ends on each bar ----
   const ends = new Map<string, { x: number; line: string }[]>();
+  const lineIndex = new Map(drawn.lines.map((line, index) => [line.id, index]));
   for (const line of drawn.lines) {
     const land = (barId: string, at: Point | undefined): void => {
       const bar = bars.get(barId);
@@ -304,6 +315,43 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
           : `end ${apart.toFixed(1)} px apart on the bar of ${barId}`,
       );
     }
+    // ---- lines over the dot of another line's end ----
+    // A run that passes a bar is held to the bar itself, below. The run a
+    // line ends on its own bar with is not, and at an angle it can pass
+    // over the dot of the end beside its own.
+    const y = bars.get(barId)!.y;
+    for (const end of list) {
+      const dot: Rect = {
+        left: end.x - TAP_CLEAR,
+        right: end.x + TAP_CLEAR,
+        top: y - TAP_CLEAR,
+        bottom: y + TAP_CLEAR,
+      };
+      for (const run of runsNear.around(dot)) {
+        if (run.line === lineIndex.get(end.line)) continue;
+        const { id: passing, from, to } = drawn.lines[run.line]!;
+        if (!((from === barId && run.first) || (to === barId && run.last))) continue;
+        // Two ends too close on one bar are that, and not this as well.
+        if (list.some((o) => o.line === passing && Math.abs(o.x - end.x) < tapSpacing - 0.5)) {
+          continue;
+        }
+        const [ux, uy] = [run.b[0] - run.a[0], run.b[1] - run.a[1]];
+        const length = ux * ux + uy * uy;
+        if (length < 1e-9) continue;
+        const t = Math.min(
+          1,
+          Math.max(0, ((end.x - run.a[0]) * ux + (y - run.a[1]) * uy) / length),
+        );
+        const off = Math.hypot(run.a[0] + t * ux - end.x, run.a[1] + t * uy - y);
+        if (off >= TAP_CLEAR - 0.5) continue;
+        report(
+          'line-tap',
+          passing,
+          end.line,
+          `passes ${off.toFixed(1)} px from the end of the other on the bar of ${barId}`,
+        );
+      }
+    }
   }
 
   // ---- lines on bars ----
@@ -320,7 +368,14 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
       const lands = (line.from === bar.id && run.first) || (line.to === bar.id && run.last);
       const level = Math.abs(run.a[1] - run.b[1]) <= TOUCH;
       if (lands) {
-        if (!level) continue;
+        if (!level) {
+          // At an angle: it comes to its bar, and does not lie along it.
+          const [tap, outer] = line.to === bar.id && run.last ? [run.b, run.a] : [run.a, run.b];
+          if (meetsBarFlat(outer, tap, bar)) {
+            report('line-bar', line.id, bar.id, 'comes to its own bar too flat, and runs along it');
+          }
+          continue;
+        }
         // In line with its own bar. A branch never is; the connector of a
         // device beside the bar runs into the tip, and no further.
         const branch = bars.has(line.from) && bars.has(line.to);
@@ -401,6 +456,7 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
   const order: OverlapKind[] = [
     'line-line',
     'shared-tap',
+    'line-tap',
     'loose-end',
     'line-bar',
     'line-box',

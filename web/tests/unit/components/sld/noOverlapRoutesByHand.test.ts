@@ -10,9 +10,14 @@
  * is dragged.
  *
  * A line that is let go also reads as one line: it is held to what a hand
- * route must be like by itself (`shapeFaults`: no fold, no step too short to
- * read, a connector that leaves its own symbol) and to the room it keeps to
- * the symbols it passes (`HAND_CLEARANCE`).
+ * route must be like by itself (`shapeFaults`: no fold and no run that
+ * doubles back, no step too short to read, a connector that leaves its own
+ * symbol) and to the room it keeps to the symbols it passes
+ * (`HAND_CLEARANCE`). It ends on its own tap and reads as ending there: the
+ * routes that were found drawn along their bar, over the dot of the end
+ * beside their own, or folded into a spike off the corner of their symbol
+ * are refused where they were let by, and no bend that is moved alone or
+ * taken out leaves one like them.
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `noOverlap.test.ts`.
@@ -22,14 +27,24 @@ import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import {
   lengthInside,
+  BAR_LENGTH,
+  BAR_THICKNESS,
+  meetsBarFlat,
   onOwnSymbol,
   routeFolds,
   type ConnectionEdge,
   type Point,
   type Rect,
 } from '@/components/sld/connections';
-import { HAND_CLEARANCE, routeChecker } from '@/components/sld/routeCheck';
-import { leavesKink, routeEndsOf, sameRoute, settleEdit } from '@/components/sld/routeEdit';
+import { HAND_CLEARANCE, HAND_TAP_CLEARANCE, routeChecker } from '@/components/sld/routeCheck';
+import {
+  leavesKink,
+  removeBend,
+  routeEndsOf,
+  sameRoute,
+  settleEdit,
+  tidyPoints,
+} from '@/components/sld/routeEdit';
 import {
   bothWays,
   dragged,
@@ -323,6 +338,206 @@ describe.each(CASES)('nothing overlaps on %s after a line is moved by hand', (_n
     // Some of the moves leave the route its shape: it is brought along, not always given up.
     expect(followed).toBeGreaterThan(0);
   }, 240_000);
+});
+
+/** A check of the routes the edge `id` of `diagram` could be given, as the editor of the canvas asks it. */
+function checkOf(diagram: Diagram, id: string) {
+  const picture = drawn(diagram);
+  const edge = (diagram.edges as ConnectionEdge[]).find((e) => e.id === id)!;
+  const route = picture.connections.routes.get(id)!.points;
+  const at = new Map(diagram.nodes.map((n) => [n.id, n.position]));
+  return {
+    edge,
+    route,
+    ends: routeEndsOf(edge, route, at, picture.connections.bars),
+    check: routeChecker(diagram.nodes, picture, edge, { values: false }),
+  };
+}
+
+/** `diagram` with the connector `id` slid `by` along its bar and kept, as a drag of its one run does. */
+function connectorSlid(diagram: Diagram, id: string, by: number): Diagram {
+  const { route } = checkOf(diagram, id);
+  expect(route, `${id} drops square onto its bar`).toHaveLength(2);
+  const points = slid(diagram, id, 0, by);
+  expect(points, `${id} slid by ${by}`).toHaveLength(4);
+  const moved = routedByHand(diagram, id, points!);
+  expect(moved, `${id} slid by ${by} is kept`).not.toBeNull();
+  return moved!;
+}
+
+/**
+ * What is wrong with how the route `points` of `edge` ends on the bar of
+ * its bus on `diagram`, read by itself: nothing, for one that comes to its
+ * own tap and keeps off the dots of the ends beside it.
+ */
+function endFaults(diagram: Diagram, edge: ConnectionEdge, points: readonly Point[]): string[] {
+  const { connections } = drawn(diagram);
+  const faults: string[] = [];
+  const last = points.length - 1;
+  const ends: [string, Point, Point][] = [[edge.target, points[last]!, points[last - 1]!]];
+  if (edge.type !== 'stub') ends.push([edge.source, points[0]!, points[1]!]);
+  for (const [bus, tap, outer] of ends) {
+    const origin = diagram.nodes.find((n) => n.id === bus)!.position;
+    const bar = connections.bars.get(bus);
+    const flat =
+      Math.abs(tap[1] - outer[1]) > 0.5 &&
+      meetsBarFlat(outer, tap, {
+        left: origin.x + (bar?.start ?? 0),
+        right: origin.x + (bar?.end ?? BAR_LENGTH),
+        y: origin.y + BAR_THICKNESS / 2,
+      });
+    if (flat) faults.push(`comes to the bar of ${bus} too flat`);
+  }
+  // The dots of the ends of the other lines, on any bar.
+  const buses = new Set(diagram.nodes.filter((n) => (n.type ?? 'bus') === 'bus').map((n) => n.id));
+  for (const other of diagram.edges as ConnectionEdge[]) {
+    const route = other.id === edge.id ? undefined : connections.routes.get(other.id)?.points;
+    if (route === undefined) continue;
+    const dots: Point[] = [route[route.length - 1]!];
+    if (buses.has(other.source)) dots.push(route[0]!);
+    for (const dot of dots) {
+      const off = Math.min(
+        ...points.slice(1).map((b, k) => {
+          const a = points[k]!;
+          const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+          const t = Math.min(
+            1,
+            Math.max(0, ((dot[0] - a[0]) * ux + (dot[1] - a[1]) * uy) / (ux * ux + uy * uy)),
+          );
+          return Math.hypot(a[0] + t * ux - dot[0], a[1] + t * uy - dot[1]);
+        }),
+      );
+      if (off < HAND_TAP_CLEARANCE - 0.5) {
+        faults.push(`passes ${off.toFixed(1)} from the end of ${other.id}`);
+      }
+    }
+  }
+  return faults;
+}
+
+describe('a line moved by hand ends on its own tap, and leaves its symbol by the face', () => {
+  it('IEEE 14: the connector of PQ_3 is not left along its bar when a bend is taken out', async () => {
+    // Slid 96 along the bar of bus 4 it steps down to its tap. Without the
+    // second bend it would run from under its symbol straight to that tap,
+    // at 12 degrees: over the dot of the line that leaves the bar beside it,
+    // and along the bar from there.
+    const diagram = connectorSlid(await opened(IEEE14), 'stub-load-PQ_3', 96);
+    const { route, check } = checkOf(diagram, 'stub-load-PQ_3');
+    const without = tidyPoints(removeBend(route, 2)!);
+    expect(without).toHaveLength(3);
+    expect(check(without)).toMatch(/run over the end of|run along the bar of bus/);
+    // The first bend out as well: one run from the symbol to the tap, flatter still.
+    expect(check(tidyPoints(removeBend(without, 1)!))).not.toBeNull();
+  }, 240_000);
+
+  it('IEEE 14: the connector of PQ_3 is not folded into a spike off the corner of its symbol', async () => {
+    const diagram = connectorSlid(await opened(IEEE14), 'stub-load-PQ_3', 96);
+    const { route, check } = checkOf(diagram, 'stub-load-PQ_3');
+    const [from, tap] = [route[0]!, route[route.length - 1]!];
+    // Out of the bottom of the symbol to the left, a few pixels under its
+    // edge, and back under the whole symbol to the tap.
+    const hairpin: Point[] = [from, [from[0] - 29, from[1] + 8], tap];
+    expect(check(hairpin)).toMatch(/along the edge of its own symbol|fold back on itself/);
+    // Clear of the symbol, the same turn is still a line that doubles back.
+    const spike: Point[] = [from, [from[0], from[1] + 16], [from[0] - 60, from[1] + 30], tap];
+    expect(check(spike)).toBe('it would fold back on itself');
+  }, 240_000);
+
+  it('Kundur: the connector of PQ_1 is not left under its bar, across the ends of the lines there', async () => {
+    const diagram = await opened(KUNDUR);
+    const { edge, route, check } = checkOf(diagram, 'stub-load-PQ_1');
+    const [from, tap] = [route[0]!, route[route.length - 1]!];
+    // Its tap is the last of its bar, and the lines of the bus end to the
+    // left of it. From well to that side, a few pixels off the bar, the last
+    // run lies along the bar, across the dots of those ends.
+    const side = from[1] < tap[1] ? -1 : 1;
+    const grazing: Point[] = [from, [tap[0] - 72, tap[1] + side * 11], tap];
+    expect(check(grazing)).toMatch(/run over the end of|run along the bar of bus/);
+    expect(endFaults(diagram, edge, grazing)).not.toEqual([]);
+  }, 240_000);
+
+  it('WSCC 9: the connector of PQ_0 is not left on the dot of the line that ends beside it', async () => {
+    const diagram = await opened(WSCC9);
+    const { edge, route, check } = checkOf(diagram, 'stub-load-PQ_0');
+    const [from, tap] = [route[0]!, route[route.length - 1]!];
+    const side = from[1] < tap[1] ? -1 : 1;
+    for (const dx of [-32, 32]) {
+      const grazing: Point[] = [from, [tap[0] + dx, tap[1] + side * 11], tap];
+      expect(check(grazing), `from ${dx} to the side`).not.toBeNull();
+      expect(endFaults(diagram, edge, grazing)).not.toEqual([]);
+    }
+  }, 240_000);
+
+  it.each(CASES)(
+    '%s: no bend of a connector that is moved alone or taken out leaves it along its bar, on a dot or folded',
+    async (_name, topology) => {
+      const opening = await opened(topology);
+      const found: string[] = [];
+      let kept = 0;
+      let refused = 0;
+      /** `points`, which a move made of `route`, kept by the canvas and held to every rule. */
+      const hold = (
+        diagram: Diagram,
+        edge: ConnectionEdge,
+        route: readonly Point[],
+        points: readonly Point[],
+        where: string,
+      ): void => {
+        const moved = routedByHand(diagram, edge.id, points);
+        if (moved === null) return;
+        kept += 1;
+        found.push(...overlapsOf(moved).map((text) => `${where}: ${text}`));
+        found.push(...shapeFaults(diagram, edge, route, points).map((t) => `${where}: ${t}`));
+        found.push(...endFaults(diagram, edge, points).map((t) => `${where}: ${t}`));
+      };
+      for (const stub of opening.edges.filter((e) => e.type === 'stub')) {
+        for (const by of [-96, -48, 48, 96]) {
+          const stepped = slid(opening, stub.id, 0, by);
+          if (stepped === null || stepped.length !== 4) continue;
+          const diagram = routedByHand(opening, stub.id, stepped);
+          if (diagram === null) continue;
+          const { edge, route, ends, check } = checkOf(diagram, stub.id);
+          const tap = route[route.length - 1]!;
+          for (const bend of [1, 2]) {
+            // Taken out, as a double-click on it does: kept only where the check lets it by.
+            const without = tidyPoints(removeBend(route, bend)!);
+            const where = `${stub.id} slid by ${by}, bend ${bend}`;
+            if (check(without) === null) hold(diagram, edge, route, without, `${where} taken out`);
+            else refused += 1;
+            // Moved alone, as a drag with Shift held does: to beside the tap,
+            // a few pixels off the bar, and onto the symbol it left.
+            const p = route[bend]!;
+            const targets: Point[] = [
+              [tap[0] - 72, tap[1] - 11],
+              [tap[0] + 72, tap[1] - 11],
+              [tap[0] - 32, tap[1] - 11],
+              [tap[0] + 32, tap[1] + 11],
+              [route[0]![0] - 29, route[0]![1] + 8],
+              [route[0]![0] + 29, route[0]![1] - 8],
+              [route[0]![0], route[0]![1] - 20],
+            ];
+            for (const to of targets) {
+              const settled = settleEdit(
+                route,
+                { kind: 'bend', index: bend },
+                [to[0] - p[0], to[1] - p[1]],
+                ends,
+                check,
+                { free: true },
+              );
+              if (settled === null || sameRoute(settled.points, route)) continue;
+              hold(diagram, edge, route, settled.points, `${where} moved to ${to[0]}, ${to[1]}`);
+            }
+          }
+        }
+      }
+      expect(found).toEqual([]);
+      // Bends are moved, and the ones that would leave the line on its bar are not taken out.
+      expect(kept).toBeGreaterThan(0);
+      expect(refused).toBeGreaterThan(0);
+    },
+    240_000,
+  );
 });
 
 describe('nothing overlaps on a case of a hundred buses after a line is moved by hand', () => {

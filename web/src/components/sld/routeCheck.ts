@@ -10,9 +10,12 @@
  *
  * - another line it would lie on, run too close beside, or end or turn on
  *   (two lines that cross are a crossing, and no overlap);
- * - the end of another line on the same bar, nearer than the taps keep;
- * - a bar it would run through or along, its own included, and an end that
- *   would leave its bar;
+ * - the end of another line on the same bar, nearer than the taps keep,
+ *   and the dot of such an end that a run of it would pass over or right
+ *   beside (`HAND_TAP_CLEARANCE` from its middle);
+ * - a bar it would run through or along, its own included: the run that
+ *   ends on a bar comes to it at `MEET_ANGLE` or more, and does not lie
+ *   along it on the way to its tap; and an end that would leave its bar;
  * - a symbol, a control chain that is drawn out, the label of a bus, the
  *   values of a device or the flow label of another line it would run
  *   through, or pass nearer than a line the diagram routes itself does
@@ -20,9 +23,11 @@
  *   `HAND_LABEL_CLEARANCE` from a label and a readout), so that a line put
  *   at the nearest clear place does not touch what it was moved off;
  * - for the connector of a device, its own symbol: it leaves by the middle
- *   of a face, square out of it or at an angle, and no later run of it comes
- *   back along the edge of the symbol (`onOwnSymbol`);
- * - itself: a route does not fold back on itself (`routeFolds`);
+ *   of a face, square out of it or at an angle of `MEET_ANGLE` or more, and
+ *   no later run of it comes back along the edge of the symbol
+ *   (`onOwnSymbol`);
+ * - itself: a route does not fold back on itself, and no run of it doubles
+ *   back on the one before (`routeFolds`);
  * - for a transformer, a route with no straight stretch where its symbol
  *   has room.
  *
@@ -44,7 +49,10 @@
  */
 import {
   BAR_THICKNESS,
+  MEET_ANGLE,
   OWN_SYMBOL_ROOM,
+  TAP_DOT_RADIUS,
+  TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
   labelBoxAt,
   onOwnSymbol,
@@ -98,6 +106,15 @@ export const HAND_CLEARANCE = 8;
  */
 export const HAND_LABEL_CLEARANCE = 4;
 
+/**
+ * The room a route that is moved by hand keeps to the end of another line
+ * on a bar, measured from the middle of the dot that marks it: the dot, and
+ * the gap two dots a spacing apart leave between them. A run that comes
+ * down to its own tap right beside another comes at 45 degrees or steeper.
+ * The overlap checker asks for less (`TAP_CLEAR`).
+ */
+export const HAND_TAP_CLEARANCE = TAP_SPACING - TAP_DOT_RADIUS;
+
 /** Two distances closer than this are the same. */
 const EPS = 0.5;
 
@@ -145,6 +162,22 @@ function roomKept(
     else low = middle;
   }
   return low;
+}
+
+/** How far the route `points` is from the place `at`, where it is nearest to it. */
+function distanceTo(points: readonly Point[], at: Point): number {
+  let least = Infinity;
+  for (let k = 1; k < points.length; k += 1) {
+    const [a, b] = [points[k - 1]!, points[k]!];
+    const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+    const length = ux * ux + uy * uy;
+    const t =
+      length < 1e-9
+        ? 0
+        : Math.min(1, Math.max(0, ((at[0] - a[0]) * ux + (at[1] - a[1]) * uy) / length));
+    least = Math.min(least, Math.hypot(a[0] + t * ux - at[0], a[1] + t * uy - at[1]));
+  }
+  return least;
 }
 
 function boxOf(points: readonly Point[], by: number): Rect {
@@ -227,12 +260,16 @@ function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): 
       return `it would end or turn on ${other}`;
     case 'shared-tap':
       return `its end would be too close to the end of ${other}`;
+    case 'line-tap':
+      return `it would run over the end of ${other} on the bar`;
     case 'loose-end':
       return `its end would leave ${other}`;
     case 'line-bar':
-      return overlap.detail.startsWith('leaves')
-        ? `it would leave ${other} in line with it`
-        : `it would run through or along ${other}`;
+      if (overlap.detail.startsWith('leaves')) return `it would leave ${other} in line with it`;
+      if (overlap.detail.startsWith('comes')) {
+        return `it would run along ${other} before it ends on it: a line comes to its bar at ${MEET_ANGLE} degrees or steeper`;
+      }
+      return `it would run through or along ${other}`;
     case 'line-box':
       return `it would run through ${other}`;
     default:
@@ -351,6 +388,18 @@ export function routeChecker<E extends ConnectionEdge>(
   );
   const boxRoom = new Map<string, number>();
   const barRoom = new Map<string, number>();
+  // The ends of the other lines on the bars, each where its dot is drawn.
+  const barIds = new Set(drawn.bars.map((bar) => bar.id));
+  const taps: { at: Point; line: string; room: number }[] = [];
+  for (const { line } of others) {
+    const [first, last] = [line.points[0], line.points[line.points.length - 1]];
+    if (first !== undefined && barIds.has(line.from)) {
+      taps.push({ at: first, line: line.id, room: HAND_TAP_CLEARANCE });
+    }
+    if (last !== undefined && barIds.has(line.to)) {
+      taps.push({ at: last, line: line.id, room: HAND_TAP_CLEARANCE });
+    }
+  }
   const bodyOf = (bar: DrawnBar): Rect => ({
     left: bar.left,
     right: bar.right,
@@ -371,6 +420,7 @@ export function routeChecker<E extends ConnectionEdge>(
       if (!meet(box, around)) continue;
       barRoom.set(bar.id, roomKept(now, bodyOf(bar), HAND_CLEARANCE, ...passing(bar, now)));
     }
+    for (const tap of taps) tap.room = Math.min(tap.room, distanceTo(now, tap.at));
   }
   /** What the line through `points` would pass too near, in words; `null` when it keeps its room. */
   const tooNear = (points: readonly Point[]): string | null => {
@@ -389,15 +439,22 @@ export function routeChecker<E extends ConnectionEdge>(
         return `it would pass too close to ${nameOf(bar.id)}`;
       }
     }
+    for (const { at, line, room } of taps) {
+      if (at[0] < around.left || at[0] > around.right) continue;
+      if (at[1] < around.top || at[1] > around.bottom) continue;
+      if (distanceTo(points, at) < room - EPS) {
+        return `it would pass too close to the end of ${nameOf(line)} on the bar`;
+      }
+    }
     return null;
   };
   // The connector of a device: how near its own symbol the runs after the
-  // first may come. As near as the diagram itself draws one, for a
-  // connector that is that near now.
-  const ownRoom =
-    own !== undefined && now !== undefined && onOwnSymbol(now, own, HAND_CLEARANCE) === 'beside'
-      ? OWN_SYMBOL_ROOM
-      : HAND_CLEARANCE;
+  // first may come, and how long the first may stay beside the face it
+  // leaves. As near as the diagram itself draws one, for a connector that
+  // is that near now.
+  const nearNow =
+    own === undefined || now === undefined ? null : onOwnSymbol(now, own, HAND_CLEARANCE);
+  const ownRoom = nearNow === 'beside' || nearNow === 'along' ? OWN_SYMBOL_ROOM : HAND_CLEARANCE;
 
   return (points) => {
     if (points.length < 2) return 'a line runs through two points at the least';

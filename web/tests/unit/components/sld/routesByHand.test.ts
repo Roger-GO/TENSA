@@ -16,6 +16,9 @@ import {
   TAP_SPACING,
   bringAlong,
   layoutConnections,
+  MEET_ANGLE,
+  SHARPEST_TURN,
+  meetsBarFlat,
   onOwnSymbol,
   routeFolds,
   type ConnectionEdge,
@@ -207,6 +210,88 @@ describe('a route that holds by itself', () => {
     ).toBe(true);
   });
 
+  it('does not double back on the run before: a turn of more than 135 degrees is a spike, not a bend', () => {
+    // Out of the bottom of a symbol to the left, and back under it to the
+    // right: the connector that was folded into a hairpin on IEEE 14.
+    expect(
+      routeFolds([
+        [290, 387],
+        [261, 395],
+        [386, 419],
+      ]),
+    ).toBe(true);
+    // The same turn in the middle of a line.
+    expect(
+      routeFolds([
+        [0, 0],
+        [0, 60],
+        [100, 60],
+        [20, 90],
+        [20, 200],
+      ]),
+    ).toBe(true);
+    // A right angle, a turn of 45 degrees and one of exactly 135 are bends.
+    expect(
+      routeFolds([
+        [0, 0],
+        [0, 60],
+        [60, 120],
+        [60, 200],
+      ]),
+    ).toBe(false);
+    expect(
+      routeFolds([
+        [0, 0],
+        [60, 60],
+        [0, 60],
+      ]),
+    ).toBe(false);
+    expect(SHARPEST_TURN).toBe(135);
+  });
+
+  it('takes a point that repeats the one before it for no run: the runs either side are neighbours', () => {
+    // A right angle with its corner written twice is no fold.
+    expect(
+      routeFolds([
+        [30, 3],
+        [30, 60],
+        [30, 60],
+        [80, 60],
+        [80, 203],
+      ]),
+    ).toBe(false);
+    // And a route that does fold is still found through one.
+    expect(
+      routeFolds([
+        [0, 0],
+        [40, 30],
+        [40, 30],
+        [20, 15],
+      ]),
+    ).toBe(true);
+  });
+
+  it('comes to its bar at an angle, and does not lie along it on the way to its tap', () => {
+    // A bar from 264 to 419 at the height 419, as that of bus 4 of IEEE 14.
+    const bar = { left: 264, right: 419, y: 419 };
+    // The connector of PQ_3 once its second bend was taken out: 12 degrees.
+    expect(meetsBarFlat([290, 399], [386, 419], bar)).toBe(true);
+    // From under the bar the same.
+    expect(meetsBarFlat([290, 439], [386, 419], bar)).toBe(true);
+    // At 30 degrees and steeper it comes to the bar.
+    expect(meetsBarFlat([386 - 52, 419 - 30], [386, 419], bar)).toBe(false);
+    expect(meetsBarFlat([356, 389], [386, 419], bar)).toBe(false);
+    expect(meetsBarFlat([386, 399], [386, 419], bar)).toBe(false);
+    // Into the tap at a tip from beyond that tip it is beside the bar for
+    // its last few pixels only; to a tap further in it runs over the tip.
+    expect(meetsBarFlat([480, 409], [416, 419], bar)).toBe(false);
+    expect(meetsBarFlat([200, 409], [267, 419], bar)).toBe(false);
+    expect(meetsBarFlat([480, 409], [402, 419], bar)).toBe(true);
+    // A short run is held to the same angle.
+    expect(meetsBarFlat([372, 414], [386, 419], bar)).toBe(true);
+    expect(MEET_ANGLE).toBe(30);
+  });
+
   it('leaves the symbol of its device, and does not come back along its edge', () => {
     // A device whose box is from (26, -80) to (66, -40).
     const box = { left: 26, right: 66, top: -80, bottom: -40 };
@@ -255,6 +340,26 @@ describe('a route that holds by itself', () => {
         box,
       ),
     ).toBe('through');
+  });
+
+  it('leaves the face of its symbol at an angle, and does not slant away along its edge', () => {
+    const box = { left: 26, right: 66, top: -80, bottom: -40 };
+    /** Out of the middle of the bottom face to a point `dx` aside and `dy` down, and on to the bar. */
+    const slanting = (dx: number, dy: number): Point[] => [
+      [46, -40],
+      [46 + dx, -40 + dy],
+      [140, 3],
+    ];
+    // 15 degrees under the bottom edge, out past the corner: it reads as a spike off the corner.
+    expect(onOwnSymbol(slanting(-29, 8), box, 8)).toBe('along');
+    expect(onOwnSymbol(slanting(29, 8), box, 8)).toBe('along');
+    // Held to the room a connector the diagram draws keeps, the same slant is still along the edge.
+    expect(onOwnSymbol(slanting(-29, 8), box)).toBe('along');
+    // At 30 degrees and steeper it goes away from the face.
+    expect(onOwnSymbol(slanting(26, 15), box, 8)).toBeNull();
+    expect(onOwnSymbol(slanting(20, 20), box, 8)).toBeNull();
+    // Square out of the face, however far.
+    expect(onOwnSymbol(slanting(0, 30), box, 8)).toBeNull();
   });
 });
 
@@ -432,6 +537,33 @@ describe('layoutConnections: the connector of a device drawn by hand', () => {
     expect(pass.byHand.has('stub-PQ')).toBe(false);
   });
 
+  it('is given up, though nothing has moved, where it comes to its bar too flat and runs along it', () => {
+    // A layout of an earlier version: out of the symbol, a neck, and from
+    // there straight to a tap well along the bar, at 14 degrees.
+    const grazing: Point[] = [
+      [46, -40],
+      [46, -28],
+      [-78, 3],
+    ];
+    const nodes = [bus('A', -120, 0), device('PQ', LOAD.x, LOAD.y)];
+    const pass = layoutConnections(nodes, [
+      stub('PQ', 'A', grazing, { source: LOAD, target: { x: -120, y: 0 } }),
+    ]);
+    expect(pass.byHand.has('stub-PQ')).toBe(false);
+    // At an angle to the bar the same route is kept.
+    const steep: Point[] = [
+      [46, -40],
+      [46, -28],
+      [70, 3],
+    ];
+    const kept = layoutConnections(
+      [bus('A', A.x, A.y), device('PQ', LOAD.x, LOAD.y)],
+      [stub('PQ', 'A', steep, FOR)],
+    );
+    expect(kept.byHand.has('stub-PQ')).toBe(true);
+    expect(kept.routes.get('stub-PQ')!.points).toEqual(steep);
+  });
+
   it('is given up where its device was moved so near the run across that the neck is gone', () => {
     // Ten down: the run across at -28 is two under the symbol.
     const nodes = [bus('A', A.x, A.y), device('PQ', LOAD.x, LOAD.y + 10)];
@@ -581,6 +713,33 @@ describe('routeDiagram: a route drawn by hand', () => {
     expect(routed.edges[0]!.data?.bendManual).toBeUndefined();
     const now = routed.connections.routes.get('L1')!.points;
     expect(routeFolds(now)).toBe(false);
+  });
+
+  it('is given up, though no bus has moved, where it comes to its bar too flat', () => {
+    // A layout of an earlier version: from a tap of A a long way to the
+    // right, a few pixels under the bar, before it turns down to B.
+    const grazing: Point[] = [
+      [20, 3],
+      [84, 14],
+      [84, 203],
+    ];
+    const edge = line('L1', 'A', 'B', grazing, AT);
+    expect(meetsBarFlat(grazing[1]!, grazing[0]!, { left: 0, right: 92, y: 3 })).toBe(true);
+    const routed = routeDiagram(nodes, [edge]);
+    expect(routed.released).toEqual(['L1']);
+    expect(routed.edges[0]!.data?.bendManual).toBeUndefined();
+    const now = routed.connections.routes.get('L1')!.points;
+    expect(meetsBarFlat(now[1]!, now[0]!, { left: 0, right: 92, y: 3 })).toBe(false);
+    expect(
+      findOverlaps({
+        lines: [{ id: 'L1', points: now, from: 'A', to: 'B' }],
+        bars: [
+          { id: 'A', left: 0, right: 92, y: 3 },
+          { id: 'B', left: 0, right: 92, y: 203 },
+        ],
+        boxes: [],
+      }),
+    ).toEqual([]);
   });
 
   it('leaves a route that stands where it was drawn alone, whatever is put on it', () => {

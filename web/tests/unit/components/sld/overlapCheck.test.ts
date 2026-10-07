@@ -251,6 +251,51 @@ describe('findOverlaps: the ends on a bar', () => {
     ]);
   });
 
+  it('finds a line that passes over the dot of the end beside its own on the way to its tap', () => {
+    // From the side, across the end of `b` a spacing along the bar: it reads
+    // as ending there, and it lies along its own bar as well.
+    const across = line(
+      'a',
+      [
+        [-20, -17],
+        [54, 3],
+      ],
+      'a:device',
+      'bus',
+    );
+    const found = findOverlaps({ bars: [b], lines: [across, down('b', 40)], boxes: [] });
+    expect(found.map(({ kind, a, b: other }) => `${kind} ${a} ${other}`)).toEqual([
+      'line-tap a b',
+      'line-bar a bus',
+    ]);
+    expect(describeOverlaps(found)[0]).toMatch(/passes 3\.\d px from the end of the other/);
+    // The same from under the bar, over the dot of an end that comes from above.
+    const under = line(
+      'a',
+      [
+        [54, 3],
+        [-20, 23],
+      ],
+      'bus',
+      'a:far',
+    );
+    expect(check({ bars: [b], lines: [under, down('b', 40)] })).toEqual([
+      'line-tap a b',
+      'line-bar a bus',
+    ]);
+    // Down to its own tap at a slant that keeps off the dot: each in its own place.
+    const clear = line(
+      'a',
+      [
+        [84, -57],
+        [54, 3],
+      ],
+      'a:device',
+      'bus',
+    );
+    expect(check({ bars: [b], lines: [clear, down('b', 40)] })).toEqual([]);
+  });
+
   it('finds an end that is not on its bar', () => {
     expect(check({ bars: [b], lines: [down('a', 120)] })).toEqual(['loose-end a bus']);
     expect(
@@ -392,6 +437,68 @@ describe('findOverlaps: a line and a bar', () => {
       'bus',
     );
     expect(check({ bars: [b], lines: [alongBar] })).toEqual(['line-bar stub bus']);
+  });
+
+  it('finds a line that comes to its own bar too flat and runs along it, from either face', () => {
+    /** The connector of a device that ends in the middle of the bar, come from `dx` to the side and `dy` over it. */
+    const slanted = (dx: number, dy: number): string[] =>
+      check({
+        bars: [b],
+        lines: [
+          line(
+            'stub',
+            [
+              [146 + dx, 53 - dy],
+              [146, 53],
+            ],
+            'device',
+            'bus',
+          ),
+        ],
+      });
+    // 12 degrees: next to the bar for most of its length.
+    expect(slanted(96, 20)).toEqual(['line-bar stub bus']);
+    expect(slanted(-96, 20)).toEqual(['line-bar stub bus']);
+    expect(slanted(72, -11)).toEqual(['line-bar stub bus']);
+    // 30 degrees and steeper: it comes to the bar.
+    expect(slanted(52, 30)).toEqual([]);
+    expect(slanted(30, 30)).toEqual([]);
+    expect(slanted(-30, -30)).toEqual([]);
+    expect(slanted(0, 40)).toEqual([]);
+    // A branch is held to it at both of its ends.
+    const branch = line(
+      'a',
+      [
+        [146, 53],
+        [240, 70],
+        [240, 200],
+      ],
+      'bus',
+      'a:far',
+    );
+    expect(check({ bars: [b], lines: [branch] })).toEqual(['line-bar a bus']);
+  });
+
+  it('lets a line come to the tip of its bar from beyond it at any angle', () => {
+    // Beside the bar only for its last few pixels: it does not run along it.
+    const fromBeyond = (dy: number): string[] =>
+      check({
+        bars: [b],
+        lines: [
+          line(
+            'stub',
+            [
+              [260, 53 - dy],
+              [189, 53],
+            ],
+            'device',
+            'bus',
+          ),
+        ],
+      });
+    expect(fromBeyond(12)).toEqual([]);
+    expect(fromBeyond(-12)).toEqual([]);
+    expect(fromBeyond(40)).toEqual([]);
   });
 
   it('finds a line that comes back through its own bar after it has left it', () => {

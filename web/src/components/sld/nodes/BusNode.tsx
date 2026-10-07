@@ -17,7 +17,13 @@ import {
   type VoltageLimits,
 } from '../voltage';
 import { VoltageMarker } from '../VoltageMarker';
-import { BAR_LENGTH, BAR_THICKNESS, busLabelPlace, type BarGeometry } from '../connections';
+import {
+  BAR_LENGTH,
+  BAR_THICKNESS,
+  TAP_DOT_RADIUS,
+  busLabelPlace,
+  type BarGeometry,
+} from '../connections';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side, type UnitNodeData } from '../graph';
 import { BUS_LABEL_BESIDE_GAP, busLabelWidth, type BusLabelSide } from '../labels';
 
@@ -128,12 +134,6 @@ export interface SldNodeData extends Record<string, unknown> {
    */
   symbolKind?: string;
 }
-
-/**
- * Radius of the dot that marks a tap. A little more than half the bar's
- * thickness, so the dot shows on either side of the bar.
- */
-const TAP_DOT_RADIUS = 4;
 
 const SIDES: Array<{ side: Side; position: Position }> = [
   { side: 'north', position: Position.Top },
