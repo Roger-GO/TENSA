@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { AddElementPanel } from '@/components/elements/AddElementPanel';
+import { ELEMENT_KINDS, groupElementKinds } from '@/components/elements/elementKinds';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { ProblemDetailsError } from '@/api/client';
@@ -238,7 +239,44 @@ describe('<AddElementPanel />', () => {
     expect(screen.queryByTestId('add-element-cancel-confirm')).toBeNull();
   });
 
-  // ---- Component library families ---------------------------------------
+  // ---- the kinds of the Components palette -------------------------------
+
+  it('offers in the Kind picker what the Components palette lists, in the same groups and order', () => {
+    useCaseStore.setState({ addPanelOpen: true, addPanelKind: null });
+    render(withQueryClient(<AddElementPanel />));
+    const picker = screen.getByTestId('add-element-kind') as HTMLSelectElement;
+    const offered = Array.from(picker.querySelectorAll('optgroup')).map((group) => [
+      group.label,
+      Array.from(group.querySelectorAll('option')).map((o) => [o.value, o.text]),
+    ]);
+    expect(offered).toEqual(
+      groupElementKinds(ELEMENT_KINDS).map(({ group, kinds }) => [
+        group,
+        kinds.map((k) => [k.value, k.label]),
+      ]),
+    );
+  });
+
+  it.each([
+    ['PQ', 'PQ load', 'PQ'],
+    ['Transformer2W', 'Transformer (2W)', 'Line'],
+    ['ESD1', 'ESD1 battery', 'ESD1'],
+  ])(
+    'opens on the model a row of the palette names (%s), with the picker on it and its form shown',
+    async (kind, pickerLabel, formModel) => {
+      useCaseStore.setState({ addPanelOpen: true, addPanelKind: kind });
+      render(withQueryClient(<AddElementPanel />));
+      const picker = screen.getByTestId('add-element-kind') as HTMLSelectElement;
+      expect(picker.value).toBe(kind);
+      expect(picker.options[picker.selectedIndex]?.text).toBe(pickerLabel);
+      await waitFor(() => {
+        expect(screen.getByTestId(`element-form-${formModel}`)).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/No schema for model/)).toBeNull();
+    },
+  );
+
+  // ---- families, which a caller may name instead of a model ---------------
 
   it.each([
     ['Generator', 'PV', 'PV generator', 'PV'],

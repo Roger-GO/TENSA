@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import { ElementForm } from './ElementForm';
 import { CancelConfirmDialog } from './CancelConfirmDialog';
 import { elementDefaults } from './elementHelp';
+import { ELEMENT_KINDS, groupElementKinds } from './elementKinds';
 
 /**
  * AddElementPanel — compact slide-over from the right edge of the dock
@@ -36,70 +37,16 @@ import { elementDefaults } from './elementHelp';
  * bus and every form with a bus field opens on it (`addPanelBus`).
  */
 
-/**
- * Kind picker entries. ``value`` is the picker's UI handle (e.g.,
- * "Transformer2W"); ``submitModel`` is what the substrate's
- * ``add_element`` endpoint expects (e.g., "Line" — ANDES models 2W
- * transformers as Lines with a non-default ``tap``).
- *
- * ``defaultParams`` pre-fills the form on kind selection so transformer
- * adds default to ``tap=1.05`` (off-nominal — required for the
- * Line→Transformer split heuristic to route the new device into the
- * transformers bucket).
- */
-const SUPPORTED_KINDS: ReadonlyArray<{
-  value: string;
-  label: string;
-  group:
-    | 'Network'
-    | 'Transformers'
-    | 'Generators'
-    | 'Exciters'
-    | 'Governors'
-    | 'Storage'
-    | 'Loads'
-    | 'Shunts';
-  submitModel: string;
-  defaultParams?: Record<string, string | number | boolean>;
-}> = [
-  { value: 'Bus', label: 'Bus', group: 'Network', submitModel: 'Bus' },
-  { value: 'Line', label: 'Line', group: 'Network', submitModel: 'Line' },
-  {
-    value: 'Transformer2W',
-    label: 'Transformer (2W)',
-    group: 'Transformers',
-    submitModel: 'Line',
-    defaultParams: { tap: 1.05 },
-  },
-  { value: 'PV', label: 'PV generator', group: 'Generators', submitModel: 'PV' },
-  { value: 'Slack', label: 'Slack generator', group: 'Generators', submitModel: 'Slack' },
-  { value: 'GENROU', label: 'GENROU (synchronous)', group: 'Generators', submitModel: 'GENROU' },
-  { value: 'GENCLS', label: 'GENCLS (classic)', group: 'Generators', submitModel: 'GENCLS' },
-  // Dynamic controllers — attach to a synchronous machine (GENROU/GENCLS) via
-  // the ``syn`` link. They make the machine's voltage (exciters) and speed
-  // (governors) regulated, so a from-scratch dynamic system is no longer
-  // GENROU-only. The machine link renders as a SynIdxSelect dropdown.
-  { value: 'IEEEX1', label: 'IEEEX1 exciter', group: 'Exciters', submitModel: 'IEEEX1' },
-  { value: 'ESDC2A', label: 'ESDC2A exciter', group: 'Exciters', submitModel: 'ESDC2A' },
-  { value: 'EXST1', label: 'EXST1 exciter', group: 'Exciters', submitModel: 'EXST1' },
-  { value: 'SEXS', label: 'SEXS exciter (simple)', group: 'Exciters', submitModel: 'SEXS' },
-  { value: 'TGOV1', label: 'TGOV1 governor', group: 'Governors', submitModel: 'TGOV1' },
-  { value: 'IEEEG1', label: 'IEEEG1 governor', group: 'Governors', submitModel: 'IEEEG1' },
-  // A battery takes over a static generator on its bus (the ``gen`` link, a
-  // GenIdxSelect dropdown) when a time-domain run starts. The form says what
-  // its parameters mean, and opens rated on the system base (`elementHelp`).
-  { value: 'ESD1', label: 'ESD1 battery', group: 'Storage', submitModel: 'ESD1' },
-  { value: 'PQ', label: 'PQ load', group: 'Loads', submitModel: 'PQ' },
-  { value: 'ZIP', label: 'ZIP load', group: 'Loads', submitModel: 'ZIP' },
-  { value: 'Shunt', label: 'Shunt', group: 'Shunts', submitModel: 'Shunt' },
-];
+/** The Kind picker's groups: the same list, in the same order, as the Components palette. */
+const KIND_SECTIONS = groupElementKinds(ELEMENT_KINDS);
 
 /**
- * The Component library names families, not models: a Generator tile cannot say
- * whether the user wants a PV, a Slack or a GENROU. The panel opens on the most
- * common model of the family, with the picker one click away, rather than on a
- * kind it has no form for (its own model names are the picker's values above).
- * The Battery tile stands for the one storage model the picker has.
+ * A caller may name a family, not a model: "Battery" is what the Add a battery
+ * button of Frequency control asks for, and it cannot say which storage model
+ * the picker has. The panel opens on the most common model of the family, with
+ * the picker one click away, rather than on a kind it has no form for (the
+ * picker's own values are the model names of `ELEMENT_KINDS`, which is what a
+ * row of the Components palette names).
  */
 const DEFAULT_KIND_OF_FAMILY: Readonly<Record<string, string>> = {
   Generator: 'PV',
@@ -181,7 +128,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
     setServerError(null);
   };
 
-  const kindEntry = SUPPORTED_KINDS.find((k) => k.value === kind);
+  const kindEntry = ELEMENT_KINDS.find((k) => k.value === kind);
   const submitModel = kindEntry?.submitModel ?? kind ?? '';
   const formModel = submitModel; // ElementForm renders fields from this model's schema.
   // What the kind itself sets (a transformer's tap), then what the model opens
@@ -232,12 +179,6 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
     seedBus === null
       ? null
       : ((topology?.buses ?? []).find((b) => String(b.idx) === seedBus)?.name ?? null);
-
-  type KindEntry = (typeof SUPPORTED_KINDS)[number];
-  const groupedKinds = SUPPORTED_KINDS.reduce<Record<string, KindEntry[]>>((acc, k) => {
-    (acc[k.group] ??= []).push(k);
-    return acc;
-  }, {});
 
   return (
     <>
@@ -291,9 +232,9 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
             <option value="" disabled>
               Pick a kind…
             </option>
-            {Object.entries(groupedKinds).map(([groupName, items]) => (
-              <optgroup key={groupName} label={groupName}>
-                {items.map((k) => (
+            {KIND_SECTIONS.map(({ group, kinds }) => (
+              <optgroup key={group} label={group}>
+                {kinds.map((k) => (
                   <option key={k.value} value={k.value}>
                     {k.label}
                   </option>
