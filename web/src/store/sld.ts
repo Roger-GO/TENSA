@@ -53,14 +53,44 @@ export interface SldState {
   /** `from: 'diagram'` marks a pick made on the diagram (`selectedOnDiagram`). */
   setSelectedNodeId: (id: string | null, from?: 'diagram') => void;
   clearSelectedNodeId: () => void;
+  /**
+   * The nodes picked on the diagram together: by a box drawn with Shift held,
+   * or by clicks with Ctrl (Cmd on a Mac) held. With two or more of them the
+   * diagram shows those as selected in place of `selectedNodeId`, they move
+   * together, and they are what Align and Distribute act on. The canvas keeps
+   * it from React Flow's own selection; a pick made away from the diagram
+   * (a table row, the search) empties it, since it asks for one node.
+   */
+  pickedNodeIds: string[];
+  setPickedNodeIds: (ids: string[]) => void;
+  /**
+   * The lock of the diagram's controls is on: nothing can be dragged or
+   * selected, and the commands that arrange the diagram say so and do
+   * nothing. Written by the mounted canvas, and false with none mounted.
+   */
+  diagramLocked: boolean;
+  setDiagramLocked: (locked: boolean) => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
   selectedNodeId: null,
   selectedOnDiagram: false,
   setSelectedNodeId: (id: string | null, from?: 'diagram') =>
-    set({ selectedNodeId: id, selectedOnDiagram: id !== null && from === 'diagram' }),
+    set((s) => ({
+      selectedNodeId: id,
+      selectedOnDiagram: id !== null && from === 'diagram',
+      pickedNodeIds: from === 'diagram' || s.pickedNodeIds.length === 0 ? s.pickedNodeIds : [],
+    })),
   clearSelectedNodeId: () => set({ selectedNodeId: null, selectedOnDiagram: false }),
+  pickedNodeIds: [],
+  setPickedNodeIds: (ids: string[]) =>
+    set((s) =>
+      s.pickedNodeIds.length === ids.length && s.pickedNodeIds.every((id, i) => id === ids[i])
+        ? s
+        : { pickedNodeIds: ids },
+    ),
+  diagramLocked: false,
+  setDiagramLocked: (locked: boolean) => set({ diagramLocked: locked }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -101,16 +131,35 @@ export function subscribeOpenSldSearch(listener: Listener): () => void {
 // ---------------------------------------------------------------------------
 // Canvas command bridge.
 //
-// Fit view, Reset to auto-layout and the choice of how device connectors are
-// drawn are commands in the registry (palette, shortcuts) but act on state
-// only the mounted canvas holds: React Flow's viewport, and the layout it was
-// drawn from. Same shape as the search bridge above: the registry posts an
+// Fit view, Reset to auto-layout, the choice of how device connectors are
+// drawn, Tidy diagram, undoing a change to the arrangement and aligning what
+// is picked are commands in the registry (palette, shortcuts) but act on
+// state only the mounted canvas holds: React Flow's viewport, and the diagram
+// as it is drawn. Same shape as the search bridge above: the registry posts an
 // intent, the canvas subscribes once on mount. With no canvas mounted (no case
 // loaded, or the full-space results view) a request reaches nobody, which is
 // fine: the registry gates these commands on there being a diagram to act on.
 // ---------------------------------------------------------------------------
 
-export type SldCommand = 'fit-view' | 'reset-layout' | 'connectors-straight' | 'connectors-elbow';
+export type SldCommand =
+  | 'fit-view'
+  | 'reset-layout'
+  | 'connectors-straight'
+  | 'connectors-elbow'
+  /** Route every line and transformer afresh, with nothing moved. */
+  | 'tidy'
+  /** The same, after the buses are lined up on the grid and the devices put back beside them. */
+  | 'tidy-relayout'
+  | 'undo-layout'
+  | 'redo-layout'
+  | 'align-left'
+  | 'align-centre'
+  | 'align-right'
+  | 'align-top'
+  | 'align-middle'
+  | 'align-bottom'
+  | 'distribute-horizontal'
+  | 'distribute-vertical';
 
 type CommandListener = (command: SldCommand) => void;
 const commandListeners: Set<CommandListener> = new Set();

@@ -84,6 +84,27 @@ export type SelectedElement =
  */
 export type DragOverrides = Record<string, { x: number; y: number }>;
 
+/**
+ * The route of one branch as chosen in this visit: the points it is drawn
+ * through, and where its two buses stood when it was made. The diagram draws
+ * it only while they still stand there, so a bus that is moved takes its
+ * branches along, routed afresh.
+ */
+export interface RouteOverride {
+  points: [number, number][];
+  anchors: { source: { x: number; y: number }; target: { x: number; y: number } };
+}
+
+/**
+ * The branch routes chosen in this visit, by edge id (`line-<idx>`,
+ * `transformer-<idx>`): by Tidy diagram, or by an undo that put an earlier
+ * arrangement back. They sit on top of the routes of the saved layout as the
+ * drags sit on top of its positions. `null` for a branch says it has no fixed
+ * route, whatever the saved layout holds for it: it is routed from where its
+ * buses stand.
+ */
+export type RouteOverrides = Record<string, RouteOverride | null>;
+
 export interface CaseState {
   /** The currently-selected case + addfiles, or null if none loaded. */
   selection: CaseSelection | null;
@@ -147,6 +168,8 @@ export interface CaseState {
   addPanelBus: string | null;
   /** Per-node coord overrides captured from user drags (Unit 13a). */
   dragOverrides: DragOverrides;
+  /** The branch routes chosen in this visit; kept here like the drags, for the same reasons. */
+  routeOverrides: RouteOverrides;
   /**
    * How the diagram draws the connector of a generator, load or shunt to its
    * bus, as chosen in this visit: a straight line, or one with a right
@@ -196,6 +219,19 @@ export interface CaseState {
   setLoadingPath: (path: string | null) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
+  setRouteOverrides: (next: RouteOverrides) => void;
+  /**
+   * Set where the nodes stand and how the branches run in one step, and with
+   * `unitExpansion` which control chains are drawn out. The diagram is drawn
+   * from all of them together, so an arrangement that is put in place (by
+   * Tidy diagram, or by an undo) goes in at once: set one after the other,
+   * the diagram in between would be half of each.
+   */
+  setArrangement: (next: {
+    dragOverrides: DragOverrides;
+    routeOverrides: RouteOverrides;
+    unitExpansion?: Record<string, boolean>;
+  }) => void;
   setConnectorStyle: (style: ConnectorStyle | null) => void;
   setUnitExpansion: (next: Record<string, boolean>) => void;
   setTopology: (topology: TopologySummary | null) => void;
@@ -254,6 +290,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelDropCoord: null,
   addPanelBus: null,
   dragOverrides: {},
+  routeOverrides: {},
   connectorStyle: null,
   unitExpansion: {},
   pendingDependents: [],
@@ -277,6 +314,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
+      routeOverrides: {},
       connectorStyle: null,
       unitExpansion: {},
       pendingDependents: [],
@@ -288,6 +326,13 @@ export const useCaseStore = create<CaseState>((set) => ({
   setLoadingPath: (path: string | null) => set({ loadingPath: path }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
+  setRouteOverrides: (next: RouteOverrides) => set({ routeOverrides: next }),
+  setArrangement: (next) =>
+    set({
+      dragOverrides: next.dragOverrides,
+      routeOverrides: next.routeOverrides,
+      ...(next.unitExpansion === undefined ? {} : { unitExpansion: next.unitExpansion }),
+    }),
   setConnectorStyle: (style: ConnectorStyle | null) => set({ connectorStyle: style }),
   setUnitExpansion: (next: Record<string, boolean>) => set({ unitExpansion: next }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
@@ -345,6 +390,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
+      routeOverrides: {},
       connectorStyle: null,
       unitExpansion: {},
       pendingDependents: [],

@@ -165,6 +165,18 @@ export interface BuildGraphOptions {
    */
   bendPoints?: Map<string, [number, number][]>;
   /**
+   * Where the two buses of an edge stood when its polyline in `bendPoints`
+   * was made, by edge id: the positions a saved layout has them at, or the
+   * ones a route chosen in this visit was worked out for. An edge that has
+   * an entry keeps its polyline exactly while both buses stand there, drags
+   * counted, wherever on their bars its ends lie; one that has none is
+   * judged by `routeFitsBuses`.
+   */
+  bendAnchors?: ReadonlyMap<
+    string,
+    { source: { x: number; y: number }; target: { x: number; y: number } }
+  >;
+  /**
    * The length a layout sets for a bus's bar, by bus idx (`barLengthsOf`).
    * A device that is placed here keeps to the bar as it will be drawn.
    */
@@ -981,6 +993,22 @@ export function buildGraph(
   const bends = opts.bendPoints ?? new Map<string, [number, number][]>();
   const nonBusCoords = opts.nonBusCoords ?? new Map<string, BusCoord>();
   const branchDragOverrides = opts.dragOverrides ?? {};
+  // Where the bars are: the layout coords with the drag overrides folded in.
+  const effCoords: CoordsByIdx =
+    Object.keys(branchDragOverrides).length === 0
+      ? coords
+      : (() => {
+          const merged: CoordsByIdx = { ...coords };
+          for (const [id, pos] of Object.entries(branchDragOverrides)) {
+            if (merged[id] !== undefined) merged[id] = pos;
+          }
+          return merged;
+        })();
+  const standsAt = (
+    bus: { x: number; y: number } | undefined,
+    place: { x: number; y: number },
+  ): boolean =>
+    bus !== undefined && Math.abs(bus.x - place.x) < 0.01 && Math.abs(bus.y - place.y) < 0.01;
   const edges: Edge[] = [];
   const seen = new Set<string>();
   const pushBranchEdge = (entry: TopologyEntry, kindLabel: 'line' | 'transformer') => {
@@ -1005,15 +1033,22 @@ export function buildGraph(
       );
     };
     const candidate = bends.get(id);
-    const polyline =
+    // A polyline that says where its buses stood when it was made is kept
+    // exactly while they stand there, wherever they were moved in between.
+    const madeFor = opts.bendAnchors?.get(id);
+    const fits =
       candidate !== undefined &&
-      routeFitsBuses(
-        candidate,
-        { coord: coords[t.from], moved: movedByDrag(t.from) },
-        { coord: coords[t.to], moved: movedByDrag(t.to) },
-      )
-        ? candidate
-        : undefined;
+      (madeFor !== undefined
+        ? candidate.length >= 2 &&
+          standsAt(effCoords[t.from], madeFor.source) &&
+          standsAt(effCoords[t.to], madeFor.target)
+        : routeFitsBuses(
+            candidate,
+            { coord: coords[t.from], moved: movedByDrag(t.from) },
+            { coord: coords[t.to], moved: movedByDrag(t.to) },
+          ));
+    const polyline = fits ? candidate : undefined;
+    const anchors = madeFor ?? { source: { ...coords[t.from]! }, target: { ...coords[t.to]! } };
     // Transformers always render via TransformerEdge (which carries the
     // 2W/3W icon at the midpoint), with a stored route or without one. A
     // line says by its type whether it keeps one.
@@ -1045,7 +1080,7 @@ export function buildGraph(
         bendAnchors:
           polyline === undefined
             ? undefined
-            : { source: { ...coords[t.from]! }, target: { ...coords[t.to]! } },
+            : { source: { ...anchors.source }, target: { ...anchors.target } },
         // Transformer-specific: 3-winding fallback gets a "3w" badge
         // overlaid on the 2-winding glyph (per Scope Boundaries).
         winding: detectWinding(entry),
@@ -1115,16 +1150,6 @@ export function buildGraph(
   // branch neighbours, so the slack machine on a bottom bus sits BELOW it
   // (not shooting up through the network). Computed against the effective
   // coords (drag overrides folded in), which is where the bars are.
-  const effCoords: CoordsByIdx =
-    Object.keys(branchDragOverrides).length === 0
-      ? coords
-      : (() => {
-          const merged: CoordsByIdx = { ...coords };
-          for (const [id, pos] of Object.entries(branchDragOverrides)) {
-            if (merged[id] !== undefined) merged[id] = pos;
-          }
-          return merged;
-        })();
   const deviceSides = computeDeviceVerticalSides(topology, effCoords);
 
   // Where the branches land on each bar and how they run, from a pass over

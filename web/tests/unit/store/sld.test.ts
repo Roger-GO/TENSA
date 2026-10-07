@@ -22,7 +22,12 @@ import {
 
 beforeEach(() => {
   // Reset the store to initial defaults before each test.
-  useSldStore.setState({ selectedNodeId: null, selectedOnDiagram: false });
+  useSldStore.setState({
+    selectedNodeId: null,
+    selectedOnDiagram: false,
+    pickedNodeIds: [],
+    diagramLocked: false,
+  });
 });
 
 afterEach(() => {
@@ -71,6 +76,41 @@ describe('useSldStore — selectedNodeId', () => {
     useSldStore.getState().setSelectedNodeId('generator-5', 'diagram');
     useSldStore.getState().setSelectedNodeId(null, 'diagram');
     expect(useSldStore.getState().selectedOnDiagram).toBe(false);
+  });
+});
+
+describe('useSldStore: the nodes picked together', () => {
+  it('starts with none, and keeps what is set', () => {
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+    useSldStore.getState().setPickedNodeIds(['1', 'load-PQ_1']);
+    expect(useSldStore.getState().pickedNodeIds).toEqual(['1', 'load-PQ_1']);
+  });
+
+  it('keeps the list it has when it is set to the same ids, so nothing is drawn again', () => {
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    const held = useSldStore.getState().pickedNodeIds;
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    expect(useSldStore.getState().pickedNodeIds).toBe(held);
+    useSldStore.getState().setPickedNodeIds(['2', '1']);
+    expect(useSldStore.getState().pickedNodeIds).not.toBe(held);
+  });
+
+  it('lets go of them when one node is picked away from the diagram', () => {
+    useSldStore.getState().setPickedNodeIds(['1', '2']);
+    // A click on the diagram adds to them, or replaces them, through React Flow.
+    useSldStore.getState().setSelectedNodeId('2', 'diagram');
+    expect(useSldStore.getState().pickedNodeIds).toEqual(['1', '2']);
+    // A table row or the search asks for one node.
+    useSldStore.getState().setSelectedNodeId('3');
+    expect(useSldStore.getState().pickedNodeIds).toEqual([]);
+  });
+});
+
+describe('useSldStore: the lock of the diagram', () => {
+  it('is off until the canvas says otherwise', () => {
+    expect(useSldStore.getState().diagramLocked).toBe(false);
+    useSldStore.getState().setDiagramLocked(true);
+    expect(useSldStore.getState().diagramLocked).toBe(true);
   });
 });
 
@@ -128,6 +168,26 @@ describe('canvas command bridge', () => {
     __requestSldCommand('connectors-straight');
     unsubscribe();
     expect(seen.mock.calls).toEqual([['connectors-elbow'], ['connectors-straight']]);
+  });
+
+  it('carries the commands that arrange the diagram and take an arrangement back', () => {
+    const seen = vi.fn();
+    const unsubscribe = subscribeSldCommand(seen);
+    __requestSldCommand('tidy');
+    __requestSldCommand('tidy-relayout');
+    __requestSldCommand('undo-layout');
+    __requestSldCommand('redo-layout');
+    __requestSldCommand('align-left');
+    __requestSldCommand('distribute-vertical');
+    unsubscribe();
+    expect(seen.mock.calls.map(([command]) => command)).toEqual([
+      'tidy',
+      'tidy-relayout',
+      'undo-layout',
+      'redo-layout',
+      'align-left',
+      'distribute-vertical',
+    ]);
   });
 });
 

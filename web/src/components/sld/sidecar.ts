@@ -795,6 +795,12 @@ export function captureLayout(
   });
 }
 
+/** Where the two buses of a branch stood when its route was made. */
+export interface RouteAnchors {
+  source: BusCoord;
+  target: BusCoord;
+}
+
 /**
  * The route each branch of `topology` is drawn through, for the ones `layout`
  * holds a route of stored points for, as the graph builder takes them: edge id
@@ -806,13 +812,21 @@ export function captureLayout(
  * by those buses for the branches left over, so the lines of a system that
  * was numbered afresh keep their routes. Two lines between the same buses
  * take the routes left for that pair in the order the layout lists them.
+ *
+ * `anchors` holds, for each route that names its two buses, where the layout
+ * has those buses. Such a route was drawn for them at those places and
+ * belongs on the branch for as long as they stand there, wherever on their
+ * bars it lands: a tidied route may land past the tip of a bar that was drawn
+ * out for it. A route that names no bus has no anchors, and the graph builder
+ * judges it by where its two ends lie (`routeFitsBuses`).
  */
-export function branchPolylines(
+export function storedBranchRoutes(
   layout: SidecarLayout | null,
   topology: TopologySummary,
-): Map<string, [number, number][]> {
+): { polylines: Map<string, [number, number][]>; anchors: Map<string, RouteAnchors> } {
   const out = new Map<string, [number, number][]>();
-  if (!layout?.branches) return out;
+  const anchors = new Map<string, RouteAnchors>();
+  if (!layout?.branches) return { polylines: out, anchors };
   const drawable = (route: LayoutBranchRoute | undefined): route is LayoutBranchRoute =>
     route !== undefined && route.routing === 'polyline' && (route.bend_points ?? []).length >= 2;
   const polyline = (route: LayoutBranchRoute): [number, number][] =>
@@ -822,9 +836,16 @@ export function branchPolylines(
     route.bus1 !== null &&
     route.bus2 !== undefined &&
     route.bus2 !== null;
+  // A route that is used was stored between the buses its branch has now.
+  const anchor = (id: string, route: LayoutBranchRoute, bus1: string, bus2: string): void => {
+    const source = layout.coordinates[bus1];
+    const target = layout.coordinates[bus2];
+    if (!anchored(route) || source === undefined || target === undefined) return;
+    anchors.set(id, { source: { x: source.x, y: source.y }, target: { x: target.x, y: target.y } });
+  };
 
   const claimed = new Set<string>();
-  const unrouted: { id: string; slot: string }[] = [];
+  const unrouted: { id: string; slot: string; bus1: string; bus2: string }[] = [];
   const collect = (entries: readonly TopologyEntry[], bucket: string) => {
     const routes = layout.branches?.[bucket] ?? {};
     for (const e of entries) {
@@ -837,8 +858,9 @@ export function branchPolylines(
       if (drawable(route) && (!anchored(route) || (route.bus1 === bus1 && route.bus2 === bus2))) {
         out.set(id, polyline(route));
         claimed.add(`${bucket}|${idx}`);
+        if (bus1 !== null && bus2 !== null) anchor(id, route, bus1, bus2);
       } else if (bus1 !== null && bus2 !== null) {
-        unrouted.push({ id, slot: `${bucket}|${bus1}|${bus2}` });
+        unrouted.push({ id, slot: `${bucket}|${bus1}|${bus2}`, bus1, bus2 });
       }
     }
   };
@@ -856,9 +878,46 @@ export function branchPolylines(
       else free.set(slot, [route]);
     }
   }
-  for (const { id, slot } of unrouted) {
+  for (const { id, slot, bus1, bus2 } of unrouted) {
     const route = free.get(slot)?.shift();
-    if (route !== undefined) out.set(id, polyline(route));
+    if (route === undefined) continue;
+    out.set(id, polyline(route));
+    anchor(id, route, bus1, bus2);
+  }
+  return { polylines: out, anchors };
+}
+
+/** The polylines of `storedBranchRoutes`: the route of each branch `layout` holds one for. */
+export function branchPolylines(
+  layout: SidecarLayout | null,
+  topology: TopologySummary,
+): Map<string, [number, number][]> {
+  return storedBranchRoutes(layout, topology).polylines;
+}
+
+/**
+ * The branch routes of `layout` as route overrides, by edge id
+ * (`<bucket>-<idx>`): how the routes of a layout are applied to a system
+ * that has no case file to keep one beside, as `dragOverridesFromLayout`
+ * applies its positions. Only a route that names its two buses is taken,
+ * with the places the layout has them at as its anchors.
+ */
+export function routeOverridesFromLayout(
+  layout: SidecarLayout,
+): Record<string, { points: [number, number][]; anchors: RouteAnchors }> {
+  const out: Record<string, { points: [number, number][]; anchors: RouteAnchors }> = {};
+  for (const bucket of BRANCH_BUCKETS) {
+    for (const [idx, route] of Object.entries(layout.branches?.[bucket] ?? {})) {
+      const points = route.bend_points ?? [];
+      if (route.routing !== 'polyline' || points.length < 2) continue;
+      const source = typeof route.bus1 === 'string' ? layout.coordinates[route.bus1] : undefined;
+      const target = typeof route.bus2 === 'string' ? layout.coordinates[route.bus2] : undefined;
+      if (source === undefined || target === undefined) continue;
+      out[`${bucket}-${idx}`] = {
+        points: points.map((point): [number, number] => [point.x, point.y]),
+        anchors: { source: { x: source.x, y: source.y }, target: { x: target.x, y: target.y } },
+      };
+    }
   }
   return out;
 }

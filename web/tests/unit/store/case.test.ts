@@ -158,3 +158,61 @@ describe('useCaseStore: the control chains drawn out in a visit', () => {
     expect(useCaseStore.getState().unitExpansion).toEqual({});
   });
 });
+
+describe('useCaseStore: the branch routes chosen in a visit', () => {
+  afterEach(() => useCaseStore.getState().clearCase());
+
+  const route = {
+    points: [
+      [10, 3],
+      [10, 103],
+    ] as [number, number][],
+    anchors: { source: { x: 0, y: 0 }, target: { x: 0, y: 100 } },
+  };
+
+  it('starts with none, and keeps what is set, a branch with no route included', () => {
+    expect(useCaseStore.getState().routeOverrides).toEqual({});
+    useCaseStore.getState().setRouteOverrides({ 'line-L1': route, 'line-L2': null });
+    expect(useCaseStore.getState().routeOverrides).toEqual({ 'line-L1': route, 'line-L2': null });
+  });
+
+  it('forgets them when another case is opened, and when the case is closed', () => {
+    useCaseStore.getState().setRouteOverrides({ 'line-L1': route });
+    useCaseStore.getState().setCase({ primaryPath: null, addfiles: [], blank: true });
+    expect(useCaseStore.getState().routeOverrides).toEqual({});
+
+    useCaseStore.getState().setRouteOverrides({ 'line-L1': route });
+    useCaseStore.getState().clearCase();
+    expect(useCaseStore.getState().routeOverrides).toEqual({});
+  });
+
+  it('puts an arrangement in place in one step: the positions, the routes, and the chains when given', () => {
+    useCaseStore.getState().setUnitExpansion({ '1': true });
+    const seen: number[] = [];
+    const unsubscribe = useCaseStore.subscribe(() => seen.push(1));
+    useCaseStore.getState().setArrangement({
+      dragOverrides: { '1': { x: 5, y: 6 } },
+      routeOverrides: { 'line-L1': route },
+    });
+    unsubscribe();
+    // One change of the store, so the diagram is never drawn from half of it.
+    expect(seen).toHaveLength(1);
+    expect(useCaseStore.getState()).toMatchObject({
+      dragOverrides: { '1': { x: 5, y: 6 } },
+      routeOverrides: { 'line-L1': route },
+      // Left as they were: a move does not fold a chain.
+      unitExpansion: { '1': true },
+    });
+
+    useCaseStore.getState().setArrangement({
+      dragOverrides: {},
+      routeOverrides: {},
+      unitExpansion: {},
+    });
+    expect(useCaseStore.getState()).toMatchObject({
+      dragOverrides: {},
+      routeOverrides: {},
+      unitExpansion: {},
+    });
+  });
+});

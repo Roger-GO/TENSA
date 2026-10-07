@@ -19,6 +19,8 @@ import {
   layoutForRenumberedCopy,
   captureLayout,
   branchPolylines,
+  storedBranchRoutes,
+  routeOverridesFromLayout,
   controllerCoordsAsMap,
   dragOverridesFromLayout,
   samePlacement,
@@ -1163,6 +1165,103 @@ describe('branchPolylines', () => {
     const saved = withRoutes({ line: { L1: route('polyline', 2) } });
     expect(branchPolylines(saved, grid([line('L1', 2, 3)])).has('line-L1')).toBe(true);
     expect(branchPolylines(saved, grid([line('L9', 2, 3)])).size).toBe(0);
+  });
+
+  describe('storedBranchRoutes: where the buses of a route stood', () => {
+    it('gives a route that names its buses the places the layout has them at', () => {
+      const saved = withRoutes({ line: { L1: route('polyline', 2, { bus1: '1', bus2: '2' }) } });
+      const { polylines, anchors } = storedBranchRoutes(saved, grid([line('L1', 1, 2)]));
+      expect([...polylines.keys()]).toEqual(['line-L1']);
+      expect(anchors.get('line-L1')).toEqual({
+        source: { x: 0, y: 0 },
+        target: { x: 200, y: 0 },
+      });
+    });
+
+    it('gives none to a route saved without its buses, which is judged by where its ends lie', () => {
+      const saved = withRoutes({ line: { L1: route('polyline', 2) } });
+      const { polylines, anchors } = storedBranchRoutes(saved, grid([line('L1', 1, 2)]));
+      expect(polylines.has('line-L1')).toBe(true);
+      expect(anchors.size).toBe(0);
+    });
+
+    it('gives none where the layout does not place one of the buses', () => {
+      // Bus 3 has no position in the layout.
+      const saved = withRoutes({ line: { L1: route('polyline', 2, { bus1: '2', bus2: '3' }) } });
+      const { polylines, anchors } = storedBranchRoutes(saved, grid([line('L1', 2, 3)]));
+      expect(polylines.has('line-L1')).toBe(true);
+      expect(anchors.size).toBe(0);
+    });
+
+    it('anchors a route found again by its buses under the idx the branch has now', () => {
+      const saved = withRoutes({
+        line: { Line_0: route('polyline', 2, { bus1: '1', bus2: '2' }, 10) },
+      });
+      const { anchors } = storedBranchRoutes(saved, grid([line('Line_7', 1, 2)]));
+      expect([...anchors.keys()]).toEqual(['line-Line_7']);
+    });
+
+    it('reads nothing from no layout', () => {
+      expect(storedBranchRoutes(null, grid([line('L1', 1, 2)]))).toEqual({
+        polylines: new Map(),
+        anchors: new Map(),
+      });
+    });
+  });
+});
+
+describe('routeOverridesFromLayout', () => {
+  it('names each stored route by the edge the canvas draws it on, with where its buses stood', () => {
+    expect(routeOverridesFromLayout(fullLayout())).toEqual({
+      'line-L1': {
+        points: [
+          [30, 6],
+          [30, 60],
+          [230, 6],
+        ],
+        anchors: { source: { x: 0, y: 0 }, target: { x: 200, y: 0 } },
+      },
+    });
+  });
+
+  it('leaves out a route that is automatic, names no buses, or names one the layout does not place', () => {
+    const stored = (overrides: Record<string, unknown>) => ({
+      routing: 'polyline' as const,
+      bend_points: [
+        { x: 0, y: 0 },
+        { x: 0, y: 50 },
+      ],
+      bus1: '1',
+      bus2: '2',
+      source_face: null,
+      target_face: null,
+      ...overrides,
+    });
+    const layout: SidecarLayout = {
+      ...fullLayout(),
+      branches: {
+        line: {
+          auto: stored({ routing: 'auto' }),
+          unnamed: stored({ bus1: null }),
+          elsewhere: stored({ bus2: '9' }),
+          short: stored({ bend_points: [{ x: 0, y: 0 }] }),
+        },
+        transformer: { T1: stored({}) },
+        cable: { odd: stored({}) },
+      },
+    };
+    expect(Object.keys(routeOverridesFromLayout(layout))).toEqual(['transformer-T1']);
+  });
+
+  it('reads nothing from a layout with no routes', () => {
+    expect(
+      routeOverridesFromLayout({
+        schema_version: '1',
+        andes_version: 'unknown',
+        last_modified: 'x',
+        coordinates: {},
+      }),
+    ).toEqual({});
   });
 });
 

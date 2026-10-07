@@ -218,6 +218,16 @@ export interface LayoutState {
   resultsViewActive: boolean;
   setResultsViewActive: (active: boolean) => void;
   toggleResultsView: () => void;
+
+  /**
+   * Snap to grid on the diagram. When ``true`` a bus or device that is
+   * dragged, or moved by the arrow keys, lands on the grid the background
+   * dots mark, and so does one moved by Align or Distribute. A preference of
+   * the user, not of a case, so it is kept here and not in a case's layout.
+   */
+  sldSnapToGrid: boolean;
+  setSldSnapToGrid: (snap: boolean) => void;
+  toggleSldSnapToGrid: () => void;
 }
 
 /**
@@ -243,6 +253,7 @@ export const DEFAULT_LAYOUT: Pick<
   | 'selectedJobId'
   | 'historyKindFilter'
   | 'resultsViewActive'
+  | 'sldSnapToGrid'
 > = {
   leftSidebarCollapsed: false,
   bottomDrawerCollapsed: false,
@@ -260,6 +271,7 @@ export const DEFAULT_LAYOUT: Pick<
   selectedJobId: null,
   historyKindFilter: 'runs',
   resultsViewActive: false,
+  sldSnapToGrid: false,
 };
 
 export const LAYOUT_STORAGE_KEY = 'tensa:layout-v1';
@@ -302,6 +314,9 @@ export const useLayoutStore = create<LayoutState>()(
 
       setResultsViewActive: (active) => set({ resultsViewActive: active }),
       toggleResultsView: () => set((state) => ({ resultsViewActive: !state.resultsViewActive })),
+
+      setSldSnapToGrid: (snap) => set({ sldSnapToGrid: snap }),
+      toggleSldSnapToGrid: () => set((state) => ({ sldSnapToGrid: !state.sldSnapToGrid })),
     }),
     {
       name: LAYOUT_STORAGE_KEY,
@@ -334,6 +349,8 @@ export const useLayoutStore = create<LayoutState>()(
         // surface the user last looked at. The results data it shows lives
         // in the in-memory run/analyze slices and is never persisted.
         resultsViewActive: state.resultsViewActive,
+        // Snap to grid on the diagram: how the user likes to place things.
+        sldSnapToGrid: state.sldSnapToGrid,
       }),
     },
   ),

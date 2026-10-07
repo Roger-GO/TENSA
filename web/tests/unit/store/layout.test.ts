@@ -55,6 +55,7 @@ describe('useLayoutStore — defaults', () => {
     expect(state.activeAnalysisSubTab).toBe('plot');
     expect(state.drawerHasUnreadResults).toBe(false);
     expect(state.resultsViewActive).toBe(false);
+    expect(state.sldSnapToGrid).toBe(false);
   });
 
   it('exposes BOTTOM_DRAWER_TABS as the canonical ordered list', () => {
@@ -175,6 +176,15 @@ describe('useLayoutStore — actions', () => {
     expect(useLayoutStore.getState().resultsViewActive).toBe(false);
   });
 
+  it('setSldSnapToGrid writes through, and toggleSldSnapToGrid alternates it', () => {
+    useLayoutStore.getState().setSldSnapToGrid(true);
+    expect(useLayoutStore.getState().sldSnapToGrid).toBe(true);
+    useLayoutStore.getState().toggleSldSnapToGrid();
+    expect(useLayoutStore.getState().sldSnapToGrid).toBe(false);
+    useLayoutStore.getState().toggleSldSnapToGrid();
+    expect(useLayoutStore.getState().sldSnapToGrid).toBe(true);
+  });
+
   it('toggleResultsView is independent of bottomDrawerCollapsed', () => {
     useLayoutStore.setState({ bottomDrawerCollapsed: true });
     useLayoutStore.getState().toggleResultsView();
@@ -217,6 +227,22 @@ describe('useLayoutStore — persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> };
     expect(parsed.state.resultsViewActive).toBe(true);
+  });
+
+  it('keeps Snap to grid across a reload: it is how the user likes to place things', async () => {
+    useLayoutStore.getState().setSldSnapToGrid(true);
+    await Promise.resolve();
+    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> };
+    expect(parsed.state.sldSnapToGrid).toBe(true);
+
+    resetLayoutStore();
+    window.localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({ state: { ...DEFAULT_LAYOUT, sldSnapToGrid: true }, version: 0 }),
+    );
+    await useLayoutStore.persist.rehydrate();
+    expect(useLayoutStore.getState().sldSnapToGrid).toBe(true);
   });
 
   it('round-trips resultsViewActive via rehydrate()', async () => {

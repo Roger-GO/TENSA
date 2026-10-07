@@ -167,6 +167,59 @@ describe('buildGraph with stored branch routes', () => {
   });
 });
 
+describe('buildGraph with routes that say where their buses stood', () => {
+  // A route made for bus 2 at (360, 20): it lands past the tip of bar 1,
+  // where a route judged by its ends would be refused.
+  const moved: [number, number][] = [
+    [-40, 3],
+    [-40, 120],
+    [400, 120],
+    [400, 23],
+  ];
+  const bendPoints = new Map([['line-L1', moved]]);
+  const bendAnchors = new Map([['line-L1', { source: { x: 0, y: 0 }, target: { x: 360, y: 20 } }]]);
+  const dragged = { '2': { x: 360, y: 20 } };
+
+  it('draws the route while both buses stand where it was made for, drags counted', () => {
+    const { edges } = buildGraph(topology, COORDS, {
+      bendPoints,
+      bendAnchors,
+      dragOverrides: dragged,
+    });
+    expect(edge(edges, 'line-L1').type).toBe('routed');
+    expect(edge(edges, 'line-L1').data?.bendPoints).toEqual(moved);
+    // The diagram draws it for as long as the buses stay at those places.
+    expect(edge(edges, 'line-L1').data?.bendAnchors).toEqual(bendAnchors.get('line-L1'));
+  });
+
+  it('routes the branch afresh once a bus stands somewhere else', () => {
+    // Without the drag bus 2 is at (300, 0), not where the route was made for.
+    expect(
+      edge(buildGraph(topology, COORDS, { bendPoints, bendAnchors }).edges, 'line-L1').data
+        ?.bendPoints,
+    ).toBeUndefined();
+    const further = { '2': { x: 420, y: 20 } };
+    expect(
+      edge(
+        buildGraph(topology, COORDS, { bendPoints, bendAnchors, dragOverrides: further }).edges,
+        'line-L1',
+      ).data?.bendPoints,
+    ).toBeUndefined();
+  });
+
+  it('judges a route that has no such places by where its ends lie, as before', () => {
+    const { edges } = buildGraph(topology, COORDS, {
+      bendPoints: new Map([['line-L1', ROUTE_1_2]]),
+      bendAnchors: new Map(),
+    });
+    expect(edge(edges, 'line-L1').data?.bendPoints).toEqual(ROUTE_1_2);
+    expect(edge(edges, 'line-L1').data?.bendAnchors).toEqual({
+      source: COORDS['1'],
+      target: COORDS['2'],
+    });
+  });
+});
+
 describe('buildGraph with stored controller positions', () => {
   it('names every controller on the symbol of its unit when the layout places none', () => {
     const { nodes } = buildGraph(topology, COORDS);
