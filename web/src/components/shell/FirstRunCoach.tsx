@@ -53,7 +53,10 @@ interface StepCopy {
 const STEP_COPY: Record<Exclude<CoachStep, null>, StepCopy> = {
   1: {
     title: 'Pick a case',
-    body: 'Look at the Project tab of the left rail to pick a case file under Saved cases (try kundur or IEEE 14). Loading sets up the topology and brings up the diagram.',
+    // Three lines in the card and no more: with a fourth the card reaches
+    // down onto the sentence in the middle of the empty diagram, in a window
+    // of a laptop's height.
+    body: 'Look at the Project tab of the left rail to pick a case file (try kundur or IEEE 14). Loading it brings up the diagram.',
     anchor: 'top-left',
     cta: 'Got it',
   },

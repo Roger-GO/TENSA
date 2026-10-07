@@ -119,7 +119,7 @@ describe('<FirstRunCoach />', () => {
     render(<FirstRunCoach />);
     const card = screen.getByTestId('first-run-coach');
     expect(card.getAttribute('data-step')).toBe('1');
-    expect(card).toHaveTextContent(/Project tab of the left rail.*case file under Saved cases/);
+    expect(card).toHaveTextContent(/Project tab of the left rail to pick a case file/);
   });
 
   it('step 2 says where a fault is added and which Run mode plays it, for a first run that is a TDS one', async () => {
