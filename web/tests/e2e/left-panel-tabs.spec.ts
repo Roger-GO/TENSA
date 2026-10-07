@@ -6,8 +6,9 @@
  *   every kind the Add element form has, under its group, with a line each ->
  *   search "exciter" -> the four exciters and how many that is -> search
  *   something no kind is known under -> it says so, and Show all components
- *   brings the list back -> reload -> still on Components -> Project -> reload
- *   -> still on Project
+ *   brings the list back -> Tab stops at one row and the next Tab leaves the
+ *   list -> reload -> still on Components -> Project -> reload -> still on
+ *   Project
  *
  *   open IEEE 14 -> Components -> click GENROU -> the Add element form is on
  *   GENROU -> drag PQ load onto the diagram -> the form is on PQ -> run a power
@@ -15,8 +16,8 @@
  *   disabled
  *
  *   no case open -> the hint of the case card opens the Components tab, which
- *   says a click starts a blank system -> click Bus -> a blank system, with the
- *   form on Bus
+ *   takes the keyboard focus and says a click starts a blank system -> click
+ *   Bus -> a blank system, with the form on Bus
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`).
  * The unit tests check the tabs and the palette each on their own; this one
@@ -118,6 +119,19 @@ test('the sidebar opens on Project, the palette is searched, and the tab is reme
   await expect(paletteRows(page)).toHaveCount(KINDS);
   await expect(search).toBeFocused();
 
+  // ---- The keyboard: the rows are one stop for Tab, the arrows walk them -----
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Add Bus' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('button', { name: 'Add Line' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  const leftThePalette = await page.evaluate(
+    () => document.activeElement?.closest('[data-testid="component-library"]') === null,
+  );
+  expect(leftThePalette).toBe(true);
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Add Line' })).toBeFocused();
+
   // ---- The tab is the user's: it is the same after a reload -----------------
   await page.reload();
   await expect(componentsTab(page)).toHaveAttribute('aria-selected', 'true');
@@ -181,8 +195,11 @@ test('with no case open, the case card leads to the palette, and a row starts a 
   await page.goto('/');
   await expect(page.getByTestId('case-nav-empty')).toContainText('No case loaded.');
 
-  await page.getByRole('button', { name: 'Components tab' }).click();
+  // From the keyboard: the link is hidden with its panel, and the tab it
+  // opened has the focus, so the next Tab goes into the palette.
+  await page.getByRole('button', { name: 'Components tab' }).press('Enter');
   await expect(componentsTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect(componentsTab(page)).toBeFocused();
   await expect(page.getByTestId('component-library-hint')).toHaveText(
     'Click a component, or drag it onto the diagram, to start a blank system with it.',
   );
