@@ -38,7 +38,9 @@ import { useCaseStore } from '@/store/case';
  * A row can also be clicked (or reached with Tab and pressed with Enter or
  * Space), which opens the same form without a drag: dragging is a fiddly gesture
  * on a trackpad, and from the keyboard it is not possible at all. The arrow
- * keys move between the rows, and down from the search box into them. A line
+ * keys move between the rows, and down from the search box into them. The rows
+ * are one stop for the Tab key between them (the row the keyboard was last on,
+ * or the first), so Tab leaves the list in one press. A line
  * under the search box says how to add, and says instead why nothing can be
  * added when that is so (``useAddComponent``). With no case open, a click
  * starts a blank system as a drop on the empty canvas does, and the line says
@@ -65,8 +67,15 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
   const caseOpen = useCaseStore((s) => s.selection !== null);
   const [query, setQuery] = useState('');
   const sections = useMemo(() => groupElementKinds(searchElementKinds(query)), [query]);
-  const shown = sections.reduce((count, section) => count + section.kinds.length, 0);
+  const shownKinds = sections.flatMap((section) => section.kinds);
+  const shown = shownKinds.length;
   const searching = query.trim() !== '';
+  // The one row Tab stops at: the row that last had the focus while the search
+  // still shows it, and the first row otherwise.
+  const [lastRow, setLastRow] = useState<string | null>(null);
+  const tabStop = shownKinds.some((kind) => kind.value === lastRow)
+    ? lastRow
+    : (shownKinds[0]?.value ?? null);
   const hintId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -205,6 +214,8 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
               kinds={kinds}
               blockedReason={blockedReason}
               blockedId={hintId}
+              tabStop={tabStop}
+              onRowFocus={setLastRow}
               onAdd={add}
             />
           ))
@@ -221,10 +232,13 @@ interface GroupProps {
   blockedReason: string | null;
   /** The id of the element that shows `blockedReason`. */
   blockedId: string;
+  /** The kind whose row is the list's stop for the Tab key, or `null` with no row. */
+  tabStop: string | null;
+  onRowFocus: (kind: string) => void;
   onAdd: (kind: string) => void;
 }
 
-function Group({ group, kinds, blockedReason, blockedId, onAdd }: GroupProps) {
+function Group({ group, kinds, blockedReason, blockedId, tabStop, onRowFocus, onAdd }: GroupProps) {
   const headingId = useId();
   return (
     <section
@@ -245,7 +259,14 @@ function Group({ group, kinds, blockedReason, blockedId, onAdd }: GroupProps) {
       <ul role="list" className="flex flex-col gap-0.5">
         {kinds.map((kind) => (
           <li key={kind.value}>
-            <Row kind={kind} blockedReason={blockedReason} blockedId={blockedId} onAdd={onAdd} />
+            <Row
+              kind={kind}
+              blockedReason={blockedReason}
+              blockedId={blockedId}
+              tabStop={kind.value === tabStop}
+              onFocus={onRowFocus}
+              onAdd={onAdd}
+            />
           </li>
         ))}
       </ul>
@@ -257,16 +278,20 @@ interface RowProps {
   kind: ElementKind;
   blockedReason: string | null;
   blockedId: string;
+  /** Whether Tab stops at this row; the arrow keys reach every row. */
+  tabStop: boolean;
+  onFocus: (kind: string) => void;
   onAdd: (kind: string) => void;
 }
 
-function Row({ kind, blockedReason, blockedId, onAdd }: RowProps) {
+function Row({ kind, blockedReason, blockedId, tabStop, onFocus, onAdd }: RowProps) {
   const blocked = blockedReason !== null;
   const descriptionId = useId();
   return (
     <div
       role="button"
-      tabIndex={0}
+      tabIndex={tabStop ? 0 : -1}
+      onFocus={() => onFocus(kind.value)}
       draggable={!blocked}
       aria-disabled={blocked ? true : undefined}
       data-testid={`component-library-item-${kind.value}`}

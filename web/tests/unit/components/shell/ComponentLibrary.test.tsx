@@ -13,7 +13,8 @@
  *    the row's kind + sets `effectAllowed='copy'`.
  *  - A row can also be clicked, or pressed with Enter or Space, to open the
  *    add form on its kind; with no case open it starts a blank system first.
- *  - The arrow keys move between the rows and the search box.
+ *  - The arrow keys move between the rows and the search box, and the rows
+ *    are one stop for the Tab key between them.
  *  - A line under the search box says how to add, or why nothing can be added,
  *    and a row that cannot add is marked disabled, cannot be dragged and does
  *    nothing.
@@ -306,11 +307,11 @@ describe('<ComponentLibrary /> click to add', () => {
     openCase();
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    row('Bus').focus();
+    act(() => row('Bus').focus());
     await user.keyboard('{Enter}');
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Bus' });
     act(() => useCaseStore.getState().closeAddPanel());
-    row('Line').focus();
+    act(() => row('Line').focus());
     await user.keyboard(' ');
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Line' });
   });
@@ -401,7 +402,7 @@ describe('<ComponentLibrary /> arrow keys', () => {
   it('goes to the last row on End and the first on Home, and stops at the last', async () => {
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    row('Line').focus();
+    act(() => row('Line').focus());
     await user.keyboard('{End}');
     expect(row('Shunt')).toHaveFocus();
     await user.keyboard('{ArrowDown}');
@@ -428,6 +429,67 @@ describe('<ComponentLibrary /> arrow keys', () => {
     await user.type(search(), 'nothing like this');
     await user.keyboard('{ArrowDown}');
     expect(search()).toHaveFocus();
+  });
+});
+
+describe('<ComponentLibrary /> Tab key', () => {
+  /** The kinds of the rows Tab stops at. */
+  const tabStops = () =>
+    Array.from(document.querySelectorAll('[data-component-kind][tabindex="0"]')).map((el) =>
+      el.getAttribute('data-component-kind'),
+    );
+  const after = () => screen.getByRole('button', { name: 'What comes after' });
+  const renderBeforeSomething = () =>
+    render(
+      <>
+        <ComponentLibrary />
+        <button type="button">What comes after</button>
+      </>,
+    );
+
+  it('stops at one row, the first, so one press leaves the list and not one per row', async () => {
+    const user = userEvent.setup();
+    renderBeforeSomething();
+    expect(tabStops()).toEqual(['Bus']);
+    search().focus();
+    await user.tab();
+    expect(row('Bus')).toHaveFocus();
+    await user.tab();
+    expect(after()).toHaveFocus();
+  });
+
+  it('comes back in at the row the arrow keys left', async () => {
+    const user = userEvent.setup();
+    renderBeforeSomething();
+    search().focus();
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+    expect(row('Transformer2W')).toHaveFocus();
+    expect(tabStops()).toEqual(['Transformer2W']);
+    await user.tab();
+    expect(after()).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(row('Transformer2W')).toHaveFocus();
+  });
+
+  it('stops at the first row the search kept while the row it was on is not shown', async () => {
+    const user = userEvent.setup();
+    renderBeforeSomething();
+    search().focus();
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(tabStops()).toEqual(['Line']);
+    await user.type(search(), 'load');
+    expect(tabStops()).toEqual(['PQ']);
+    // Shown again, the row it was on is the stop again.
+    await user.clear(search());
+    expect(tabStops()).toEqual(['Line']);
+  });
+
+  it('keeps a row that cannot add as a stop: it still says why when it has the focus', () => {
+    openCase();
+    MOCK_TOPOLOGY = topology('committed');
+    renderBeforeSomething();
+    expect(row('Bus')).toHaveAttribute('aria-disabled', 'true');
+    expect(tabStops()).toEqual(['Bus']);
   });
 });
 
