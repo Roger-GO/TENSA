@@ -415,6 +415,50 @@ describe('<TopologyEdge /> line loading', () => {
     expect(getByTestId('line-flow-label-edge-1').getAttribute('data-loading-band')).toBe('neutral');
   });
 
+  it('turns the label to read along an upright run when the canvas found it room only that way', () => {
+    setPflowFlow(lineFlow(120, 10));
+    const route: ConnectorRoute = {
+      points: [
+        [50, 0],
+        [50, 200],
+      ],
+      sourceSide: 'south',
+      targetSide: 'north',
+    };
+    const upright = renderEdge({
+      data: {
+        bucket: 'line',
+        idx: 'l-1',
+        route,
+        labelAt: { x: 50, y: 100, angleDeg: 90, turned: true },
+      },
+    });
+    const turned = upright.getByTestId('line-flow-label-edge-1');
+    expect(turned).toHaveAttribute('data-turned', 'true');
+    expect(turned.style.transform).toContain('translate(50px, 100px)');
+    expect(turned.style.transform).toMatch(/rotate\(-90deg\)$/);
+    cleanup();
+
+    const level = renderEdge({
+      data: { bucket: 'line', idx: 'l-1', route, labelAt: { x: 50, y: 100, angleDeg: 90 } },
+    });
+    const plain = level.getByTestId('line-flow-label-edge-1');
+    expect(plain).not.toHaveAttribute('data-turned');
+    expect(plain.style.transform).not.toContain('rotate');
+  });
+
+  it('leaves the label off where the canvas found it no place, and keeps the arrow and the colour', () => {
+    setPflowFlow(lineFlow(112, 8, undefined, { rate_a: 100, loading_pct: 112.4 }));
+    const { queryByTestId, getByTestId } = renderEdge({
+      data: { bucket: 'line', idx: 'l-1', labelAt: { x: 50, y: 0, angleDeg: 0, hidden: true } },
+    });
+    expect(queryByTestId('line-flow-label-edge-1')).toBeNull();
+    // The line still shows that it is over its rating.
+    expect(getByTestId('topology-edge-base').getAttribute('data-stroke')).not.toBe(
+      'var(--color-foreground)',
+    );
+  });
+
   it('keeps the loading of a flagged line when the labels are hidden, and drops the rest', () => {
     useUiStore.setState({ hideLabels: true });
     setPflowFlow(lineFlow(112, 8, undefined, { rate_a: 100, loading_pct: 112.4 }));

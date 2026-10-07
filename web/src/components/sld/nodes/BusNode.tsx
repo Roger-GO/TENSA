@@ -19,7 +19,7 @@ import {
 import { VoltageMarker } from '../VoltageMarker';
 import { BAR_LENGTH, BAR_THICKNESS, busLabelPlace, type BarGeometry } from '../connections';
 import { SOURCE_HANDLE, TARGET_HANDLE, type Side, type UnitNodeData } from '../graph';
-import { busLabelWidth } from '../labels';
+import { BUS_LABEL_BESIDE_GAP, busLabelWidth, type BusLabelSide } from '../labels';
 
 /**
  * Shape of `data` for an IEC 60617 SLD node. Shared across BusNode +
@@ -80,18 +80,14 @@ export interface SldNodeData extends Record<string, unknown> {
    */
   bar?: BarGeometry;
   /**
-   * Bus nodes: the stretches of the strip under the bar that the runs of
-   * connectors and the symbols that stand there cover, as x offsets from
-   * the origin of the node, for the label to stand clear of. Absent:
-   * nothing is there. Stamped by `SldCanvas`.
+   * Bus nodes: where the label stands (`placeBusLabels`): under the bar or
+   * over it, with the x of its middle as an offset from the origin of the
+   * node, beside the east or the west tip of the bar, level with it, or
+   * `away` from the bar, with `top` the offset of its top edge as well.
+   * Absent: under the bar, clear of the connectors that land there. Stamped
+   * by `SldCanvas`.
    */
-  labelClear?: [number, number][];
-  /**
-   * Bus nodes: the same for the strip over the bar, where the label stands
-   * when the strip under the bar has no place for it. Stamped by
-   * `SldCanvas` along with `labelClear`.
-   */
-  labelClearAbove?: [number, number][];
+  labelAt?: { offset: number; side: BusLabelSide; top?: number };
   /**
    * Generator / load / shunt nodes: the face the connector to the bus
    * leaves by. The P / Q readout moves aside when it hangs off that face.
@@ -111,9 +107,11 @@ export interface SldNodeData extends Record<string, unknown> {
    * of the face it hangs off): `left` of the connector, on the `far` side of
    * the device, or beside its symbol on the `east` or the `west`. Another
    * connector runs through the first place, or something stands there.
-   * Stamped by `SldCanvas`.
+   * `none` when every one of those places is taken: the readout is left off
+   * (the values are in the tables and in the Inspector). Stamped by
+   * `SldCanvas`.
    */
-  readoutSpot?: 'left' | 'far' | 'east' | 'west';
+  readoutSpot?: 'left' | 'far' | 'east' | 'west' | 'none';
   /**
    * Generator nodes that stand for a generating unit of more than one model
    * (a static generator with its machine and their controllers): the models
@@ -159,8 +157,8 @@ const SIDES: Array<{ side: Side; position: Position }> = [
  * hangs under the middle of the bar, and moves along it to stay clear of a
  * feeder that comes up from below, of a line that passes under the bar and
  * of a symbol that stands there; with no place left under the bar it stands
- * over it (`busLabelPlace`, with `data.labelClear` and
- * `data.labelClearAbove`).
+ * over it, and with none there either beside a tip of the bar
+ * (`data.labelAt`, which the canvas works out for the whole diagram).
  *
  * Unit 9: subscribes to `pflow.lastRun` + `ui.hideLabels` and consumes
  * `getBusOverlayState` to tint the bar on a limit violation + show a
@@ -218,17 +216,19 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
   const barBg = barClassForBand(effectiveBand);
   const barStart = d.bar?.start ?? 0;
   const barEnd = d.bar?.end ?? BAR_LENGTH;
-  // One dot per place: a feeder above the bar and one below it may share a tap.
+  // One dot per tap: every connection lands at a place of its own.
   const tapXs = [...new Set((d.bar?.taps ?? []).map((tap) => tap.x))];
-  // Where the label stands, by the width the canvas takes it to have: the
-  // flow labels and the readouts around it were placed against that.
-  const labelPlace = busLabelPlace(
-    d.bar,
-    busLabelWidth(d.name || d.idx, pflowOverlay.voltage_label !== null),
-    d.labelClear,
-    d.labelClearAbove,
-  );
-  const labelShift = labelPlace.offset - BAR_LENGTH / 2;
+  // Where the label stands: where the canvas put it, clear of everything
+  // else on the diagram, and under the bar otherwise, by the width the
+  // diagram takes it to have.
+  const labelAt = d.labelAt ?? {
+    offset: busLabelPlace(
+      d.bar,
+      busLabelWidth(d.name || d.idx, pflowOverlay.voltage_label !== null),
+    ).offset,
+    side: 'below' as const,
+  };
+  const labelShift = labelAt.offset - BAR_LENGTH / 2;
   // `effectiveColorClass` (border-success/...) is retained on the node so
   // existing band-colour assertions keep working AND assistive tooling can
   // read the band off the wrapper; it's visually inert (no border drawn).
@@ -309,18 +309,32 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
           feeder line passes behind it. */}
       <div
         data-testid={`bus-label-${d.idx}`}
-        data-label-side={labelPlace.above ? 'above' : undefined}
+        data-label-side={labelAt.side === 'below' ? undefined : labelAt.side}
         title={`${d.name || d.idx}: voltage limits ${formatVoltageLimits(d.voltageLimits ?? DEFAULT_VOLTAGE_LIMITS)}`}
         className={cn(
-          'bg-background/70 flex flex-col items-center gap-0 rounded px-1 leading-tight whitespace-nowrap',
-          labelPlace.above ? 'absolute bottom-full mb-1 -translate-x-1/2' : 'relative mt-1',
+          'bg-background/70 flex flex-col gap-0 rounded px-1 leading-tight whitespace-nowrap',
+          labelAt.side === 'below'
+            ? 'relative mt-1 items-center'
+            : labelAt.side === 'above'
+              ? 'absolute bottom-full mb-1 -translate-x-1/2 items-center'
+              : labelAt.side === 'away'
+                ? 'absolute -translate-x-1/2 items-center'
+                : labelAt.side === 'east'
+                  ? 'absolute -translate-y-1/2 items-start'
+                  : 'absolute -translate-x-full -translate-y-1/2 items-end',
         )}
         style={
-          labelPlace.above
-            ? { left: labelPlace.offset }
-            : labelShift === 0
+          labelAt.side === 'below'
+            ? labelShift === 0
               ? undefined
               : { left: labelShift }
+            : labelAt.side === 'above'
+              ? { left: labelAt.offset }
+              : labelAt.side === 'away'
+                ? { left: labelAt.offset, top: labelAt.top ?? BAR_THICKNESS }
+                : labelAt.side === 'east'
+                  ? { left: barEnd + BUS_LABEL_BESIDE_GAP, top: BAR_THICKNESS / 2 }
+                  : { left: barStart - BUS_LABEL_BESIDE_GAP, top: BAR_THICKNESS / 2 }
         }
       >
         <span className="flex items-center gap-0.5">

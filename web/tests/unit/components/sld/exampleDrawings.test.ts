@@ -1,18 +1,15 @@
 /**
- * IEEE 14 and WSCC 9 as the diagram draws them with no saved layout: the
- * automatic layout places the buses and routes the branches (`layout.ts`),
- * `buildGraph` places the devices, and `layoutConnections` lands every
- * connector on the bars.
+ * The example cases as the diagram draws them with no saved layout: ELK
+ * places the buses (`layout.ts`), and the diagram is arranged around them
+ * as Tidy and re-layout arranges it (`useAutoLayout`): the buses on the
+ * grid, every device beside its bus, every branch routed clear of the rest.
  *
- * The automatic layout runs every branch of one side of a bus through one
- * point and several of them down one corridor, a few pixels beside the bars
- * it passes. The connection pass parts them on the bar, and each run moves
- * along with its tap. These two cases are where that went wrong: on IEEE 14
- * a line from bus 2 to bus 5 was moved into the tips of the bars of buses 3
- * and 4 and behind a generator of bus 3, and on WSCC 9 a line was moved
- * onto the edge of a load. So the rules are held on the whole drawing: a
- * branch keeps clear of every bar but its own two and of every generator,
- * load and shunt, and a device connector runs through no other device.
+ * `noOverlap.test.ts` holds these drawings to the rule that nothing is
+ * drawn over anything else. This file holds what a first look at an opened
+ * case shows besides: every element is there, every connector of a device
+ * drops square onto its bar, every branch runs at right angles from a tap
+ * to a tap and keeps its distance from the bars and the devices it passes,
+ * with the device connectors drawn straight or with a right angle.
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `layout.test.ts`.
@@ -20,15 +17,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
-import { autoLayout } from '@/components/sld/layout';
-import { DEVICE_COLUMN_GAP, buildGraph } from '@/components/sld/graph';
-import {
-  SLIDE_CLEARANCE,
-  layoutConnections,
-  type ConnectorStyle,
-} from '@/components/sld/connections';
+import { DEVICE_COLUMN_GAP } from '@/components/sld/graph';
+import { SLIDE_CLEARANCE, type ConnectorStyle } from '@/components/sld/connections';
+import { GRID_STEP } from '@/components/sld/tidy';
 
-import { IEEE14, WSCC9 } from '../../helpers/exampleCases';
+import { drawn, opened } from '../../helpers/diagramStates';
+import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
 
 vi.mock('@/components/sld/elkClient', async () => {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
@@ -50,23 +44,11 @@ function distance(a: readonly number[], b: readonly number[], box: Box): number 
   return Math.hypot(dx, dy);
 }
 
-/** Whether the run from `a` to `b` passes through the inside of `box`. */
-function passesThrough(a: readonly number[], b: readonly number[], box: Box): boolean {
-  const steps = Math.ceil(Math.hypot(b[0]! - a[0]!, b[1]! - a[1]!));
-  for (let i = 0; i <= steps; i += 1) {
-    const t = steps === 0 ? 0 : i / steps;
-    const x = a[0]! + t * (b[0]! - a[0]!);
-    const y = a[1]! + t * (b[1]! - a[1]!);
-    if (x > box.left + 1 && x < box.right - 1 && y > box.top + 1 && y < box.bottom - 1) return true;
-  }
-  return false;
-}
-
-/** The drawing of `topology` with no saved layout, and every way it breaks the rules above. */
-async function drawn(topology: TopologySummary, connectorStyle: ConnectorStyle) {
-  const { coords, bendPoints } = await autoLayout(topology);
-  const { nodes, edges } = buildGraph(topology, coords, { bendPoints });
-  const { bars, routes } = layoutConnections(nodes, edges, { connectorStyle });
+/** The drawing of `topology` as its case opens, and every way it breaks the rules above. */
+async function opens(topology: TopologySummary, connectorStyle: ConnectorStyle) {
+  const diagram = await opened(topology);
+  const { nodes, edges } = diagram;
+  const { bars, routes } = drawn(diagram, { values: false, connectorStyle }).connections;
   const boxOf = (id: string): Box => {
     const node = nodes.find((n) => n.id === id)!;
     const bar = bars.get(id);
@@ -90,15 +72,21 @@ async function drawn(topology: TopologySummary, connectorStyle: ConnectorStyle) 
   const problems: string[] = [];
   for (const edge of edges) {
     const points = routes.get(edge.id)!.points;
+    if (edge.type === 'stub') {
+      // Square onto the bar: one upright run from the device to its tap.
+      const square = points.length === 2 && points[0]![0] === points[1]![0];
+      if (!square) problems.push(`${edge.id} does not drop square onto its bar`);
+      continue;
+    }
+    const ends = [boxOf(edge.source), boxOf(edge.target)];
+    const onBar = (p: readonly number[], bar: Box): boolean =>
+      p[1] === bar.top + 3 && p[0]! >= bar.left + 3 && p[0]! <= bar.right - 3;
+    if (!onBar(points[0]!, ends[0]!) || !onBar(points[points.length - 1]!, ends[1]!)) {
+      problems.push(`${edge.id} does not run from a tap to a tap`);
+    }
     for (let i = 1; i < points.length; i += 1) {
       const [a, b] = [points[i - 1]!, points[i]!];
-      if (edge.type === 'stub') {
-        for (const device of devices) {
-          if (device.id === edge.source || !passesThrough(a, b, boxOf(device.id))) continue;
-          problems.push(`${edge.id} runs through ${device.id}`);
-        }
-        continue;
-      }
+      if (a[0] !== b[0] && a[1] !== b[1]) problems.push(`${edge.id} runs at an angle`);
       for (const bus of buses) {
         if (bus.id === edge.source || bus.id === edge.target) continue;
         const apart = distance(a, b, boxOf(bus.id));
@@ -111,14 +99,14 @@ async function drawn(topology: TopologySummary, connectorStyle: ConnectorStyle) 
       }
     }
   }
-  return { nodes, edges, routes, problems };
+  return { nodes, edges, buses, devices, problems };
 }
 
-describe('the example cases, drawn by the automatic layout', () => {
+describe('the example cases, as they open with no saved layout', () => {
   for (const connectorStyle of ['straight', 'elbow'] as const) {
-    it(`keeps every branch of IEEE 14 clear of the bars and the devices it passes (${connectorStyle})`, async () => {
-      const { nodes, edges, problems } = await drawn(IEEE14, connectorStyle);
-      expect(nodes.filter((n) => n.type === 'bus')).toHaveLength(14);
+    it(`draws every branch of IEEE 14 from tap to tap, clear of the bars and the devices it passes (${connectorStyle})`, async () => {
+      const { buses, edges, problems } = await opens(IEEE14, connectorStyle);
+      expect(buses).toHaveLength(14);
       expect(edges.filter((e) => e.type !== 'stub')).toHaveLength(20);
       // One connector per load and shunt, and one per generating unit: a
       // generator and the machine that names it are one symbol.
@@ -126,35 +114,31 @@ describe('the example cases, drawn by the automatic layout', () => {
       expect(problems).toEqual([]);
     });
 
-    it(`keeps every branch of WSCC 9 clear of the bars and the devices it passes (${connectorStyle})`, async () => {
-      const { edges, problems } = await drawn(WSCC9, connectorStyle);
-      expect(edges.filter((e) => e.type !== 'stub')).toHaveLength(9);
-      expect(problems).toEqual([]);
+    it(`draws WSCC 9 and Kundur the same way (${connectorStyle})`, async () => {
+      const wscc = await opens(WSCC9, connectorStyle);
+      expect(wscc.edges.filter((e) => e.type !== 'stub')).toHaveLength(9);
+      expect(wscc.problems).toEqual([]);
+      const kundur = await opens(KUNDUR, connectorStyle);
+      expect(kundur.edges.filter((e) => e.type !== 'stub')).toHaveLength(15);
+      expect(kundur.problems).toEqual([]);
     });
   }
 
-  it('draws the line of IEEE 14 from bus 2 to bus 5 down the corridor left of the bars of buses 3 and 4', async () => {
-    // Four branches land on the north port of bus 5. Parted about the one
-    // in the middle, this line's long run stood inside the tips of the bars
-    // of buses 3 and 4; they are parted so that it keeps the corridor the
-    // layout routed it down.
-    const { nodes, routes } = await drawn(IEEE14, 'straight');
-    const x = (id: string): number => nodes.find((n) => n.id === id)!.position.x;
-    const points = routes.get('line-Line_5')!.points;
-    const longRun = points[points.length - 1]![0];
-    expect(points[points.length - 2]![0]).toBe(longRun);
-    for (const bus of ['3', '4']) {
-      expect(x(bus) - longRun).toBeGreaterThanOrEqual(SLIDE_CLEARANCE);
+  it('stands every bus on the grid, and every device in the row over or under its bar', async () => {
+    const { nodes, buses, devices } = await opens(IEEE14, 'straight');
+    for (const bus of buses) {
+      expect(bus.position.x % GRID_STEP, bus.id).toBe(0);
+      expect(bus.position.y % GRID_STEP, bus.id).toBe(0);
     }
-    // The four are still a spacing apart on the bar of bus 5, in the order
-    // that keeps them from crossing: from the left, down the corridor
-    // twice, and from the right.
-    const landing = (id: string): number => {
-      const route = routes.get(id)!.points;
-      return route[route.length - 1]![0] - x('5');
-    };
-    expect(
-      ['transformer-Line_19', 'line-Line_2', 'line-Line_5', 'line-Line_7'].map(landing),
-    ).toEqual([18, 32, 46, 60]);
+    for (const device of devices) {
+      const parent = nodes.find((n) => n.id === (device.data as { parentBus: string }).parentBus)!;
+      expect(Math.abs(device.position.y - parent.position.y), device.id).toBe(70);
+    }
+  });
+
+  it('opens the same diagram every time', async () => {
+    const [first, second] = [await opened(IEEE14), await opened(IEEE14)];
+    expect(second.nodes.map((n) => n.position)).toEqual(first.nodes.map((n) => n.position));
+    expect(second.edges.map((e) => e.data)).toEqual(first.edges.map((e) => e.data));
   });
 });

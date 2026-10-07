@@ -228,6 +228,9 @@ vi.mock('@xyflow/react', async () => {
       getZoom: vi.fn(() => 1),
       getNodes: vi.fn(() => []),
       fitView: fitViewSpy,
+      // What Fit view measures the diagram with, to leave room for what
+      // floats over its corners.
+      getNodesBounds: () => ({ x: 0, y: 0, width: 800, height: 400 }),
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
     }),
   };
@@ -972,8 +975,8 @@ describe('SldCanvas', () => {
 
   // ---- ELK runs only when it can change the drawing -------------------------
 
-  /** ELK passes per layout: one for coords, one for edge bend points. */
-  const ELK_PASSES = 2;
+  /** ELK passes per layout: one, for the places of the buses. The routes are made here. */
+  const ELK_PASSES = 1;
 
   function selectCase(path: string) {
     act(() => {
@@ -1541,7 +1544,17 @@ describe('SldCanvas', () => {
     await renderLoaded();
     act(() => __requestSldCommand('fit-view'));
     expect(fitViewSpy).toHaveBeenCalledTimes(1);
-    expect(fitViewSpy.mock.calls[0]?.[0]).toMatchObject({ duration: expect.any(Number) });
+    // With room left on every side: the minimap and the zoom controls float
+    // over the bottom corners (`fitPadding`).
+    expect(fitViewSpy.mock.calls[0]?.[0]).toMatchObject({
+      duration: expect.any(Number),
+      padding: {
+        top: expect.stringMatching(/^\d+px$/),
+        right: expect.stringMatching(/^\d+px$/),
+        bottom: expect.stringMatching(/^\d+px$/),
+        left: expect.stringMatching(/^\d+px$/),
+      },
+    });
   });
 
   it('Reset to auto-layout forgets the drags, replaces the saved layout with an empty one, and offers Undo', async () => {
@@ -1684,14 +1697,16 @@ describe('SldCanvas', () => {
   });
 
   it('the canvas menu tidies the diagram', async () => {
-    const success = vi.spyOn(toast, 'success');
+    const info = vi.spyOn(toast, 'info');
     loadSavedCase();
     await renderLoaded();
     fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
     const menu = await screen.findByTestId('sld-context-menu');
     await userEvent.click(within(menu).getByTestId('sld-context-tidy'));
-    expect(success).toHaveBeenCalledWith('Diagram tidied', expect.anything());
-    success.mockRestore();
+    // The one line was routed as the diagram was drawn, so the tidy that
+    // ran has nothing to change, and says so.
+    expect(info).toHaveBeenCalledWith('The diagram is already tidy.', expect.anything());
+    info.mockRestore();
   });
 
   it('a right-click inside the node search popover leaves the browser its own menu', async () => {

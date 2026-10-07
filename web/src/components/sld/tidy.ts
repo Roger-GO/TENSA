@@ -16,13 +16,18 @@
  *   which is also the grid a node snaps to. Where a diagram leaves less
  *   room than that, it may also run along a line that just clears what
  *   stands there: `DEVICE_CLEARANCE` beside a device, `RUN_CLEARANCE` over
- *   or under a bar, `SLIDE_CLEARANCE` past its tip. And it may run along
- *   the line of its own bar from a tip of that bar, which is how two buses
- *   that stand level are joined end to end.
- * - It leaves a bar by a face, at a tap of its own, or by a free end. A tap
- *   keeps `TAP_SPACING` from the taps the devices of the bus have and from
- *   the other branches of that face, so the connection pass leaves it where
- *   it is: what `tidyRoutes` answers is what gets drawn.
+ *   or under a bar, `SLIDE_CLEARANCE` past its tip.
+ * - It leaves a bar by a face, at a tap of its own, and never by a tip: a
+ *   line that left a bar in line with it would read as the bar going on.
+ *   For the same reason no route runs level within `TIP_REACH` of a tip, at
+ *   the height of the bar. Two buses that stand level are joined by a route
+ *   that bridges over them, or under.
+ * - A tap keeps `TAP_SPACING` from every other tap of its bar, on either
+ *   face: the ones the devices of the bus have and the ones of the other
+ *   branches. Two lines never meet a bar at one place, one from above and
+ *   one from below, where they would read as one line through the bus. So
+ *   the connection pass leaves a tap where it is: what `tidyRoutes` answers
+ *   is what gets drawn.
  * - It keeps clear of every generator, load and shunt, of the line of a bar
  *   it is not connected to, of the label of every bus but its own two
  *   (which it only passes on its way out of the south face), and of the
@@ -32,7 +37,13 @@
  *   where two meet, they cross at a right angle. A crossing costs as much
  *   as a detour of `CROSS_COST`, and a bend as much as one of `BEND_COST`,
  *   so a route takes the way with the fewest of both that is not much
- *   longer. A device connector counts as a route that is already there.
+ *   longer. A device connector counts as a route that is already there:
+ *   a route crosses it, and never runs along it.
+ * - The routes that are to stay as they are (`TidyOptions.keep`) are there
+ *   before the first search: the rest are routed around them, at their own
+ *   taps, and none of the kept ones is touched. That is how the canvas
+ *   routes the branches of a bus that was moved and no others
+ *   (`routing.ts`).
  * - A bus with more branches on a face than its bar has room for gets a
  *   tap past the tip, up to `MAX_OVERHANG`, where nothing stands in the
  *   way; the bar is drawn out to it.
@@ -98,15 +109,26 @@ export const CROSS_COST = 120;
 /**
  * How far past the tip of its bar a tap may stand; the bar is drawn out to
  * it. Room for four taps on the grid: a bar that has a load and a generator
- * on a face often has its lines leave beside them, past the tip.
+ * on a face often has its lines leave beside them, past the tip. (A bus
+ * with many connections has a longer bar to begin with: `busRoom` in
+ * `graph.ts`.)
  */
 export const MAX_OVERHANG = 4 * GRID_STEP;
 
 /** The gap a route keeps to a generator, load or shunt (`DEVICE_COLUMN_GAP` in `graph.ts`). */
 export const DEVICE_CLEARANCE = 8;
 
-/** Two runs side by side nearer than this would read as one line. */
-export const NEAR_LINE = 10;
+/**
+ * The room two runs side by side keep between them (`LINE_GAP` of the
+ * overlap checker): nearer, they would read as one line.
+ */
+export const NEAR_LINE = 12;
+
+/**
+ * How far past a tip of a bar, at the height of the bar, no route runs
+ * level: it would read as a line that leaves the bar by that tip.
+ */
+export const TIP_REACH = 2 * GRID_STEP;
 
 /**
  * What running through a place that is kept for the values of a device
@@ -118,6 +140,15 @@ export const NEAR_LINE = 10;
  */
 export const KEEP_FREE_COST = 2;
 export const LAST_PLACE_COST = 2 * CROSS_COST;
+
+/**
+ * What running through the last place that is left for the label of a bus
+ * costs (`TidyOptions.preferFree`): as much as a bend. Of two ways alike the
+ * one that leaves the label its place is taken, and no line is given a step
+ * aside for it: a label has other places to stand in, further from its bar
+ * (`placeBusLabels`).
+ */
+export const PREFER_FREE_COST = BEND_COST;
 
 /** The gap a route keeps to a controller badge and to a control chain that is drawn out. */
 const BADGE_CLEARANCE = 4;
@@ -135,10 +166,11 @@ const WIRE_NEAR = 6;
 const TAP_BIAS = 0.05;
 
 /**
- * What a tap past the tip of its bar costs: more than two bends, so a bar
- * is drawn out only for a branch that has no good way from a tap on it.
+ * What a tap past the tip of its bar costs: less than the two bends of a
+ * step aside, so a bar is drawn out a little sooner than a line that could
+ * run straight is given a dogleg to reach a tap on it.
  */
-const OVERHANG_COST = 70;
+const OVERHANG_COST = 40;
 
 /**
  * How much longer a run counts along a line that is not of the grid, so
@@ -194,6 +226,8 @@ export const TIDY_STEPS = 750_000;
 const SEARCH_STEPS = 1_000;
 const HURRY = 32;
 const HURRY_STEPS = 4_000;
+/** The steps a branch that was left without a way gets for one more search (see `tidyRoutes`). */
+const LAST_CHANCE_STEPS = 100_000;
 
 /**
  * The most points the grid has. A diagram past it is routed without the
@@ -235,8 +269,29 @@ export interface TidyOptions extends ConnectionOptions {
    * can (`LAST_PLACE_COST`).
    */
   keepFree?: readonly (readonly Rect[])[];
+  /**
+   * The places to leave free where that costs next to nothing, group by
+   * group: where the label of each bus can stand (`busLabelReserve`). A
+   * route takes the last place of a group rather than a detour
+   * (`PREFER_FREE_COST`).
+   */
+  preferFree?: readonly (readonly Rect[])[];
+  /**
+   * The routes that stay as they are, by edge id: each as the points it is
+   * drawn through, from its tap on the bar of its source to its tap on the
+   * bar of its target. Only the other branches are routed, around these.
+   */
+  keep?: ReadonlyMap<string, readonly Point[]>;
+  /**
+   * Where to route: only what stands in this box, or reaches into it, is
+   * looked at, and the grid covers no more. For routing a few branches of a
+   * large diagram, whose two buses must both stand in it.
+   */
+  within?: Rect;
   /** How many steps the search may take; default `TIDY_STEPS`. */
   steps?: number;
+  /** The most points the grid may have; default `GRID_POINTS`. */
+  gridPoints?: number;
 }
 
 export interface TidyResult {
@@ -346,17 +401,9 @@ interface Bus {
   taps: Record<'north' | 'south', number[]>;
   /** The ends a device connector runs into. */
   endDevice: Record<'east' | 'west', boolean>;
-  /** The ends a route runs into, by the id of the route. */
-  endRoute: Record<'east' | 'west', string | null>;
   /** The sides the bar is drawn out on for a tap past its tip, and the grid points that takes. */
   grown: Record<'east' | 'west', boolean>;
   grownOver: number[];
-  /**
-   * Set once a branch found no place left on the bar. An end takes one
-   * branch and shuts the taps beside it and the room past it, so a bus with
-   * more branches than that leaves room for has them all on its faces.
-   */
-  endsBarred: boolean;
 }
 
 /** One way a route can leave a bar. */
@@ -366,7 +413,7 @@ interface Terminal {
   dir: number;
   /** Where it lands on the bar. */
   tap: Point;
-  side: Side;
+  side: 'north' | 'south';
   /** What it costs: the run from the tap to `node`, and how far off the middle the tap is. */
   cost: number;
   /** How far past the tip of the bar the tap stands; 0 for one on the bar. */
@@ -549,6 +596,61 @@ function grown(rect: Rect, by: number): Rect {
   };
 }
 
+/** The box `node` is taken to have: its bar and the strip its label hangs in for a bus. */
+function footprintOf(node: TidyNode, options: TidyOptions): Rect {
+  const { x, y } = node.position;
+  if (node.type === 'bus') {
+    const half = Math.max(BAR_LENGTH, options.barLengths?.get(node.id) ?? 0) / 2 + MAX_OVERHANG;
+    return {
+      left: x + BAR_LENGTH / 2 - half,
+      right: x + BAR_LENGTH / 2 + half,
+      top: y,
+      bottom: y + LABEL_BOTTOM,
+    };
+  }
+  const measured = options.sizes?.get(node.id);
+  return {
+    left: x,
+    right: x + (measured?.width ?? node.initialWidth ?? DEVICE_SIZE.width),
+    top: y,
+    bottom: y + (measured?.height ?? node.initialHeight ?? DEVICE_SIZE.height),
+  };
+}
+
+/**
+ * What of the diagram a routing reads: all of it, or with
+ * `TidyOptions.within` what stands in that box or reaches into it, with the
+ * bus of every device that does and the devices of every bus that does (a
+ * connector is drawn whole or not at all). The branches that are routed are
+ * the ones whose two buses both stand there.
+ */
+function standingIn(
+  nodes: readonly TidyNode[],
+  edges: readonly ConnectionEdge[],
+  options: TidyOptions,
+): { nodes: readonly TidyNode[]; edges: readonly ConnectionEdge[] } {
+  const within = options.within;
+  if (within === undefined) return { nodes, edges };
+  const inside = new Set<string>();
+  for (const node of nodes) {
+    const box = footprintOf(node, options);
+    const apart =
+      box.right < within.left ||
+      box.left > within.right ||
+      box.bottom < within.top ||
+      box.top > within.bottom;
+    if (!apart) inside.add(node.id);
+  }
+  const stubs = edges.filter((edge) => edge.type === 'stub');
+  // A device that stands there brings its bus, and that bus its devices.
+  for (const stub of stubs) if (inside.has(stub.source)) inside.add(stub.target);
+  for (const stub of stubs) if (inside.has(stub.target)) inside.add(stub.source);
+  return {
+    nodes: nodes.filter((node) => inside.has(node.id)),
+    edges: edges.filter((edge) => inside.has(edge.source) && inside.has(edge.target)),
+  };
+}
+
 /**
  * Route the branches among `edges` afresh, with the nodes where they are.
  *
@@ -559,10 +661,11 @@ function grown(rect: Rect, by: number): Rect {
  * the devices, the connectors and each other.
  */
 export function tidyRoutes(
-  nodes: readonly TidyNode[],
-  edges: readonly ConnectionEdge[],
+  allNodes: readonly TidyNode[],
+  allEdges: readonly ConnectionEdge[],
   options: TidyOptions = {},
 ): TidyResult {
+  const { nodes, edges } = standingIn(allNodes, allEdges, options);
   const stubs = edges.filter((edge) => edge.type === 'stub');
   const base = layoutConnections(nodes, stubs, options);
 
@@ -604,10 +707,8 @@ export function tidyRoutes(
       deviceTaps: { north: on('north'), south: on('south') },
       taps: { north: [], south: [] },
       endDevice: { east: on('east').length > 0, west: on('west').length > 0 },
-      endRoute: { east: null, west: null },
       grown: { east: false, west: false },
       grownOver: [],
-      endsBarred: false,
     };
     buses.push(bus);
     busById.set(bus.id, bus);
@@ -624,12 +725,34 @@ export function tidyRoutes(
   }
   for (const box of options.obstacles ?? []) boxes.push({ box, clearance: BADGE_CLEARANCE });
 
+  // The branches to route, and the ones that stay as they are: each of
+  // those with the bus and the face of each of its two ends.
   const branches: Branch[] = [];
-  for (const edge of edges) {
+  const heldRoutes: {
+    points: readonly Point[];
+    ends: { bus: Bus; side: 'north' | 'south'; x: number }[];
+  }[] = [];
+  const routable = new Set(edges);
+  for (const edge of allEdges) {
     if (edge.type === 'stub') continue;
     const a = busById.get(edge.source);
     const b = busById.get(edge.target);
-    if (a && b && a !== b) branches.push({ edge, a, b, found: null });
+    const held = options.keep?.get(edge.id);
+    if (held !== undefined && held.length >= 2) {
+      // One that only passes through where the routing looks is in the way
+      // there all the same; it has its taps on the bars that stand there.
+      const ends: (typeof heldRoutes)[number]['ends'] = [];
+      for (const [bus, at, next] of [
+        [a, held[0]!, held[1]!],
+        [b, held[held.length - 1]!, held[held.length - 2]!],
+      ] as const) {
+        if (bus === undefined || Math.abs(at[1] - bus.cy) > BAR_THICKNESS) continue;
+        ends.push({ bus, side: next[1] < at[1] ? 'north' : 'south', x: at[0] });
+      }
+      heldRoutes.push({ points: held, ends });
+      continue;
+    }
+    if (routable.has(edge) && a && b && a !== b) branches.push({ edge, a, b, found: null });
   }
   const result: TidyResult = { routes: new Map(), unrouted: [], steps: 0 };
   if (branches.length === 0) return result;
@@ -672,8 +795,15 @@ export function tidyRoutes(
   const linesOf = (fine: boolean, step: number): { cols: Axis; rws: Axis } => {
     const columns = gridLines(across, step);
     const rows = gridLines(down, step);
-    // The line of every bar, which the branches of that bus run along from
-    // its tips, and the lines that just clear a bar: over and under it, where
+    // How far the grid reaches: its outermost lines.
+    const reach: Rect = {
+      left: columns[0]!.at,
+      right: columns[columns.length - 1]!.at,
+      top: rows[0]!.at,
+      bottom: rows[rows.length - 1]!.at,
+    };
+    // The line of every bar, which a route leaves from and none runs
+    // along, and the lines that just clear a bar: over and under it, where
     // a branch that leaves by a face first turns, and past its tips.
     for (const bus of buses) {
       rows.push({ at: bus.cy, kind: 'bar' });
@@ -682,10 +812,25 @@ export function tidyRoutes(
       rows.push({ at: bus.y + LABEL_BOTTOM, kind: 'aux' });
       columns.push({ at: bus.start - SLIDE_CLEARANCE, kind: 'aux' });
       columns.push({ at: bus.end + SLIDE_CLEARANCE, kind: 'aux' });
-      // Where a device lands on one face a branch may land on the other, on
-      // the same dot: any nearer place on that face would crowd it.
+      // Beside the tap of a device, a spacing from it, is the nearest place
+      // a branch can land, on either face: no line of the grid need fall
+      // there, and the lines of the grid nearer than that are shut.
       for (const x of [...bus.deviceTaps.north, ...bus.deviceTaps.south]) {
-        columns.push({ at: x, kind: 'aux' });
+        columns.push({ at: x - TAP_SPACING, kind: 'aux' });
+        columns.push({ at: x + TAP_SPACING, kind: 'aux' });
+      }
+    }
+    // The lines the kept routes run along, so that each is on the grid,
+    // where the grid reaches: a run of one that passes further out is in
+    // nobody's way.
+    for (const { points } of heldRoutes) {
+      for (let i = 1; i < points.length; i += 1) {
+        const [p, q] = [points[i - 1]!, points[i]!];
+        const [x0, x1] = [Math.min(p[0], q[0]), Math.max(p[0], q[0])];
+        const [y0, y1] = [Math.min(p[1], q[1]), Math.max(p[1], q[1])];
+        if (x1 < reach.left || x0 > reach.right || y1 < reach.top || y0 > reach.bottom) continue;
+        if (x1 - x0 <= EPS) columns.push({ at: p[0], kind: 'aux' });
+        else if (y1 - y0 <= EPS) rows.push({ at: p[1], kind: 'aux' });
       }
     }
     // The lines that just clear a device: the way between two that stand
@@ -710,7 +855,7 @@ export function tidyRoutes(
     [false, 4],
   ] as const) {
     const tried = linesOf(fine, wider * GRID_STEP);
-    if (tried.cols.at.length * tried.rws.at.length > GRID_POINTS) continue;
+    if (tried.cols.at.length * tried.rws.at.length > (options.gridPoints ?? GRID_POINTS)) continue;
     grid = tried;
     break;
   }
@@ -766,6 +911,22 @@ export function tidyRoutes(
     inside(barRect(bus), (n) => claim(barZone, n, bus.index));
     inside(labels[i]!, (n) => claim(labelZone, n, bus.index));
   });
+  /**
+   * Past a tip of a bar, at its height: no route runs level there. The
+   * stretch reaches as far as a tap may come to stand past that tip, and
+   * `TIP_REACH` beyond: a bar is drawn out to such a tap, and a route that
+   * ran up to there would then be in line with the bar at its tip.
+   */
+  const tipZone = new Uint8Array(size);
+  for (const bus of buses) {
+    const zone = barRect(bus);
+    const west = (bus.endDevice.west ? 0 : MAX_OVERHANG) + TIP_REACH;
+    const east = (bus.endDevice.east ? 0 : MAX_OVERHANG) + TIP_REACH;
+    inside({ ...zone, left: bus.start - west, right: bus.end + east }, (n) => {
+      const x = xs[n % nC]!;
+      if (x <= zone.left || x >= zone.right) tipZone[n] = 1;
+    });
+  }
   // The places kept for the values of the devices (`TidyOptions.keepFree`):
   // which grid points each takes, how many routes run through it now, and
   // which other places its device has.
@@ -776,17 +937,21 @@ export function tidyRoutes(
   const placeBox: Rect[] = [];
   const placeMates: number[][] = [];
   const placeCrossed: number[] = [];
-  /** The places of each device that has any. */
+  /** What running through a place costs when it is the last of its group. */
+  const placeLast: number[] = [];
+  /** The places of each device that has any, and of each group that is only preferred free. */
   const devicePlaces: number[][] = [];
-  for (const boxes of options.keepFree ?? []) {
+  const preferredPlaces: number[][] = [];
+  const keepGroup = (boxes: readonly Rect[], groups: number[][], last: number): void => {
     const first = placeBox.length;
     const places = boxes.map((_, k) => first + k);
-    devicePlaces.push(places);
+    groups.push(places);
     boxes.forEach((box, k) => {
       const place = first + k;
       placeBox.push(box);
       placeMates.push(places.filter((mate) => mate !== place));
       placeCrossed.push(0);
+      placeLast.push(last);
       inside(box, (n) => {
         kept[n] = 1;
         const list = placesAt.get(n);
@@ -794,7 +959,9 @@ export function tidyRoutes(
         else placesAt.set(n, [place]);
       });
     });
-  }
+  };
+  for (const boxes of options.keepFree ?? []) keepGroup(boxes, devicePlaces, LAST_PLACE_COST);
+  for (const boxes of options.preferFree ?? []) keepGroup(boxes, preferredPlaces, PREFER_FREE_COST);
   /** The place no route may run through, while the routes around a device are routed again to leave it one. */
   let barred = -1;
   /**
@@ -819,37 +986,61 @@ export function tidyRoutes(
         const ahead = level ? at > box.top && at < box.bottom : at > box.left && at < box.right;
         return placeCrossed[mate] === 0 && !ahead;
       });
-      cost += left ? KEEP_FREE_COST : LAST_PLACE_COST;
+      cost += left ? KEEP_FREE_COST : placeLast[place]!;
     }
     return cost;
   };
-  /** How many devices have a route through every place kept for them. */
-  const withoutAPlace = (): number =>
-    devicePlaces.filter((places) => places.every((place) => placeCrossed[place]! > 0)).length;
+  /** What the groups that have a route through every one of their places cost, together. */
+  const withoutAPlace = (): number => {
+    const taken = (places: number[]): boolean => places.every((place) => placeCrossed[place]! > 0);
+    return (
+      LAST_PLACE_COST * devicePlaces.filter(taken).length +
+      PREFER_FREE_COST * preferredPlaces.filter(taken).length
+    );
+  };
 
   /** On a device connector, or right beside one. */
   const wireNode = new Uint8Array(size);
   /** The grid edge to the right of a point, and the one below it, crosses a device connector. */
   const wireCrossH = new Uint8Array(size);
   const wireCrossV = new Uint8Array(size);
-  for (const stub of stubs) {
-    const points = base.routes.get(stub.id)?.points ?? [];
-    for (let i = 1; i < points.length; i += 1) {
-      const [p, q] = [points[i - 1]!, points[i]!];
-      const c0 = Math.max(0, colTo(Math.min(p[0], q[0]) - WIRE_NEAR));
-      const c1 = Math.min(nC - 1, colFrom(Math.max(p[0], q[0]) + WIRE_NEAR));
-      const r0 = Math.max(0, rowTo(Math.min(p[1], q[1]) - WIRE_NEAR));
-      const r1 = Math.min(nR - 1, rowFrom(Math.max(p[1], q[1]) + WIRE_NEAR));
-      for (let r = r0; r <= r1; r += 1) {
-        for (let c = c0; c <= c1; c += 1) {
-          const n = r * nC + c;
-          const at: Point = [xs[c]!, ys[r]!];
-          if (distanceToRun(at, p, q) < WIRE_NEAR) wireNode[n] = 1;
-          if (c < c1 && runsCross(at, [xs[c + 1]!, ys[r]!], p, q)) wireCrossH[n] = 1;
-          if (r < r1 && runsCross(at, [xs[c]!, ys[r + 1]!], p, q)) wireCrossV[n] = 1;
+  /**
+   * Beside an upright run of a device connector, and beside a level one,
+   * nearer than two lines side by side keep: a route does not run that way
+   * there.
+   */
+  const wireBesideV = new Uint8Array(size);
+  const wireBesideH = new Uint8Array(size);
+  /** Take the run from `p` to `q` of a line that is no route of the grid as a wire. */
+  const wire = (p: Point, q: Point): void => {
+    const upright = Math.abs(p[0] - q[0]) <= EPS;
+    const level = Math.abs(p[1] - q[1]) <= EPS;
+    const c0 = Math.max(0, colTo(Math.min(p[0], q[0]) - NEAR_LINE));
+    const c1 = Math.min(nC - 1, colFrom(Math.max(p[0], q[0]) + NEAR_LINE));
+    const r0 = Math.max(0, rowTo(Math.min(p[1], q[1]) - NEAR_LINE));
+    const r1 = Math.min(nR - 1, rowFrom(Math.max(p[1], q[1]) + NEAR_LINE));
+    for (let r = r0; r <= r1; r += 1) {
+      for (let c = c0; c <= c1; c += 1) {
+        const n = r * nC + c;
+        const at: Point = [xs[c]!, ys[r]!];
+        const off = distanceToRun(at, p, q);
+        if (off < WIRE_NEAR) wireNode[n] = 1;
+        if (off < NEAR_LINE - EPS) {
+          const [low, high] = upright
+            ? [Math.min(p[1], q[1]), Math.max(p[1], q[1])]
+            : [Math.min(p[0], q[0]), Math.max(p[0], q[0])];
+          const beside = upright ? at[1] : at[0];
+          if (upright && beside >= low - EPS && beside <= high + EPS) wireBesideV[n] = 1;
+          if (level && beside >= low - EPS && beside <= high + EPS) wireBesideH[n] = 1;
         }
+        if (c < c1 && runsCross(at, [xs[c + 1]!, ys[r]!], p, q)) wireCrossH[n] = 1;
+        if (r < r1 && runsCross(at, [xs[c]!, ys[r + 1]!], p, q)) wireCrossV[n] = 1;
       }
     }
+  };
+  for (const stub of stubs) {
+    const points = base.routes.get(stub.id)?.points ?? [];
+    for (let i = 1; i < points.length; i += 1) wire(points[i - 1]!, points[i]!);
   }
 
   // ---- what the routes made so far take up ----
@@ -870,45 +1061,22 @@ export function tidyRoutes(
   const besideClearH = (c: number, r: number): boolean =>
     rws.near[r]!.every((r3) => occH[r3 * nC + c] === 0 && occBend[r3 * nC + c] === 0);
 
-  /** Whether a tap at `x` on `side` of `bus` keeps its distance from every other tap of the bar. */
-  const tapFree = (bus: Bus, side: 'north' | 'south', x: number): boolean => {
-    const other = side === 'north' ? 'south' : 'north';
-    // To the last fraction: the connection pass parts two taps of a face
-    // that are any nearer than the spacing.
-    const crowds = (t: number): boolean => Math.abs(t - x) < TAP_SPACING - 1e-6;
-    const apart = (t: number): boolean => Math.abs(t - x) <= EPS || !crowds(t);
-    if (bus.deviceTaps[side].some(crowds) || bus.taps[side].some(crowds)) return false;
-    if (!bus.deviceTaps[other].every(apart) || !bus.taps[other].every(apart)) return false;
-    // No tap past a tip that something runs into, and a spacing clear of
-    // the end of a route, as the connection pass keeps it from a device's.
-    if ((bus.endDevice.west || bus.endRoute.west !== null) && x < bus.lo - EPS) return false;
-    if ((bus.endDevice.east || bus.endRoute.east !== null) && x > bus.hi + EPS) return false;
-    if (bus.endRoute.west !== null && crowds(bus.start + TAP_INSET)) return false;
-    if (bus.endRoute.east !== null && crowds(bus.end - TAP_INSET)) return false;
-    return true;
-  };
-
-  /** Where a route that runs into an end of `bus` lands: the middle of that tip. */
-  const tipOf = (bus: Bus, side: 'east' | 'west'): Point => [
-    side === 'east' ? bus.end - TAP_INSET : bus.start + TAP_INSET,
-    bus.cy,
-  ];
-
   /**
-   * Whether a route can run into an end of `bus`: nothing does yet, the
-   * bar was not drawn out on that side, and no tap of a face is within a
-   * spacing of the tip, which is a tap of the bar as well.
+   * Whether a tap at `x` on the bar of `bus` keeps its distance from every
+   * other tap of the bar, whichever face each is on.
    */
-  const endOpen = (bus: Bus, side: 'east' | 'west'): boolean => {
-    if (bus.endsBarred) return false;
-    if (bus.endDevice[side] || bus.endRoute[side] !== null || bus.grown[side]) return false;
-    const tip = tipOf(bus, side)[0];
-    return [
-      ...bus.deviceTaps.north,
-      ...bus.deviceTaps.south,
-      ...bus.taps.north,
-      ...bus.taps.south,
-    ].every((t) => Math.abs(t - tip) >= TAP_SPACING - 1e-6);
+  const tapFree = (bus: Bus, x: number): boolean => {
+    // To the last fraction: the connection pass parts two taps that are any
+    // nearer than the spacing.
+    const crowds = (t: number): boolean => Math.abs(t - x) < TAP_SPACING - 1e-6;
+    for (const side of ['north', 'south'] as const) {
+      if (bus.deviceTaps[side].some(crowds) || bus.taps[side].some(crowds)) return false;
+    }
+    // No tap past a tip that a device connector runs into: the taps keep a
+    // spacing in from that end, as the connection pass has it.
+    if (bus.endDevice.west && x < bus.lo - EPS) return false;
+    if (bus.endDevice.east && x > bus.hi + EPS) return false;
+    return true;
   };
 
   /**
@@ -939,8 +1107,8 @@ export function tidyRoutes(
   /** The ways a route can leave `bus`. */
   const terminalsOf = (bus: Bus): Terminal[] => {
     const out: Terminal[] = [];
-    const westFree = !bus.endDevice.west && bus.endRoute.west === null;
-    const eastFree = !bus.endDevice.east && bus.endRoute.east === null;
+    const westFree = !bus.endDevice.west;
+    const eastFree = !bus.endDevice.east;
     for (const side of ['north', 'south'] as const) {
       const step = side === 'north' ? -1 : 1;
       const row =
@@ -950,7 +1118,7 @@ export function tidyRoutes(
       const c1 = colTo((eastFree ? bus.drawn.hi + MAX_OVERHANG : bus.hi) + EPS);
       for (let c = c0; c <= c1; c += 1) {
         const x = xs[c]!;
-        if (!tapFree(bus, side, x)) continue;
+        if (!tapFree(bus, x)) continue;
         const over = Math.max(0, bus.lo - EPS - x, x - bus.hi - EPS);
         // The run from the bar to the first grid point clear of it: nothing
         // of another bus in it, and no other route.
@@ -964,6 +1132,7 @@ export function tidyRoutes(
             own(barZone) &&
             own(labelZone) &&
             wireNode[n] === 0 &&
+            wireBesideV[n] === 0 &&
             occV[n] === 0 &&
             occBend[n] === 0 &&
             (r === row || occH[n] === 0);
@@ -987,38 +1156,12 @@ export function tidyRoutes(
         });
       }
     }
-    for (const side of ['east', 'west'] as const) {
-      if (!endOpen(bus, side)) continue;
-      const tip = tipOf(bus, side);
-      const c =
-        side === 'east' ? colFrom(bus.end + SLIDE_CLEARANCE) : colTo(bus.start - SLIDE_CLEARANCE);
-      if (c < 0 || c >= nC) continue;
-      const node = bus.row * nC + c;
-      const free =
-        hard[node] === 0 &&
-        barZone[node] === -1 &&
-        labelZone[node] === -1 &&
-        wireNode[node] === 0 &&
-        occH[node] === 0 &&
-        occBend[node] === 0 &&
-        besideClearH(c, bus.row);
-      const avoided = into(side === 'east' ? node - 1 : node + 1, node);
-      if (!free || avoided === Infinity) continue;
-      out.push({
-        node,
-        dir: H,
-        tap: tip,
-        side,
-        cost: Math.abs(xs[c]! - tip[0]) + CROSS_COST * occV[node]! + avoided,
-        over: 0,
-      });
-    }
     return out;
   };
 
   // ---- the search ----
-  /** The step from one grid point to the next away from a bar, by the side a route leaves it by. */
-  const AHEAD: Record<Side, number> = { north: -nC, south: nC, east: 1, west: -1 };
+  /** The step from one grid point to the next away from a bar, by the face a route leaves it by. */
+  const AHEAD: Record<'north' | 'south', number> = { north: -nC, south: nC };
   const best = new Float64Array(2 * size);
   const seen = new Uint32Array(2 * size);
   /** The state a state was reached from; `-1 - i` for the `i`th way out of the source. */
@@ -1040,6 +1183,8 @@ export function tidyRoutes(
   let allowed = Infinity;
   /** Whether a search that runs out of them goes on for the first way it finds (`HURRY`). */
   let anyWay = false;
+  /** How many steps it goes on for, on top of what it takes to cross the stretch that is searched. */
+  let hurryFor = HURRY_STEPS;
   /** Whether the last search ran out of steps before it had looked at every way that could be better. */
   let ranOut = false;
   /** Whether the last search looked at every way it could go, where it was told to look, and found none. */
@@ -1050,14 +1195,6 @@ export function tidyRoutes(
     const points: Point[] = [source.tap];
     for (const n of path) points.push([xs[n % nC]!, ys[(n / nC) | 0]!]);
     points.push(target.tap);
-    // The run out of an end follows the line of its bar, not the grid row
-    // that line was taken to be.
-    const level = (i: number, tap: Point): void => {
-      const p = points[i];
-      if (p !== undefined && Math.abs(p[1] - tap[1]) <= EPS) points[i] = [p[0], tap[1]];
-    };
-    if (source.dir === H) level(1, source.tap);
-    if (target.dir === H) level(points.length - 2, target.tap);
     return simplifyRoute(points);
   };
 
@@ -1069,9 +1206,9 @@ export function tidyRoutes(
     const offer = (candidate: Found): void => {
       if (least.route === null || candidate.cost < least.route.cost - 1e-9) least.route = candidate;
     };
-    const direct = (dir: number, side: Side, tap: Point): Terminal => ({
+    const direct = (side: 'north' | 'south', tap: Point): Terminal => ({
       node: -1,
-      dir,
+      dir: V,
       tap,
       side,
       cost: 0,
@@ -1079,14 +1216,14 @@ export function tidyRoutes(
     });
 
     // Straight from one bar to the other, where they stand one over the
-    // other or level end to end: the grid may have no point between them.
+    // other: the grid may have no point between them.
     const upper = a.cy <= b.cy ? a : b;
     const lower = upper === a ? b : a;
     if (lower.cy - upper.cy > BAR_THICKNESS) {
       const c1 = colTo(Math.min(a.hi, b.hi) + EPS);
       for (let c = colFrom(Math.max(a.lo, b.lo) - EPS); c <= c1; c += 1) {
         const x = xs[c]!;
-        if (!tapFree(upper, 'south', x) || !tapFree(lower, 'north', x)) continue;
+        if (!tapFree(upper, x) || !tapFree(lower, x)) continue;
         const path: number[] = [];
         let cost =
           (lower.cy - upper.cy) * cols.cost[c]! +
@@ -1099,6 +1236,7 @@ export function tidyRoutes(
             own(barZone, n) &&
             own(labelZone, n) &&
             wireNode[n] === 0 &&
+            wireBesideV[n] === 0 &&
             occV[n] === 0 &&
             occBend[n] === 0 &&
             besideClearV(c, r);
@@ -1108,48 +1246,22 @@ export function tidyRoutes(
         if (!clear || cost === Infinity) continue;
         const down = upper === a;
         if (!down) path.reverse();
-        const source = direct(V, down ? 'south' : 'north', [x, a.cy]);
-        const target = direct(V, down ? 'north' : 'south', [x, b.cy]);
+        const source = direct(down ? 'south' : 'north', [x, a.cy]);
+        const target = direct(down ? 'north' : 'south', [x, b.cy]);
         offer({ cost, nodes: path, source, target, points: pointsOf(source, path, target) });
       }
     }
-    const left = a.cx <= b.cx ? a : b;
-    const right = left === a ? b : a;
-    if (
-      a.row === b.row &&
-      left.end < right.start &&
-      endOpen(left, 'east') &&
-      endOpen(right, 'west')
-    ) {
-      const path: number[] = [];
-      let cost = right.start - left.end + 2 * TAP_INSET;
-      let clear = true;
-      const c1 = colTo(right.start - 1e-6);
-      for (let c = colFrom(left.end + 1e-6); clear && c <= c1; c += 1) {
-        const n = a.row * nC + c;
-        clear =
-          hard[n] === 0 &&
-          own(barZone, n) &&
-          labelZone[n] === -1 &&
-          wireNode[n] === 0 &&
-          occH[n] === 0 &&
-          occBend[n] === 0 &&
-          besideClearH(c, a.row);
-        cost += CROSS_COST * occV[n]! + into(n - 1, n);
-        path.push(n);
-      }
-      if (clear && cost !== Infinity) {
-        const along = left === a;
-        if (!along) path.reverse();
-        const source = direct(H, along ? 'east' : 'west', tipOf(a, along ? 'east' : 'west'));
-        const target = direct(H, along ? 'west' : 'east', tipOf(b, along ? 'west' : 'east'));
-        offer({ cost, nodes: path, source, target, points: pointsOf(source, path, target) });
-      }
-    }
-
-    // Around everything else: A* over the grid.
-    const sources = terminalsOf(a);
-    const targets = terminalsOf(b);
+    // Around everything else: A* over the grid. Between two buses that
+    // stand level, or nearly, neither bar is drawn out towards the other:
+    // each would grow into the room the other grows into, and the two bars
+    // would meet and read as one.
+    const level = Math.abs(a.cy - b.cy) < 2 * RUN_CLEARANCE;
+    const notTowards =
+      (from: Bus, to: Bus) =>
+      (terminal: Terminal): boolean =>
+        !level || terminal.over === 0 || terminal.tap[0] < from.cx !== to.cx < from.cx;
+    const sources = terminalsOf(a).filter(notTowards(a, b));
+    const targets = terminalsOf(b).filter(notTowards(b, a));
     if (sources.length === 0 || targets.length === 0) {
       ranOut = false;
       noWay = least.route === null;
@@ -1169,7 +1281,8 @@ export function tidyRoutes(
         cols.near[c]!.every((c3) => untouched(r * nC + c3))
       );
     };
-    const rowOpen = (r: number): boolean => rws.kind[r] !== 'bar' || r === a.row || r === b.row;
+    // No route runs along the line of a bar, its own two included.
+    const rowOpen = (r: number): boolean => rws.kind[r] !== 'bar';
 
     const targetsAt = new Map<number, Terminal[]>();
     for (const target of targets) {
@@ -1195,9 +1308,9 @@ export function tidyRoutes(
     // so the least over them is looked up by the column of the state: with
     // one bend for a state that travels along a row, and for one that
     // travels along a column with none in the column of a way in and two in
-    // any other. An end of the bar is one way in. The nearer this is to
-    // what the rest of the route does cost, the fewer states the search
-    // takes up, and across open ground it is exact.
+    // any other. The nearer this is to what the rest of the route does
+    // cost, the fewer states the search takes up, and across open ground it
+    // is exact.
     const faceRows: number[] = [];
     for (const side of ['north', 'south'] as const) {
       const onFace = targets.filter((target) => target.side === side);
@@ -1224,13 +1337,6 @@ export function tidyRoutes(
         alongRow[c] = alongRow[c]! + BEND_COST;
       }
     }
-    const ends = targets
-      .filter((target) => target.dir === H)
-      .map((target) => ({
-        x: xs[target.node % nC]!,
-        row: (target.node / nC) | 0,
-        cost: target.cost,
-      }));
     const aheadOf = (state: number): number => {
       const n = state >> 1;
       const along = state & 1;
@@ -1242,12 +1348,6 @@ export function tidyRoutes(
         const rest =
           Math.abs(y - faceRows[face]!) +
           (along === H ? aheadAlongRow[face]![c]! : aheadAlongColumn[face]![c]!);
-        if (rest < least) least = rest;
-      }
-      for (const end of ends) {
-        const bends = r === end.row ? (along === H ? 0 : 1) : along === H ? 2 : 1;
-        const rest =
-          Math.abs(xs[c]! - end.x) + Math.abs(y - ys[end.row]!) + end.cost + BEND_COST * bends;
         if (rest < least) least = rest;
       }
       return least;
@@ -1298,7 +1398,7 @@ export function tidyRoutes(
         frontier.hurry(HURRY, aheadOf);
         // As many steps as find a way round a thing or two, and as it takes
         // to cross the stretch that is searched.
-        stopAt = steps + HURRY_STEPS + 4 * (wc1 - wc0 + wr1 - wr0);
+        stopAt = steps + hurryFor + 4 * (wc1 - wc0 + wr1 - wr0);
         continue;
       }
       if (hurried && goal !== null) break;
@@ -1314,6 +1414,9 @@ export function tidyRoutes(
       for (const target of targetsAt.get(n) ?? []) {
         const turns = target.dir !== d;
         if (turns && (!mayBend(n) || kinks(state))) continue;
+        // Not from the side of the bar: the route would turn back on itself
+        // to land.
+        if (!turns && cameFrom[state]! >> 1 === n - AHEAD[target.side]) continue;
         const total = cost + target.cost + (turns ? BEND_COST : 0);
         if (goal === null || total < goal.cost) goal = { cost: total, state, target };
       }
@@ -1335,6 +1438,7 @@ export function tidyRoutes(
         let step: number;
         if (md === H) {
           if (!rowOpen(r) || onLabel(n) || onLabel(n2)) continue;
+          if (tipZone[n] !== 0 || tipZone[n2] !== 0 || wireBesideH[n2] !== 0) continue;
           if (edgeH[edge] !== 0 || occH[n2] !== 0 || occBend[n2] !== 0) continue;
           const ec = edge % nC;
           if (rws.near[r]!.some((r3) => edgeH[r3 * nC + ec] !== 0)) continue;
@@ -1344,6 +1448,7 @@ export function tidyRoutes(
             step += CROSS_COST;
           }
         } else {
+          if (wireBesideV[n2] !== 0) continue;
           if (edgeV[edge] !== 0 || occV[n2] !== 0 || occBend[n2] !== 0) continue;
           const er = (edge / nC) | 0;
           if (cols.near[c]!.some((c3) => edgeV[er * nC + c3] !== 0)) continue;
@@ -1404,14 +1509,11 @@ export function tidyRoutes(
     }
     for (const place of through ?? []) placeCrossed[place] = placeCrossed[place]! + by;
   };
-  const land = (bus: Bus, terminal: Terminal, id: string, on: boolean): void => {
-    if (terminal.side === 'east' || terminal.side === 'west') {
-      bus.endRoute[terminal.side] = on ? id : null;
-      return;
-    }
-    const taps = bus.taps[terminal.side];
-    if (on) taps.push(terminal.tap[0]);
-    else taps.splice(taps.indexOf(terminal.tap[0]), 1);
+  /** Give a route its tap at `x` on a face of `bus`, or take the tap back. */
+  const land = (bus: Bus, side: 'north' | 'south', x: number, on: boolean): void => {
+    const taps = bus.taps[side];
+    if (on) taps.push(x);
+    else taps.splice(taps.indexOf(x), 1);
     // The bar is drawn out to the outermost tap past each tip, and what
     // comes later keeps clear of it there; with that tap gone, it is as long
     // as it was.
@@ -1432,8 +1534,8 @@ export function tidyRoutes(
   };
   const take = (branch: Branch, route: Found): void => {
     // The taps first: a bar is drawn out over grid points that are still free.
-    land(branch.a, route.source, branch.edge.id, true);
-    land(branch.b, route.target, branch.edge.id, true);
+    land(branch.a, route.source.side, route.source.tap[0], true);
+    land(branch.b, route.target.side, route.target.tap[0], true);
     mark(route, 1);
     branch.found = route;
   };
@@ -1441,11 +1543,50 @@ export function tidyRoutes(
     const route = branch.found;
     if (route === null) return null;
     mark(route, -1);
-    land(branch.a, route.source, branch.edge.id, false);
-    land(branch.b, route.target, branch.edge.id, false);
+    land(branch.a, route.source.side, route.source.tap[0], false);
+    land(branch.b, route.target.side, route.target.tap[0], false);
     branch.found = null;
     return route;
   };
+
+  // ---- the routes that stay as they are ----
+  // Each has its taps, and takes up the lines of the grid it runs along (it
+  // is on the grid: its lines were added to it). A run of one that is at an
+  // angle is taken as a device connector is: crossed, and not run along.
+  for (const { points, ends } of heldRoutes) {
+    for (const { bus, side, x } of ends) land(bus, side, x, true);
+    /** The grid point at a point of the route; -1 for one that is off the grid. */
+    const nodeAt = (p: Point): number => {
+      const c = colFrom(p[0] - EPS);
+      const r = rowFrom(p[1] - EPS);
+      const on =
+        c < nC && r < nR && Math.abs(xs[c]! - p[0]) <= EPS && Math.abs(ys[r]! - p[1]) <= EPS;
+      return on ? r * nC + c : -1;
+    };
+    const through = new Set<number>();
+    for (let i = 1; i < points.length; i += 1) {
+      const [p, q] = [points[i - 1]!, points[i]!];
+      const upright = Math.abs(p[0] - q[0]) <= EPS;
+      if (!upright && Math.abs(p[1] - q[1]) > EPS) {
+        wire(p, q);
+        continue;
+      }
+      const from = nodeAt(upright ? [p[0], Math.min(p[1], q[1])] : [Math.min(p[0], q[0]), p[1]]);
+      const to = nodeAt(upright ? [p[0], Math.max(p[1], q[1])] : [Math.max(p[0], q[0]), p[1]]);
+      if (from < 0 || to < 0) continue;
+      const step = upright ? nC : 1;
+      for (let n = from; n <= to; n += step) {
+        bump(upright ? occV : occH, n, 1);
+        if (n < to) bump(upright ? edgeV : edgeH, n, 1);
+        if (kept[n] !== 0) for (const place of placesAt.get(n)!) through.add(place);
+      }
+      // Where it turns into its next run.
+      const turn = i < points.length - 1 ? nodeAt(q) : -1;
+      if (turn >= 0) bump(occBend, turn, 1);
+    }
+    for (const place of through) placeCrossed[place] = placeCrossed[place]! + 1;
+  }
+
   /**
    * The route of `branch` around everything that is there now: looked for
    * around its two buses first, and across the whole diagram when there is
@@ -1465,40 +1606,11 @@ export function tidyRoutes(
     .map((branch, i) => ({ branch, i, far: apart(branch) }))
     .sort((p, q) => p.far - q.far || p.i - q.i)
     .map(({ branch }) => branch);
-  const byId = new Map(branches.map((branch) => [branch.edge.id, branch]));
-  /**
-   * Route `branch`. Where there is no place left for it on one of its two
-   * bars, the branches that run into the ends of those bars are taken off,
-   * the ends are barred, and they are routed again after it: on the faces
-   * there is room for as many as come, with the bar drawn out.
-   */
+  /** Route `branch`, and say so when the steps ran out before a way was found. */
   const settle = (branch: Branch): void => {
     const route = routeOf(branch);
-    if (route !== null) {
-      take(branch, route);
-      return;
-    }
-    // No way within the steps it had is not a bar with no place left.
-    if (ranOut) {
-      result.outOfSteps = true;
-      return;
-    }
-    const evicted: Branch[] = [];
-    for (const bus of [branch.a, branch.b]) {
-      if (bus.endsBarred) continue;
-      bus.endsBarred = true;
-      for (const side of ['east', 'west'] as const) {
-        const id = bus.endRoute[side];
-        const other = id === null ? undefined : byId.get(id);
-        if (other === undefined || other === branch) continue;
-        drop(other);
-        evicted.push(other);
-      }
-    }
-    for (const again of [branch, ...evicted]) {
-      const found = routeOf(again);
-      if (found !== null) take(again, found);
-    }
+    if (route !== null) take(branch, route);
+    else if (ranOut) result.outOfSteps = true;
   };
   // The first routing: every branch gets a way, the best one there is while
   // the steps last and the first one found after that (`TIDY_STEPS`).
@@ -1526,6 +1638,26 @@ export function tidyRoutes(
       if (route !== null) take(branch, route);
     }
   }
+
+  // A branch that has no way yet is worse off than one with a poor way: it
+  // would be drawn from tap to tap, over whatever stands in between. Each
+  // is looked for once more, across the whole diagram and for the first way
+  // there is, with steps of its own.
+  // Those steps are a part of what the call was given: a call that was given
+  // few (a pass of the canvas while a node is dragged) spends few here.
+  anyWay = true;
+  const lastChance = steps + Math.min(budget, LAST_CHANCE_STEPS * order.length);
+  for (const branch of order) {
+    if (branch.found !== null || steps >= lastChance) continue;
+    allowed = Math.min(SEARCH_STEPS, lastChance - steps);
+    hurryFor = Math.min(LAST_CHANCE_STEPS, lastChance - steps);
+    const route =
+      routeBetween(branch.a, branch.b, SEARCH_WINDOW) ?? routeBetween(branch.a, branch.b, null);
+    if (route !== null) take(branch, route);
+  }
+  anyWay = false;
+  hurryFor = HURRY_STEPS;
+  if (order.every((branch) => branch.found !== null)) delete result.outOfSteps;
 
   const wires: Point[][] = stubs.map((stub) => base.routes.get(stub.id)?.points ?? []);
   /** How often two routes cross. */
@@ -1561,7 +1693,7 @@ export function tidyRoutes(
         crossed += crossings(points, other.found.points);
       }
     });
-    return length + BEND_COST * bends + CROSS_COST * crossed + LAST_PLACE_COST * withoutAPlace();
+    return length + BEND_COST * bends + CROSS_COST * crossed + withoutAPlace();
   };
 
   // Two routes that cross are then taken out together and routed again, one
@@ -1612,11 +1744,7 @@ export function tidyRoutes(
   // through every one that was kept for it. Routed one at a time, none of
   // those routes gives way: each finds the other places taken. So they are
   // taken out together and routed again with one of the places shut, each
-  // place in turn, and the drawing that costs least is kept. Each is tried
-  // with the ends of their bars shut as well: a line that squeezes between
-  // a load and the generator beside it can land on the other side of the
-  // load, on the bar drawn out, and the lines that left by that end of the
-  // bar then leave by its face beside it, which an end taken first rules out.
+  // place in turn, and the drawing that costs least is kept.
   for (const places of devicePlaces) {
     if (steps >= budget) break;
     if (!places.every((place) => placeCrossed[place]! > 0)) continue;
@@ -1629,8 +1757,8 @@ export function tidyRoutes(
     );
     if (through.length === 0 || through.length > GROUP_LIMIT) continue;
     // With them go the other routes of their buses that pass close by: one
-    // that has the end of a bar, or the way beside the device, is what the
-    // ones through the places would have to get round.
+    // that has the way beside the device is what the ones through the
+    // places would have to get round.
     const boxes = places.map((place) => placeBox[place]!);
     const around: Rect = grown(
       {
@@ -1655,35 +1783,25 @@ export function tidyRoutes(
       through.length + beside.length > GROUP_LIMIT
         ? through
         : order.filter((branch) => through.includes(branch) || beside.includes(branch));
-    allowed = Math.max(SEARCH_STEPS, (budget - steps) / (2 * group.length * places.length));
-    const bars = [...new Set(group.flatMap((branch) => [branch.a, branch.b]))];
-    const shut = bars.map((bus) => bus.endsBarred);
+    allowed = Math.max(SEARCH_STEPS, (budget - steps) / (group.length * places.length));
     let best = { price: priceOf(group), routes: group.map((branch) => branch.found!) };
     for (const branch of group) drop(branch);
     for (const place of places) {
-      for (const noEnds of [false, true]) {
-        barred = place;
-        bars.forEach((bus, i) => {
-          bus.endsBarred = noEnds || shut[i]!;
-        });
-        const whole = group.every((branch) => {
-          const found = routeOf(branch);
-          if (found !== null) take(branch, found);
-          return found !== null;
-        });
-        if (whole) {
-          const price = priceOf(group);
-          if (price < best.price - 1e-9) {
-            best = { price, routes: group.map((branch) => branch.found!) };
-          }
+      barred = place;
+      const whole = group.every((branch) => {
+        const found = routeOf(branch);
+        if (found !== null) take(branch, found);
+        return found !== null;
+      });
+      if (whole) {
+        const price = priceOf(group);
+        if (price < best.price - 1e-9) {
+          best = { price, routes: group.map((branch) => branch.found!) };
         }
-        for (const branch of group) drop(branch);
       }
+      for (const branch of group) drop(branch);
     }
     barred = -1;
-    bars.forEach((bus, i) => {
-      bus.endsBarred = shut[i]!;
-    });
     group.forEach((branch, i) => take(branch, best.routes[i]!));
   }
 
@@ -1709,10 +1827,12 @@ const ROW_HEIGHT = 3 * GRID_STEP;
  * to the nearest line of the grid, and buses that are nearly level, or
  * nearly in a column, go to the same line (the one nearest the middle of
  * where they were). Two buses that then stand on top of each other are
- * parted, the one further right moving right.
+ * parted, the one further right moving right, by the lengths of their bars
+ * (`barLengths`, for the ones that are longer than `BAR_LENGTH`).
  */
 export function alignToGrid(
   coords: Readonly<Record<string, { x: number; y: number }>>,
+  barLengths?: ReadonlyMap<string, number>,
 ): Record<string, { x: number; y: number }> {
   const ids = Object.keys(coords);
   const snapped = (axis: 'x' | 'y'): Map<string, number> => {
@@ -1734,14 +1854,17 @@ export function alignToGrid(
   const y = snapped('y');
   const out: Record<string, { x: number; y: number }> = {};
   for (const id of ids) out[id] = { x: x.get(id)!, y: y.get(id)! };
-  // Part the ones that came to stand on top of each other, left to right.
-  const room = Math.ceil((BAR_LENGTH + ROW_GAP) / GRID_STEP) * GRID_STEP;
+  // Part the ones that came to stand on top of each other, left to right:
+  // the middles of two bars as far apart as half of each and the gap.
+  const half = (id: string): number => Math.max(BAR_LENGTH, barLengths?.get(id) ?? 0) / 2;
   const byColumn = [...ids].sort((p, q) => out[p]!.x - out[q]!.x || (p < q ? -1 : 1));
   for (let i = 0; i < byColumn.length; i += 1) {
     const moved = out[byColumn[i]!]!;
     for (let k = 0; k < i; k += 1) {
       const fixed = out[byColumn[k]!]!;
       if (Math.abs(moved.y - fixed.y) >= ROW_HEIGHT) continue;
+      const room =
+        Math.ceil((half(byColumn[i]!) + half(byColumn[k]!) + ROW_GAP) / GRID_STEP) * GRID_STEP;
       if (moved.x - fixed.x < room) moved.x = fixed.x + room;
     }
   }

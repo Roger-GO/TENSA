@@ -618,14 +618,24 @@ describe('layoutConnections: device connectors', () => {
     expect(routes.get('stub-load-A')!.points[1]).toEqual([60, 103]);
   });
 
-  it('lets a device above the bar and one below it share a tap', () => {
-    const { bars } = layoutConnections(
+  it('gives a device above the bar and one below it at the same spot a tap each', () => {
+    // In one place the two connectors would read as a single line through
+    // the bus: one drops square, the other lands a spacing beside it.
+    const { bars, routes } = layoutConnections(
       [bus('1', 0, 100), device('generator-G', 46, 50, 'generator'), device('load-L', 46, 180)],
       [stub('generator-G', '1'), stub('load-L', '1')],
     );
     expect(bars.get('1')!.taps).toEqual([
       { x: 46, side: 'north' },
-      { x: 46, side: 'south' },
+      { x: 46 + TAP_SPACING, side: 'south' },
+    ]);
+    expect(routes.get('stub-generator-G')!.points).toEqual([
+      [46, 70],
+      [46, 103],
+    ]);
+    expect(routes.get('stub-load-L')!.points).toEqual([
+      [46, 160],
+      [60, 103],
     ]);
   });
 
@@ -657,6 +667,44 @@ describe('layoutConnections: device connectors', () => {
     );
     expect(past.routes.get('stub-load-A')!.points[1]).toEqual([89, 103]);
     expect(past.bars.get('1')).toMatchObject({ start: 0, end: 92 });
+  });
+
+  it('takes the bar as the routes that end on it draw it: a device past where a route took the tip drops square beside it', () => {
+    // The line to bus 2 leaves bus 1 downwards 28 past its east tip, where
+    // its route has it: the bar is drawn out to there. A load whose box
+    // begins at that tip stands over the end of the bar as it is drawn, so
+    // it drops square onto a tap of its own, and the bar reaches on under
+    // it. Taken by its length alone the bar would end 40 short of the load,
+    // whose connector would run back over the end of the bar at an angle.
+    const nodes = [bus('1', 0, 100), bus('2', 100, 300), device('load-A', 142, 50)];
+    const route: Point[] = [
+      [120, 103],
+      [120, 303],
+    ];
+    const stored = routedLine('line-L', '1', '2', route, { x: 0, y: 100 }, { x: 100, y: 300 });
+    const { routes, bars } = layoutConnections(nodes, [stored, stub('load-A', '1')]);
+    expect(routes.get('line-L')!.points[0]).toEqual([120, 103]);
+    expect(routes.get('stub-load-A')!.points).toEqual([
+      [142, 70],
+      [142, 103],
+    ]);
+    expect(bars.get('1')).toMatchObject({ start: 0, end: 142 + TAP_INSET });
+    expect(bars.get('1')!.taps).toEqual([
+      { x: 120, side: 'south' },
+      { x: 142, side: 'north' },
+    ]);
+    // Without the line the bar ends at 92, and the load is clear past its tip.
+    const alone = layoutConnections(nodes, [stub('load-A', '1')]);
+    expect(alone.routes.get('stub-load-A')!.points[1]).toEqual([89, 103]);
+    // A load that stands clear past the drawn end as well lands by that
+    // end, a spacing from the tap the line has there, and not back at 89.
+    const far = layoutConnections(
+      [bus('1', 0, 100), bus('2', 100, 300), device('load-A', 200, 50)],
+      [stored, stub('load-A', '1')],
+    );
+    const tap = far.routes.get('stub-load-A')!.points.at(-1)!;
+    expect(tap[1]).toBe(103);
+    expect(Math.abs(tap[0] - 120)).toBe(TAP_SPACING);
   });
 
   it('keeps a spacing between a tap past the tip and the end a branch runs into', () => {
@@ -1064,7 +1112,9 @@ describe('layoutConnections: branches routed from where their buses sit', () => 
     ]);
   });
 
-  it('joins two bars that stand side by side end to end', () => {
+  it('bridges over two bars that stand side by side, and never joins them end to end', () => {
+    // A line that left a bar by its tip, in line with it, would read as the
+    // bar going on: the branch leaves both by the north face.
     const { routes, bars } = layoutConnections(
       [bus('1', 0, 0), bus('2', 300, 0)],
       [line('line-L', '1', '2')],
@@ -1072,30 +1122,68 @@ describe('layoutConnections: branches routed from where their buses sit', () => 
     expect(routes.get('line-L')).toEqual({
       points: [
         [89, 3],
+        [89, -21],
+        [303, -21],
         [303, 3],
       ],
-      sourceSide: 'east',
-      targetSide: 'west',
+      sourceSide: 'north',
+      targetSide: 'north',
     });
-    expect(bars.get('1')!.taps).toEqual([{ x: 89, side: 'east' }]);
-    expect(bars.get('2')!.taps).toEqual([{ x: 3, side: 'west' }]);
+    expect(bars.get('1')!.taps).toEqual([{ x: 89, side: 'north' }]);
+    expect(bars.get('2')!.taps).toEqual([{ x: 3, side: 'north' }]);
   });
 
-  it('bridges a second line between two level bars over them, since an end takes one', () => {
+  it('bridges a second line between two level bars under them, at taps of its own', () => {
     const { routes } = layoutConnections(
       [bus('1', 0, 0), bus('2', 300, 0)],
       [line('line-A', '1', '2'), line('line-B', '1', '2')],
     );
-    expect(routes.get('line-A')!.sourceSide).toBe('east');
-    const second = routes.get('line-B')!;
-    expect(second.sourceSide).toBe('north');
-    expect(second.targetSide).toBe('north');
-    // A face tap keeps a spacing from the end the first line runs into.
-    expect(second.points).toEqual([
+    expect(routes.get('line-A')!.points).toEqual([
       [75, 3],
       [75, -21],
-      [317, -21],
+      [303, -21],
+      [303, 3],
+    ]);
+    const second = routes.get('line-B')!;
+    expect(second.sourceSide).toBe('south');
+    expect(second.targetSide).toBe('south');
+    // A spacing from the first on each bar, though that one is on the other face.
+    expect(second.points).toEqual([
+      [89, 3],
+      [89, 47],
+      [317, 47],
       [317, 3],
+    ]);
+  });
+
+  it('bridges over two bars that are nearly level as well', () => {
+    // 20 apart up and down: a line from face to face would be all but in
+    // line with both bars.
+    const { routes } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 300, 20)],
+      [line('line-L', '1', '2')],
+    );
+    expect(routes.get('line-L')).toEqual({
+      points: [
+        [89, 3],
+        [89, -21],
+        [303, -21],
+        [303, 23],
+      ],
+      sourceSide: 'north',
+      targetSide: 'north',
+    });
+  });
+
+  it('draws a branch that is asked for straight as one line from tap to tap', () => {
+    const { routes } = layoutConnections(
+      [bus('1', 0, 0), bus('2', 150, 200)],
+      [line('line-L', '1', '2')],
+      { straight: new Set(['line-L']) },
+    );
+    expect(routes.get('line-L')!.points).toEqual([
+      [89, 3],
+      [153, 203],
     ]);
   });
 
@@ -1131,16 +1219,17 @@ describe('layoutConnections: branches routed from where their buses sit', () => 
     ]);
   });
 
-  it('gives the end of a bar to a branch before a device that sits level with it', () => {
+  it('leaves the end of a bar to a device that sits level with it: a branch leaves by a face', () => {
     const { routes } = layoutConnections(
       [bus('1', 0, 0), bus('2', 300, 0), device('load-A', 150, 5)],
       [line('line-L', '1', '2'), stub('load-A', '1')],
     );
-    expect(routes.get('line-L')!.sourceSide).toBe('east');
-    // The device lands on a face instead, a spacing in from the end.
+    expect(routes.get('line-L')!.sourceSide).toBe('north');
+    // The tap of the branch keeps a spacing from the end the device runs into.
+    expect(routes.get('line-L')!.points[0]).toEqual([75, 3]);
     const connector = routes.get('stub-load-A')!;
-    expect(connector.targetSide).toBe('south');
-    expect(connector.points[connector.points.length - 1]).toEqual([75, 3]);
+    expect(connector.targetSide).toBe('east');
+    expect(connector.points[connector.points.length - 1]).toEqual([89, 3]);
   });
 
   it('brings the two taps of a branch in line when one of them is free to move', () => {
@@ -1697,11 +1786,11 @@ describe('layoutConnections: branches with a stored route', () => {
     ]);
   });
 
-  it('steps a route the layout drew straight across where its two taps cannot be brought in line', () => {
+  it('parts two straight routes that meet a bar nearer than a spacing, one from above and one from below', () => {
     // Line A comes straight down onto bar 2 at 46, and line B leaves under
-    // it at 53, straight down to bar 3. The two would stand 7 apart on bar
-    // 2, so B leaves in line with A. Its tap on bar 3 cannot follow: a load
-    // stands a spacing from it there, and in line would be 7 from that.
+    // it at 53, straight down to bar 3. They would stand 7 apart on bar 2:
+    // each moves half of what is missing, and both still run straight, the
+    // other end of each following.
     const third = { x: 7, y: 240 };
     const { routes, bars } = layoutConnections(
       [bus('1', 0, 0), bus('2', 0, 120), bus('3', 7, 240), device('load-A', 39, 205)],
@@ -1732,21 +1821,19 @@ describe('layoutConnections: branches with a stored route', () => {
       ],
     );
     expect(bars.get('2')!.taps).toEqual([
-      { x: 46, side: 'north' },
-      { x: 46, side: 'south' },
+      { x: 42.5, side: 'north' },
+      { x: 56.5, side: 'south' },
     ]);
     expect(routes.get('line-A')!.points).toEqual([
-      [46, 3],
-      [46, 123],
+      [42.5, 3],
+      [42.5, 123],
     ]);
     expect(routes.get('line-B')!.points).toEqual([
-      [46, 123],
-      [46, 183],
-      [53, 183],
-      [53, 243],
+      [56.5, 123],
+      [56.5, 243],
     ]);
-    // On bar 3, as offsets from its origin at 7: the load at 32, the line at 46.
-    expect(bars.get('3')!.taps.map((tap) => tap.x)).toEqual([32, 46]);
+    // On bar 3, as offsets from its origin at 7: the load at 32, the line at 49.5.
+    expect(bars.get('3')!.taps.map((tap) => tap.x)).toEqual([32, 49.5]);
   });
 
   it('grows the bar to a route that leaves it beyond its tip', () => {
@@ -1921,11 +2008,11 @@ describe('layoutConnections: branches with a stored route', () => {
 });
 
 describe('layoutConnections: the two faces of a bar', () => {
-  it('shares a dot between what lands above the bar and what leaves under it at the same place', () => {
-    // As the automatic layout routes them: one line comes down onto the
-    // middle of the north side of bus 2, two leave the middle of its south
-    // side. One of the two keeps the middle and the other stands a spacing
-    // beside it, so the line above lands in line with one of them.
+  it('gives what lands above the bar and what leaves under it at the same place a tap each', () => {
+    // One line comes down onto the middle of the north side of bus 2, and
+    // two leave the middle of its south side. In one place the three would
+    // read as one line through the bus that forks: one keeps the middle and
+    // the others stand a spacing either side of it, each on its own dot.
     const top = { x: -200, y: 0 };
     const middle = { x: 0, y: 120 };
     const { bars } = layoutConnections(
@@ -1973,15 +2060,16 @@ describe('layoutConnections: the two faces of a bar', () => {
       ],
     );
     expect(bars.get('2')!.taps).toEqual([
-      { x: 46, side: 'north' },
+      { x: 32, side: 'north' },
       { x: 46, side: 'south' },
       { x: 60, side: 'south' },
     ]);
   });
 
-  it('brings the end of a route that stands within a spacing of a tap on the other face in line with it', () => {
+  it('moves the end of a route that stands within a spacing of a tap on the other face clear of it', () => {
     // The route comes down onto bar 2 at 46 and a load hangs under 52. The
-    // end of the route moves over the load's tap, and its last bend with it.
+    // end of the route moves a spacing clear of the load's tap, and its last
+    // bend with it.
     const { routes, bars } = layoutConnections(
       [bus('1', -200, 0), bus('2', 0, 120), device('load-A', 52, 200)],
       [
@@ -2002,14 +2090,14 @@ describe('layoutConnections: the two faces of a bar', () => {
       ],
     );
     expect(bars.get('2')!.taps).toEqual([
-      { x: 52, side: 'north' },
+      { x: 38, side: 'north' },
       { x: 52, side: 'south' },
     ]);
     expect(routes.get('line-in')!.points).toEqual([
       [-154, 3],
       [-154, 80],
-      [52, 80],
-      [52, 123],
+      [38, 80],
+      [38, 123],
     ]);
     expect(routes.get('stub-load-A')!.points).toEqual([
       [52, 180],
@@ -2019,47 +2107,48 @@ describe('layoutConnections: the two faces of a bar', () => {
 
   it('moves the end of a branch, and leaves a device that drops square where it is', () => {
     // The generator stands over 40, the line under the bar would leave at
-    // 46: it leaves at 40 instead, and its other end follows.
+    // 46: it leaves a spacing from the generator instead, and its other end
+    // follows.
     const { routes, bars } = layoutConnections(
       [bus('1', 0, 100), bus('2', 0, 300), device('generator-G', 40, 50, 'generator')],
       [line('line-L', '1', '2'), stub('generator-G', '1')],
     );
     expect(bars.get('1')!.taps).toEqual([
-      { x: 40, side: 'south' },
       { x: 40, side: 'north' },
+      { x: 40 + TAP_SPACING, side: 'south' },
     ]);
     expect(routes.get('stub-generator-G')!.points).toEqual([
       [40, 70],
       [40, 103],
     ]);
     expect(routes.get('line-L')!.points).toEqual([
-      [40, 103],
-      [40, 303],
+      [54, 103],
+      [54, 303],
     ]);
   });
 
-  it('puts a tap a spacing clear of the other face where it cannot be in line', () => {
+  it('puts every tap a spacing clear of the other face', () => {
     // Two lines under the bar, at 46 and 60, and a generator over 53, half a
-    // spacing from each. One comes in line with the generator; the other,
-    // which cannot be in the same place, stands a whole spacing from it.
+    // spacing from each. The generator drops square where it stands, and the
+    // two lines stand whole spacings from it.
     const { routes, bars } = layoutConnections(
       [bus('1', 0, 100), bus('2', 0, 300), device('generator-G', 53, 50, 'generator')],
       [line('line-A', '1', '2'), line('line-B', '1', '2'), stub('generator-G', '1')],
     );
     expect(bars.get('1')!.taps).toEqual([
+      { x: 25, side: 'south' },
       { x: 39, side: 'south' },
-      { x: 53, side: 'south' },
       { x: 53, side: 'north' },
     ]);
     expect(routes.get('stub-generator-G')!.points[1]).toEqual([53, 103]);
     // Both still run straight down: their ends on bar 2 followed.
     expect(routes.get('line-A')!.points).toEqual([
-      [39, 103],
-      [39, 303],
+      [25, 103],
+      [25, 303],
     ]);
     expect(routes.get('line-B')!.points).toEqual([
-      [53, 103],
-      [53, 303],
+      [39, 103],
+      [39, 303],
     ]);
   });
 
@@ -2089,11 +2178,11 @@ describe('layoutConnections: the two faces of a bar', () => {
     ]);
     expect(bars.get('1')!.taps).toEqual([
       { x: 46, side: 'south' },
-      { x: 46, side: 'north' },
+      { x: 46 + TAP_SPACING, side: 'north' },
     ]);
     expect(routes.get('stub-generator-G')!.points).toEqual([
       [52, -30],
-      [46, 3],
+      [60, 3],
     ]);
   });
 
@@ -2436,6 +2525,168 @@ describe('branchLabelPlaces', () => {
     expect(places.get('l')).toEqual({ x: 100, y: 100, angleDeg: 90 });
   });
 
+  it('turns a label to read along an upright run where lines close on either side leave no other room', () => {
+    // Three lines a tap spacing apart: a label 40 wide on the middle one, or
+    // beside it, would be drawn over a neighbour.
+    const routes = new Map([
+      ['left', down(84)],
+      ['l', down(100)],
+      ['right', down(116)],
+    ]);
+    const asked = { id: 'l', ...label, beside: true };
+    const flat = branchLabelPlaces(routes, [asked], []).get('l')!;
+    expect(flat.turned).toBeUndefined();
+    const place = branchLabelPlaces(routes, [{ ...asked, mayTurn: true }], []).get('l')!;
+    expect(place).toMatchObject({ x: 100, turned: true });
+    expect(place.label).toBeUndefined();
+    // 16 wide and 40 long now: between its two neighbours.
+    expect(labelBoxAt(place, 40, 16)).toEqual({
+      left: 92,
+      right: 108,
+      top: place.y - 20,
+      bottom: place.y + 20,
+    });
+  });
+
+  it('does not turn a label that has a place the way it reads best, nor one on a level run', () => {
+    const upright = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ id: 'l', ...label, beside: true, mayTurn: true }],
+      [],
+    ).get('l')!;
+    expect(upright.turned).toBeUndefined();
+    const level = {
+      points: [
+        [0, 100],
+        [200, 100],
+      ] as Point[],
+    };
+    const walls = [
+      { left: -50, right: 250, top: 60, bottom: 96 },
+      { left: -50, right: 250, top: 104, bottom: 140 },
+    ];
+    const place = branchLabelPlaces(
+      new Map([['l', level]]),
+      [{ id: 'l', ...label, beside: true, mayTurn: true }],
+      walls,
+    ).get('l')!;
+    expect(place.turned).toBeUndefined();
+  });
+
+  it('leaves off a label that may be left off and has no place clear of everything', () => {
+    // A symbol over the whole line and well to both sides of it.
+    const wall = { left: 0, right: 200, top: -20, bottom: 220 };
+    const asked = { id: 'l', ...label, beside: true, mayTurn: true };
+    const kept = branchLabelPlaces(new Map([['l', down(100)]]), [asked], [wall]).get('l')!;
+    expect(kept.hidden).toBeUndefined();
+    const hidden = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ ...asked, mayHide: true }],
+      [wall],
+    ).get('l')!;
+    // Left off: where the arrow of the flow stays, half way along.
+    expect(hidden).toEqual({ x: 100, y: 100, angleDeg: 90, hidden: true });
+  });
+
+  it('takes no room for a label that is left off', () => {
+    const wall = { left: 60, right: 140, top: -20, bottom: 220 };
+    const routes = new Map([
+      ['l', down(100)],
+      ['other', down(160)],
+    ]);
+    const places = branchLabelPlaces(
+      routes,
+      [
+        { id: 'l', ...label, mayHide: true },
+        { id: 'other', ...label },
+      ],
+      [wall],
+    );
+    expect(places.get('l')!.hidden).toBe(true);
+    expect(places.get('other')).toEqual({ x: 160, y: 100, angleDeg: 90 });
+  });
+
+  it('finds a place that is only a pixel or two long, between the places it tries a step apart', () => {
+    // Room for a label 16 high from 123 to 141 on the line, and nowhere else.
+    const walls = [
+      { left: 60, right: 140, top: -20, bottom: 121 },
+      { left: 60, right: 140, top: 143, bottom: 220 },
+    ];
+    const place = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ id: 'l', ...label, mayHide: true }],
+      walls,
+    ).get('l')!;
+    expect(place.hidden).toBeUndefined();
+    expect(place.y).toBeGreaterThanOrEqual(131);
+    expect(place.y).toBeLessThanOrEqual(133);
+  });
+
+  it('places the labels again with the ones left without a place first', () => {
+    // Three short lines between two bars. The label of the right one, placed
+    // first, stands on its line, where it reaches into the only room the
+    // middle one has: turned on its own line, between its neighbours. Placed
+    // after the middle one, the right one stands beside its line instead.
+    const short = (x: number): { points: Point[] } => ({
+      points: [
+        [x, 0],
+        [x, 80],
+      ],
+    });
+    const routes = new Map([
+      ['right', short(126)],
+      ['middle', short(100)],
+      ['left', short(84)],
+    ]);
+    const bars = [
+      { left: 0, right: 300, top: -6, bottom: 0 },
+      { left: 0, right: 300, top: 80, bottom: 86 },
+    ];
+    const asked = { ...label, beside: true, mayTurn: true, mayHide: true };
+    const places = branchLabelPlaces(
+      routes,
+      [
+        { id: 'right', ...asked },
+        { id: 'middle', ...asked },
+      ],
+      bars,
+    );
+    expect(places.get('middle')).toMatchObject({ x: 100, turned: true });
+    expect(places.get('right')!.hidden).toBeUndefined();
+    expect(places.get('right')!.label?.side).toBe('right');
+    // Asked to be quick, as while a node is dragged, they are placed once,
+    // in the order given: the middle one is left off until the diagram is
+    // at rest, and nothing is drawn over anything meanwhile.
+    const quick = branchLabelPlaces(
+      routes,
+      [
+        { id: 'right', ...asked },
+        { id: 'middle', ...asked },
+      ],
+      bars,
+      { quick: true },
+    );
+    expect(quick.get('right')!.hidden).toBeUndefined();
+    expect(quick.get('middle')!.hidden).toBe(true);
+  });
+
+  it('does not go over every place of a short route for a label when it is asked to be quick', () => {
+    // The room of a pixel or two that the full search finds (see above).
+    const walls = [
+      { left: 60, right: 140, top: -20, bottom: 121 },
+      { left: 60, right: 140, top: 143, bottom: 220 },
+    ];
+    const asked = [{ id: 'l', ...label, mayHide: true }];
+    const routes = new Map([['l', down(100)]]);
+    expect(branchLabelPlaces(routes, asked, walls).get('l')!.hidden).toBeUndefined();
+    const quick = branchLabelPlaces(routes, asked, walls, { quick: true }).get('l')!;
+    // Left off, or found by the steps it does take: never drawn on a wall.
+    if (quick.hidden !== true) {
+      expect(quick.y).toBeGreaterThanOrEqual(131);
+      expect(quick.y).toBeLessThanOrEqual(133);
+    }
+  });
+
   it('moves a label along its route, off a symbol that stands at the middle', () => {
     const device = { left: 90, right: 150, top: 80, bottom: 120 };
     const place = branchLabelPlaces(
@@ -2668,6 +2919,37 @@ describe('layoutConnections: a device connector and the bars of other buses', ()
     const route = layoutConnections(nodes, [stub('load-x', '1')]).routes.get('stub-load-x')!;
     expect(route.points).toHaveLength(2);
     expect(route.points[1]).toEqual([89, 203]);
+  });
+
+  it('says which branches are drawn along the route stored for them', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 0, 200), bus('3', 300, 200)];
+    const stored = routedLine(
+      'line-kept',
+      '1',
+      '2',
+      [
+        [46, 3],
+        [46, 203],
+      ],
+      { x: 0, y: 0 },
+      { x: 0, y: 200 },
+    );
+    // Made for bus 3 somewhere else: it is routed from where the buses stand.
+    const stale = routedLine(
+      'line-stale',
+      '1',
+      '3',
+      [
+        [60, 3],
+        [60, 100],
+        [200, 100],
+        [200, 203],
+      ],
+      { x: 0, y: 0 },
+      { x: 150, y: 200 },
+    );
+    const { kept } = layoutConnections(nodes, [stored, stale, line('line-new', '2', '3')]);
+    expect([...kept]).toEqual(['line-kept']);
   });
 
   it('is not kept off the bar it lands on', () => {

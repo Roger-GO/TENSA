@@ -11,6 +11,10 @@
  * to be shown an element (a table row, the search) zooms in on it as well
  * as centring it (`locateZoom`).
  *
+ * A fit keeps the whole diagram clear of what floats over the corners of
+ * its pane, the minimap and the zoom controls (`fitPadding`): a load at the
+ * foot of a tall diagram is not behind the minimap.
+ *
  * The line is drawn low on purpose. Between it and full size the names are
  * small but the symbols can be told apart and a drag can be aimed, which is
  * how a case of a few dozen buses is looked at whole, and a pick in a table
@@ -47,4 +51,44 @@ export function useTooSmallZoomPercent(): number | null {
     const zoom = s.transform[2];
     return isTooSmallToRead(zoom) ? Math.round(zoom * 100) : null;
   });
+}
+
+/** The room a fitted diagram keeps to the edge of its pane, in pixels on screen. */
+const FIT_MARGIN = 24;
+
+/**
+ * What floats over the corners of the diagram: the minimap with the search
+ * button at the bottom right, and the zoom controls at the bottom left, each
+ * with the margin it keeps to the edge.
+ */
+const MINIMAP_CORNER = { width: 232, height: 176 };
+const CONTROLS_CORNER = { width: 56, height: 132 };
+
+/**
+ * The padding a fit of the diagram keeps to each edge of its pane, so that
+ * the whole of it is in view and none of it is behind the minimap or the
+ * zoom controls. There are two ways to keep clear of those: leave the strip
+ * along the bottom that holds both, or leave a strip down each side. The
+ * one that shows the diagram larger is taken: a tall, narrow diagram stands
+ * between the two, a wide one over them. `pane` is the size of the pane on
+ * screen and `diagram` the size of what is drawn, in its own units.
+ */
+export function fitPadding(
+  pane: { width: number; height: number },
+  diagram: { width: number; height: number },
+): { top: `${number}px`; right: `${number}px`; bottom: `${number}px`; left: `${number}px` } {
+  const zoomWith = (across: number, down: number): number =>
+    Math.min(
+      (pane.width - across) / Math.max(1, diagram.width),
+      (pane.height - down) / Math.max(1, diagram.height),
+    );
+  const above = zoomWith(2 * FIT_MARGIN, FIT_MARGIN + MINIMAP_CORNER.height);
+  const between = zoomWith(MINIMAP_CORNER.width + CONTROLS_CORNER.width, 2 * FIT_MARGIN);
+  const side = between > above;
+  return {
+    top: `${FIT_MARGIN}px`,
+    right: `${side ? MINIMAP_CORNER.width : FIT_MARGIN}px`,
+    bottom: `${side ? FIT_MARGIN : MINIMAP_CORNER.height}px`,
+    left: `${side ? CONTROLS_CORNER.width : FIT_MARGIN}px`,
+  };
 }

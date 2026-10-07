@@ -1,0 +1,282 @@
+/**
+ * The diagram as it is drawn, worked out in one place: from the nodes where
+ * they stand and the edges with the routes stored for them, everything the
+ * canvas hands to React Flow besides.
+ *
+ * `pictureOf` does it in the order each part depends on the one before:
+ *
+ * 1. the connectors of the devices, and the bars as long as those need;
+ * 2. where the control chains that are drawn out stand: beside their unit,
+ *    on a side where no symbol, bar or connector is in the way;
+ * 3. the route of every line and transformer, clear of all of that and of
+ *    each other (`routeDiagram`), and with it the bars and the taps as they
+ *    are drawn;
+ * 4. the label of every bus, clear of the lines and the symbols;
+ * 5. the P / Q readout of every generator and load, clear of the lines, the
+ *    symbols and the labels of the buses;
+ * 6. the flow label of every line and the symbol of every transformer,
+ *    clear of all of those and of each other.
+ *
+ * `drawnDiagram` turns a picture into what the overlap checker reads
+ * (`findOverlaps`): the tests hold the example cases to it in every state,
+ * and the picture they check is the one the canvas draws.
+ *
+ * Pure: no React, no React Flow, nothing read but the arguments.
+ */
+import {
+  BAR_LENGTH,
+  BAR_THICKNESS,
+  labelBoxAt,
+  layoutConnections,
+  routesThrough,
+  type ConnectionEdge,
+  type ConnectionPass,
+  type LabelPlace,
+  type NodeSize,
+  type Rect,
+} from './connections';
+import {
+  chooseChainSide,
+  unitChainPlaces,
+  unitChainSize,
+  type ChainSide,
+  type UnitNodeData,
+} from './graph';
+import {
+  LINE_LABEL_BOX,
+  TRANSFORMER_LABEL_BOX,
+  boxOnDiagram,
+  busLabelReserve,
+  overlaps,
+  placeBranchLabels,
+  placeBusLabels,
+  placeReadouts,
+  readoutReserve,
+  type BusLabel,
+  type LabelNode,
+  type ReadoutPlace,
+} from './labels';
+import type { DrawnBar, DrawnBox, DrawnDiagram, DrawnLine } from './overlapCheck';
+import { routeDiagram, type RoutedDiagram, type RoutingOptions } from './routing';
+
+export interface PictureOptions extends Omit<
+  RoutingOptions,
+  'obstacles' | 'keepFree' | 'preferFree'
+> {
+  /** Whether the values of a power flow show: the labels of the buses are larger, and the readouts and flow labels are drawn. */
+  values: boolean;
+  /**
+   * How wide the readout of each device and the flow label of each line is
+   * with the values it shows, by node id and by edge id (`readoutWidth`,
+   * `flowLabelWidth`). One without an entry is taken at its widest.
+   */
+  labelWidths?: {
+    readouts?: ReadonlyMap<string, number>;
+    flows?: ReadonlyMap<string, number>;
+  };
+}
+
+export interface Picture<E extends ConnectionEdge> extends RoutedDiagram<E> {
+  /** Where each control chain that is drawn out stands, by the id of the node of its unit. */
+  chains: Map<string, { side: ChainSide; box: Rect }>;
+  /** Where the label of each bus stands, by bus id. */
+  busLabels: Map<string, BusLabel>;
+  /** Where the P / Q readout of each generator and load stands, by node id. */
+  readouts: Map<string, ReadoutPlace>;
+  /** Where each line carries its flow label and each transformer its symbol, by edge id. */
+  labelPlaces: Map<string, LabelPlace>;
+}
+
+const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
+
+/** The picture of the diagram whose nodes are `nodes` and whose edges are `edges`. */
+export function pictureOf<E extends ConnectionEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): Picture<E> {
+  const { values, labelWidths, ...routing } = options;
+  const sizes = routing.sizes ?? NO_SIZES;
+  const {
+    steps: _steps,
+    gridPoints: _gridPoints,
+    dragging: _dragging,
+    ...connectionOptions
+  } = routing;
+
+  // The connectors of the devices alone: what a chain and a route go round.
+  const stubs = layoutConnections(
+    nodes,
+    edges.filter((edge) => edge.type === 'stub'),
+    connectionOptions,
+  );
+  const chains = placeChains(nodes, stubs, sizes);
+  const chainBoxes = new Map([...chains].map(([id, { box }]) => [id, box]));
+
+  const routed = routeDiagram(nodes, edges, {
+    ...routing,
+    obstacles: [...chainBoxes.values()],
+    keepFree: readoutReserve(nodes, stubs, sizes, { chains: chainBoxes }),
+    preferFree: busLabelReserve(nodes, stubs, sizes, { chains: chainBoxes }),
+  });
+  const { connections } = routed;
+
+  const busLabels = placeBusLabels(nodes, connections, sizes, values, chainBoxes);
+  // The readouts show with the values, and stand clear of the labels of the
+  // buses as those are then.
+  const labelBoxes = new Map([...busLabels].map(([id, { box }]) => [id, box]));
+  const readouts: Map<string, ReadoutPlace> = values
+    ? placeReadouts(nodes, connections, sizes, {
+        chains: chainBoxes,
+        busLabels: labelBoxes,
+        widths: labelWidths?.readouts,
+      })
+    : new Map();
+  const labelPlaces = placeBranchLabels(nodes, routed.edges, connections, sizes, {
+    busLabels: labelBoxes,
+    readouts: [...readouts.values()].map(({ box }) => box),
+    chains: chainBoxes,
+    values,
+    widths: labelWidths?.flows,
+    quick: routing.dragging === true,
+  });
+  return { ...routed, chains, busLabels, readouts, labelPlaces };
+}
+
+/**
+ * Where the control chains that are drawn out stand. A chain is drawn out
+ * on the side of its unit away from the bus. Where a bar, another symbol or
+ * the connector of a device is in the way there and not beside the symbol,
+ * it goes beside the symbol. The lines and transformers are routed round it
+ * afterwards, so they do not count here.
+ */
+function placeChains(
+  nodes: readonly LabelNode[],
+  stubs: ConnectionPass,
+  sizes: ReadonlyMap<string, NodeSize>,
+): Map<string, { side: ChainSide; box: Rect }> {
+  const out = new Map<string, { side: ChainSide; box: Rect }>();
+  // What stands on the diagram, as boxes: worked out when a unit has its
+  // chain drawn out and the chain needs a place, not otherwise.
+  let standing: { id: string; box: Rect }[] | null = null;
+  let connectorsThrough: ReturnType<typeof routesThrough> | null = null;
+  for (const n of nodes) {
+    const unit = (n.data as { unit?: UnitNodeData } | undefined)?.unit;
+    if (n.type !== 'generator' || unit?.expanded !== true) continue;
+    const around = (standing ??= nodes.map((m) => ({
+      id: m.id,
+      box: boxOnDiagram(m, sizes, stubs.bars),
+    })));
+    const through = (connectorsThrough ??= routesThrough(stubs.routes));
+    const measured = sizes.get(n.id);
+    const places = unitChainPlaces(
+      {
+        ...n.position,
+        width: measured?.width ?? n.initialWidth ?? 0,
+        height: measured?.height ?? n.initialHeight ?? 0,
+      },
+      unitChainSize(unit.members),
+    );
+    const taken = [...out.values()];
+    const side = chooseChainSide(
+      unit.side === 'below' ? 'below' : 'above',
+      places,
+      (place) =>
+        around.filter(({ id, box }) => id !== n.id && overlaps(box, place)).length +
+        taken.filter(({ box }) => overlaps(box, place)).length +
+        through(place, `stub-${n.id}`),
+    );
+    out.set(n.id, { side, box: places[side] });
+  }
+  return out;
+}
+
+/** What `drawnDiagram` reads of an edge besides what a connection needs. */
+interface DrawnEdge extends ConnectionEdge {
+  data?: Record<string, unknown>;
+}
+
+/**
+ * `picture` as the overlap checker reads it: every connector as a line,
+ * every bar, and every box: the symbols of the devices and the badges, the
+ * chains that are drawn out, the symbols of the transformers, the labels of
+ * the buses, and with `values` the readouts of the devices and the flow
+ * labels of the lines.
+ */
+export function drawnDiagram(
+  nodes: readonly LabelNode[],
+  picture: Picture<DrawnEdge>,
+  options: {
+    sizes?: ReadonlyMap<string, NodeSize>;
+    values: boolean;
+    labelWidths?: PictureOptions['labelWidths'];
+  },
+): DrawnDiagram {
+  const sizes = options.sizes ?? NO_SIZES;
+  const { connections } = picture;
+  const lines: DrawnLine[] = [];
+  const boxes: DrawnBox[] = [];
+  for (const edge of picture.edges) {
+    const route = connections.routes.get(edge.id);
+    if (route === undefined) continue;
+    lines.push({ id: edge.id, points: route.points, from: edge.source, to: edge.target });
+    const at = picture.labelPlaces.get(edge.id);
+    if (edge.type === 'stub' || at === undefined) continue;
+    if (edge.type === 'transformer') {
+      const { width, height } = TRANSFORMER_LABEL_BOX;
+      boxes.push({
+        id: `symbol:${edge.id}`,
+        kind: 'symbol',
+        box: labelBoxAt(at, width, height),
+        of: [edge.id],
+      });
+    } else if (options.values && at.hidden !== true) {
+      const { height } = LINE_LABEL_BOX;
+      const width = options.labelWidths?.flows?.get(edge.id) ?? LINE_LABEL_BOX.width;
+      boxes.push({
+        id: `flow:${edge.id}`,
+        kind: 'label',
+        box: labelBoxAt(at, width, height),
+        of: [edge.id],
+      });
+    }
+  }
+  const bars: DrawnBar[] = [];
+  for (const node of nodes) {
+    const { x, y } = node.position;
+    if ((node.type ?? 'bus') === 'bus') {
+      const bar = connections.bars.get(node.id);
+      bars.push({
+        id: node.id,
+        left: x + (bar?.start ?? 0),
+        right: x + (bar?.end ?? BAR_LENGTH),
+        y: y + BAR_THICKNESS / 2,
+      });
+      const label = picture.busLabels.get(node.id);
+      if (label !== undefined) {
+        boxes.push({ id: `label:${node.id}`, kind: 'label', box: label.box, of: [node.id] });
+      }
+      continue;
+    }
+    const size = sizes.get(node.id);
+    boxes.push({
+      id: node.id,
+      kind: 'symbol',
+      box: {
+        left: x,
+        right: x + (size?.width ?? node.initialWidth ?? 0),
+        top: y,
+        bottom: y + (size?.height ?? node.initialHeight ?? 0),
+      },
+    });
+    const chain = picture.chains.get(node.id);
+    if (chain !== undefined) {
+      boxes.push({ id: `chain:${node.id}`, kind: 'block', box: chain.box, of: [node.id] });
+    }
+    const readout = picture.readouts.get(node.id);
+    if (options.values && readout !== undefined && readout.spot !== 'none') {
+      boxes.push({ id: `readout:${node.id}`, kind: 'readout', box: readout.box, of: [node.id] });
+    }
+  }
+  return { lines, bars, boxes };
+}

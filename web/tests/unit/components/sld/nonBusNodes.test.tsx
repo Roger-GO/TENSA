@@ -12,6 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   branchColumns,
   buildGraph,
+  busRoom,
+  defaultBarLengths,
   deviceBoxSize,
   freeColumn,
   readoutPlaces,
@@ -861,16 +863,16 @@ describe('freeColumn', () => {
     expect(x).toBe(66 + 19 + 19 + DEVICE_COLUMN_GAP);
   });
 
-  it('stands in line with a tap of the other face, or a tap spacing clear of it', () => {
+  it('stands a tap spacing clear of a tap of the other face, never in line with it', () => {
     // A tap under the bar at 72, 7 from the place it prefers: in line with
-    // it (72) and a spacing past it (86) are as near, and 72 is nearer the
-    // middle of the bar.
-    expect(freeColumn(79, 19, [], lo, hi, middle, [72])).toBe(72);
-    // In line is taken by a branch on its own face: a spacing clear, then.
+    // it the two connectors would read as one line through the bus, so it
+    // stands a spacing past it (86), the nearer of the two such places.
+    expect(freeColumn(79, 19, [], lo, hi, middle, [72])).toBe(72 + TAP_SPACING);
     expect(freeColumn(79, 19, [{ x: 58, half: 0 }], lo, hi, middle, [72])).toBe(72 + TAP_SPACING);
     // A tap that is a spacing away already leaves it where it prefers.
     expect(freeColumn(79, 19, [], lo, hi, middle, [79 - TAP_SPACING])).toBe(79);
-    expect(freeColumn(79, 19, [], lo, hi, middle, [79])).toBe(79);
+    // One right under it moves it a spacing, to the side nearer the middle of the bar.
+    expect(freeColumn(79, 19, [], lo, hi, middle, [79])).toBe(79 - TAP_SPACING);
   });
 
   it('does not look at the other face for a place past a tip, where the connector lands on the tip', () => {
@@ -1030,12 +1032,14 @@ describe('buildGraph: where a device the layout does not place is put', () => {
     });
     const wide = nodes.find((n) => n.id === 'load-WIDE')!;
     expect(wide.position.y).toBe(200 + DEVICE_ROW_OFFSET);
-    const { bars } = layoutConnections(nodes, edges);
-    const line = bars.get('2')!.taps.find((tap) => tap.side === 'south' && tap.x === 46);
-    expect(line).toBeDefined();
+    const { bars, routes } = layoutConnections(nodes, edges);
+    // The line leaves the south face at a tap of its own (the line from above
+    // has the middle of the bar on the north face, and the two keep apart).
+    const line = routes.get('line-L23')!.points[0]!;
+    expect(bars.get('2')!.taps).toContainEqual({ x: line[0], side: 'south' });
     // The box does not sit on the line: its near edge is a gap away from it.
     const half = wide.initialWidth! / 2;
-    expect(Math.abs(middleOf(wide) - 46)).toBeCloseTo(half + DEVICE_COLUMN_GAP);
+    expect(Math.abs(middleOf(wide) - line[0])).toBeGreaterThanOrEqual(half + DEVICE_COLUMN_GAP);
   });
 
   it('stands a device in line with what lands on the other face of its bar, or a spacing clear of it', () => {
@@ -1088,9 +1092,26 @@ describe('buildGraph: where a device the layout does not place is put', () => {
         { ...load('PQ_1', 1), name: 'PQ_1' },
       ],
     });
-    const { nodes, edges } = buildGraph(topology, { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } });
+    const coords = { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } };
+    // On a bar as long as its bus needs (`defaultBarLengths`) the four stand
+    // side by side over it, and each connector drops square.
+    const barLengths = defaultBarLengths(topology);
+    expect(barLengths.get('1')).toBeGreaterThan(92);
+    const roomy = buildGraph(topology, coords, { barLengths });
+    const inARow = roomy.nodes.filter((n) => n.type !== 'bus');
+    expect(inARow.map((n) => n.position.y)).toEqual([-70, -70, -70, -70]);
+    const square = layoutConnections(roomy.nodes, roomy.edges, { barLengths });
+    for (const device of inARow) {
+      const points = square.routes.get(`stub-${device.id}`)!.points;
+      expect(points, device.id).toHaveLength(2);
+      expect(points[0]![0], device.id).toBe(points[1]![0]);
+    }
+    // On a bar of the default length three have a place over it or over a
+    // tip of it. The fourth would stand clear past the tip: it takes the
+    // other face of the bar, where it has a place over it.
+    const { nodes, edges } = buildGraph(topology, coords);
     const devices = nodes.filter((n) => n.type !== 'bus');
-    expect(devices.map((n) => n.position.y)).toEqual([-70, -70, -70, -70]);
+    expect(devices.map((n) => n.position.y)).toEqual([-70, -70, -70, 70]);
     /** Whether the run from `a` to `b` passes through the inside of the box of `n`. */
     const passesThrough = (a: number[], b: number[], n: (typeof nodes)[number]): boolean => {
       for (let i = 0; i <= 100; i += 1) {
@@ -1116,14 +1137,12 @@ describe('buildGraph: where a device the layout does not place is put', () => {
         expect(tap[0]).toBeGreaterThanOrEqual(bars.get('1')!.start + 3);
         expect(tap[0]).toBeLessThanOrEqual(bars.get('1')!.end - 3);
       }
-      // The three with their box over the bar or over a tip of it drop square.
-      for (const id of ['generator-G0', 'generator-G1', 'load-PQ_0']) {
-        const points = routes.get(`stub-${id}`)!.points;
-        expect(points, `${connectorStyle}: ${id}`).toHaveLength(2);
-        expect(points[0]![0], `${connectorStyle}: ${id}`).toBe(points[1]![0]);
+      // Every one of them drops square: none stands clear past a tip.
+      for (const device of devices) {
+        const points = routes.get(`stub-${device.id}`)!.points;
+        expect(points, `${connectorStyle}: ${device.id}`).toHaveLength(2);
+        expect(points[0]![0], `${connectorStyle}: ${device.id}`).toBe(points[1]![0]);
       }
-      // The fourth stands clear of the tip: a diagonal, or down and into the tip.
-      expect(routes.get('stub-load-PQ_1')!.points).toHaveLength(connectorStyle === 'elbow' ? 3 : 2);
     }
   });
 
@@ -1154,8 +1173,9 @@ describe('buildGraph: where a device the layout does not place is put', () => {
 
   it('keeps a device by its bus when stepping out from under a level run would take it further than the limit', () => {
     // A line runs level through the row under bus 1, as a saved route has
-    // it. A fourth bus, far off, keeps the load of bus 1 below its bar.
-    const drawn = (from: number, to: number) => {
+    // it. A fourth bus, far off, has the load of bus 1 prefer the face under
+    // its bar.
+    const drawn = (from: number, to: number, face: 'south' | 'north' = 'south') => {
       const topology = makeTopology({
         buses: [bus(1), bus(2), bus(3), bus(4)],
         lines: [trafo('L23', 2, 3)],
@@ -1177,7 +1197,7 @@ describe('buildGraph: where a device the layout does not place is put', () => {
         bendPoints: new Map([['line-L23', route]]),
       });
       const placed = nodes.find((n) => n.id === 'load-A')!;
-      expect(placed.position.y).toBe(DEVICE_ROW_OFFSET);
+      expect(placed.position.y).toBe(face === 'south' ? DEVICE_ROW_OFFSET : -DEVICE_ROW_OFFSET);
       return middleOf(placed);
     };
     // A short run, from 46 to 146: the load stands a gap left of where it starts.
@@ -1186,8 +1206,10 @@ describe('buildGraph: where a device the layout does not place is put', () => {
     // further past a tip than the limit, so it keeps its third of the bar...
     expect(300 - 19 - DEVICE_COLUMN_GAP).toBeGreaterThan(DEVICE_DETOUR_LIMIT);
     expect(drawn(-254, 346)).toBe(46 + DEVICE_COLUMN_OFFSET);
-    // ...and still steps aside for the upright run of the same line, where that is near.
-    expect(drawn(-254, 90)).toBe(90 + 19 + DEVICE_COLUMN_GAP);
+    // ...and where the upright run of the same line would take it clear past
+    // the tip of the bar, it stands over the bar instead, on the other face.
+    expect(90 + 19 + DEVICE_COLUMN_GAP - 89).toBeGreaterThan(19);
+    expect(drawn(-254, 90, 'north')).toBe(46 + DEVICE_COLUMN_OFFSET);
   });
 
   it('places the narrow devices first, and a generator with its machine as one symbol', () => {
@@ -1269,5 +1291,102 @@ describe('buildGraph: where a device the layout does not place is put', () => {
     expect(Math.abs(middleOf(placed) - middleOf(dragged))).toBeGreaterThanOrEqual(
       deviceBoxSize('L').width + DEVICE_COLUMN_GAP,
     );
+  });
+});
+
+describe('buildGraph: a device and what stands around its bus', () => {
+  it('stands a device clear of a device of the bus above that hangs in the same strip', () => {
+    // Bus 1 over bus 2, 136 apart: the load under bus 1 and the generator
+    // over bus 2 share the strip between the two bars. The load is where a
+    // layout put it, right where the generator would stand.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2), bus(3)],
+      lines: [trafo('L23', 2, 3)],
+      generators: [{ ...gen('G', 2), name: 'G' }],
+      loads: [{ ...load('L', 1), name: 'L' }],
+    });
+    const coords = { '1': { x: 0, y: 0 }, '2': { x: 0, y: 136 }, '3': { x: 0, y: 400 } };
+    const alone = buildGraph({ ...topology, loads: [] }, coords).nodes.find(
+      (n) => n.id === 'generator-G',
+    )!;
+    // In the way: its box over the place the generator takes with nothing there.
+    const placed = new Map([['PQ|L', { x: alone.position.x, y: 70 }]]);
+    const { nodes } = buildGraph(topology, coords, { nonBusCoords: placed, applyPushOut: false });
+    const [generator, hung] = ['generator-G', 'load-L'].map(
+      (id) => nodes.find((n) => n.id === id)!,
+    );
+    expect(hung!.position).toEqual({ x: alone.position.x, y: 70 });
+    // Still over its own bar, and a gap clear of the load beside it.
+    expect(generator!.position.y).toBe(136 - DEVICE_ROW_OFFSET);
+    const middle = (n: (typeof nodes)[number]): number => n.position.x + n.initialWidth! / 2;
+    const apart = Math.abs(middle(generator!) - middle(hung!));
+    expect(apart).toBeGreaterThanOrEqual(
+      (generator!.initialWidth! + hung!.initialWidth!) / 2 + DEVICE_COLUMN_GAP,
+    );
+  });
+
+  it('stands a device clear of the bar of another bus that lies in its row', () => {
+    // Bus 2 stands 70 under bus 1 and a little to the right: its bar and
+    // label are where the load of bus 1 would hang.
+    const topology = makeTopology({
+      buses: [bus(1), bus(2), bus(3)],
+      lines: [trafo('L13', 1, 3)],
+      loads: [{ ...load('L', 1), name: 'L' }],
+    });
+    const coords = { '1': { x: 0, y: 0 }, '2': { x: 60, y: 70 }, '3': { x: 400, y: -300 } };
+    const { nodes } = buildGraph(topology, coords, { applyPushOut: false });
+    const hung = nodes.find((n) => n.id === 'load-L')!;
+    const box = {
+      left: hung.position.x,
+      right: hung.position.x + hung.initialWidth!,
+      top: hung.position.y,
+      bottom: hung.position.y + hung.initialHeight!,
+    };
+    // Not on the bar of bus 2 (60 to 152, at 70) nor on the label under it.
+    const onBus2 = box.left < 152 && box.right > 60 && box.top < 70 + 44 && box.bottom > 70;
+    expect(onBus2).toBe(false);
+  });
+});
+
+describe('busRoom and defaultBarLengths', () => {
+  const star = (branches: number, devices = 0): TopologySummary =>
+    makeTopology({
+      buses: [bus('hub'), ...Array.from({ length: branches }, (_, i) => bus(`b${i}`))],
+      lines: Array.from({ length: branches }, (_, i) => trafo(`L${i}`, 'hub', `b${i}`)),
+      loads: Array.from({ length: devices }, (_, i) => ({
+        ...load(`L${i}`, 'hub'),
+        name: `L${i}`,
+      })),
+    });
+
+  it('leaves a bus with a few connections its bar of the default length', () => {
+    expect(busRoom(star(5)).get('hub')).toEqual({ bar: 92, box: 92 });
+    expect(defaultBarLengths(star(5)).size).toBe(0);
+  });
+
+  it('gives a busy bus a bar with a place on the grid for each of its connections', () => {
+    // A bar of 92 has five lines of the grid on it; each 32 more adds two.
+    expect(busRoom(star(6)).get('hub')!.bar).toBe(108);
+    expect(busRoom(star(7)).get('hub')!.bar).toBe(108);
+    expect(busRoom(star(8)).get('hub')!.bar).toBe(140);
+    expect(busRoom(star(12)).get('hub')!.bar).toBe(204);
+    expect([...defaultBarLengths(star(12))]).toEqual([['hub', 204]]);
+    // The buses at the other ends have one connection each.
+    expect(busRoom(star(12)).get('b0')).toEqual({ bar: 92, box: 92 });
+  });
+
+  it('counts a device for more than a line: its tap is not on the grid', () => {
+    expect(busRoom(star(4, 0)).get('hub')!.bar).toBe(92);
+    expect(busRoom(star(4, 1)).get('hub')!.bar).toBe(108);
+  });
+
+  it('makes the bar long enough for the devices of a bus side by side, and its box as wide as their row', () => {
+    const many = star(1, 5);
+    const width = deviceBoxSize('L0').width;
+    const row = 5 * width + 4 * DEVICE_COLUMN_GAP;
+    const room = busRoom(many).get('hub')!;
+    expect(room.box).toBe(row);
+    // The middles of the two at the ends are over the tips.
+    expect(room.bar).toBeGreaterThanOrEqual(row - width);
   });
 });

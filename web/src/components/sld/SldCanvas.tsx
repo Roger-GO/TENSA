@@ -57,7 +57,7 @@ import {
   type SldContextTarget,
 } from './contextTarget';
 import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
-import type { TopologySummary, SidecarLayout } from '@/api/types';
+import type { BusCoord, TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { elementToPng } from '@/components/export/exportToPng';
@@ -84,7 +84,11 @@ import {
   type DistributeAxis,
 } from './arrange';
 import { GRID_STEP } from './tidy';
-import { branchesThroughSymbols, planTidy } from './tidyPlan';
+import { branchesThroughSymbols, type TidyPlan } from './tidyPlan';
+import { startTidy, type TidyJob } from './tidyClient';
+import { pictureOf } from './picture';
+import { flowLabelWidth, readoutWidth } from './labels';
+import { getDeviceOverlayState, getLineOverlayState } from './overlay';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -110,36 +114,23 @@ import {
 import { curatedLayoutFor } from './curated';
 import {
   buildGraph,
-  chooseChainSide,
-  unitChainPlaces,
-  unitChainSize,
+  defaultBarLengths,
   DEVICE_PORT,
   SOURCE_HANDLE,
   TARGET_HANDLE,
-  type ChainSide,
   type UnitNodeData,
 } from './graph';
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
   DEFAULT_CONNECTOR_STYLE,
-  layoutConnections,
-  routesThrough,
+  type ConnectionEdge,
   type ConnectorRoute,
   type ConnectorStyle,
   type LabelPlace,
   type NodeSize,
-  type Rect,
 } from './connections';
-import {
-  boxOnDiagram,
-  busLabelBox,
-  busLabelClear,
-  overlaps,
-  placeBranchLabels,
-  placeReadouts,
-} from './labels';
-import { FULL_ZOOM, locateZoom } from './zoom';
+import { FULL_ZOOM, fitPadding, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
 
 const NODE_TYPES: NodeTypes = {
@@ -181,15 +172,8 @@ const DRAG_SLOP_PX = 2;
 /** The grid a node snaps to while Snap to grid is on: the dots of the background. */
 const SNAP_GRID: [number, number] = [GRID_STEP, GRID_STEP];
 
-/**
- * The most branches Tidy diagram routes within the press that asked for it,
- * which takes a few hundredths of a second. With more it first lets the
- * button say that it is at work (`TIDY_PAINT_MS` later, a frame or two):
- * routing them takes long enough to notice, up to about a second on a large
- * diagram, where the work stops (`TIDY_STEPS` in `tidy.ts`).
- */
-const TIDY_AT_ONCE = 30;
-const TIDY_PAINT_MS = 30;
+/** The most times in a row the canvas keeps the routes a picture made (see `settlingRef`). */
+const SETTLING_ROUNDS = 4;
 
 /** What the Undo of a toast says when its change is no longer the newest one. */
 const CHANGED_SINCE_NOTICE = 'The diagram was changed since. Use Undo in the Edit menu to go back.';
@@ -376,10 +360,17 @@ function SldCanvasInner({
     [],
   );
   const [coords, setCoords] = useState<CoordsByIdx | null>(null);
-  // The topology `coords` was composed for. A new topology arrives a render
-  // before its coords do, and the graph built in between pairs the new
-  // elements with the old positions; nothing is saved from that one.
+  // The topology `coords` was composed for, and the layout. A new topology
+  // arrives a render before its coords do, and so does another layout (a
+  // snapshot that is restored, a layout that is reset): the graph built in
+  // between pairs the new elements, or the routes of the new layout, with
+  // the old positions. Nothing is saved from that one, and no route is kept
+  // from it.
   const [coordsTopology, setCoordsTopology] = useState<TopologySummary | null>(null);
+  const [coordsSource, setCoordsSource] = useState<{
+    layout: SidecarLayout | null;
+    auto: CoordsByIdx | null;
+  } | null>(null);
   const [showLargeBanner, setShowLargeBanner] = useState<boolean>(false);
   const [showDriftBanner, setShowDriftBanner] = useState<boolean>(false);
   // The lock button of the controls was pressed: React Flow refuses drags and
@@ -410,7 +401,7 @@ function SldCanvasInner({
   const baseSidecar = storedSidecar ?? curated;
   const {
     coords: autoCoords,
-    bendPoints: autoBendPoints,
+    arrangement: autoArrangement,
     needed: autoLayoutNeeded,
   } = useAutoLayout(topology, baseSidecar);
 
@@ -421,6 +412,7 @@ function SldCanvasInner({
     const merged = mergeWithDrift(baseSidecar, topology, autoCoords ?? {});
     setCoords(merged.coords);
     setCoordsTopology(topology);
+    setCoordsSource({ layout: baseSidecar, auto: autoCoords });
     setShowDriftBanner(merged.hasDrift);
     // >30-bus banner: only when there's no curated layout AND no
     // stored sidecar AND the case is large.
@@ -434,13 +426,11 @@ function SldCanvasInner({
   // React Flow's controlled state. Maintained in `nodes`/`edges` so we
   // can mutate node positions on drag without losing other props.
   //
-  // Unit 1: only feed ELK bend points to buildGraph when the canvas is
-  // running on auto-layout (no curated, no sidecar) — otherwise the
-  // bend points reference pass-2 ELK coords that diverge from the
-  // curated/sidecar coords React Flow renders, and the polyline would
-  // hang in mid-air. A saved layout brings its own routes instead: the
+  // With no layout at all (no curated one, no sidecar) the diagram is the
+  // automatic arrangement: its buses, its devices and its routes
+  // (`useAutoLayout`). A saved layout brings its own routes instead: the
   // ones that were on screen when it was written, so a diagram saved from
-  // auto-layout comes back with the same lines.
+  // the automatic arrangement comes back with the same lines.
   const usingAutoLayout = curated === null && storedSidecar === null;
   const storedRoutes = useMemo(
     () => storedBranchRoutes(storedSidecar, topology),
@@ -451,8 +441,12 @@ function SldCanvasInner({
   // of the positions; `null` takes a route away.
   const routeOverrides = useCaseStore((s) => s.routeOverrides);
   const branchRoutes = useMemo(() => {
-    const bendPoints = new Map(usingAutoLayout ? (autoBendPoints ?? []) : storedRoutes.polylines);
-    const bendAnchors = new Map(usingAutoLayout ? [] : storedRoutes.anchors);
+    const bendPoints = new Map(
+      usingAutoLayout ? (autoArrangement?.routes ?? []) : storedRoutes.polylines,
+    );
+    const bendAnchors = new Map(
+      usingAutoLayout ? (autoArrangement?.anchors ?? []) : storedRoutes.anchors,
+    );
     for (const [id, chosen] of Object.entries(routeOverrides)) {
       if (chosen === null) {
         bendPoints.delete(id);
@@ -463,7 +457,7 @@ function SldCanvasInner({
       }
     }
     return { bendPoints, bendAnchors };
-  }, [usingAutoLayout, autoBendPoints, storedRoutes, routeOverrides]);
+  }, [usingAutoLayout, autoArrangement, storedRoutes, routeOverrides]);
   const controllerCoords = useMemo(() => controllerCoordsAsMap(storedSidecar), [storedSidecar]);
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
@@ -490,13 +484,21 @@ function SldCanvasInner({
   // by its idx (model class first, UI category as the fallback for a
   // kind-edited element) or, when the idx values have changed, by the bus it
   // was placed against.
+  // With no layout, where the automatic arrangement puts them.
   const nonBusCoordsMap = useMemo(
-    () => resolveDeviceCoords(storedSidecar?.non_bus_coordinates, topology),
-    [storedSidecar, topology],
+    () =>
+      usingAutoLayout
+        ? (autoArrangement?.devices ?? new Map<string, BusCoord>())
+        : resolveDeviceCoords(storedSidecar?.non_bus_coordinates, topology),
+    [usingAutoLayout, autoArrangement, storedSidecar, topology],
   );
-  // The bars a layout gives a length of their own; the rest are sized by
-  // what connects to them.
-  const barLengths = useMemo(() => barLengthsOf(savedLayout ?? curated), [savedLayout, curated]);
+  // How long each bar is: as long as what connects to its bus needs
+  // (`defaultBarLengths`), unless a layout gives it a length of its own. It
+  // still grows to hold a tap that lands past its tip.
+  const barLengths = useMemo(
+    () => new Map([...defaultBarLengths(topology), ...barLengthsOf(savedLayout ?? curated)]),
+    [topology, savedLayout, curated],
+  );
   // The generating units whose control chain is drawn out: what was chosen
   // in this visit, over what the saved layout says.
   const chosenUnits = useCaseStore((s) => s.unitExpansion);
@@ -665,44 +667,72 @@ function SldCanvasInner({
   const connectorStyle: ConnectorStyle =
     chosenConnectorStyle ?? connectorStyleOf(savedLayout) ?? DEFAULT_CONNECTOR_STYLE;
 
-  // Where every connector attaches and runs, and how long every bar is, from
-  // where the nodes are now. `nodes` changes on every move of a drag, so the
-  // taps, the faces and the routes follow the pointer.
-  const connections = useMemo(
-    () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
-    [nodes, edges, sizes, connectorStyle, barLengths],
+  // The nodes under the pointer in a drag, from the press to the drop, and
+  // whether a drag is moving nodes right now: React Flow reports the press
+  // and the moves separately, and either says that the diagram is not at
+  // rest.
+  const [draggedIds, setDraggedIds] = useState<readonly string[]>(NO_IDS);
+  const [moving, setMoving] = useState(false);
+  const dragging = draggedIds.length > 0 || moving;
+
+  // The diagram as it is drawn, from where the nodes are now (`picture.ts`):
+  // where every connector attaches and runs and how long every bar is, the
+  // route of every line and transformer, clear of everything else, and
+  // where the labels stand. `nodes` changes on every move of a drag, so the
+  // taps, the faces, the routes and the labels follow the pointer. The
+  // labels of the buses are larger once a power flow has run, with a
+  // voltage and an angle in them, and the readouts of the devices and the
+  // flows of the lines show only then.
+  const pflowShown = usePflowStore((s) => s.lastRun !== null);
+  const labelsHidden = useUiStore((s) => s.hideLabels);
+  const valuesShown = pflowShown && !labelsHidden;
+  // How wide each readout and each flow label is with the values the power
+  // flow gave: a label is looked for a place as large as it is drawn, not as
+  // large as the longest value there could be.
+  const pflowResult = usePflowStore((s) => s.lastRun);
+  const labelWidths = useMemo(() => {
+    if (!valuesShown || baseGraph === null) return undefined;
+    const readouts = new Map<string, number>();
+    for (const n of baseGraph.nodes) {
+      if (n.type !== 'generator' && n.type !== 'load') continue;
+      const data = n.data as { idx?: string; pflowIdx?: string | null };
+      const key = data.pflowIdx === undefined ? (data.idx ?? null) : data.pflowIdx;
+      const { p_label, q_label } = getDeviceOverlayState(n.type, key, pflowResult);
+      readouts.set(n.id, readoutWidth(p_label, q_label));
+    }
+    const flows = new Map<string, number>();
+    for (const e of baseGraph.edges) {
+      const data = e.data as { idx?: string; bucket?: string } | undefined;
+      if (data?.bucket !== 'line' || data.idx === undefined) continue;
+      const { p_label, loading_label } = getLineOverlayState(data.idx, pflowResult);
+      flows.set(e.id, flowLabelWidth(p_label, loading_label));
+    }
+    return { readouts, flows };
+  }, [baseGraph, pflowResult, valuesShown]);
+  const picture = useMemo(
+    () =>
+      pictureOf(nodes, edges as ConnectionEdge[], {
+        sizes,
+        connectorStyle,
+        barLengths,
+        values: valuesShown,
+        labelWidths,
+        dragging,
+      }),
+    [nodes, edges, sizes, connectorStyle, barLengths, valuesShown, labelWidths, dragging],
   );
+  const connections = picture.connections;
   // The lines and transformers that are drawn through a symbol or a bar:
   // the Tidy diagram button counts them. Not while a node is being dragged,
   // when a line passes through things on its way to where the node is
   // dropped.
   const untidyCount = useMemo(
-    () => branchesThroughSymbols(nodes, edges, connections, sizes).length,
-    [nodes, edges, connections, sizes],
-  );
-  // How many connectors pass through a box, for the chains that are drawn out.
-  const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
-  // What the label of each bus has to stand clear of, under its bar and over
-  // it (`labels.ts`): the runs that pass there and the symbols that stand there.
-  // The labels are placed one after the other, each as large as it is drawn:
-  // with a voltage and an angle in it once a power flow has run. The readouts
-  // of the devices show only then, so they are placed against the labels as
-  // they are then.
-  const pflowShown = usePflowStore((s) => s.lastRun !== null);
-  const labelsHidden = useUiStore((s) => s.hideLabels);
-  const valuesShown = pflowShown && !labelsHidden;
-  const labelClearsWithValues = useMemo(
-    () => busLabelClear(nodes, connections, sizes, true),
-    [nodes, connections, sizes],
-  );
-  const labelClears = useMemo(
-    () => (valuesShown ? labelClearsWithValues : busLabelClear(nodes, connections, sizes, false)),
-    [nodes, connections, sizes, valuesShown, labelClearsWithValues],
+    () => branchesThroughSymbols(nodes, picture.edges, connections, sizes).length,
+    [nodes, picture, connections, sizes],
   );
   // The devices whose connector is picked out (`StubEdge`): the one that is
   // selected and the ones under the pointer in a drag, so it shows which
   // connector is the device's and that it follows the device to the bar.
-  const [draggedIds, setDraggedIds] = useState<readonly string[]>(NO_IDS);
   const activeDeviceIds = useMemo(() => {
     const ids = new Set(draggedIds);
     if (selectedDrawnId !== null) ids.add(selectedDrawnId);
@@ -738,6 +768,10 @@ function SldCanvasInner({
   // the change that ends it. Presses of the arrow keys on the same nodes in
   // quick succession are one move.
   const persistRequestedRef = useRef(false);
+  // Whether a change of this visit was just written, and the routes the
+  // diagram makes for it are still to come: they are written as well. Until
+  // the diagram is at rest again with nothing left to route.
+  const routesToFollowRef = useRef(false);
   const dragOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
   const moveStartRef = useRef<{ nodes: Node[]; dragged: boolean } | null>(null);
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
@@ -777,6 +811,7 @@ function SldCanvasInner({
         (c): c is NodePositionChange =>
           c.type === 'position' && c.dragging === false && c.position !== undefined,
       );
+      setMoving(start.dragged && !dragEnded);
       const origin = dragOriginRef.current;
       // To the nearest pixel: the positions are in flow units, and a pointer
       // that went two pixels comes back from them as a hair over or under two.
@@ -820,10 +855,15 @@ function SldCanvasInner({
   // sessions only for the write: a system built from scratch has no file to
   // keep a layout beside until it is saved.
   const setDiagramLayout = useCaseStore((s) => s.setDiagramLayout);
-  const coordsAreCurrent = coordsTopology === topology;
+  const coordsAreCurrent =
+    coordsTopology === topology &&
+    coordsSource !== null &&
+    coordsSource.layout === baseSidecar &&
+    coordsSource.auto === autoCoords;
   useEffect(() => {
-    // A graph whose coords belong to the topology of a render ago is redrawn
-    // at once; a write asked for meanwhile waits for the graph that follows.
+    // A graph whose coords belong to the topology or the layout of a render
+    // ago is redrawn at once; a write asked for meanwhile waits for the
+    // graph that follows.
     if (!baseGraph || !coordsAreCurrent) return;
     const layout = captureLayout(baseGraph, topology, savedLayout, {
       connectorStyle: chosenConnectorStyle,
@@ -831,6 +871,8 @@ function SldCanvasInner({
     setDiagramLayout(layout);
     if (!persistRequestedRef.current) return;
     persistRequestedRef.current = false;
+    // The routes the diagram makes for this change are written after it.
+    routesToFollowRef.current = true;
     if (primaryPath && hasSavedPositions(layout)) {
       debouncedPutSidecar(primaryPath, layout, putSidecar);
     }
@@ -844,6 +886,56 @@ function SldCanvasInner({
     putSidecar,
     setDiagramLayout,
   ]);
+
+  // The routes the picture made while it was drawn (`picture.changed`: the
+  // branches of a bus that was moved, a line a device was dropped on, the
+  // lines of a layout that brought no routes) become the routes the diagram
+  // keeps, once it is at rest: in a drag they are worked out afresh with
+  // every move. The next picture then finds them in place and routes
+  // nothing, they are part of the arrangement an Undo puts back, and they
+  // are written beside the case with the positions that led to them.
+  // How many times in a row routes were kept with nothing else changing in
+  // between. Each time should leave the next picture with nothing to route;
+  // should two routes ever keep unsettling each other, this ends it.
+  const settlingRef = useRef(0);
+  // Not from a graph whose positions are a render behind its layout (a
+  // snapshot that was just restored, a layout that was just reset and whose
+  // automatic arrangement is still on its way), and not from the edges of
+  // the graph before (they are handed to React Flow a render after the
+  // graph they come from is built): what is drawn until then is not the
+  // diagram yet, and routes kept from it would stand in for the ones the
+  // layout brings.
+  useEffect(() => {
+    if (dragging || !coordsAreCurrent) return;
+    if (baseGraph === null || edges !== baseGraph.edges) return;
+    if (picture.changed.size === 0) {
+      settlingRef.current = 0;
+      routesToFollowRef.current = false;
+      return;
+    }
+    if (settlingRef.current >= SETTLING_ROUNDS) return;
+    const held = useCaseStore.getState().routeOverrides;
+    const next: RouteOverrides = { ...held };
+    let changed = false;
+    for (const [id, route] of picture.changed) {
+      if (JSON.stringify(held[id]?.points ?? null) === JSON.stringify(route.points)) continue;
+      next[id] = route;
+      changed = true;
+    }
+    if (!changed) return;
+    settlingRef.current += 1;
+    useCaseStore.getState().setRouteOverrides(next);
+    // They are written with the change that led to them (`routesToFollowRef`):
+    // a move, or anything else that was just written for this diagram. A
+    // diagram that was only opened is not written for being drawn, whether
+    // it stands in its automatic arrangement or came from a layout saved
+    // without routes; its routes are made again the next time, and saved
+    // with the next change. Nor is the system of a case that is just being
+    // opened: its topology arrives a moment before the store lets go of the
+    // case that was open, and what is drawn for that moment is the new
+    // system under the name of the old one.
+    if (routesToFollowRef.current) persistRequestedRef.current = true;
+  }, [picture, dragging, coordsAreCurrent, baseGraph, edges]);
 
   // A write still waiting out its delay when the canvas goes away (another
   // view, another case) is sent then, not dropped: the drag stays on screen
@@ -921,62 +1013,6 @@ function SldCanvasInner({
   const connectivityResult = useConnectivityStore((s) => s.result);
   const energisedBusIdxes = useConnectivityStore((s) => s.energisedBusIdxes);
 
-  // Where the control chains that are drawn out stand. A chain is drawn out
-  // on the side of its unit away from the bus. Where a bar, another symbol
-  // or a line is in the way there and not beside the symbol, it goes beside
-  // the symbol.
-  const chains = useMemo(() => {
-    const out = new Map<string, { side: ChainSide; box: Rect }>();
-    // What stands on the diagram, as boxes: worked out when a unit has its
-    // chain drawn out and the chain needs a place, not otherwise.
-    let standing: { id: string; box: Rect }[] | null = null;
-    for (const n of nodes) {
-      const unit = (n.data as { unit?: UnitNodeData }).unit;
-      if (n.type !== 'generator' || unit?.expanded !== true) continue;
-      const around = (standing ??= nodes.map((m) => ({
-        id: m.id,
-        box: boxOnDiagram(m, sizes, connections.bars),
-      })));
-      const measured = sizes.get(n.id);
-      const places = unitChainPlaces(
-        {
-          ...n.position,
-          width: measured?.width ?? n.initialWidth ?? 0,
-          height: measured?.height ?? n.initialHeight ?? 0,
-        },
-        unitChainSize(unit.members),
-      );
-      const side = chooseChainSide(
-        unit.side === 'below' ? 'below' : 'above',
-        places,
-        (place) =>
-          around.filter(({ id, box }) => id !== n.id && overlaps(box, place)).length +
-          connectorsThrough(place, `stub-${n.id}`),
-      );
-      out.set(n.id, { side, box: places[side] });
-    }
-    return out;
-  }, [nodes, sizes, connections, connectorsThrough]);
-  // Where the P / Q readout of each generator and load stands (`labels.ts`):
-  // beside its connector where no other connector runs through it and
-  // nothing stands there, on the far side of the device otherwise. Placed
-  // against the labels of the buses as they are with values in them, which
-  // is when the readouts show.
-  const readouts = useMemo(() => {
-    const busLabels = new Map<string, Rect>();
-    for (const n of nodes) {
-      if ((n.type ?? 'bus') !== 'bus') continue;
-      busLabels.set(
-        n.id,
-        busLabelBox(n, true, connections.bars.get(n.id), labelClearsWithValues.get(n.id)),
-      );
-    }
-    return placeReadouts(nodes, connections, sizes, {
-      chains: new Map([...chains].map(([id, { box }]) => [id, box])),
-      busLabels,
-    });
-  }, [nodes, connections, sizes, labelClearsWithValues, chains]);
-
   // The buses and devices picked together (`pickedNodeIds`), when there are
   // two or more of them that are still on the diagram and can be moved.
   const pickedNodeIds = useSldStore((s) => s.pickedNodeIds);
@@ -1042,10 +1078,9 @@ function SldCanvasInner({
         // What the connection pass worked out for this node: the bar of a
         // bus with its taps, and the face a device's connector leaves by.
         const bar = isBus ? connections.bars.get(n.id) : undefined;
-        // What the label of the bus stands clear of: the stretches of the
-        // strip under its bar that are shut to it, and of the one over it.
-        const clear = bar === undefined ? undefined : labelClears.get(n.id);
-        const labelClear = clear !== undefined && clear.below.length > 0 ? clear : undefined;
+        // Where the label of the bus stands: under its bar, clear of what
+        // lands and passes there, or over the bar, or beside a tip of it.
+        const label = isBus ? picture.busLabels.get(n.id) : undefined;
         const connector = isBus ? undefined : connections.routes.get(`stub-${n.id}`);
         const connectorFace = connector?.sourceSide;
         // Which way the connector goes from that face: to the left, to the
@@ -1062,8 +1097,9 @@ function SldCanvasInner({
         // connector that runs straight out of the face it hangs off. Where
         // another connector runs through it there (a line lands on the bar
         // just right of the device), or something stands there, it stands
-        // somewhere else (`placeReadouts`), and the node is told where.
-        const spot = readouts.get(n.id)?.spot;
+        // somewhere else (`placeReadouts`), and the node is told where; with
+        // no place at all it is left off.
+        const spot = picture.readouts.get(n.id)?.spot;
         const readoutSpot =
           spot === undefined ||
           spot === 'right' ||
@@ -1074,7 +1110,7 @@ function SldCanvasInner({
         // The side the chain of a unit is drawn out on, where that is not
         // the one `buildGraph` gave it.
         const unit = (n.data as { unit?: UnitNodeData }).unit;
-        const chain = chains.get(n.id);
+        const chain = picture.chains.get(n.id);
         const drawnOut =
           unit !== undefined && chain !== undefined && chain.side !== unit.side
             ? { unit: { ...unit, side: chain.side } }
@@ -1087,8 +1123,14 @@ function SldCanvasInner({
           data: {
             ...(n.data as Record<string, unknown>),
             ...(bar !== undefined ? { bar } : {}),
-            ...(labelClear !== undefined
-              ? { labelClear: labelClear.below, labelClearAbove: labelClear.above }
+            ...(label !== undefined
+              ? {
+                  labelAt: {
+                    offset: label.offset,
+                    side: label.side,
+                    ...(label.side === 'away' ? { top: label.box.top - n.position.y } : {}),
+                  },
+                }
               : {}),
             ...(connectorFace !== undefined ? { connectorFace } : {}),
             ...(connectorLean !== 0 ? { connectorLean } : {}),
@@ -1118,9 +1160,7 @@ function SldCanvasInner({
       connectivityResult,
       energisedBusIdxes,
       connections,
-      labelClears,
-      readouts,
-      chains,
+      picture,
       sizes,
     ],
   );
@@ -1136,20 +1176,7 @@ function SldCanvasInner({
   // (`labels.ts`): on a straight run of its route, or beside one, clear of
   // the symbols, of the labels of the buses, of the P / Q readouts of the
   // devices, and of each other.
-  const labelPlaces = useMemo(() => {
-    const busLabels = new Map<string, Rect>();
-    for (const n of nodes) {
-      if ((n.type ?? 'bus') !== 'bus') continue;
-      busLabels.set(
-        n.id,
-        busLabelBox(n, valuesShown, connections.bars.get(n.id), labelClears.get(n.id)),
-      );
-    }
-    return placeBranchLabels(nodes, edges, connections, sizes, {
-      busLabels,
-      readouts: valuesShown ? [...readouts.values()].map(({ box }) => box) : [],
-    });
-  }, [nodes, edges, connections, sizes, labelClears, readouts, valuesShown]);
+  const labelPlaces = picture.labelPlaces;
   // The edges with their routes. An edge whose route did not change keeps its
   // object, so React Flow redraws only the connectors that moved.
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
@@ -1258,9 +1285,30 @@ function SldCanvasInner({
   //
   // Commands of the palette and of the right-click menu; the registry reaches
   // the canvas through the bridge in ``store/sld.ts``.
-  const fitView = useCallback(() => {
-    void rf.fitView({ duration: 250 });
-  }, [rf]);
+  // A fit shows the whole diagram clear of the minimap and the zoom controls
+  // (`fitPadding`).
+  const fitWithin = useCallback(
+    (duration: number) => {
+      const surface = canvasRef.current;
+      const bounds = rf.getNodesBounds(nodesRef.current);
+      const padding =
+        surface === null
+          ? undefined
+          : fitPadding({ width: surface.clientWidth, height: surface.clientHeight }, bounds);
+      void rf.fitView({ duration, ...(padding !== undefined ? { padding } : {}) });
+    },
+    [rf],
+  );
+  const fitView = useCallback(() => fitWithin(250), [fitWithin]);
+  // React Flow fits a diagram when it first draws it, to the edges of the
+  // pane. Once every node has been measured it is fitted again, clear of
+  // what floats over the corners.
+  const fittedRef = useRef(false);
+  useEffect(() => {
+    if (fittedRef.current || nodes.length === 0 || !nodes.every((n) => sizes.has(n.id))) return;
+    fittedRef.current = true;
+    fitWithin(0);
+  }, [nodes, sizes, fitWithin]);
 
   // The button above a diagram that is too small to read (`SldCanvasHint`):
   // full size, on the selected bus or device when there is one, and about
@@ -1452,24 +1500,11 @@ function SldCanvasInner({
   // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
   // `relayout` the buses are first lined up on the grid and every generator,
   // load and shunt is put back beside its bus, where the diagram places one
-  // that was never moved.
-  const runTidy = useCallback(
-    (relayout: boolean) => {
+  // that was never moved. `applyTidy` puts a plan in place (`planTidy`).
+  const applyTidy = useCallback(
+    ({ nodes: placedNodes, edges: placedEdges, tidied }: TidyPlan, relayout: boolean) => {
       const graph = baseGraphRef.current;
       if (graph === null) return;
-      const {
-        nodes: placedNodes,
-        edges: placedEdges,
-        tidied,
-      } = planTidy({ nodes: nodesRef.current, edges: graph.edges }, topology, {
-        relayout,
-        sizes,
-        connectorStyle,
-        barLengths,
-        controllerCoords,
-        unitStates,
-        drawn: drawnNodesRef.current,
-      });
       const branches = placedEdges.filter((e) => e.type !== 'stub');
       if (branches.length === 0 && !relayout) {
         toast.info('Nothing to tidy: the diagram has no lines or transformers.');
@@ -1486,7 +1521,8 @@ function SldCanvasInner({
       const before = arrangementOf(nodesRef.current, graph.edges);
       // The routes as routes chosen for the buses where they now stand. A
       // branch that got none keeps the one it had, while its buses stand
-      // where they stood: a re-layout draws it from bar to bar.
+      // where they stood. After a re-layout it has none: the picture routes
+      // it on its own if it finds a way, and draws it from bar to bar if not.
       const at = new Map(placedNodes.map((n) => [n.id, n.position]));
       const chosen: RouteOverrides = {};
       for (const edge of branches) {
@@ -1518,7 +1554,7 @@ function SldCanvasInner({
         ? `${unrouted.length} could not be routed in the time a tidy takes`
         : `No way was found for ${unrouted.length}`;
       const then = relayout
-        ? `${one ? 'it is' : 'they are'} drawn straight from bar to bar`
+        ? `${one ? 'it is' : 'they are'} drawn the most direct way, which may cross a symbol or a bar`
         : one
           ? 'it keeps the route it had'
           : 'they keep the routes they had';
@@ -1531,43 +1567,73 @@ function SldCanvasInner({
         action: { label: 'Undo', onClick: () => undoStep(step) },
       });
     },
-    [topology, barLengths, controllerCoords, unitStates, sizes, connectorStyle, arrange, undoStep],
+    [arrange, undoStep],
   );
-  // A diagram of a few dozen branches is tidied before the next frame. A
-  // large one takes up to about a second, in which the page cannot answer,
-  // so the button says what is going on before the work begins.
+  // A diagram of a few dozen branches is tidied within the press that asked
+  // for it. A large one takes up to about a second, and is worked out off
+  // the main thread (`tidyClient.ts`): the button says what is going on, the
+  // diagram keeps answering, and the work can be called off. Nothing can be
+  // dragged meanwhile, so the plan fits the diagram it is put on.
   const [tidying, setTidying] = useState(false);
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const tidyJobRef = useRef<TidyJob | null>(null);
+  useEffect(
+    () => () => {
+      tidyJobRef.current?.cancel();
+      tidyJobRef.current = null;
+    },
+    [],
+  );
   const tidy = useCallback(
     (relayout: boolean) => {
       const graph = baseGraphRef.current;
-      if (graph === null || tidying) return;
+      if (graph === null || tidyJobRef.current !== null) return;
       if (locked) {
         toast.info(LOCKED_NOTICE);
         return;
       }
-      if (graph.edges.filter((e) => e.type !== 'stub').length <= TIDY_AT_ONCE) {
-        runTidy(relayout);
+      const job = startTidy({ nodes: nodesRef.current, edges: graph.edges }, topology, {
+        relayout,
+        sizes,
+        connectorStyle,
+        barLengths,
+        controllerCoords,
+        unitStates,
+        drawn: drawnNodesRef.current,
+      });
+      if (job.plan !== undefined) {
+        applyTidy(job.plan, relayout);
         return;
       }
+      tidyJobRef.current = job;
       setTidying(true);
-      window.setTimeout(() => {
-        if (!mountedRef.current) return;
-        try {
-          runTidy(relayout);
-        } finally {
-          setTidying(false);
-        }
-      }, TIDY_PAINT_MS);
+      const finished = (): boolean => {
+        if (tidyJobRef.current !== job) return false;
+        tidyJobRef.current = null;
+        setTidying(false);
+        return true;
+      };
+      job.done.then(
+        (plan) => {
+          if (finished()) applyTidy(plan, relayout);
+        },
+        (err: unknown) => {
+          if (!finished()) return;
+          toast.error('The diagram could not be tidied', {
+            description: `${err instanceof Error ? err.message : String(err)}. Nothing was changed.`,
+          });
+        },
+      );
     },
-    [runTidy, locked, tidying],
+    [topology, barLengths, controllerCoords, unitStates, sizes, connectorStyle, locked, applyTidy],
   );
+  const cancelTidy = useCallback(() => {
+    const job = tidyJobRef.current;
+    if (job === null) return;
+    job.cancel();
+    tidyJobRef.current = null;
+    setTidying(false);
+    toast.info('Tidy stopped. Nothing was changed.');
+  }, []);
 
   // Align or distribute the nodes that are picked together. They are lined
   // up by their boxes (`arrangeBoxOf`: a bus by its bar), and one step of Undo
@@ -1797,6 +1863,7 @@ function SldCanvasInner({
         <SldArrangeControls
           locked={locked}
           busy={tidying}
+          onCancel={cancelTidy}
           untidy={draggedIds.length > 0 ? 0 : untidyCount}
           pickedCount={pickedCount}
           snap={snapToGrid}
@@ -1850,7 +1917,10 @@ function SldCanvasInner({
               fitView
               minZoom={MIN_ZOOM}
               ariaLabelConfig={locked ? ARIA_LABELS_LOCKED : ARIA_LABELS_UNLOCKED}
-              nodesDraggable
+              // The padlock of the controls sets this in React Flow's own
+              // state; a tidy that ends must not unlock a diagram that was
+              // locked meanwhile.
+              nodesDraggable={!tidying && !locked}
               nodeDragThreshold={0}
               snapToGrid={snapToGrid}
               snapGrid={SNAP_GRID}

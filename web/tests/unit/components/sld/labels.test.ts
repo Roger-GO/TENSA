@@ -4,8 +4,8 @@
  * clear of what is drawn and of the ones placed before it.
  *
  * A bus node at `(x, y)` is drawn as a bar from `x` to `x + 92` whose centre
- * line is at `y + 3`, and its label hangs in the strip from `y + 7` to
- * `y + 48`. A device is given as a box, and the readout of one that stands
+ * line is at `y + 3`, and its label hangs in the strip from `y + 6` to
+ * `y + 46`. A device is given as a box, and the readout of one that stands
  * over or under its bar hangs in the strip between the two, 72 wide and 22
  * high, 4 beside the connector. The diagrams are built by hand, with the
  * routes written out, so each test says what runs where.
@@ -22,16 +22,21 @@ import {
   type Rect,
 } from '@/components/sld/connections';
 import {
+  BUS_LABEL_BESIDE_GAP,
   LINE_LABEL_BOX,
   boxOnDiagram,
   busLabelBox,
   busLabelClear,
+  busLabelReserve,
   busLabelWidth,
   chainBoxes,
+  flowLabelWidth,
   overlaps,
   placeBranchLabels,
+  placeBusLabels,
   placeReadouts,
   readoutReserve,
+  readoutWidth,
   type LabelNode,
 } from '@/components/sld/labels';
 
@@ -106,18 +111,20 @@ describe('busLabelWidth and busLabelBox', () => {
       top: 206,
       bottom: 224,
     });
+    // Its three lines and the gap to the bar: right down to where the readout
+    // of a device at the default distance under the bus begins.
     expect(busLabelBox(node, true, bar(), undefined)).toEqual({
       left: 146 - 31,
       right: 146 + 31,
       top: 206,
-      bottom: 248,
+      bottom: 246,
     });
   });
 
   it('stands the label over the bar where `busLabelPlace` puts it there', () => {
     const node = bus('BUS1', 100, 200);
     const box = busLabelBox(node, true, bar(), { below: [[-200, 300]], above: [] });
-    expect(box).toEqual({ left: 146 - 31, right: 146 + 31, top: 200 - 4 - 42, bottom: 196 });
+    expect(box).toEqual({ left: 146 - 31, right: 146 + 31, top: 200 - 4 - 40, bottom: 196 });
   });
 });
 
@@ -319,7 +326,7 @@ describe('placeReadouts', () => {
     expect(place.box).toEqual({ left: -4 - 72, right: -4, top: 193.5 - 11, bottom: 193.5 + 11 });
   });
 
-  it('stays where it would first stand when no place is free', () => {
+  it('is left off when no place is free, with the box it would first take', () => {
     const drawn = layout(
       {
         '1': bar([
@@ -340,7 +347,16 @@ describe('placeReadouts', () => {
         ]),
       },
     );
-    expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')!.spot).toBe('right');
+    const place = placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')!;
+    expect(place.spot).toBe('none');
+    // Right of the connector, under the load: where it stands with nothing in the way.
+    expect(place.box).toEqual(
+      placeReadouts(
+        nodes,
+        layout({ '1': bar([{ x: 20, side: 'south' }]) }, { 'stub-load-PQ': stub }),
+        NO_SIZES,
+      ).get('load-PQ')!.box,
+    );
   });
 
   it('keeps out of a symbol that stands where it would', () => {
@@ -454,8 +470,12 @@ describe('placeReadouts', () => {
         ]),
       },
     );
+    // Both places beside the connector are taken. Without a chain the far
+    // side of the device would do; with one drawn out there, the readout is
+    // left off rather than drawn over the chain.
     const chains = new Map([['load-PQ', { left: -20, right: 60, top: 218, bottom: 260 }]]);
-    expect(placeReadouts(nodes, drawn, NO_SIZES, { chains }).get('load-PQ')!.spot).toBe('right');
+    expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')!.spot).toBe('far');
+    expect(placeReadouts(nodes, drawn, NO_SIZES, { chains }).get('load-PQ')!.spot).toBe('none');
   });
 
   it('places the readouts of generators and loads only', () => {
@@ -651,5 +671,165 @@ describe('chainBoxes', () => {
     // Over the symbol, about its middle.
     expect(box.bottom).toBe(96);
     expect((box.left + box.right) / 2).toBe(120);
+  });
+});
+
+describe('placeBusLabels', () => {
+  const node = bus('BUS1', 100, 200);
+  /** An upright connector at `x` through the strips under and over the bar. */
+  const through = (x: number): ConnectorRoute =>
+    route([
+      [x, 100],
+      [x, 300],
+    ]);
+  /** Upright connectors `step` apart from `from` to `to`: no label fits between two of them. */
+  const fence = (from: number, to: number, step = 40): Record<string, ConnectorRoute> => {
+    const lines: Record<string, ConnectorRoute> = {};
+    for (let x = from; x <= to; x += step) lines[`fence-${x}`] = through(x);
+    return lines;
+  };
+
+  it('hangs the label under the middle of a bar that stands alone', () => {
+    const label = placeBusLabels([node], layout({ BUS1: bar() }), NO_SIZES, true).get('BUS1')!;
+    expect(label.side).toBe('below');
+    expect(label.offset).toBe(46);
+    expect(label.box).toEqual({ left: 146 - 31, right: 146 + 31, top: 206, bottom: 246 });
+  });
+
+  it('stands it over the bar where the strip under the bar is shut and the one over it is not', () => {
+    // A symbol all along under the bar.
+    const below = device('load-PQ', 0, 210, {}, 300);
+    const label = placeBusLabels([node, below], layout({ BUS1: bar() }), NO_SIZES, true).get(
+      'BUS1',
+    )!;
+    expect(label.side).toBe('above');
+    expect(label.box.bottom).toBe(196);
+  });
+
+  it('stands it beside a tip of the bar, level with it, where neither strip has a place', () => {
+    // A wide symbol in the strip under the bar and one in the strip over it,
+    // both clear of the height of the bar itself.
+    const under = device('load-PQ', -100, 228, {}, 500);
+    const over = device('generator-G', -100, 130, {}, 500);
+    const drawn = layout({ BUS1: bar() });
+    const label = placeBusLabels([node, under, over], drawn, NO_SIZES, true).get('BUS1')!;
+    expect(label.side).toBe('east');
+    // Right of the tip, its middle at the height of the bar.
+    expect(label.box.left).toBe(100 + 92 + BUS_LABEL_BESIDE_GAP);
+    expect((label.box.top + label.box.bottom) / 2).toBe(203);
+    // With something there as well, left of the other tip.
+    const beside = device('shunt-S', 200, 183);
+    const west = placeBusLabels([node, under, over, beside], drawn, NO_SIZES, true).get('BUS1')!;
+    expect(west.side).toBe('west');
+    expect(west.box.right).toBe(100 - BUS_LABEL_BESIDE_GAP);
+  });
+
+  it('stands it in the nearest clear place away from the bar where it has none by it', () => {
+    // Connectors through both strips, all along the bar and far past its tips.
+    const drawn = layout({ BUS1: bar() }, fence(-200, 500));
+    const label = placeBusLabels([node], drawn, NO_SIZES, true).get('BUS1')!;
+    expect(label.side).toBe('away');
+    // Under the connectors, which end at 300: nothing runs through it.
+    expect(label.box.top).toBeGreaterThanOrEqual(300);
+    for (const { points } of drawn.routes.values()) expect(crosses(points, label.box)).toBe(false);
+    // Its middle is what the node is told.
+    expect(label.offset).toBe((label.box.left + label.box.right) / 2 - 100);
+  });
+
+  it('keeps the label of a bus clear of the label placed before it, and of a chain that is drawn out', () => {
+    // Two buses on one spot of the diagram, one a little lower.
+    const first = bus('BUS1', 100, 200);
+    const second = bus('BUS2', 110, 204);
+    const labels = placeBusLabels(
+      [first, second],
+      layout({ BUS1: bar(), BUS2: bar() }),
+      NO_SIZES,
+      true,
+    );
+    expect(overlaps(labels.get('BUS1')!.box, labels.get('BUS2')!.box)).toBe(false);
+    const chain = { left: 100, right: 200, top: 206, bottom: 250 };
+    const moved = placeBusLabels(
+      [first],
+      layout({ BUS1: bar() }),
+      NO_SIZES,
+      true,
+      new Map([['generator-1', chain]]),
+    ).get('BUS1')!;
+    expect(overlaps(moved.box, chain)).toBe(false);
+  });
+});
+
+describe('busLabelReserve', () => {
+  it('keeps places for the label under the bar, over it and beside its tips, as large as it is with values', () => {
+    const places = busLabelReserve([bus('BUS1', 100, 200)], layout({ BUS1: bar() }), NO_SIZES);
+    expect(places).toHaveLength(1);
+    expect(places[0]).toHaveLength(8);
+    // Under the middle of the bar: the label, with a little room either side.
+    expect(places[0]![0]).toEqual({ left: 146 - 36, right: 146 + 36, top: 206, bottom: 246 });
+    for (const place of places[0]!) expect(place.bottom - place.top).toBe(40);
+  });
+
+  it('leaves out a place a device connector runs through, or a symbol stands in', () => {
+    const load = device('load-PQ', 126, 270);
+    const drawn = layout(
+      { BUS1: bar([{ x: 46, side: 'south' }]) },
+      {
+        'stub-load-PQ': route(
+          [
+            [146, 270],
+            [146, 203],
+          ],
+          'north',
+        ),
+      },
+    );
+    const [places] = busLabelReserve([bus('BUS1', 100, 200), load], drawn, NO_SIZES);
+    const connector = drawn.routes.get('stub-load-PQ')!.points;
+    expect(places!.length).toBeLessThan(8);
+    for (const place of places!) expect(crosses(connector, place)).toBe(false);
+  });
+});
+
+describe('the widths of the values', () => {
+  it('takes a readout to be as wide as the longer of its two lines', () => {
+    expect(readoutWidth('40.0 MW', '30.4 MVAr')).toBe(Math.ceil(5.4 * 9 + 8));
+    expect(readoutWidth('-1575.0 MW', null)).toBe(62);
+  });
+
+  it('takes a flow label to be as wide as its arrow, its flow and its loading', () => {
+    // An arrow and the flow, a gap between them.
+    expect(flowLabelWidth('50.10 MW', null)).toBe(6 * 9 + 4 + 14);
+    // The loading after it, another gap on.
+    expect(flowLabelWidth('50.10 MW', '87.3%')).toBe(6 * 14 + 8 + 14);
+    // The loading alone, when the labels are hidden and the line is near its rating.
+    expect(flowLabelWidth(null, '87.3%')).toBe(6 * 5 + 14);
+  });
+
+  it('stands a readout that is narrower where the widest would not fit', () => {
+    // A line 62 right of the connector of a load under its bar.
+    const nodes = [bus('1', 0, 100), device('load-PQ', 0, 173)];
+    const drawn = layout(
+      { '1': bar([{ x: 20, side: 'south' }]) },
+      {
+        'stub-load-PQ': route(
+          [
+            [20, 173],
+            [20, 103],
+          ],
+          'north',
+        ),
+        'line-l': route([
+          [86, 0],
+          [86, 400],
+        ]),
+      },
+    );
+    // At its widest (72) the line runs through it on the right; 57 wide it stands there.
+    expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')!.spot).not.toBe('right');
+    const narrow = placeReadouts(nodes, drawn, NO_SIZES, {
+      widths: new Map([['load-PQ', 57]]),
+    }).get('load-PQ')!;
+    expect(narrow.spot).toBe('right');
+    expect(narrow.box.right - narrow.box.left).toBe(57);
   });
 });

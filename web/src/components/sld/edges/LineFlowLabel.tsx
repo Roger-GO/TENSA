@@ -13,6 +13,8 @@ export interface LineFlowLabelProps {
   y: number;
   /** The side of its line the label stands on; absent: on the line. */
   side?: 'left' | 'right' | 'above' | 'below';
+  /** Whether it stands on an upright run turned to read along it, from the bottom up. */
+  turned?: boolean;
   overlay: LineOverlayState;
   hideLabels: boolean;
 }
@@ -30,13 +32,23 @@ const HUNG_BY: Record<NonNullable<LineFlowLabelProps['side']> | 'on', string> = 
  * The label of a line: the direction of the flow with its MW, and, for a line
  * the case rates, its loading in percent of the rating. It stands on the line
  * at the place the canvas found for it, or beside the line there (`side`),
- * hung by the edge it turns to the line. The
+ * hung by the edge it turns to the line, or on an upright run turned to
+ * read along it (`turned`), where lines close on either side leave it no
+ * other room. The
  * label outlines in amber or red when the line is near or past its rating, and
  * the percentage is the colour-free sign of it. It follows the Labels / Hide
  * toggle, except that a line near or past its rating keeps its percentage, as
  * a bus near a voltage limit keeps its marker.
  */
-export function LineFlowLabel({ id, x, y, side, overlay, hideLabels }: LineFlowLabelProps) {
+export function LineFlowLabel({
+  id,
+  x,
+  y,
+  side,
+  turned = false,
+  overlay,
+  hideLabels,
+}: LineFlowLabelProps) {
   const flagged = overlay.loading_status !== null;
   const showLoading = overlay.loading_label !== null && (!hideLabels || flagged);
   if (!overlay.has_data || (overlay.p_label === null && !showLoading)) return null;
@@ -48,9 +60,10 @@ export function LineFlowLabel({ id, x, y, side, overlay, hideLabels }: LineFlowL
         data-direction={overlay.direction}
         data-loading-band={band}
         data-beside={side}
+        data-turned={turned ? 'true' : undefined}
         style={{
           position: 'absolute',
-          transform: `${HUNG_BY[side ?? 'on']} translate(${x}px, ${y}px)`,
+          transform: `${HUNG_BY[side ?? 'on']} translate(${x}px, ${y}px)${turned ? ' rotate(-90deg)' : ''}`,
           pointerEvents: 'none',
           zIndex: 20,
         }}

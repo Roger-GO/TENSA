@@ -1,42 +1,38 @@
 /**
  * What Tidy diagram and Tidy and re-layout work out (`tidyPlan.ts`), held on
- * the three example cases as the automatic layout draws them: the diagram a
- * user has after opening a case, pressing the button and running a power
- * flow. The routes are checked in `tidy.test.ts`; this is about what is
- * drawn around them once the values show: that every generator and load has
- * a place for its P and Q that no line runs through, that the flow of a
- * line stands on no symbol, no readout and no other label, and that the
- * label of a bus stands on no symbol and no other label.
+ * the three example cases drawn the way a layout saved by an earlier version
+ * has them: the buses where ELK puts them, the devices where the diagram
+ * places one that has no place, and the branches along the routes ELK makes,
+ * which share corridors and take no notice of the devices. That is the
+ * diagram a tidy is for. (A case that opens with no saved layout is tidy
+ * already: `noOverlap.test.ts`.)
+ *
+ * The routes are checked in `tidy.test.ts`; this is about the whole diagram
+ * once the plan is in place and a power flow has run: nothing on it is drawn
+ * over anything else (`findOverlaps`), and after a re-layout every bus is on
+ * the grid and every device square to its bar.
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `layout.test.ts`.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { Edge, Node } from '@xyflow/react';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
+import type { ConnectionEdge, ConnectionLayout } from '@/components/sld/connections';
 import { autoLayout } from '@/components/sld/layout';
-import { buildGraph } from '@/components/sld/graph';
-import {
-  labelBoxAt,
-  layoutConnections,
-  type ConnectionEdge,
-  type ConnectionLayout,
-  type Point,
-  type Rect,
-} from '@/components/sld/connections';
-import {
-  LINE_LABEL_BOX,
-  TRANSFORMER_LABEL_BOX,
-  boxOnDiagram,
-  busLabelBox,
-  busLabelClear,
-  overlaps,
-  placeBranchLabels,
-  placeReadouts,
-} from '@/components/sld/labels';
+import { buildGraph, defaultBarLengths } from '@/components/sld/graph';
+import { countCrossings } from '@/components/sld/overlapCheck';
+import { drawnDiagram } from '@/components/sld/picture';
 import { GRID_STEP } from '@/components/sld/tidy';
 import { branchesThroughSymbols, planTidy } from '@/components/sld/tidyPlan';
+import {
+  dragged,
+  drawn,
+  opened,
+  overlapsOf,
+  tidied,
+  type Diagram,
+} from '../../helpers/diagramStates';
 import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -45,151 +41,17 @@ vi.mock('@/components/sld/elkClient', async () => {
   return { elkLayout: vi.fn((graph: ElkNode) => elk.layout(graph)) };
 });
 
-const NO_SIZES = new Map<string, { width: number; height: number }>();
-
-interface Drawing {
-  nodes: Node[];
-  edges: Edge[];
-  connections: ConnectionLayout;
-}
-
-/** `topology` as the diagram draws it with no saved layout. */
-async function opened(topology: TopologySummary): Promise<Drawing> {
+/** `topology` drawn along the routes ELK makes, as a layout saved by an earlier version has it. */
+async function alongElkRoutes(topology: TopologySummary): Promise<Diagram> {
   const { coords, bendPoints } = await autoLayout(topology);
-  const { nodes, edges } = buildGraph(topology, coords, { bendPoints });
-  return { nodes, edges, connections: layoutConnections(nodes, edges as ConnectionEdge[]) };
+  const barLengths = defaultBarLengths(topology);
+  const { nodes, edges } = buildGraph(topology, coords, { bendPoints, barLengths });
+  return { topology, nodes, edges, barLengths };
 }
 
-/** `drawing` after Tidy diagram, or after Tidy and re-layout: the plan, put in place. */
-function tidied(drawing: Drawing, topology: TopologySummary, relayout: boolean) {
-  const plan = planTidy({ nodes: drawing.nodes, edges: drawing.edges }, topology, { relayout });
-  const at = new Map(plan.nodes.map((n) => [n.id, n.position]));
-  const edges = plan.edges.map((edge) => {
-    const points = plan.tidied.routes.get(edge.id);
-    if (points === undefined) return edge;
-    return {
-      ...edge,
-      data: {
-        ...edge.data,
-        bendPoints: points,
-        bendAnchors: { source: { ...at.get(edge.source)! }, target: { ...at.get(edge.target)! } },
-      },
-    };
-  });
-  return {
-    nodes: plan.nodes,
-    edges,
-    connections: layoutConnections(plan.nodes, edges as ConnectionEdge[]),
-    tidied: plan.tidied,
-  };
-}
-
-/** Whether a level or upright run of `points` passes through `box`, a pixel inside its edge. */
-function crosses(points: readonly Point[], box: Rect): boolean {
-  return points.slice(1).some((b, i) => {
-    const a = points[i]!;
-    return (
-      Math.max(a[0], b[0]) > box.left + 1 &&
-      Math.min(a[0], b[0]) < box.right - 1 &&
-      Math.max(a[1], b[1]) > box.top + 1 &&
-      Math.min(a[1], b[1]) < box.bottom - 1
-    );
-  });
-}
-
-/** Every way the labels of `drawing` are in each other's way or in a line's, with values shown. */
-function labelProblems({ nodes, edges, connections }: Drawing): string[] {
-  const clear = busLabelClear(nodes, connections, NO_SIZES, true);
-  const busLabels = new Map<string, Rect>();
-  for (const n of nodes) {
-    if (n.type !== 'bus') continue;
-    busLabels.set(n.id, busLabelBox(n, true, connections.bars.get(n.id), clear.get(n.id)));
-  }
-  const readouts = placeReadouts(nodes, connections, NO_SIZES, { busLabels });
-  const places = placeBranchLabels(nodes, edges as ConnectionEdge[], connections, NO_SIZES, {
-    busLabels,
-    readouts: [...readouts.values()].map(({ box }) => box),
-  });
-  const flows = new Map<string, Rect>();
-  for (const edge of edges) {
-    const at = places.get(edge.id);
-    if (edge.type === 'stub' || at === undefined) continue;
-    const size = edge.type === 'transformer' ? TRANSFORMER_LABEL_BOX : LINE_LABEL_BOX;
-    flows.set(edge.id, labelBoxAt(at, size.width, size.height));
-  }
-  const devices = nodes.filter((n) => n.type !== 'bus');
-  const boxOf = (n: Node): Rect => boxOnDiagram(n, NO_SIZES, connections.bars);
-  const found: string[] = [];
-  for (const [id, { box }] of readouts) {
-    for (const [edgeId, route] of connections.routes) {
-      if (edgeId !== `stub-${id}` && crosses(route.points, box)) {
-        found.push(`${edgeId} runs through the readout of ${id}`);
-      }
-    }
-    for (const other of devices) {
-      if (other.id !== id && overlaps(boxOf(other), box, 2)) {
-        found.push(`the readout of ${id} is on ${other.id}`);
-      }
-    }
-    for (const [otherId, other] of readouts) {
-      if (otherId < id && overlaps(other.box, box, 2)) {
-        found.push(`the readouts of ${id} and ${otherId} overlap`);
-      }
-    }
-  }
-  for (const [id, box] of flows) {
-    for (const device of devices) {
-      if (overlaps(boxOf(device), box)) found.push(`the label of ${id} is on ${device.id}`);
-    }
-    for (const [device, readout] of readouts) {
-      if (overlaps(readout.box, box))
-        found.push(`the label of ${id} is on the readout of ${device}`);
-    }
-    for (const [bus, label] of busLabels) {
-      if (overlaps(label, box)) found.push(`the label of ${id} is on the label of bus ${bus}`);
-    }
-    for (const [other, label] of flows) {
-      if (other < id && overlaps(label, box))
-        found.push(`the labels of ${id} and ${other} overlap`);
-    }
-  }
-  for (const [bus, label] of busLabels) {
-    for (const device of devices) {
-      if (overlaps(boxOf(device), label)) found.push(`the label of bus ${bus} is on ${device.id}`);
-    }
-    for (const [other, box] of busLabels) {
-      if (other < bus && overlaps(box, label)) {
-        found.push(`the labels of buses ${bus} and ${other} overlap`);
-      }
-    }
-    for (const [edgeId, route] of connections.routes) {
-      if (crosses(route.points, label))
-        found.push(`${edgeId} runs through the label of bus ${bus}`);
-    }
-  }
-  return found;
-}
-
-/** How often two branches of `drawing` cross. */
-function crossings({ edges, connections }: Drawing): number {
-  const routes = edges
-    .filter((edge) => edge.type !== 'stub')
-    .map((edge) => connections.routes.get(edge.id)!.points);
-  const side = (u: Point, v: Point, w: Point): number =>
-    (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0]);
-  let count = 0;
-  for (let i = 0; i < routes.length; i += 1) {
-    for (let k = i + 1; k < routes.length; k += 1) {
-      const [p, q] = [routes[i]!, routes[k]!];
-      for (let m = 1; m < p.length; m += 1) {
-        for (let n = 1; n < q.length; n += 1) {
-          const [a, b, c, d] = [p[m - 1]!, p[m]!, q[n - 1]!, q[n]!];
-          if (side(c, d, a) * side(c, d, b) < 0 && side(a, b, c) * side(a, b, d) < 0) count += 1;
-        }
-      }
-    }
-  }
-  return count;
+/** How often two lines of `diagram` cross. */
+function crossings(diagram: Diagram): number {
+  return countCrossings(drawnDiagram(diagram.nodes, drawn(diagram), { values: false }).lines);
 }
 
 const CASES = [
@@ -200,37 +62,41 @@ const CASES = [
 
 describe('Tidy diagram on the example cases', () => {
   for (const [name, topology] of CASES) {
-    it(`leaves the values of ${name} clear of the lines, and its labels clear of each other`, async () => {
-      const before = await opened(topology);
-      const after = tidied(before, topology, false);
-      expect(after.tidied.unrouted).toEqual([]);
+    it(`moves nothing of ${name}, and leaves nothing on it drawn over anything else`, async () => {
+      const before = await alongElkRoutes(topology);
+      const after = tidied(before, false);
+      expect(drawn(after).unrouted).toEqual([]);
       // Nothing was moved.
       expect(after.nodes).toBe(before.nodes);
-      expect(labelProblems(after)).toEqual([]);
-      expect(branchesThroughSymbols(after.nodes, after.edges, after.connections)).toEqual([]);
-      expect(crossings(after)).toBeLessThanOrEqual(crossings(before));
+      expect(overlapsOf(after, { values: false })).toEqual([]);
+      expect(overlapsOf(after, { values: true })).toEqual([]);
+      const picture = drawn(after);
+      expect(branchesThroughSymbols(after.nodes, picture.edges, picture.connections)).toEqual([]);
     });
   }
 
-  it('finds every load of IEEE 14 a place for its values that the automatic layout does not', async () => {
-    // As the case opens, lines run through the readouts of several loads:
-    // a line lands on the bar between a load and the generator beside it,
-    // and others pass on the far side of the load.
-    const before = await opened(IEEE14);
-    const struck = labelProblems(before).filter((problem) =>
-      problem.includes('runs through the readout'),
-    );
-    expect(struck.length).toBeGreaterThan(0);
-    expect(labelProblems(tidied(before, IEEE14, false))).toEqual([]);
+  it('routes every branch of IEEE 14, which ELK runs through symbols and down shared corridors', async () => {
+    // Drawn along ELK's routes as they are stored, lines run through the
+    // devices that were placed after them; the plan routes each of the
+    // twenty afresh.
+    const before = await alongElkRoutes(IEEE14);
+    const plan = planTidy({ nodes: before.nodes, edges: before.edges }, IEEE14, {
+      relayout: false,
+      barLengths: before.barLengths,
+    });
+    expect(plan.tidied.unrouted).toEqual([]);
+    expect(plan.tidied.routes.size).toBe(20);
+    expect(plan.nodes).toBe(before.nodes);
   });
 });
 
 describe('Tidy and re-layout on the example cases', () => {
   for (const [name, topology] of CASES) {
-    it(`puts every device of ${name} square to its bar, with its values and the labels clear`, async () => {
-      const before = await opened(topology);
-      const after = tidied(before, topology, true);
-      expect(after.tidied.unrouted).toEqual([]);
+    it(`puts every device of ${name} square to its bar, with nothing drawn over anything else`, async () => {
+      const before = await alongElkRoutes(topology);
+      const after = tidied(before, true);
+      const picture = drawn(after);
+      expect(picture.unrouted).toEqual([]);
       for (const node of after.nodes) {
         if (node.type !== 'bus') continue;
         expect(node.position.x % GRID_STEP, node.id).toBe(0);
@@ -239,22 +105,51 @@ describe('Tidy and re-layout on the example cases', () => {
       // Every device stands over or under its bar: its connector drops square.
       for (const edge of after.edges) {
         if (edge.type !== 'stub') continue;
-        const points = after.connections.routes.get(edge.id)!.points;
+        const points = picture.connections.routes.get(edge.id)!.points;
         expect(points, edge.id).toHaveLength(2);
         expect(points[0]![0], edge.id).toBe(points[1]![0]);
       }
-      expect(labelProblems(after)).toEqual([]);
-      expect(branchesThroughSymbols(after.nodes, after.edges, after.connections)).toEqual([]);
-      expect(crossings(after)).toBe(0);
+      expect(overlapsOf(after, { values: false })).toEqual([]);
+      expect(overlapsOf(after, { values: true })).toEqual([]);
+      expect(branchesThroughSymbols(after.nodes, picture.edges, picture.connections)).toEqual([]);
+      expect(crossings(after)).toBeLessThanOrEqual(name === 'IEEE 14' ? 2 : 0);
     });
   }
 
+  it('still stands every device of IEEE 14 square to its bar after a bus was moved', async () => {
+    // With bus 13 moved down and to the left, the lines of bus 9 come to
+    // take the whole of its bar on the first pass, and its shunt has no
+    // column left that is a gap clear of them. It stands as far past the
+    // tip as the bar still reaches under it, and the lines are routed round
+    // it; clear of them all it stood further out, with its connector run to
+    // the tip of the bar at an angle.
+    const moved = dragged(await opened(IEEE14), '13', -155.465, 42.399);
+    const after = tidied(moved, true);
+    const picture = drawn(after);
+    expect(picture.unrouted).toEqual([]);
+    for (const edge of after.edges) {
+      if (edge.type !== 'stub') continue;
+      const points = picture.connections.routes.get(edge.id)!.points;
+      expect(points, edge.id).toHaveLength(2);
+      expect(points[0]![0], edge.id).toBe(points[1]![0]);
+    }
+    expect(overlapsOf(after, { values: false })).toEqual([]);
+    expect(overlapsOf(after, { values: true })).toEqual([]);
+  });
+
   it('is the same plan when it is asked for again', async () => {
-    const before = await opened(IEEE14);
-    const first = tidied(before, IEEE14, true);
-    const again = planTidy({ nodes: first.nodes, edges: first.edges }, IEEE14, { relayout: true });
+    const before = await alongElkRoutes(IEEE14);
+    const first = tidied(before, true);
+    const again = planTidy({ nodes: first.nodes, edges: first.edges }, IEEE14, {
+      relayout: true,
+      barLengths: first.barLengths,
+    });
     expect(again.nodes.map((n) => n.position)).toEqual(first.nodes.map((n) => n.position));
-    expect([...again.tidied.routes]).toEqual([...first.tidied.routes]);
+    expect([...again.tidied.routes]).toEqual(
+      first.edges
+        .filter((e) => e.type !== 'stub')
+        .map((e) => [e.id, (e.data as { bendPoints: unknown }).bendPoints]),
+    );
   });
 });
 

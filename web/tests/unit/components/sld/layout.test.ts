@@ -12,7 +12,7 @@ import type { ElkNode } from 'elkjs/lib/elk-api';
 import { LAYER_GAP, autoLayout, gridLayout, layoutSignature } from '@/components/sld/layout';
 import { elkLayout } from '@/components/sld/elkClient';
 import { BAR_LENGTH, RUN_CLEARANCE } from '@/components/sld/connections';
-import { DEVICE_ROW_OFFSET } from '@/components/sld/graph';
+import { DEVICE_ROW_OFFSET, busRoom } from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -173,6 +173,46 @@ describe('autoLayout', () => {
     // A bar drawn at each x reaches BAR_LENGTH to the right of it.
     expect(xs[1]! - xs[0]!).toBeGreaterThan(BAR_LENGTH);
     expect(xs[2]! - xs[1]!).toBeGreaterThan(BAR_LENGTH);
+  });
+
+  it('lays a busy bus out as wide as the bar its connections need, and places its node in the middle', async () => {
+    // Bus 1 with eight lines: more than a bar of the default length has taps for.
+    const others = [2, 3, 4, 5, 6, 7, 8, 9];
+    const topology = makeTopology(
+      [bus(1, 'b1'), ...others.map((i) => bus(i, `b${i}`))],
+      others.map((i) => line(i, 1, i)),
+    );
+    const room = busRoom(topology).get('1')!;
+    expect(room.bar).toBeGreaterThan(BAR_LENGTH);
+    expect(room.box).toBeGreaterThanOrEqual(room.bar);
+
+    const { coords } = await autoLayout(topology, undefined, { routes: false });
+
+    const graph = vi.mocked(elkLayout).mock.calls[0]![0] as ElkNode;
+    const widths = new Map((graph.children ?? []).map((c) => [c.id, c.width]));
+    expect(widths.get('1')).toBe(room.box);
+    expect(widths.get('2')).toBe(BAR_LENGTH);
+    // The node of a bus is as wide as a bar of the default length and its
+    // bar grows about the middle: it stands in the middle of the box ELK
+    // placed, so the long bar fills that box and no more.
+    const placed = await (vi.mocked(elkLayout).mock.results[0]!.value as Promise<ElkNode>);
+    const box = (placed.children ?? []).find((c) => c.id === '1')!;
+    expect(coords['1']).toEqual({ x: box.x! + (room.box - BAR_LENGTH) / 2, y: box.y });
+    const narrow = (placed.children ?? []).find((c) => c.id === '2')!;
+    expect(coords['2']).toEqual({ x: narrow.x, y: narrow.y });
+  });
+
+  it('asks ELK for the places of the buses alone when no routes are wanted', async () => {
+    const topology = makeTopology(
+      [bus(1, 'b1'), bus(2, 'b2'), bus(3, 'b3')],
+      [line(1, 1, 2), line(2, 2, 3)],
+    );
+    const { coords, bendPoints } = await autoLayout(topology, undefined, { routes: false });
+    expect(Object.keys(coords).sort()).toEqual(['1', '2', '3']);
+    expect(bendPoints.size).toBe(0);
+    // One pass: the one that declares no ports.
+    expect(elkLayout).toHaveBeenCalledTimes(1);
+    expect(isPass2(vi.mocked(elkLayout).mock.calls[0]![0] as ElkNode)).toBe(false);
   });
 
   it('routes each branch out of a face of the bar when its buses stand one above the other', async () => {

@@ -2,11 +2,19 @@
  * What the diagram specs share: opening a case, reading what React Flow drew
  * (the box of each node as the browser laid it out, the bar and the tap dots
  * of each bus, the path of each edge), the rules every connector of a drawn
- * diagram keeps, and the rules the values of a power flow keep on it.
+ * diagram keeps, the rules the values of a power flow keep on it, and the
+ * rule that nothing on it is drawn over anything else (`overlapsOnScreen`,
+ * which hands what is on screen to the checker the diagram itself routes
+ * by).
  *
- * Not a spec itself: `sld-connections.spec.ts` and `sld-tidy.spec.ts` import
- * from it.
+ * Not a spec itself: `sld-connections.spec.ts`, `sld-tidy.spec.ts` and
+ * `sld-no-overlap.spec.ts` import from it.
  */
+import {
+  describeOverlaps,
+  findOverlaps,
+  type DrawnDiagram,
+} from '../../src/components/sld/overlapCheck';
 import { expect, type Page } from './fixtures';
 
 /** Open a case from the saved-cases list (see load-pf-flow.spec.ts for why this retries). */
@@ -28,6 +36,42 @@ export async function openCase(page: Page, caseFile: string): Promise<void> {
   await expect(page.getByRole('complementary', { name: 'Case navigation' })).toContainText(
     new RegExp(`Loaded case\\s*${name}`),
   );
+}
+
+/** Save the open case under `stem`, with its layout, and open the copy. */
+export async function openCopy(page: Page, stem: string): Promise<void> {
+  await page.getByTestId('topbar-menu-workspace-trigger').click();
+  await page.getByTestId('topbar-menu-workspace-save-system').click();
+  await page.getByTestId('save-filename').fill(stem);
+  await Promise.all([layoutWritten(page), page.getByTestId('save-confirm').click()]);
+  await openCase(page, `${stem}.xlsx`);
+}
+
+/** Drag the node `id` by `dx`, `dy` on screen, and wait for the layout to be written. */
+export async function dragBy(page: Page, id: string, dx: number, dy: number): Promise<void> {
+  const node = page.locator(`.react-flow__node[data-id="${id}"]`);
+  const box = (await node.boundingBox())!;
+  // On the bar of a bus, which is at the top of its node; in the middle of a device.
+  const press = { x: box.x + Math.min(box.width / 2, 30), y: box.y + Math.min(box.height / 2, 3) };
+  await page.mouse.move(press.x, press.y);
+  await page.mouse.down();
+  await page.mouse.move(press.x + dx / 2, press.y + dy / 2, { steps: 5 });
+  await page.mouse.move(press.x + dx, press.y + dy, { steps: 5 });
+  await Promise.all([layoutWritten(page), page.mouse.up()]);
+}
+
+/**
+ * Drag the node `id` by `dx`, `dy` in the diagram's own units, whatever the
+ * zoom the diagram was fitted at, and wait for the layout to be written: a
+ * move that lands a node on free ground lands it there in a pane of any
+ * size.
+ */
+export async function dragInDiagram(page: Page, id: string, dx: number, dy: number): Promise<void> {
+  const zoom = await page.evaluate(() => {
+    const transform = document.querySelector<HTMLElement>('.react-flow__viewport')?.style.transform;
+    return Number(/scale\(([\d.]+)\)/.exec(transform ?? '')?.[1] ?? 1);
+  });
+  await dragBy(page, id, dx * zoom, dy * zoom);
 }
 
 /** A node as the browser drew it, in the diagram's own coordinates. */
@@ -234,11 +278,12 @@ export function problems({ nodes, edges }: Drawing): string[] {
       if (tap < start || tap > end) found.push(`bus ${id}: a tap at ${tap} off the bar`);
     }
     // Two dots are a spacing apart, whichever face each tap is on: nearer,
-    // they would run into each other (taps in one place share a dot).
+    // they would run into each other, and in one place two connectors
+    // would read as one line through the bus.
     const dots = [...(node.taps ?? [])].sort((a, b) => a - b);
     for (let i = 1; i < dots.length; i += 1) {
       const apart = dots[i]! - dots[i - 1]!;
-      if (apart > NEAR && apart < TAP_SPACING - NEAR) {
+      if (apart < TAP_SPACING - NEAR) {
         found.push(`bus ${id}: taps at ${dots[i - 1]} and ${dots[i]} run into each other`);
       }
     }
@@ -410,6 +455,107 @@ export async function labelProblems(page: Page): Promise<string[]> {
     }
     return found;
   });
+}
+
+/**
+ * What is on screen, as the overlap checker reads a diagram
+ * (`overlapCheck.ts`): every connector as the points of its path, every bar,
+ * and every box the browser laid out, in the diagram's own coordinates: the
+ * symbols, the labels of the buses, the P / Q readouts, the flow labels of
+ * the lines and the symbols of the transformers.
+ */
+export async function drawnOnScreen(page: Page): Promise<DrawnDiagram> {
+  return await page.evaluate(() => {
+    const numbers = (text: string | null): number[] =>
+      (text ?? '').match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
+    const nodeEls = [...document.querySelectorAll<HTMLElement>('.react-flow__node')];
+    // Screen to diagram: by a node, whose place in the diagram is in its style.
+    const reference = nodeEls.find((el) => el.offsetWidth > 0);
+    if (reference === undefined) return { lines: [], bars: [], boxes: [] };
+    const onScreen = reference.getBoundingClientRect();
+    const [refX = 0, refY = 0] = numbers(reference.style.transform);
+    const zoom = onScreen.width / reference.offsetWidth;
+    const inDiagram = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return {
+        left: refX + (r.left - onScreen.left) / zoom,
+        right: refX + (r.right - onScreen.left) / zoom,
+        top: refY + (r.top - onScreen.top) / zoom,
+        bottom: refY + (r.bottom - onScreen.top) / zoom,
+      };
+    };
+    type Box = {
+      id: string;
+      kind: 'symbol' | 'label' | 'readout';
+      box: { left: number; right: number; top: number; bottom: number };
+      of?: string[];
+    };
+    const bars: { id: string; left: number; right: number; y: number }[] = [];
+    const boxes: Box[] = [];
+    for (const el of nodeEls) {
+      const id = el.dataset.id ?? '';
+      const [x = 0, y = 0] = numbers(el.style.transform);
+      const bar = el.querySelector<HTMLElement>('[data-testid^="bus-bar-"]');
+      if (bar !== null) {
+        const left = x + parseFloat(bar.style.left);
+        bars.push({ id, left, right: left + parseFloat(bar.style.width), y: y + 3 });
+        const label = el.querySelector('[data-testid^="bus-label-"]');
+        if (label !== null) {
+          boxes.push({ id: `label:${id}`, kind: 'label', box: inDiagram(label), of: [id] });
+        }
+        continue;
+      }
+      boxes.push({
+        id,
+        kind: 'symbol',
+        box: { left: x, right: x + el.offsetWidth, top: y, bottom: y + el.offsetHeight },
+      });
+      const readout = el.querySelector(
+        '[data-testid^="generator-values-"], [data-testid^="load-values-"]',
+      );
+      if (readout !== null) {
+        boxes.push({ id: `readout:${id}`, kind: 'readout', box: inDiagram(readout), of: [id] });
+      }
+    }
+    const lines: { id: string; points: [number, number][]; from: string; to: string }[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('.react-flow__edge')) {
+      const id = el.dataset.id ?? '';
+      const d = numbers(el.querySelector('path.react-flow__edge-path')?.getAttribute('d') ?? null);
+      const points: [number, number][] = [];
+      for (let i = 0; i + 1 < d.length; i += 2) points.push([d[i]!, d[i + 1]!]);
+      const label = el.getAttribute('aria-label') ?? '';
+      const stub = /connection to bus (.+)$/.exec(label);
+      const branch = /bus (.+) to bus (.+)$/.exec(label);
+      if (points.length < 2 || (stub === null && branch === null)) continue;
+      lines.push({
+        id,
+        points,
+        from: stub !== null ? id.slice('stub-'.length) : branch![1]!,
+        to: stub !== null ? stub[1]! : branch![2]!,
+      });
+    }
+    for (const el of document.querySelectorAll<HTMLElement>('[data-testid^="line-flow-label-"]')) {
+      const edge = (el.dataset.testid ?? '').replace('line-flow-label-', '');
+      boxes.push({ id: `flow:${edge}`, kind: 'label', box: inDiagram(el), of: [edge] });
+    }
+    for (const el of document.querySelectorAll<HTMLElement>(
+      '[data-testid^="transformer-edge-icon-"]',
+    )) {
+      const edge = (el.dataset.testid ?? '').replace('transformer-edge-icon-', '');
+      boxes.push({ id: `symbol:${edge}`, kind: 'symbol', box: inDiagram(el), of: [edge] });
+    }
+    return { lines, bars, boxes };
+  });
+}
+
+/**
+ * Every place where two things on screen are drawn over each other, as
+ * text; empty when the diagram keeps the rule. Two pixels of slack: the
+ * browser lays text out on whole pixels, and measures a label a little
+ * wider or narrower than the diagram took it to be when it placed it.
+ */
+export async function overlapsOnScreen(page: Page): Promise<string[]> {
+  return describeOverlaps(findOverlaps(await drawnOnScreen(page), { slack: 2 }));
 }
 
 /** The diagram once it has nodes, every node is measured, and it has stopped changing. */

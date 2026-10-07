@@ -127,6 +127,24 @@ describe('<SldArrangeControls />', () => {
     expect(onCommand).not.toHaveBeenCalled();
   });
 
+  it('offers to stop a tidy that is being worked out, and only then', () => {
+    const onCancel = vi.fn();
+    controls({ busy: true, onCancel });
+    const stop = screen.getByTestId('sld-tidy-cancel');
+    expect(stop).toHaveTextContent('Stop');
+    expect(stop).toHaveAttribute('title', 'Stop tidying. Nothing is changed.');
+    fireEvent.click(stop);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // Not while nothing runs, and not for a tidy that cannot be stopped.
+    controls({ busy: false, onCancel });
+    expect(screen.queryByTestId('sld-tidy-cancel')).not.toBeInTheDocument();
+    cleanup();
+    controls({ busy: true });
+    expect(screen.queryByTestId('sld-tidy-cancel')).not.toBeInTheDocument();
+  });
+
   it('greys everything that arranges out while the diagram is locked, and says why', async () => {
     const { onCommand } = controls({ locked: true, pickedCount: 3 });
     const tidy = screen.getByTestId('sld-tidy');

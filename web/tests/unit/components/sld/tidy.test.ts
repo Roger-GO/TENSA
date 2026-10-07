@@ -5,10 +5,11 @@
  *
  * A bus node at `(x, y)` is drawn as a bar from `x` to `x + 92` whose centre
  * line is at `y + 3`. The first tests are small diagrams built by hand, one
- * rule each. The last ones are the three example cases as the automatic
- * layout draws them, where the rules are held on the whole drawing: that is
- * where the routes the automatic layout makes share corridors, which is
- * what Tidy diagram is for.
+ * rule each. The last ones are the three example cases drawn along the
+ * routes ELK makes for them (which the app no longer draws: a case opens
+ * tidied, see `noOverlap.test.ts`), where the rules are held on the whole
+ * drawing: those routes share corridors, as the routes of a layout saved by
+ * an earlier version do, which is what Tidy diagram is for.
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `layout.test.ts`.
@@ -19,6 +20,7 @@ import type { TopologySummary } from '@/api/types';
 import { autoLayout } from '@/components/sld/layout';
 import { buildGraph } from '@/components/sld/graph';
 import {
+  RUN_CLEARANCE,
   SLIDE_CLEARANCE,
   TAP_SPACING,
   layoutConnections,
@@ -32,6 +34,7 @@ import {
   GRID_STEP,
   NEAR_LINE,
   TIDY_STEPS,
+  TIP_REACH,
   alignToGrid,
   tidyRoutes,
   type TidyNode,
@@ -156,32 +159,71 @@ describe('tidyRoutes: one branch', () => {
     expect([points[0]![1], points[1]![1]]).toEqual([3, 163]);
   });
 
-  it('joins two buses that stand level end to end', () => {
+  it('bridges over two buses that stand level, and never joins them end to end', () => {
     const nodes = [bus('1', 0, 0), bus('2', 200, 0)];
-    const { routes } = tidyRoutes(nodes, [line('l', '1', '2')]);
-    // From the middle of one rounded tip to the middle of the other.
-    expect(routes.get('l')).toEqual([
-      [89, 3],
-      [203, 3],
-    ]);
+    const points = tidyRoutes(nodes, [line('l', '1', '2')]).routes.get('l')!;
+    // Out of a face of one bar, across clear of both, and onto the same face
+    // of the other: a line from tip to tip would read as one long bar.
+    expect(points).toHaveLength(4);
+    expect([points[0]![1], points[3]![1]]).toEqual([3, 3]);
+    expect(points[0]![0]).toBeLessThanOrEqual(92);
+    expect(points[3]![0]).toBeGreaterThanOrEqual(200);
+    const across = points[1]![1];
+    expect(points[2]![1]).toBe(across);
+    expect(Math.abs(across - 3)).toBeGreaterThanOrEqual(GRID_STEP);
+  });
+
+  it('draws neither of two level bars out towards the other, however near they stand', () => {
+    // Tip to tip the two bars are 48 apart: a tap past the east tip of the
+    // one and a tap past the west tip of the other could be the same place,
+    // the bars would be drawn out to it from both sides, and the line
+    // between them would be no line at all. (`noOverlap.test.ts` holds the
+    // layout shipped for IEEE 14 to this, where it happened.)
+    for (const gap of [48, 64, 108, 140]) {
+      const nodes = [bus('1', 0, 0), bus('2', 92 + gap, 0)];
+      const { routes, unrouted } = tidyRoutes(nodes, [line('l', '1', '2')]);
+      expect(unrouted, `${gap} apart`).toEqual([]);
+      const points = routes.get('l')!;
+      // On its own bar at either end, and over or under in between.
+      expect(points[0]![0], `${gap} apart`).toBeLessThanOrEqual(92);
+      expect(points.at(-1)![0], `${gap} apart`).toBeGreaterThanOrEqual(92 + gap);
+      expect(points, `${gap} apart`).toHaveLength(4);
+      expect(Math.abs(points[1]![1] - 3), `${gap} apart`).toBeGreaterThanOrEqual(GRID_STEP);
+      expect(points[2]![1], `${gap} apart`).toBe(points[1]![1]);
+    }
   });
 
   it('is routed from its source to its target, whichever stands first', () => {
     const nodes = [bus('1', 0, 0), bus('2', 200, 0)];
-    const { routes } = tidyRoutes(nodes, [line('l', '2', '1')]);
-    expect(routes.get('l')).toEqual([
-      [203, 3],
-      [89, 3],
-    ]);
+    const forward = tidyRoutes(nodes, [line('l', '1', '2')]).routes.get('l')!;
+    const backward = tidyRoutes(nodes, [line('l', '2', '1')]).routes.get('l')!;
+    expect(backward[0]![0]).toBeGreaterThanOrEqual(200);
+    expect(backward).toEqual([...forward].reverse());
   });
 
-  it('turns once to reach a bus that stands below and to the side', () => {
+  it('turns twice to reach a bus that stands below and to the side: out of a face, onto a face', () => {
     const nodes = [bus('1', 0, 0), bus('2', 240, 160)];
     const points = tidyRoutes(nodes, [line('l', '1', '2')]).routes.get('l')!;
-    expect(bendsOf(points)).toBe(1);
-    // Out of an end of one bar and onto a face of the other.
-    const level = runsOf(points).find(([a, b]) => a[1] === b[1])!;
-    expect([3, 163]).toContain(level[0][1]);
+    expect(bendsOf(points)).toBe(2);
+    const runs = runsOf(points);
+    // It leaves the one bar downwards and lands on the other from above.
+    expect(runs[0]![0][0]).toBe(runs[0]![1][0]);
+    expect(runs[2]![0][0]).toBe(runs[2]![1][0]);
+    expect([points[0]![1], points[3]![1]]).toEqual([3, 163]);
+  });
+
+  it('runs level at the height of no bar within reach of its tips', () => {
+    // Bus 3 stands beside the way from 1 to 2, a little off the grid: the
+    // line of the grid nearest its bar would bring a level run up to its tip.
+    const nodes = [bus('1', 0, 0), bus('2', 400, 320), bus('3', 150, 157)];
+    const points = tidyRoutes(nodes, [line('l', '1', '2')]).routes.get('l')!;
+    for (const [a, b] of runsOf(points)) {
+      if (a[1] !== b[1]) continue;
+      const nearBar = Math.abs(a[1] - 160) < RUN_CLEARANCE;
+      const nearTips =
+        Math.max(a[0], b[0]) > 150 - TIP_REACH && Math.min(a[0], b[0]) < 242 + TIP_REACH;
+      expect(nearBar && nearTips, `a level run at ${a[1]}`).toBe(false);
+    }
   });
 
   it('goes round a device that stands between its two buses', () => {
@@ -207,7 +249,8 @@ describe('tidyRoutes: one branch', () => {
       expect(distance(a, b, bar)).toBeGreaterThanOrEqual(SLIDE_CLEARANCE);
       expect(distance(a, b, label)).toBeGreaterThan(0);
     }
-    expect(bendsOf(points)).toBeGreaterThan(0);
+    // It ends on the two bars it joins, drawn out to it if it passes the third by its tip.
+    expect([points[0]![1], points[points.length - 1]![1]]).toEqual([3, 323]);
   });
 
   it('keeps off what stands on the diagram and is no node', () => {
@@ -298,15 +341,31 @@ describe('tidyRoutes: the taps of a bar', () => {
     expect(Math.abs(a[0]![0] - b[0]![0])).toBe(GRID_STEP);
   });
 
-  it('lands a branch on the dot of a device on the other face, or a spacing clear of it', () => {
-    // A generator over the bar of bus 1, and a branch that leaves under it.
-    const nodes = [bus('1', 0, 100), bus('2', 0, 300), device('generator-g', 12, 30, 'generator')];
+  it('lands a branch a spacing clear of a device on the other face, never on its dot', () => {
+    // A generator over the middle of the bar of bus 1, and a branch that
+    // leaves under it: in one place the two would read as one line through
+    // the bus.
+    const nodes = [bus('1', 0, 100), bus('2', 0, 300), device('generator-g', 26, 30, 'generator')];
     const edges = [stub('generator-g', '1'), line('l', '1', '2')];
     const { routes } = tidyRoutes(nodes, edges);
     const tap = routes.get('l')![0]![0];
     const deviceTap = layoutConnections(nodes, edges).routes.get('stub-generator-g')!.points[1]![0];
-    const apart = Math.abs(tap - deviceTap);
-    expect(apart === 0 || apart >= TAP_SPACING).toBe(true);
+    expect(deviceTap).toBe(46);
+    expect(Math.abs(tap - deviceTap)).toBeGreaterThanOrEqual(TAP_SPACING);
+    // And what Tidy answers is what the connection pass draws.
+    const drawn = layoutConnections(nodes, tidied(nodes, edges, routes));
+    expect(drawn.routes.get('l')!.points).toEqual(routes.get('l'));
+  });
+
+  it('never lands two branches at one place, one from above and one from below', () => {
+    // Three buses one over the other: the line that comes down onto the
+    // middle one and the line that leaves under it have a tap each.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 160), bus('3', 0, 320)];
+    const { routes } = tidyRoutes(nodes, [line('upper', '1', '2'), line('lower', '2', '3')]);
+    const [upper, lower] = [routes.get('upper')!, routes.get('lower')!];
+    expect(upper).toHaveLength(2);
+    expect(lower).toHaveLength(2);
+    expect(Math.abs(upper[1]![0] - lower[0]![0])).toBeGreaterThanOrEqual(TAP_SPACING);
   });
 
   it('keeps a branch on a face a spacing clear of the device beside it there', () => {
@@ -355,7 +414,8 @@ describe('tidyRoutes: several branches', () => {
     expect(met.shared).toEqual([]);
     expect(met.crossings).toBe(1);
     expect(routes.get('down')).toHaveLength(2);
-    expect(routes.get('across')).toHaveLength(2);
+    // Out of a face of bus 3, across, and onto a face of bus 4.
+    expect(routes.get('across')).toHaveLength(4);
   });
 
   it('lets two routes that cross change places when that parts them', () => {
@@ -379,6 +439,153 @@ describe('tidyRoutes: several branches', () => {
     const first = tidyRoutes(nodes, edges);
     const second = tidyRoutes(nodes, edges);
     expect([...second.routes]).toEqual([...first.routes]);
+  });
+});
+
+describe('tidyRoutes: the routes that stay as they are', () => {
+  // Bus 1 over buses 2 and 3: the line to 2 is kept, the line to 3 is routed.
+  const nodes = [bus('1', 100, 0), bus('2', 0, 200), bus('3', 200, 200)];
+  const edges = [line('kept', '1', '2'), line('new', '1', '3')];
+  const held: Point[] = [
+    [144, 3],
+    [144, 96],
+    [48, 96],
+    [48, 203],
+  ];
+
+  it('routes only the others, and answers nothing for a kept one', () => {
+    const { routes, unrouted } = tidyRoutes(nodes, edges, { keep: new Map([['kept', held]]) });
+    expect([...routes.keys()]).toEqual(['new']);
+    expect(unrouted).toEqual([]);
+  });
+
+  it('keeps a new route off the run of a kept one, and its tap a spacing from the kept tap', () => {
+    const { routes } = tidyRoutes(nodes, edges, { keep: new Map([['kept', held]]) });
+    const made = routes.get('new')!;
+    expect(
+      meetings(
+        new Map([
+          ['kept', held],
+          ['new', made],
+        ]),
+      ).shared,
+    ).toEqual([]);
+    expect(Math.abs(made[0]![0] - 144)).toBeGreaterThanOrEqual(TAP_SPACING);
+    // The connection pass draws both where they are.
+    const drawn = layoutConnections(
+      nodes,
+      tidied(
+        nodes,
+        edges,
+        new Map([
+          ['kept', held],
+          ['new', made],
+        ]),
+      ),
+    );
+    expect(drawn.routes.get('kept')!.points).toEqual(held);
+    expect(drawn.routes.get('new')!.points).toEqual(made);
+  });
+
+  it('takes the place a kept route has on the bar as taken, whichever face it is on', () => {
+    // The kept line comes down onto the middle of bus 2, and a new one leaves
+    // under bus 2: not from the same place.
+    const stacked = [bus('1', 0, 0), bus('2', 0, 160), bus('3', 0, 320)];
+    const lines = [line('upper', '1', '2'), line('lower', '2', '3')];
+    const keep = new Map<string, Point[]>([
+      [
+        'upper',
+        [
+          [48, 3],
+          [48, 163],
+        ],
+      ],
+    ]);
+    const lower = tidyRoutes(stacked, lines, { keep }).routes.get('lower')!;
+    expect(Math.abs(lower[0]![0] - 48)).toBeGreaterThanOrEqual(TAP_SPACING);
+  });
+
+  it('crosses a kept route that is drawn at an angle, and does not run along it', () => {
+    const diagonal: Point[] = [
+      [144, 3],
+      [48, 203],
+    ];
+    const made = tidyRoutes(nodes, edges, { keep: new Map([['kept', diagonal]]) }).routes.get(
+      'new',
+    )!;
+    expect(made.length).toBeGreaterThanOrEqual(2);
+    expect(Math.abs(made[0]![0] - 144)).toBeGreaterThanOrEqual(TAP_SPACING);
+  });
+});
+
+describe('tidyRoutes: a part of the diagram', () => {
+  it('reads only what stands in the box it is given, and routes only the branches in it', () => {
+    // Two pairs of buses far apart, a line in each.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 160), bus('3', 4000, 0), bus('4', 4000, 160)];
+    const edges = [line('here', '1', '2'), line('there', '3', '4')];
+    const within = { left: -200, right: 300, top: -200, bottom: 400 };
+    const { routes, unrouted } = tidyRoutes(nodes, edges, { within });
+    expect([...routes.keys()]).toEqual(['here']);
+    expect(unrouted).toEqual([]);
+    // The same route as with the whole diagram read.
+    expect(routes.get('here')).toEqual(tidyRoutes(nodes, edges).routes.get('here'));
+  });
+
+  it('brings the bus of a device that stands in the box along, and its connector', () => {
+    // The load of bus 2 hangs in the box though its bus stands outside it:
+    // the route keeps off the connector all the same.
+    const nodes = [
+      bus('1', 0, 0),
+      bus('3', 0, 320),
+      bus('2', 300, 100),
+      device('load-x', 180, 150),
+    ];
+    const edges = [line('l', '1', '3'), stub('load-x', '2')];
+    const within = { left: -100, right: 230, top: -100, bottom: 420 };
+    const { routes } = tidyRoutes(nodes, edges, { within });
+    const box: Rect = { left: 180, right: 220, top: 150, bottom: 190 };
+    for (const [a, b] of runsOf(routes.get('l')!)) {
+      expect(distance(a, b, box)).toBeGreaterThanOrEqual(DEVICE_CLEARANCE);
+    }
+  });
+
+  it('routes nothing on a grid of more points than it may have, and says so', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 0, 160)];
+    const result = tidyRoutes(nodes, [line('l', '1', '2')], { gridPoints: 10 });
+    expect(result.tooLarge).toBe(true);
+    expect(result.unrouted).toEqual(['l']);
+  });
+});
+
+describe('tidyRoutes: the connectors of the devices', () => {
+  it('never runs a branch along the connector of a device, side by side with it', () => {
+    // A load hangs under the right of bus 1, and bus 2 stands under and to
+    // the right: the way down beside the connector is the shortest.
+    const nodes = [bus('1', 0, 0), bus('2', 60, 240), device('load-x', 50, 70)];
+    const edges = [stub('load-x', '1'), line('l', '1', '2')];
+    const stubs = layoutConnections(nodes, edges).routes.get('stub-load-x')!.points;
+    const points = tidyRoutes(nodes, edges).routes.get('l')!;
+    const wire: [Point, Point] = [stubs[0]!, stubs[1]!];
+    for (const run of runsOf(points)) expect(alongside(run, wire)).toBe(0);
+  });
+});
+
+describe('tidyRoutes: the places left for the labels of the buses', () => {
+  // Bus 1 over bus 2, a label place right under the way between them.
+  const nodes = [bus('1', 0, 0), bus('2', 0, 240)];
+  const edges = [line('l', '1', '2')];
+  const place: Rect = { left: 30, right: 66, top: 100, bottom: 140 };
+
+  it('takes the last place of a label rather than a step aside', () => {
+    const { routes } = tidyRoutes(nodes, edges, { preferFree: [[place]] });
+    // Straight down, through the place or beside it: no bend is spent on it.
+    expect(routes.get('l')).toHaveLength(2);
+  });
+
+  it('goes a long way round the last place of a readout', () => {
+    const wide: Rect = { left: -40, right: 140, top: 100, bottom: 140 };
+    const { routes } = tidyRoutes(nodes, edges, { keepFree: [[wide]] });
+    for (const [a, b] of runsOf(routes.get('l')!)) expect(through(a, b, wide)).toBe(false);
   });
 });
 
@@ -613,7 +820,7 @@ async function drawings(topology: TopologySummary) {
   };
 }
 
-describe('tidyRoutes: the example cases, drawn by the automatic layout', () => {
+describe('tidyRoutes: the example cases, drawn along the routes ELK makes', () => {
   for (const [name, topology] of [
     ['IEEE 14', IEEE14],
     ['WSCC 9', WSCC9],
@@ -631,16 +838,14 @@ describe('tidyRoutes: the example cases, drawn by the automatic layout', () => {
     });
   }
 
-  it('parts the lines of IEEE 14 that the automatic layout runs down one corridor', async () => {
-    // The automatic layout runs every branch of one side of a bus through
-    // one point: lines 4 and 5 leave bus 2 on top of each other, and lines 8
-    // and 10 leave bus 6 the same way.
+  it('parts the lines of IEEE 14 that ELK runs down one corridor', async () => {
+    // ELK runs every branch of one side of a bus through one point, and
+    // several of them down one corridor: drawn along its routes, lines of
+    // one bus lie on top of each other.
     const drawn = await drawings(IEEE14);
-    expect(drawn.before.shared).toContain('line-Line_4 and line-Line_5');
-    expect(drawn.before.shared).toContain('line-Line_8 and line-Line_10');
+    expect(drawn.before.shared.length).toBeGreaterThan(0);
     expect(drawn.after.shared).toEqual([]);
-    // And no line of it crosses another once tidied.
-    expect(drawn.after.crossings).toBe(0);
+    expect(drawn.after.crossings).toBeLessThanOrEqual(drawn.before.crossings);
   });
 });
 

@@ -12,9 +12,10 @@
  * per bus with `'elk.portConstraints': 'FIXED_SIDE'` and points each
  * edge at the port on the side the diagram draws it leaving by
  * (`computeHandleAssignments`); ELK's ORTHOGONAL routing then produces
- * per-edge bend points exiting the declared cardinal sides. The bend
- * points become the route each line is drawn through, so each traces a
- * corridor of its own.
+ * per-edge bend points exiting the declared cardinal sides. The canvas
+ * does not draw along them (it routes every branch itself, around the
+ * devices and clear of the other branches, which ELK does not: see
+ * `useAutoLayout`), and asks for the coordinates alone.
  *
  * Design choices:
  *
@@ -40,7 +41,13 @@
 import type { ElkNode, LayoutOptions } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
 import type { CoordsByIdx } from './sidecar';
-import { DEVICE_ROW_OFFSET, NODE_FOOTPRINT, computeHandleAssignments, type Side } from './graph';
+import {
+  DEVICE_ROW_OFFSET,
+  NODE_FOOTPRINT,
+  busRoom,
+  computeHandleAssignments,
+  type Side,
+} from './graph';
 import { RUN_CLEARANCE } from './connections';
 import { elkLayout } from './elkClient';
 
@@ -199,7 +206,9 @@ interface ElkResultEdge {
  *    on `result.edges[].sections[0].{startPoint, bendPoints, endPoint}`.
  *
  * Pass 2 is skipped if `topology.buses.length < 2` (a single bus has
- * no edges; routing is moot).
+ * no edges; routing is moot), and with `routes: false`: the canvas asks
+ * for the coordinates alone, and routes every branch itself, clear of the
+ * devices and of each other (`useAutoLayout`), which ELK's routes are not.
  *
  * Callers should `await` and render `<SldLayoutSkeleton />` while
  * pending.
@@ -207,6 +216,7 @@ interface ElkResultEdge {
 export async function autoLayout(
   topology: TopologySummary,
   options: LayoutOptions = DEFAULT_LAYOUT_OPTIONS,
+  { routes = true }: { routes?: boolean } = {},
 ): Promise<LayoutResult> {
   const buses = topology.buses;
   if (buses.length === 0) {
@@ -216,6 +226,17 @@ export async function autoLayout(
   const branches = collectBranches(topology);
   const busIdSet = new Set(buses.map((b) => String(b.idx)));
   const validBranches = branches.filter((b) => busIdSet.has(b.from) && busIdSet.has(b.to));
+  // A bus with many connections has a longer bar, and one with several
+  // devices has them side by side over it (`busRoom`): its box is as wide
+  // as both, so that neither grows into the bus beside it. The node of a
+  // bus is as wide as a bar of the default length, and a longer bar grows
+  // about its middle: the node stands in the middle of the box ELK placed.
+  const room = busRoom(topology);
+  const widthOf = (idx: string): number => room.get(idx)?.box ?? NODE_WIDTH;
+  const origin = (child: { id: string; x?: number; y?: number }): { x: number; y: number } => ({
+    x: (child.x ?? 0) + (widthOf(child.id) - NODE_WIDTH) / 2,
+    y: child.y ?? 0,
+  });
 
   // ---- pass 1: get coords ----
   const pass1Graph: ElkNode = {
@@ -223,7 +244,7 @@ export async function autoLayout(
     layoutOptions: options,
     children: buses.map((b) => ({
       id: String(b.idx),
-      width: NODE_WIDTH,
+      width: widthOf(String(b.idx)),
       height: NODE_HEIGHT,
     })),
     edges: validBranches.map((b) => ({
@@ -237,9 +258,7 @@ export async function autoLayout(
   try {
     const result = (await elkLayout(pass1Graph)) as ElkLayoutResult;
     coords = {};
-    for (const child of result.children ?? []) {
-      coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
-    }
+    for (const child of result.children ?? []) coords[child.id] = origin(child);
   } catch (err) {
     console.warn('SLD auto-layout: ELK pass 1 failed, using grid fallback', err);
     return {
@@ -248,7 +267,7 @@ export async function autoLayout(
     };
   }
 
-  if (validBranches.length === 0) {
+  if (validBranches.length === 0 || !routes) {
     return { coords, bendPoints: new Map() };
   }
 
@@ -272,7 +291,7 @@ export async function autoLayout(
     layoutOptions: options,
     children: buses.map((b) => ({
       id: String(b.idx),
-      width: NODE_WIDTH,
+      width: widthOf(String(b.idx)),
       height: NODE_HEIGHT,
       layoutOptions: { 'elk.portConstraints': 'FIXED_SIDE' },
       ports: (['north', 'east', 'south', 'west'] as Side[]).map((side) => ({
@@ -295,9 +314,7 @@ export async function autoLayout(
   try {
     const result = (await elkLayout(pass2Graph)) as ElkLayoutResult;
     pass2Coords = {};
-    for (const child of result.children ?? []) {
-      pass2Coords[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
-    }
+    for (const child of result.children ?? []) pass2Coords[child.id] = origin(child);
     // Edges may sit on root or on the deepest common parent's children.
     const allEdges: ElkResultEdge[] = [
       ...(result.edges ?? []),

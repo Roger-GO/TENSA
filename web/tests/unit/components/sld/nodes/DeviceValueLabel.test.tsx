@@ -369,6 +369,26 @@ describe('GeneratorNode P / Q label', () => {
     expect(label.className).not.toContain('bottom-full');
   });
 
+  it('shows no readout when the canvas found no place for it that is clear', () => {
+    // A line or a symbol stands on every place around the device: a readout
+    // there would be drawn over it, and neither could be read.
+    setPflow(makePflow());
+    const view = render(
+      <LoadNode
+        {...props<typeof LoadNode>({
+          idx: 'PQ_1',
+          kind: 'PQ',
+          valueSide: 'above',
+          connectorFace: 'north',
+          readoutSpot: 'none',
+        })}
+      />,
+    );
+    expect(view.queryByTestId('load-values-PQ_1')).toBeNull();
+    // The symbol itself is still there.
+    expect(view.container.querySelector('[data-testid^="load-node-"]')).not.toBeNull();
+  });
+
   it('stands beside the symbol when the canvas found no place over or under it', () => {
     setPflow(makePflow());
     const beside = (readoutSpot: 'east' | 'west') =>

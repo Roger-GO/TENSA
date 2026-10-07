@@ -26,13 +26,13 @@
  *   bar that has no room for the taps of a face grows, about its middle,
  *   until it has, and a bar grows at a tip to hold a tap that was moved
  *   past it.
- * - A tap on one face and a tap on the other are either in one place, where
- *   they share a dot (a generator above a bar and a load below it, a line
- *   that comes down onto a bar and one that leaves under it), or a spacing
- *   apart like two taps of one face. Several that ask for the very same
- *   place stand whole spacings from it for that reason, and where two faces
- *   still crowd each other the taps of the one that gives way more easily
- *   are moved in line or clear.
+ * - Every connection has a tap of its own, whichever face it comes to: a
+ *   tap on one face keeps the spacing from a tap on the other as it does
+ *   from one of its own face. Two that landed in one place, one from above
+ *   and one from below, would read as a single line running through the
+ *   bus. So the taps of the two faces are handed out together, each face in
+ *   its own order, and several that ask for the very same place stand whole
+ *   spacings from it.
  * - The run of a stored route that leaves a bar moves along with its tap,
  *   and a run that moves is kept `SLIDE_CLEARANCE` from every bar the
  *   branch is not connected to: the layout that made the route kept it
@@ -53,17 +53,23 @@
  *   runs through another device, a controller badge or the bar of another
  *   bus where there is a way round: the connector then leaves by the face
  *   that looks at the bar.
- * - A branch is drawn with right angles. One with a stored route (from the
- *   auto-layout, or a saved layout) keeps its bends, and its two ends are
- *   brought onto the bars: the route was computed for a box around the bus,
- *   and its ends would otherwise hang beside the bar. A branch without a
- *   route, or whose bus has moved since the route was made, is routed from
- *   tap to tap; where it steps across it keeps clear of the line of a bar
- *   that stands between its two buses.
+ * - A branch is drawn with right angles. One with a stored route (the
+ *   router's, or a saved layout's) keeps its bends, and its two ends are
+ *   brought onto the bars. A branch without a route, or whose bus has moved
+ *   since the route was made, is routed from tap to tap; where it steps
+ *   across it keeps clear of the line of a bar that stands between its two
+ *   buses. The canvas gives every branch a route that is clear of the rest
+ *   of the diagram (`routing.ts`), so this is what is drawn only for a
+ *   branch no such route was found for, and then as one straight line
+ *   where the steps would run over something (`ConnectionOptions.straight`).
+ * - A branch leaves a bar by a face and never by a tip, in line with the
+ *   bar, where it would read as the bar going on. Two bars that stand level
+ *   have no face that looks at the other: the branch between them leaves
+ *   both by the north face and bridges over, and the next one by the south.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
-import { assignBranchSides, type BranchEnds, type HandleAssignment, type Side } from './sides';
+import type { Side } from './sides';
 
 /** A point on the canvas, `[x, y]`. */
 export type Point = [number, number];
@@ -155,6 +161,13 @@ export interface ConnectionOptions {
   connectorStyle?: ConnectorStyle;
   /** The length a layout sets for a bus's bar, by bus id. The bar still grows to hold its taps. */
   barLengths?: ReadonlyMap<string, number>;
+  /**
+   * The branches without a stored route that are drawn as one straight line
+   * from tap to tap, by edge id: the ones whose steps would run over
+   * something else. A straight line shares no stretch with a line that
+   * runs at right angles.
+   */
+  straight?: ReadonlySet<string>;
 }
 
 /** One tap on a bar. */
@@ -192,6 +205,12 @@ export interface ConnectionLayout {
   bars: Map<string, BarGeometry>;
   /** The route of every device connector and branch, by edge id. */
   routes: Map<string, ConnectorRoute>;
+}
+
+/** What `layoutConnections` answers: the layout, and which branches kept their stored route. */
+export interface ConnectionPass extends ConnectionLayout {
+  /** The branches that are drawn along the route stored for them, by edge id. */
+  kept: Set<string>;
 }
 
 // ---- taps -------------------------------------------------------------------
@@ -295,14 +314,12 @@ function sameSpots(
  *
  * Several that ask for the very same place are the exception: one of them
  * has it, and the others stand whole spacings to either side (two at `x` and
- * `x + spacing`, not half a spacing either side of `x`). Whatever asked for
- * that place on the other face of the bar, however many, then stands in
- * line with them or a whole spacing away: the automatic layout runs every
- * branch of one side of a bus through the middle of that side, so the taps
- * of the two faces of a bar ask for one place more often than not. Which of
- * them has the place is the one in the middle, unless that leaves a tap
- * where its connection is up against something (`TapWish.blocked`): then
- * it is the one that leaves the fewest so.
+ * `x + spacing`, not half a spacing either side of `x`), so that of a
+ * device over a bar and a line under it, both square to the bar at one
+ * place, one stays square. Which of them has the place is the one in the
+ * middle, unless that leaves a tap where its connection is up against
+ * something (`TapWish.blocked`): then it is the one that leaves the fewest
+ * so.
  */
 export function spreadTaps(
   wishes: readonly TapWish[],
@@ -512,6 +529,13 @@ interface Bar {
   /** Whether a connection runs into the west end, and into the east end. */
   westTaken: boolean;
   eastTaken: boolean;
+  /**
+   * How far the ends of the stored routes draw the bar out past `half`
+   * either side of its centre, once that is known: a route that ends past
+   * a tip takes the bar with it, and a device is over the bar, or past its
+   * tip, by where the bar is then.
+   */
+  drawnOut?: { start: number; end: number };
 }
 
 /** A device's box, in canvas coordinates. */
@@ -787,78 +811,12 @@ function sits(at: { x: number; y: number }, anchorPoint: Anchor): boolean {
   return Math.abs(at.x - anchorPoint.x) < 0.01 && Math.abs(at.y - anchorPoint.y) < 0.01;
 }
 
-/** Whether two taps are too close: not in one place, and less than a spacing apart. */
-function crowd(a: number, b: number): boolean {
-  const apart = Math.abs(a - b);
-  return apart > EPS && apart < TAP_SPACING - EPS;
-}
-
-/** What moving a tap costs for each unit, squared, by how firmly it holds its place (`TAP_HOLD`). */
-const MOVE_COST = [1, 1e3, 1e6, 1e9];
-
 /**
- * Places for the taps of one face (`moving`, in order along the bar) at
- * which none crowds a tap of the other face (`fixed`): each is in line with
- * one of those or a spacing clear of them all. The taps keep their order
- * and the spacing between them, stay within `[low, high]`, and move as
- * little as that allows, the ones that hold their place least first. `null`
- * when there are no such places.
+ * How far apart, up and down, two bars are that count as standing level: a
+ * line from a face of one to a face of the other would be all but in line
+ * with both, so the branch between them bridges over.
  */
-function clearOfFace(
-  moving: readonly Request[],
-  fixed: readonly number[],
-  low: number,
-  high: number,
-): { cost: number; taps: number[] } | null {
-  // A tap ends up where it is, in line with a tap of the other face, or a
-  // whole number of spacings from one of those: as far as a neighbour or
-  // the other face pushed it.
-  const candidates: number[] = [];
-  for (const base of [...moving.map((r) => r.tap[0]), ...fixed]) {
-    for (let k = -moving.length; k <= moving.length; k += 1) {
-      const x = base + k * TAP_SPACING;
-      if (x < low - 1e-6 || x > high + 1e-6 || fixed.some((f) => crowd(f, x))) continue;
-      candidates.push(x);
-    }
-  }
-  candidates.sort((a, b) => a - b);
-  const places = candidates.filter((x, i) => i === 0 || x - candidates[i - 1]! > 1e-6);
-  // `cost[j][c]`: the least it costs to place the taps up to the `j`th with
-  // that one at `places[c]`, and `before[j][c]` where the tap before it is
-  // then: the cheapest place a spacing or more to its left.
-  const cost: number[][] = [];
-  const before: number[][] = [];
-  moving.forEach((r, j) => {
-    const weight = MOVE_COST[r.hold] ?? 1;
-    const earlier = cost[j - 1];
-    const row: number[] = [];
-    const back: number[] = [];
-    let least = earlier === undefined ? 0 : Infinity;
-    let leastAt = -1;
-    let reached = 0;
-    places.forEach((x, c) => {
-      for (; earlier !== undefined && places[reached]! <= x - TAP_SPACING + 1e-6; reached += 1) {
-        if (earlier[reached]! < least) {
-          least = earlier[reached]!;
-          leastAt = reached;
-        }
-      }
-      row[c] = least + weight * (x - r.tap[0]) ** 2;
-      back[c] = leastAt;
-    });
-    cost.push(row);
-    before.push(back);
-  });
-  const last = cost[moving.length - 1] ?? [];
-  let at = -1;
-  last.forEach((total, c) => {
-    if (total < (at < 0 ? Infinity : last[at]!)) at = c;
-  });
-  if (at < 0) return null;
-  const taps: number[] = [];
-  for (let j = moving.length - 1, c = at; j >= 0; c = before[j]![c]!, j -= 1) taps[j] = places[c]!;
-  return { cost: last[at]!, taps };
-}
+const LEVEL_BARS = 2 * RUN_CLEARANCE;
 
 /**
  * Lay out every connection of the diagram: the bar of each bus with its
@@ -874,7 +832,7 @@ export function layoutConnections(
   nodes: readonly ConnectionNode[],
   edges: readonly ConnectionEdge[],
   options: ConnectionOptions = {},
-): ConnectionLayout {
+): ConnectionPass {
   const style = options.connectorStyle ?? DEFAULT_CONNECTOR_STYLE;
   const bars = new Map<string, Bar>();
   const boxes = new Map<string, Box>();
@@ -1040,24 +998,24 @@ export function layoutConnections(
   }
 
   // ---- branches routed from where their buses sit ----
-  const sides: Map<string, HandleAssignment> = assignBranchSides(
-    unrouted.map(
-      ({ edge }): BranchEnds => ({ id: edge.id, source: edge.source, target: edge.target }),
-    ),
-    Object.fromEntries([...bars.values()].map((bar) => [bar.id, { x: bar.cx, y: bar.cy }])),
-    claimedEnds,
-  );
+  // Out of the face of each bar that looks at the other. Two bars that
+  // stand level have no such face: the first branch between them leaves
+  // both by the north face and bridges over, the next by the south face.
+  const bridges = new Map<string, number>();
   const stepped: { edge: ConnectionEdge; source: Request; target: Request }[] = [];
   for (const { edge, source, target } of unrouted) {
-    const assigned = sides.get(edge.id);
-    if (!assigned) continue;
+    let sourceSide: Side = target.cy > source.cy ? 'south' : 'north';
+    let targetSide: Side = sourceSide === 'south' ? 'north' : 'south';
+    if (Math.abs(target.cy - source.cy) < LEVEL_BARS) {
+      const pair = [source.id, target.id].sort().join('|');
+      const nth = bridges.get(pair) ?? 0;
+      bridges.set(pair, nth + 1);
+      sourceSide = targetSide = nth % 2 === 0 ? 'north' : 'south';
+    }
     // Two faces that look at each other share a tap position where the two
     // bars overlap, so the branch runs straight; otherwise each end goes to
     // the tip of its bar nearest the other bus.
-    const facing =
-      isVertical(assigned.sourceSide) &&
-      isVertical(assigned.targetSide) &&
-      assigned.sourceSide !== assigned.targetSide;
+    const facing = sourceSide !== targetSide;
     const wish = (own: Bar, other: Bar) => (): TapWish => {
       // Read when the bars have their final lengths.
       const low = Math.max(lo(own), lo(other));
@@ -1067,8 +1025,8 @@ export function layoutConnections(
     };
     stepped.push({
       edge,
-      source: ask(source, assigned.sourceSide, target.cx, wish(source, target)),
-      target: ask(target, assigned.targetSide, source.cx, wish(target, source)),
+      source: ask(source, sourceSide, target.cx, wish(source, target)),
+      target: ask(target, targetSide, source.cx, wish(target, source)),
     });
   }
 
@@ -1088,11 +1046,23 @@ export function layoutConnections(
         box.cy <= bar.cy ? 'north' : 'south',
         box.cx,
         // Over the bar, or with its box over a tip of it, it drops square
-        // onto the bar; further out it lands on the tip.
-        (b) =>
-          Math.abs(box.cx - b.cx) <= b.half + box.hw
+        // onto the bar; further out it lands on the tip. The bar is as long
+        // as the routes that end on it draw it: under a device that stands
+        // past where a route has taken the tip, it reaches on to the
+        // device, and the two have a tap each.
+        (b) => {
+          const start = Math.min(b.cx - b.half, b.drawnOut?.start ?? Infinity);
+          const end = Math.max(b.cx + b.half, b.drawnOut?.end ?? -Infinity);
+          return box.cx + box.hw >= start && box.cx - box.hw <= end
             ? { desired: box.cx, hold: TAP_HOLD.square }
-            : { desired: clamp(box.cx, lo(b), hi(b)) },
+            : {
+                desired: clamp(
+                  box.cx,
+                  Math.min(lo(b), start + TAP_INSET),
+                  Math.max(hi(b), end - TAP_INSET),
+                ),
+              };
+        },
         // Of two devices beyond the same tip, the nearer takes the outer tap.
         { rank: left ? off : -off },
       ),
@@ -1109,15 +1079,10 @@ export function layoutConnections(
     if (list) list.push({ box, bar, edge });
     else wantsEnd.set(key, [{ box, bar, edge }]);
   }
-  const endTaken = new Set<string>(claimedEnds);
-  for (const { source, target } of stepped) {
-    if (!isVertical(source.side)) endTaken.add(`${source.bar.id}|${source.side}`);
-    if (!isVertical(target.side)) endTaken.add(`${target.bar.id}|${target.side}`);
-  }
   for (const [key, list] of wantsEnd) {
     list.sort((a, b) => Math.abs(a.box.cy - a.bar.cy) - Math.abs(b.box.cy - b.bar.cy));
     list.forEach(({ box, bar, edge }, i) => {
-      if (i > 0 || endTaken.has(key)) {
+      if (i > 0 || claimedEnds.has(key)) {
         onFace(edge, box, bar);
         return;
       }
@@ -1127,92 +1092,93 @@ export function layoutConnections(
   }
 
   // ---- size the bars, then hand out the taps ----
-  const byFace = new Map<string, Request[]>();
+  // Every connection on a face has a tap of its own, a spacing from every
+  // other tap of the bar, whichever face that one is on: the taps of the
+  // two faces are handed out together.
+  const onFaces = new Map<Bar, Request[]>();
   for (const r of requests) {
     if (!isVertical(r.side)) {
       if (r.side === 'east') r.bar.eastTaken = true;
       else r.bar.westTaken = true;
       continue;
     }
-    const key = `${r.bar.id}|${r.side}`;
-    const list = byFace.get(key);
+    const list = onFaces.get(r.bar);
     if (list) list.push(r);
-    else byFace.set(key, [r]);
+    else onFaces.set(r.bar, [r]);
   }
-  for (const list of byFace.values()) {
-    const bar = list[0]!.bar;
-    // Room for the taps of this face. Where an end is taken as well they do
-    // not all fit between the two, run over both alike, and the bar is
-    // brought out to them below.
+  for (const [bar, list] of onFaces) {
+    // Room for the taps. Where an end is taken as well they do not all fit
+    // between the two, run over both alike, and the bar is brought out to
+    // them below.
     bar.half = Math.max(bar.half, barLengthFor(list.length) / 2);
   }
   for (const bar of bars.values()) {
     bar.start = bar.cx - bar.half;
     bar.end = bar.cx + bar.half;
   }
-  for (const list of byFace.values()) {
-    const bar = list[0]!.bar;
-    // Stable: two that tie on every key keep the order they were asked in.
-    list.sort((a, b) => a.from - b.from || a.rank - b.rank || a.tie - b.tie);
-    const wishes = list.map((r) => r.wish(bar));
+  for (const [bar, list] of onFaces) {
+    // Where the routes that hold their ends take the bar: read first, since
+    // where a device lands depends on it.
+    for (const r of list) {
+      const wish = r.wish(bar);
+      const held = wish.hold === TAP_HOLD.route || wish.hold === TAP_HOLD.straight;
+      if (!held) continue;
+      bar.drawnOut = {
+        start: Math.min(bar.drawnOut?.start ?? bar.start, wish.desired - TAP_INSET),
+        end: Math.max(bar.drawnOut?.end ?? bar.end, wish.desired + TAP_INSET),
+      };
+    }
+    const wishOf = new Map(list.map((r) => [r, r.wish(bar)]));
+    // Each face in its own order, which keeps its connections from
+    // crossing. Stable: two that tie on every key keep the order they were
+    // asked in.
+    const inOrder = (side: Side): Request[] =>
+      list
+        .filter((r) => r.side === side)
+        .sort((a, b) => a.from - b.from || a.rank - b.rank || a.tie - b.tie);
+    const north = inOrder('north');
+    const south = inOrder('south');
+    // The two put together by the place each asks for: a connection of one
+    // face never crosses one of the other.
+    const merged: Request[] = [];
+    for (let n = 0, m = 0; n < north.length || m < south.length; ) {
+      const [above, below] = [north[n], south[m]];
+      const northFirst =
+        below === undefined ||
+        (above !== undefined && wishOf.get(above)!.desired <= wishOf.get(below)!.desired);
+      if (northFirst) n += 1;
+      else m += 1;
+      merged.push(northFirst ? above! : below!);
+    }
+    const wishes = merged.map((r) => wishOf.get(r)!);
     const positions = spreadTaps(wishes, lo(bar), hi(bar));
-    list.forEach((r, i) => {
+    merged.forEach((r, i) => {
       r.hold = wishes[i]!.hold ?? TAP_HOLD.free;
       r.tap = [positions[i]!, bar.cy];
-    });
-  }
-
-  // ---- the two faces of a bar ----
-  // A tap of one face that stands less than a spacing from a tap of the
-  // other, and not on it, would have its dot run into that one's. The taps
-  // of one of the two faces are then moved, each in line with a tap of the
-  // other face or a spacing clear of them all: the face that it costs less
-  // to move, and of two that cost the same the one with fewer taps.
-  for (const bar of bars.values()) {
-    const north = byFace.get(`${bar.id}|north`);
-    const south = byFace.get(`${bar.id}|south`);
-    if (!north || !south) continue;
-    if (!north.some((n) => south.some((s) => crowd(n.tap[0], s.tap[0])))) continue;
-    const at = (list: readonly Request[]): number[] => list.map((r) => r.tap[0]);
-    const low = Math.min(lo(bar), ...at(north), ...at(south));
-    const high = Math.max(hi(bar), ...at(north), ...at(south));
-    const options = [
-      { face: south, placed: clearOfFace(south, at(north), low, high) },
-      { face: north, placed: clearOfFace(north, at(south), low, high) },
-    ].filter((option) => option.placed !== null);
-    options.sort((a, b) => a.placed!.cost - b.placed!.cost || a.face.length - b.face.length);
-    const chosen = options[0];
-    if (!chosen) continue;
-    chosen.face.forEach((r, i) => {
-      r.tap = [chosen.placed!.taps[i]!, bar.cy];
     });
   }
 
   // ---- straighten ----
   // A branch that would run straight down from one bar to the other, were
   // its two taps in line, has them brought in line where one of them is
-  // free to move: within its bar, a spacing clear of the other taps of its
-  // face, without changing places with any of them, and not to where it
-  // would crowd a tap of the other face. The tap on the face with fewer
-  // taps is the one that moves.
-  const faceOf = (r: Request): Request[] => byFace.get(`${r.bar.id}|${r.side}`) ?? [];
-  const acrossFrom = (r: Request): Request[] =>
-    byFace.get(`${r.bar.id}|${r.side === 'north' ? 'south' : 'north'}`) ?? [];
+  // free to move: within its bar, a spacing clear of every other tap of the
+  // bar, and without changing places with a tap of its own face. The tap on
+  // the bar with fewer taps is the one that moves.
+  const tapsOf = (r: Request): Request[] => onFaces.get(r.bar) ?? [];
   const canMoveTo = (r: Request, x: number): boolean => {
     if (x < lo(r.bar) - EPS || x > hi(r.bar) + EPS) return false;
     const [from, to] = [Math.min(r.tap[0], x), Math.max(r.tap[0], x)];
-    return (
-      faceOf(r).every(
-        (q) =>
-          q === r ||
-          (Math.abs(q.tap[0] - x) >= TAP_SPACING - EPS && (q.tap[0] < from || q.tap[0] > to)),
-      ) && acrossFrom(r).every((q) => !crowd(q.tap[0], x))
+    return tapsOf(r).every(
+      (q) =>
+        q === r ||
+        (Math.abs(q.tap[0] - x) >= TAP_SPACING - EPS &&
+          (q.side !== r.side || q.tap[0] < from || q.tap[0] > to)),
     );
   };
   const straighten = (a: Request, b: Request): void => {
     if (!isVertical(a.side) || !isVertical(b.side) || a.side === b.side) return;
     if (Math.abs(a.tap[0] - b.tap[0]) <= EPS) return;
-    const [freer, other] = faceOf(a).length <= faceOf(b).length ? [a, b] : [b, a];
+    const [freer, other] = tapsOf(a).length <= tapsOf(b).length ? [a, b] : [b, a];
     if (canMoveTo(freer, other.tap[0])) freer.tap = [other.tap[0], freer.tap[1]];
     else if (canMoveTo(other, freer.tap[0])) other.tap = [freer.tap[0], other.tap[1]];
   };
@@ -1303,6 +1269,15 @@ export function layoutConnections(
       );
   };
   for (const { edge, source, target } of stepped) {
+    if (options.straight?.has(edge.id) === true && source.side !== target.side) {
+      // One line from tap to tap: at an angle unless the two are in line.
+      routes.set(edge.id, {
+        points: [source.tap, target.tap],
+        sourceSide: source.side,
+        targetSide: target.side,
+      });
+      continue;
+    }
     let points = stepRoute(source.tap, source.side, target.tap, target.side);
     const [first, turn, back, last] = points;
     if (
@@ -1424,7 +1399,7 @@ export function layoutConnections(
       taps: (taps.get(bar.id) ?? []).sort((a, b) => a.x - b.x),
     });
   }
-  return { bars: out, routes };
+  return { bars: out, routes, kept: new Set(routed.map(({ edge }) => edge.id)) };
 }
 
 /**
@@ -1550,8 +1525,8 @@ export interface Rect {
   bottom: number;
 }
 
-/** The height of the bands `routesThrough` sorts the runs into. */
-const ROUTE_BAND = 64;
+/** The side of the squares `runsIn` sorts the runs into, to find the ones near a box. */
+const ROUTE_CELL = 64;
 
 /**
  * How many of `routes` pass through a box, for a label that is to stand
@@ -1586,17 +1561,35 @@ export interface RouteRun {
 export function runsIn(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
 ): (box: Rect) => RouteRun[] {
-  // The runs by the bands of height they reach into.
-  const bands = new Map<number, RouteRun[]>();
+  // The runs by the squares they reach into: a run at an angle by every
+  // square its box covers.
+  const cells = new Map<number, RouteRun[]>();
+  const cell = (x: number, y: number): number =>
+    Math.floor(x / ROUTE_CELL) * 65_536 + Math.floor(y / ROUTE_CELL);
+  const squares = (left: number, right: number, top: number, bottom: number): number[] => {
+    const keys: number[] = [];
+    for (let x = left; ; x += ROUTE_CELL) {
+      for (let y = top; ; y += ROUTE_CELL) {
+        keys.push(cell(Math.min(x, right), Math.min(y, bottom)));
+        if (y >= bottom) break;
+      }
+      if (x >= right) break;
+    }
+    return keys;
+  };
   for (const [id, { points }] of routes) {
     for (let i = 1; i < points.length; i += 1) {
       const run = { id, a: points[i - 1]!, b: points[i]! };
-      const first = Math.floor(Math.min(run.a[1], run.b[1]) / ROUTE_BAND);
-      const last = Math.floor(Math.max(run.a[1], run.b[1]) / ROUTE_BAND);
-      for (let band = first; band <= last; band += 1) {
-        const list = bands.get(band);
+      const keys = squares(
+        Math.min(run.a[0], run.b[0]),
+        Math.max(run.a[0], run.b[0]),
+        Math.min(run.a[1], run.b[1]),
+        Math.max(run.a[1], run.b[1]),
+      );
+      for (const key of new Set(keys)) {
+        const list = cells.get(key);
         if (list) list.push(run);
-        else bands.set(band, [run]);
+        else cells.set(key, [run]);
       }
     }
   }
@@ -1608,10 +1601,8 @@ export function runsIn(
       hh: (box.bottom - box.top) / 2,
     };
     const found = new Set<RouteRun>();
-    const first = Math.floor(box.top / ROUTE_BAND);
-    const last = Math.floor(box.bottom / ROUTE_BAND);
-    for (let band = first; band <= last; band += 1) {
-      for (const run of bands.get(band) ?? []) {
+    for (const key of new Set(squares(box.left, box.right, box.top, box.bottom))) {
+      for (const run of cells.get(key) ?? []) {
         if (!found.has(run) && runsThrough(run.a, run.b, middle)) found.add(run);
       }
     }
@@ -1667,6 +1658,19 @@ export interface LabelPlace {
    * The arrow of the flow stays on the line, at `x`, `y`.
    */
   label?: { x: number; y: number; side: 'left' | 'right' | 'above' | 'below' };
+  /**
+   * Set for a label that stands on an upright run turned to read along it,
+   * from the bottom up: between two lines that run close beside its own
+   * there is room for it that way and no other (`mayTurn`).
+   */
+  turned?: true;
+  /**
+   * Set where there is no place for the label on its route or beside it
+   * that is clear of everything else: the label would be drawn on a symbol,
+   * on another label or under a line, so it is left off (`mayHide`). The
+   * arrow of the flow stays on the line.
+   */
+  hidden?: true;
 }
 
 /**
@@ -1675,6 +1679,14 @@ export interface LabelPlace {
  * from.
  */
 export function labelBoxAt(place: LabelPlace, width: number, height: number): Rect {
+  if (place.turned === true) {
+    return {
+      left: place.x - height / 2,
+      right: place.x + height / 2,
+      top: place.y - width / 2,
+      bottom: place.y + width / 2,
+    };
+  }
   const hung = place.label;
   const cx =
     hung === undefined
@@ -1703,6 +1715,12 @@ export function labelBoxAt(place: LabelPlace, width: number, height: number): Re
 /** How far apart the places tried for a label are, along the route. */
 const LABEL_STEP = 8;
 
+/** The longest route on which every place, a pixel apart, is tried for a label that has none. */
+const LABEL_EVERY_PLACE = 480;
+
+/** How many steps past a place beside its line a label is still looked for a place on the line. */
+const LABEL_LOOK_ON = 8;
+
 /** The room a label keeps to a symbol and to the label of another branch. */
 const LABEL_GAP = 2;
 
@@ -1713,14 +1731,18 @@ const LABEL_CELL = 96;
  * What a label costs where it stands, on top of the area it covers of what
  * is near it: on a bend of its route, for each other connector that runs
  * through it, for each symbol, bar, bus label or readout it reaches into,
- * and for each label of another branch it reaches into. A label over the
- * line beside its own is bad; one that is drawn on a symbol or through the
- * values of a device is worse, and text on text is worst.
+ * and for each label of another branch it reaches into. A label on a bend
+ * of its own line is poor; one that is drawn over another line, on a
+ * symbol or through the values of a device overlaps it, which is worse
+ * than anything else, and text on text is worst.
  */
 const LABEL_ON_BEND = 400;
-const LABEL_OVER_LINE = 300;
-const LABEL_OVER_BOX = 600;
-const LABEL_OVER_LABEL = 1000;
+const LABEL_OVER_LINE = 3000;
+const LABEL_OVER_BOX = 6000;
+const LABEL_OVER_LABEL = 10000;
+
+/** A place that costs this much or more has the label drawn on something. */
+const LABEL_OVERLAPS = LABEL_OVER_LINE;
 
 /**
  * What it costs a label to stand beside its line: next to nothing, so it
@@ -1729,6 +1751,13 @@ const LABEL_OVER_LABEL = 1000;
  */
 const LABEL_BESIDE = 1;
 const LABEL_BESIDE_GAP = 6;
+
+/**
+ * What it costs a label to stand on its line turned to read along it: more
+ * than a place beside the line, so it is turned only where it has no place
+ * the way it reads best.
+ */
+const LABEL_TURNED = 2;
 
 /**
  * Where each branch carries its label (the flow of a line, the symbol of a
@@ -1748,13 +1777,78 @@ const LABEL_BESIDE_GAP = 6;
  * an upright one. Where a symbol stands close beside a line there is often
  * room on the other side of the line and none on it.
  *
+ * A label that may be turned (`mayTurn`: the flow of a line) is also tried
+ * on each upright run turned to read along the line. Two or three lines
+ * that run side by side, as close as two taps of a bar, leave no room for a
+ * label between them any other way.
+ *
+ * A label that may be left off (`mayHide`: the flow of a line, not the
+ * symbol of a transformer) and has no place where it is drawn on nothing
+ * else is marked `hidden`, and takes up no room.
+ *
  * `labels` lists the branches in the order they are placed, each with the
- * box its label takes; `boxes` is what stands on the diagram.
+ * box its label takes; `boxes` is what stands on the diagram. A label that
+ * is placed takes its room from the ones after it, so where one is left
+ * without a place the labels are placed once more with those first: the
+ * ones with the least room choose before the ones that have plenty.
  */
 export function branchLabelPlaces(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
-  labels: readonly { id: string; width: number; height: number; beside?: boolean }[],
+  labels: readonly BranchLabel[],
   boxes: readonly Rect[],
+  { quick = false }: { quick?: boolean } = {},
+): Map<string, LabelPlace> {
+  const hiddenIn = (places: ReadonlyMap<string, LabelPlace>): string[] =>
+    [...places].filter(([, place]) => place.hidden === true).map(([id]) => id);
+  let best = placeInOrder(routes, labels, boxes, quick);
+  // `quick`: the labels are placed once and no further. The last places a
+  // crowded diagram has are found by going over the labels again, which is
+  // most of the work on a large one; while a node is dragged the places are
+  // worked out with every move, and are found again when it is dropped.
+  for (let round = 0; round < LABEL_ROUNDS && !quick; round += 1) {
+    const hidden = new Set(hiddenIn(best));
+    if (hidden.size === 0) break;
+    const again = placeInOrder(
+      routes,
+      [...labels.filter(({ id }) => hidden.has(id)), ...labels.filter(({ id }) => !hidden.has(id))],
+      boxes,
+      quick,
+    );
+    if (hiddenIn(again).length >= hidden.size) break;
+    best = again;
+  }
+  return best;
+}
+
+/** A label `branchLabelPlaces` finds a place for. */
+export interface BranchLabel {
+  id: string;
+  width: number;
+  height: number;
+  /** Whether it may stand beside its line. */
+  beside?: boolean;
+  /** Whether it may stand on an upright run turned to read along it. */
+  mayTurn?: boolean;
+  /** Whether it is left off where it has no place clear of everything else. */
+  mayHide?: boolean;
+}
+
+/** How many more times the labels are placed, with the ones left without a place first. */
+const LABEL_ROUNDS = 2;
+
+/**
+ * How far a label keeps from a line that is not its own. Without it a
+ * label may stand with its edge on a line that passes it, which is on
+ * nothing but reads as joined to it.
+ */
+const LABEL_LINE_MARGIN = 3;
+
+/** `branchLabelPlaces` for the labels in the order given. */
+function placeInOrder(
+  routes: ReadonlyMap<string, { points: readonly Point[] }>,
+  labels: readonly BranchLabel[],
+  boxes: readonly Rect[],
+  quick: boolean,
 ): Map<string, LabelPlace> {
   interface Standing {
     box: Rect;
@@ -1797,10 +1891,25 @@ export function branchLabelPlaces(
     return cost;
   };
   for (const box of boxes) stand({ box, label: false });
-  const through = routesThrough(routes);
+  const routesIn = routesThrough(routes);
+  /**
+   * How many routes a label in `box` would be on or right up against: the
+   * ones that pass through it or within `LABEL_LINE_MARGIN` of it, the
+   * route `own` aside, which the label belongs to and may stand on.
+   */
+  const through = (box: Rect, own?: string): number =>
+    routesIn(
+      {
+        left: box.left - LABEL_LINE_MARGIN,
+        right: box.right + LABEL_LINE_MARGIN,
+        top: box.top - LABEL_LINE_MARGIN,
+        bottom: box.bottom + LABEL_LINE_MARGIN,
+      },
+      own,
+    );
 
   const out = new Map<string, LabelPlace>();
-  for (const { id, width, height, beside } of labels) {
+  for (const { id, width, height, beside, mayTurn, mayHide } of labels) {
     const points = routes.get(id)?.points;
     if (points === undefined || points.length < 2) continue;
     // The runs of the route, with how far along it each starts.
@@ -1828,6 +1937,8 @@ export function branchLabelPlaces(
       }
     };
     const settled = (): boolean => best.at !== null && best.at.cost <= 0;
+    /** Whether a place beside the line, clear of everything, has been found: one that will do. */
+    const willDo = (): boolean => best.at !== null && best.at.cost <= LABEL_BESIDE;
     const weigh = (along: number): void => {
       weighed = along;
       const run = runs.find((r) => along <= r.from + r.length) ?? runs[runs.length - 1]!;
@@ -1866,25 +1977,70 @@ export function branchLabelPlaces(
         offer(
           { x, y, angleDeg, label },
           box,
-          LABEL_BESIDE + covered(box) + LABEL_OVER_LINE * through(box),
+          LABEL_BESIDE +
+            covered(box) +
+            LABEL_OVER_LINE * (through(box, id) + routesIn(box) - routesIn(box, id)),
         );
       }
+      if (mayTurn !== true || level || willDo()) return;
+      // On an upright run, turned to read along it.
+      const turned: Rect = {
+        left: x - height / 2,
+        right: x + height / 2,
+        top: y - width / 2,
+        bottom: y + width / 2,
+      };
+      const nearBend =
+        (run !== runs[0] && along - run.from < width / 2) ||
+        (run !== runs[runs.length - 1] && run.from + run.length - along < width / 2);
+      offer(
+        { x, y, angleDeg, turned: true },
+        turned,
+        LABEL_TURNED +
+          covered(turned) +
+          (nearBend ? LABEL_ON_BEND : 0) +
+          LABEL_OVER_LINE * through(turned, id),
+      );
     };
-    for (let k = 0; k * LABEL_STEP <= total / 2 && !settled(); k += 1) {
+    // From the middle outwards, until the label has a place on its line that
+    // costs nothing. Once it has one beside the line, a place on the line is
+    // looked for a little further on and no more: the label stays near the
+    // middle, and a long route is not walked from end to end for it.
+    let further = LABEL_LOOK_ON;
+    for (let k = 0; k * LABEL_STEP <= total / 2 && !settled() && further > 0; k += 1) {
       weigh(total / 2 + k * LABEL_STEP);
       if (k > 0 && !settled()) weigh(total / 2 - k * LABEL_STEP);
+      if (willDo()) further -= 1;
     }
     // A gap between two symbols that the label just fits falls between two
     // of the places tried a step apart: around the best of those, every
     // place in between is tried as well.
-    if (best.at !== null && !settled()) {
+    if (best.at !== null && !willDo()) {
       const around = best.at.along;
-      for (let d = 1; d < LABEL_STEP && !settled(); d += 1) {
+      for (let d = 1; d < LABEL_STEP && !willDo(); d += 1) {
         if (around + d <= total) weigh(around + d);
-        if (around - d >= 0 && !settled()) weigh(around - d);
+        if (around - d >= 0 && !willDo()) weigh(around - d);
+      }
+    }
+    // On a short route the room for a label can be a pixel or two long: a
+    // place that would have it drawn on something is given up only after
+    // every place has been tried.
+    if (
+      !quick &&
+      best.at !== null &&
+      best.at.cost >= LABEL_OVERLAPS &&
+      total <= LABEL_EVERY_PLACE
+    ) {
+      for (let d = 0; d <= total / 2 && !willDo(); d += 1) {
+        weigh(total / 2 + d);
+        if (d > 0 && !willDo()) weigh(total / 2 - d);
       }
     }
     if (best.at === null) continue;
+    if (mayHide === true && best.at.cost >= LABEL_OVERLAPS) {
+      out.set(id, { ...routeMidpoint(points), hidden: true });
+      continue;
+    }
     out.set(id, best.at.place);
     stand({ box: best.at.box, label: true });
   }

@@ -91,42 +91,17 @@ vi.mock('@xyflow/react', () => ({
   }),
 }));
 
-// An ELK that lays the buses out on a slope and, on its routing pass, runs
-// each branch from the bottom of its first bus to the top of its second with
-// one bend, the shape the real one answers in.
+// An ELK that lays the buses out on a slope, a little off the grid. It is
+// asked for the places of the buses only: the diagram is arranged around
+// them, and its branches routed, afterwards (`useAutoLayout`).
 vi.mock('@/components/sld/elkClient', () => ({
-  elkLayout: vi.fn(
-    async (graph: {
-      children?: { id: string }[];
-      edges?: { id: string; sources: string[]; targets: string[] }[];
-    }) => {
-      const children = (graph.children ?? []).map((c, i) => ({
-        id: c.id,
-        x: 240 * i + 1 / 3,
-        y: 130 * i,
-      }));
-      const at = (port: string) => {
-        const child = children.find((c) => c.id === port.split('.')[0]);
-        if (!child) throw new Error(`no node for ${port}`);
-        return child;
-      };
-      const edges = (graph.edges ?? []).map((e) => {
-        const from = at(e.sources[0]!);
-        const to = at(e.targets[0]!);
-        return {
-          id: e.id,
-          sections: [
-            {
-              startPoint: { x: from.x + 30, y: from.y + 40 },
-              bendPoints: [{ x: from.x + 30, y: to.y }],
-              endPoint: { x: to.x, y: to.y + 20 },
-            },
-          ],
-        };
-      });
-      return { children, edges };
-    },
-  ),
+  elkLayout: vi.fn(async (graph: { children?: { id: string }[] }) => ({
+    children: (graph.children ?? []).map((c, i) => ({
+      id: c.id,
+      x: 240 * i + 1 / 3,
+      y: 130 * i,
+    })),
+  })),
 }));
 
 import { SldCanvas } from '@/components/sld/SldCanvas';
@@ -270,9 +245,13 @@ describe('place, save, reload', () => {
     open('kundur.xlsx');
     await draw();
     const before = picture();
-    // The automatic layout routed the branches through fixed points.
+    // The automatic arrangement put the buses on the grid and routed the
+    // branches through fixed points.
+    expect(before.positions['2']).toEqual({ x: 240, y: 128 });
     expect(before.routes['line-L12']?.type).toBe('routed');
-    expect(before.routes['transformer-T34']?.bendPoints).toHaveLength(3);
+    expect(
+      (before.routes['transformer-T34']?.bendPoints as unknown[] | null)?.length,
+    ).toBeGreaterThanOrEqual(2);
 
     // What a save sends: every bus, every device and every route, though
     // nothing was dragged.
@@ -320,24 +299,32 @@ describe('place, save, reload', () => {
     const movedTo = { x: start.positions['1']!.x - 80.5, y: start.positions['1']!.y + 45.25 };
     dropAt('1', movedTo);
     await waitFor(() => expect(drawn.nodes.find((n) => n.id === '1')?.position).toEqual(movedTo));
+    // The branch of the bus that moved is routed to where the bus stands
+    // now, and that route is kept; the others keep the routes they had.
+    await waitFor(() =>
+      expect(picture().routes['line-L12']?.bendPoints).not.toEqual(
+        start.routes['line-L12']?.bendPoints,
+      ),
+    );
     const placed = picture();
-
-    // The branch of the bus that moved is drawn from the live positions now;
-    // the others keep the routes they had.
-    expect(placed.routes['line-L12']).toEqual({ type: 'topology', bendPoints: null });
+    const moved = placed.routes['line-L12']?.bendPoints as [number, number][];
+    expect(placed.routes['line-L12']?.type).toBe('routed');
+    expect(moved[0]![1]).toBe(movedTo.y + 3);
     expect(placed.routes['line-L23']).toEqual(start.routes['line-L23']);
     expect(placed.routes['transformer-T34']).toEqual(start.routes['transformer-T34']);
 
-    // The debounced write.
+    // The debounced write: one, with the move and the route it led to.
     await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
     const [vars] = putSidecarSpy.mock.calls[0] as [{ casePath: string; layout: SidecarLayout }];
     expect(vars.casePath).toBe('kundur.xlsx');
     expect(vars.layout.schema_version).toBe('2');
     expect(vars.layout.coordinates['1']).toEqual(movedTo);
     expect([...branchPolylines(vars.layout, chain()).keys()]).toEqual([
+      'line-L12',
       'line-L23',
       'transformer-T34',
     ]);
+    expect(branchPolylines(vars.layout, chain()).get('line-L12')).toEqual(moved);
     // A badge is no bus: none is filed among the bus coordinates.
     expect(Object.keys(vars.layout.coordinates)).toEqual(['1', '2', '3', '4']);
 
@@ -684,11 +671,16 @@ describe('place, save, reload', () => {
     expect(ids).not.toContain('load-PQ_1');
     // The buses the layout knows stay where it has them.
     expect(drawn.nodes.find((n) => n.id === '2')?.position).toEqual(saved.coordinates['2']);
-    // What is written next describes the case as it is now.
+    // What is written next describes the case as it is now, the new line
+    // with the route the diagram made for it.
+    await waitFor(() =>
+      expect(Object.keys(savedLayout().branches?.line ?? {})).toEqual(['L12', 'L23', 'L35']),
+    );
     const next = savedLayout();
     expect(Object.keys(next.coordinates).sort()).toEqual(['1', '2', '3', '5']);
     expect(next.non_bus_coordinates?.load).toBeUndefined();
     expect(next.branches?.transformer).toBeUndefined();
-    expect(Object.keys(next.branches?.line ?? {})).toEqual(['L12', 'L23']);
+    // Nothing is written for it until something on the diagram is changed.
+    expect(putSidecarSpy).not.toHaveBeenCalled();
   });
 });

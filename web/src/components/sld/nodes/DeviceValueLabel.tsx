@@ -31,7 +31,10 @@ export interface DeviceValueLabelProps {
  * readout on the far side is one that hangs close under its bus, where the
  * strip holds the label of the bus, or one with no place free on either side
  * of its connector (`data.readoutSpot`: a line lands on each side of it, or a
- * symbol stands there), which may also stand beside the symbol. Shown only
+ * symbol stands there), which may also stand beside the symbol. A device
+ * with no place at all for its readout shows none: the values are in the
+ * tables and in the Inspector, and a readout drawn over a line or a symbol
+ * could be read on neither. Shown only
  * after a converged PF that has
  * a row for the device, never under "Hide labels", and, on a case with many
  * devices, only while the canvas is zoomed in far enough to read it
@@ -54,6 +57,9 @@ export const DeviceValueLabel = memo(function DeviceValueLabel({
     pflowResult,
     hideLabels,
   );
+  // With no place on the diagram that is clear of the lines and the symbols
+  // (`data.readoutSpot`), the readout is left off.
+  if (data.readoutSpot === 'none') return null;
   if (!zoomedIn || (overlay.p_label === null && overlay.q_label === null)) return null;
   // Default: the generator sits above its bus, the load below it. With no
   // place free on the side of the bus, the readout hangs off the far side,

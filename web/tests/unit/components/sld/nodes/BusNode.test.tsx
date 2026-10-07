@@ -683,23 +683,21 @@ describe('BusNode, the bar and its taps', () => {
     expect(getByTestId('bus-label-1').style.left).toBe('-26px');
   });
 
-  it('moves the label clear of a line that passes under the bar', () => {
-    const { getByTestId } = render(
-      <BusNode
-        {...withBar({ start: 0, end: 92, taps: [] })}
-        data={{ ...withBar({ start: 0, end: 92, taps: [] }).data, labelClear: [[46, 46]] }}
-      />,
-    );
-    // As beside a feeder of its own: 26 from where the line passes.
-    expect(getByTestId('bus-label-1').style.left).toBe('-26px');
-  });
-
-  it('stands the label over the bar when there is no place for it under the bar', () => {
-    // A symbol takes up the strip under the bar and well past both tips,
-    // and nothing stands over the bar.
+  it('hangs the label where the canvas says, along the bar', () => {
     const bare = withBar({ start: 0, end: 92, taps: [] });
     const { getByTestId } = render(
-      <BusNode {...bare} data={{ ...bare.data, labelClear: [[-200, 300]], labelClearAbove: [] }} />,
+      <BusNode {...bare} data={{ ...bare.data, labelAt: { offset: 20, side: 'below' } }} />,
+    );
+    // 26 left of the middle of the bar, as beside a feeder of its own.
+    const label = getByTestId('bus-label-1');
+    expect(label.style.left).toBe('-26px');
+    expect(label).not.toHaveAttribute('data-label-side');
+  });
+
+  it('stands the label over the bar when the canvas has no place for it under the bar', () => {
+    const bare = withBar({ start: 0, end: 92, taps: [] });
+    const { getByTestId } = render(
+      <BusNode {...bare} data={{ ...bare.data, labelAt: { offset: 46, side: 'above' } }} />,
     );
     const label = getByTestId('bus-label-1');
     expect(label).toHaveAttribute('data-label-side', 'above');
@@ -708,14 +706,56 @@ describe('BusNode, the bar and its taps', () => {
     expect(label.style.left).toBe('46px');
   });
 
-  it('keeps the label under the bar when it is not told what stands over it', () => {
+  it('stands the label beside a tip of the bar, level with it', () => {
+    const long = withBar({ start: -8, end: 100, taps: [] });
+    const east = render(
+      <BusNode {...long} data={{ ...long.data, labelAt: { offset: 140, side: 'east' } }} />,
+    ).getByTestId('bus-label-1');
+    expect(east).toHaveAttribute('data-label-side', 'east');
+    // Its left edge a gap right of the tip, its middle at the height of the bar.
+    expect(east.style.left).toBe('106px');
+    expect(east.style.top).toBe('3px');
+    expect(east.className).toContain('-translate-y-1/2');
+    east.remove();
+    const west = render(
+      <BusNode {...long} data={{ ...long.data, labelAt: { offset: -50, side: 'west' } }} />,
+    ).getAllByTestId('bus-label-1')[0]!;
+    expect(west).toHaveAttribute('data-label-side', 'west');
+    expect(west.style.left).toBe('-14px');
+    expect(west.className).toContain('-translate-x-full');
+  });
+
+  it('stands the label away from the bar where the canvas found the nearest clear place', () => {
     const bare = withBar({ start: 0, end: 92, taps: [] });
     const { getByTestId } = render(
-      <BusNode {...bare} data={{ ...bare.data, labelClear: [[-200, 300]] }} />,
+      <BusNode
+        {...bare}
+        data={{ ...bare.data, labelAt: { offset: 150, side: 'away', top: 54 } }}
+      />,
     );
     const label = getByTestId('bus-label-1');
-    expect(label).not.toHaveAttribute('data-label-side');
-    expect(label.className).not.toContain('bottom-full');
+    expect(label).toHaveAttribute('data-label-side', 'away');
+    // Its middle at the offset, its top edge where it was put.
+    expect(label.style.left).toBe('150px');
+    expect(label.style.top).toBe('54px');
+    expect(label.className).toContain('-translate-x-1/2');
+  });
+
+  it('draws a dot for every tap: no two connections land at one place', () => {
+    const { getAllByTestId } = render(
+      <BusNode
+        {...withBar({
+          start: 0,
+          end: 92,
+          taps: [
+            { x: 32, side: 'north' },
+            { x: 46, side: 'south' },
+            { x: 60, side: 'north' },
+          ],
+        })}
+      />,
+    );
+    expect(getAllByTestId('bus-tap-1').map((dot) => dot.dataset.tapX)).toEqual(['32', '46', '60']);
   });
 
   it('makes room for the values a power flow adds to the label', () => {

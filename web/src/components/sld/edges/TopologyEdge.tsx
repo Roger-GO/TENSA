@@ -19,9 +19,10 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * Topology edge: a line between two buses.
  *
  * It is drawn through the points `connections.ts` works out, with square
- * corners: the bends of a stored route (the auto-layout's, or a saved
- * layout's) when the line has one, a route stepped from tap to tap when it
- * has none. Either way its two ends are taps on the bars, which `BusNode`
+ * corners: the bends of the route the diagram keeps for it (the automatic
+ * arrangement's, a saved layout's, or one made as the diagram was drawn:
+ * `routing.ts`), or a route stepped from tap to tap where no way was found
+ * for one. Either way its two ends are taps on the bars, which `BusNode`
  * marks with a dot, so both edge types that carry a line (`topology` and
  * `routed`) are drawn by this one component.
  *
@@ -29,9 +30,12 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * a magnitude label, at the place the canvas found for them on a straight run
  * of the route (`data.labelAt`; half way along without one). The label stands
  * on the line there, or beside it where the line has no room for it
- * (`data.labelAt.label`). The arrow lies along the run it sits on and points
- * the way the active power flows; the stroke turns amber or red, and heavier,
- * as the line nears or passes its rating.
+ * (`data.labelAt.label`), turned to read upwards where only an upright
+ * run has the room (`data.labelAt.turned`), and is left off where no place
+ * has (`data.labelAt.hidden`: it would be drawn over a symbol, another label
+ * or another line). The arrow lies along the run it sits on and points the
+ * way the active power flows; the stroke turns amber or red, and heavier, as
+ * the line nears or passes its rating.
  */
 interface EdgeData {
   idx?: string;
@@ -94,12 +98,13 @@ export const TopologyEdge = memo(function TopologyEdge({
           testid={`line-flow-arrow-${id}`}
         />
       ) : null}
-      {overlay ? (
+      {overlay && edgeData.labelAt?.hidden !== true ? (
         <LineFlowLabel
           id={id}
           x={edgeData.labelAt?.label?.x ?? mid.x}
           y={edgeData.labelAt?.label?.y ?? mid.y}
           side={edgeData.labelAt?.label?.side}
+          turned={edgeData.labelAt?.turned === true}
           overlay={overlay}
           hideLabels={hideLabels}
         />

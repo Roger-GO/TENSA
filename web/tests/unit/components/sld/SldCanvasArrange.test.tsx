@@ -48,6 +48,7 @@ const drawn: {
   onInteractiveChange: ((interactive: boolean) => void) | null;
   snapToGrid: boolean | undefined;
   snapGrid: [number, number] | undefined;
+  nodesDraggable: boolean | undefined;
 } = {
   nodes: [],
   edges: [],
@@ -57,6 +58,7 @@ const drawn: {
   onInteractiveChange: null,
   snapToGrid: undefined,
   snapGrid: undefined,
+  nodesDraggable: undefined,
 };
 
 vi.mock('@xyflow/react', () => ({
@@ -68,6 +70,7 @@ vi.mock('@xyflow/react', () => ({
     onNodeDragStop: DragHandler;
     snapToGrid?: boolean;
     snapGrid?: [number, number];
+    nodesDraggable?: boolean;
     children?: ReactNode;
   }) => {
     drawn.nodes = props.nodes;
@@ -77,6 +80,7 @@ vi.mock('@xyflow/react', () => ({
     drawn.onNodeDragStop = props.onNodeDragStop;
     drawn.snapToGrid = props.snapToGrid;
     drawn.snapGrid = props.snapGrid;
+    drawn.nodesDraggable = props.nodesDraggable;
     return props.children;
   },
   ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
@@ -103,46 +107,17 @@ vi.mock('@xyflow/react', () => ({
   }),
 }));
 
-// An ELK that lays the buses out two to a row and, on its routing pass, runs
-// every branch out of the bottom of its first bus and into the top of its
-// second with one bend, through the middle of each, as the real one does: the
-// branches of a bus then leave it on top of each other.
+// An ELK that lays the buses out two to a row, a little off the grid. The
+// canvas asks it for the places of the buses only: the devices and the
+// routes are arranged around them afterwards (`useAutoLayout`).
 vi.mock('@/components/sld/elkClient', () => ({
-  elkLayout: vi.fn(
-    async (graph: {
-      children?: { id: string }[];
-      edges?: { id: string; sources: string[]; targets: string[] }[];
-    }) => {
-      const children = (graph.children ?? []).map((c, i) => ({
-        id: c.id,
-        x: 300 * (i % 2) + 5,
-        y: 220 * Math.floor(i / 2) + 7,
-      }));
-      const at = (port: string) => {
-        const child = children.find((c) => c.id === port.split('.')[0]);
-        if (!child) throw new Error(`no node for ${port}`);
-        return child;
-      };
-      const edges = (graph.edges ?? []).map((e) => {
-        const from = at(e.sources[0]!);
-        const to = at(e.targets[0]!);
-        return {
-          id: e.id,
-          sections: [
-            {
-              startPoint: { x: from.x + 46, y: from.y + 40 },
-              bendPoints: [
-                { x: from.x + 46, y: from.y + 100 },
-                { x: to.x + 46, y: from.y + 100 },
-              ],
-              endPoint: { x: to.x + 46, y: to.y },
-            },
-          ],
-        };
-      });
-      return { children, edges };
-    },
-  ),
+  elkLayout: vi.fn(async (graph: { children?: { id: string }[] }) => ({
+    children: (graph.children ?? []).map((c, i) => ({
+      id: c.id,
+      x: 300 * (i % 2) + 5,
+      y: 220 * Math.floor(i / 2) + 7,
+    })),
+  })),
 }));
 
 /**
@@ -156,6 +131,18 @@ const forced = vi.hoisted(() => ({
   unrouted: [] as string[],
   outOfSteps: false,
   tooLarge: false,
+  /**
+   * The picture finds no route of its own while this is set: a branch whose
+   * route is broken is drawn the plain way from bar to bar, as on a diagram
+   * where there is no way round.
+   */
+  noRouting: false,
+  /**
+   * The job the next tidy is handed in place of a plan made within the
+   * call: what a diagram large enough for the worker gets, which jsdom has
+   * none of.
+   */
+  job: null as { done: Promise<unknown>; cancel: () => void } | null,
 }));
 
 vi.mock('@/components/sld/tidyPlan', async () => {
@@ -186,9 +173,36 @@ vi.mock('@/components/sld/tidyPlan', async () => {
   };
 });
 
+vi.mock('@/components/sld/tidyClient', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/tidyClient')>(
+    '@/components/sld/tidyClient',
+  );
+  return {
+    ...actual,
+    startTidy: vi.fn((...args: Parameters<typeof actual.startTidy>) => {
+      const job = forced.job;
+      if (job === null) return actual.startTidy(...args);
+      forced.job = null;
+      return job as ReturnType<typeof actual.startTidy>;
+    }),
+  };
+});
+
+vi.mock('@/components/sld/routing', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/routing')>(
+    '@/components/sld/routing',
+  );
+  const routeDiagram: typeof actual.routeDiagram = (nodes, edges, options) =>
+    actual.routeDiagram(nodes, edges, forced.noRouting ? { ...options, steps: 0 } : options);
+  return { ...actual, routeDiagram };
+});
+
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { GRID_STEP } from '@/components/sld/tidy';
-import { __clearAllPendingForTests, parseSidecar } from '@/components/sld/sidecar';
+import { planTidy } from '@/components/sld/tidyPlan';
+import { startTidy } from '@/components/sld/tidyClient';
+import { defaultBarLengths } from '@/components/sld/graph';
+import { __clearAllPendingForTests, captureLayout, parseSidecar } from '@/components/sld/sidecar';
 import { useCaseStore } from '@/store/case';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
@@ -197,8 +211,9 @@ import { useSessionStore } from '@/store/session';
 import { __requestSldCommand, useSldStore } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { toast } from '@/lib/toast';
-import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import { parseRunId, parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
+import { lineFlow } from '../../helpers/lineFlow';
 
 let mockTopology: TopologySummary | null = null;
 let mockSidecar: SidecarLayout | null = null;
@@ -347,6 +362,49 @@ function overlap(a: Points, b: Points): number {
   return shared;
 }
 
+/**
+ * The route the line from bus 1 to bus 4 has in `untidy()`: down, across,
+ * down again and across again, where one turn would do.
+ */
+const JOGGED: Points = [
+  [64, 3],
+  [64, 112],
+  [240, 112],
+  [240, 160],
+  [320, 160],
+  [320, 227],
+];
+
+/**
+ * Open `square()` from a layout that was saved with a line the long way
+ * round: the diagram as it opens with no layout, but with a jog in the line
+ * from bus 1 to bus 4 that nothing calls for. No line of it is drawn over
+ * anything, so it is drawn as it was saved, and a tidy has something to do.
+ */
+async function openUntidy(): Promise<void> {
+  open('square.xlsx');
+  await draw();
+  const layout = captureLayout(
+    {
+      nodes: drawn.nodes,
+      edges: drawn.edges.map((e) =>
+        e.id === 'line-L14' ? { ...e, data: { ...e.data, bendPoints: JOGGED } } : e,
+      ),
+    },
+    mockTopology!,
+    null,
+  );
+  cleanup();
+  drawn.nodes = [];
+  useCaseStore.getState().clearCase();
+  history().clear();
+  mockSidecar = parseSidecar(JSON.parse(JSON.stringify(layout)));
+  open('square.xlsx');
+  await draw();
+  expect(routes()['line-L14']).toEqual(JOGGED);
+  expect(putSidecarSpy).not.toHaveBeenCalled();
+}
+
 beforeEach(() => {
   mockTopology = square();
   mockSidecar = null;
@@ -366,6 +424,9 @@ beforeEach(() => {
   forced.unrouted = [];
   forced.outOfSteps = false;
   forced.tooLarge = false;
+  forced.noRouting = false;
+  forced.job = null;
+  vi.mocked(startTidy).mockClear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePflowStore.setState({ lastRun: null });
   history().clear();
@@ -378,16 +439,47 @@ afterEach(() => {
   useCaseStore.getState().clearCase();
 });
 
+describe('a case that opens with no saved layout', () => {
+  it('is arranged already: no line lies on another, and a tidy finds nothing to do', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    const opened = { picture: picture(), routes: routes() };
+    // Every branch has its route, drawn as it is stored.
+    const ids = Object.keys(opened.routes);
+    expect(ids).toHaveLength(4);
+    for (const id of ids) {
+      expect(squareCornered(opened.routes[id]!), id).toBe(true);
+      expect(opened.routes[id], id).toEqual(opened.picture.stored[id]);
+      for (const other of ids) {
+        if (id < other) {
+          expect(overlap(opened.routes[id]!, opened.routes[other]!), `${id} ${other}`).toBe(0);
+        }
+      }
+    }
+    // The buses are on the grid, and the devices beside their bars.
+    for (const id of ['1', '2', '3', '4']) {
+      expect(positionOf(id).x % GRID_STEP, id).toBe(0);
+      expect(positionOf(id).y % GRID_STEP, id).toBe(0);
+    }
+
+    for (const command of ['tidy', 'tidy-relayout'] as const) {
+      info.mockClear();
+      run(command);
+      expect(info, command).toHaveBeenCalledWith('The diagram is already tidy.', expect.anything());
+    }
+    expect(picture()).toEqual(opened.picture);
+    expect(labels()).toEqual([]);
+    // A diagram that only stands in its automatic arrangement is not written.
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe('Tidy diagram', () => {
   it('routes every branch afresh, moves nothing, and writes the result beside the case', async () => {
     const success = vi.spyOn(toast, 'success');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     const before = picture();
-    // The automatic layout turns the lines from bus 1 to buses 2 and 4 into
-    // one corridor: they run on top of each other.
-    const untidy = routes();
-    expect(overlap(untidy['line-L12']!, untidy['line-L14']!)).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByTestId('sld-tidy'));
 
@@ -404,6 +496,8 @@ describe('Tidy diagram', () => {
     for (const a of ids) {
       for (const b of ids) if (a < b) expect(overlap(tidy[a]!, tidy[b]!), `${a} ${b}`).toBe(0);
     }
+    // The jog is gone: one turn takes the line from bus 1 to bus 4.
+    expect(tidy['line-L14']!.length).toBeLessThan(JOGGED.length);
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied',
       expect.objectContaining({
@@ -415,18 +509,17 @@ describe('Tidy diagram', () => {
     // One step for Undo, and the routes are in the file.
     expect(labels()).toEqual(['tidy diagram']);
     const layout = await written();
-    expect(layout.branches?.line?.L13).toMatchObject({
+    expect(layout.branches?.line?.L14).toMatchObject({
       routing: 'polyline',
       bus1: '1',
-      bus2: '3',
-      bend_points: tidy['line-L13']!.map(([x, y]) => ({ x, y })),
+      bus2: '4',
+      bend_points: tidy['line-L14']!.map(([x, y]) => ({ x, y })),
     });
     expect(layout.branches?.transformer?.T24?.routing).toBe('polyline');
   });
 
   it('reopens as it was tidied', async () => {
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     run('tidy');
     const layout = await written();
     const tidied = { picture: picture(), routes: routes() };
@@ -445,8 +538,7 @@ describe('Tidy diagram', () => {
 
   it('is taken back by one Undo, and put back by one Redo', async () => {
     const info = vi.spyOn(toast, 'info');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     const before = { picture: picture(), routes: routes() };
     run('tidy');
     await waitFor(() => expect(picture().stored).not.toEqual(before.picture.stored));
@@ -460,11 +552,9 @@ describe('Tidy diagram', () => {
     expect(info).toHaveBeenCalledWith('Undone: tidy diagram');
     expect(labels()).toEqual([]);
     expect(history().future.map((step) => step.label)).toEqual(['tidy diagram']);
-    // The file follows: it holds the routes the automatic layout made again.
+    // The file follows: it holds the route with the jog in it again.
     const undone = await written();
-    expect(undone.branches?.line?.L13?.bend_points).toEqual(
-      before.picture.stored['line-L13']!.map(([x, y]) => ({ x, y })),
-    );
+    expect(undone.branches?.line?.L14?.bend_points).toEqual(JOGGED.map(([x, y]) => ({ x, y })));
 
     run('redo-layout');
     await waitFor(() => expect(routes()).toEqual(tidied.routes));
@@ -475,8 +565,7 @@ describe('Tidy diagram', () => {
 
   it('offers Undo on its toast, which takes it back while it is the newest change', async () => {
     const success = vi.spyOn(toast, 'success');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     const before = routes();
     run('tidy');
     await waitFor(() => expect(routes()).not.toEqual(before));
@@ -489,8 +578,7 @@ describe('Tidy diagram', () => {
 
   it('says so, and leaves nothing to take back, when the diagram is already tidy', async () => {
     const info = vi.spyOn(toast, 'info');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     const before = routes();
     run('tidy');
     await waitFor(() => expect(routes()).not.toEqual(before));
@@ -511,33 +599,97 @@ describe('Tidy diagram', () => {
     expect(info).toHaveBeenCalledWith('Nothing to tidy: the diagram has no lines or transformers.');
     expect(labels()).toEqual([]);
   });
+});
 
-  it('routes the branches of a bus that was dragged, which are drawn from tap to tap until then', async () => {
+describe('a bus or a device that is moved', () => {
+  it('has the lines of a bus routed to where it is dropped, with no tidy asked for', async () => {
     open('square.xlsx');
     await draw();
     const start = positionOf('3');
+    const before = picture().stored;
     dragTo('3', { x: start.x + 150, y: start.y + 90 });
     await waitFor(() => expect(positionOf('3').x).toBe(start.x + 150));
-    expect(picture().stored['line-L13']).toBeNull();
 
-    run('tidy');
-    await waitFor(() => expect(picture().stored['line-L13']).not.toBeNull());
+    // The route of its line is made for where the bus stands now, and kept.
+    await waitFor(() => expect(picture().stored['line-L13']).not.toEqual(before['line-L13']));
     const points = routes()['line-L13']!;
+    expect(points).toEqual(picture().stored['line-L13']);
     expect(squareCornered(points)).toBe(true);
     // It lands on the bar where the bus stands now.
     const end = points[points.length - 1]!;
     expect(end[1]).toBe(start.y + 90 + 3);
     expect(end[0]).toBeGreaterThanOrEqual(start.x + 150);
     expect(end[0]).toBeLessThanOrEqual(start.x + 150 + 92);
-    expect(labels()).toEqual(['move bus Bus 3', 'tidy diagram']);
+    // The lines of the buses that stayed keep their routes.
+    expect(picture().stored['transformer-T24']).toEqual(before['transformer-T24']);
+    // The move is the one step there is to take back, and the routes are saved with it.
+    expect(labels()).toEqual(['move bus Bus 3']);
+    const layout = await written();
+    expect(layout.branches?.line?.L13?.bend_points).toEqual(points.map(([x, y]) => ({ x, y })));
+  });
+
+  it('has the lines a device is dropped on routed round it', async () => {
+    open('square.xlsx');
+    await draw();
+    const straight = routes()['line-L13']!;
+    // The line from bus 1 to bus 3 drops straight down at x = 48.
+    expect(straight).toEqual([
+      [48, 3],
+      [48, 227],
+    ]);
+
+    // The generator is dropped on it.
+    dragTo('generator-G1', { x: 20, y: 60 });
+    await waitFor(() => expect(routes()['line-L13']).not.toEqual(straight));
+    const box = { left: 20, right: 20 + 55, top: 60, bottom: 60 + 41 };
+    for (const [id, points] of Object.entries(routes())) {
+      expect(squareCornered(points), id).toBe(true);
+      for (let i = 1; i < points.length; i += 1) {
+        const [a, b] = [points[i - 1]!, points[i]!];
+        const through =
+          Math.max(a[0], b[0]) > box.left &&
+          Math.min(a[0], b[0]) < box.right &&
+          Math.max(a[1], b[1]) > box.top &&
+          Math.min(a[1], b[1]) < box.bottom;
+        expect(through, `${id} run ${i}`).toBe(false);
+      }
+    }
+    // Nothing is left for the Tidy diagram button to count.
+    expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
+    expect(labels()).toEqual(['move generator GENROU G1']);
+  });
+
+  it('routes nothing afresh while the drag is on its way, and keeps what it made when it ends', async () => {
+    open('square.xlsx');
+    await draw();
+    const start = positionOf('3');
+    const from = { id: '3', position: start };
+    const to = { x: start.x + 150, y: start.y + 90 };
+    act(() => {
+      drawn.onNodeDragStart?.({}, from, [from]);
+      drawn.onNodesChange?.([{ id: '3', type: 'position', position: to, dragging: true }]);
+    });
+    // In the drag the line follows the bus, and no route is kept for it yet.
+    expect(positionOf('3')).toEqual(to);
+    expect(squareCornered(routes()['line-L13']!)).toBe(true);
+    expect(useCaseStore.getState().routeOverrides).toEqual({});
+
+    act(() => {
+      drawn.onNodesChange?.([{ id: '3', type: 'position', position: to, dragging: false }]);
+      drawn.onNodeDragStop?.({}, { id: '3', position: to }, [{ id: '3', position: to }]);
+    });
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L13']?.points).toEqual(
+        routes()['line-L13'],
+      ),
+    );
   });
 });
 
 describe('Tidy diagram that cannot route every branch', () => {
   it('leaves a branch it finds no way for on the route it had, and says so', async () => {
     const success = vi.spyOn(toast, 'success');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     const before = { picture: picture() };
     expect(before.picture.stored['line-L13']).not.toBeNull();
     forced.unrouted = ['line-L13'];
@@ -545,11 +697,10 @@ describe('Tidy diagram that cannot route every branch', () => {
     run('tidy');
 
     await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
-    // The other three are routed afresh; this one keeps the route it had
-    // (its ends land where the taps of the others now leave room).
+    // The other three are routed afresh; this one keeps the route it had.
     expect(picture().stored['line-L13']).toEqual(before.picture.stored['line-L13']);
     expect(squareCornered(routes()['line-L13']!)).toBe(true);
-    expect(picture().stored['line-L12']).not.toEqual(before.picture.stored['line-L12']);
+    expect(picture().stored['line-L14']).not.toEqual(before.picture.stored['line-L14']);
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied',
       expect.objectContaining({
@@ -564,24 +715,17 @@ describe('Tidy diagram that cannot route every branch', () => {
     );
   });
 
-  it('keeps the routes of several, and of a branch that was tidied before', async () => {
+  it('keeps the routes of several', async () => {
     const success = vi.spyOn(toast, 'success');
-    open('square.xlsx');
-    await draw();
-    run('tidy');
-    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
-    const tidied = picture();
-    // The load is put on the way of the line from bus 1 to bus 4.
-    dragTo('load-PQ_1', { x: 200, y: 100 });
-    await waitFor(() => expect(positionOf('load-PQ_1')).toEqual({ x: 200, y: 100 }));
+    await openUntidy();
+    const before = picture();
     forced.unrouted = ['line-L13', 'transformer-T24'];
-    success.mockClear();
 
     run('tidy');
 
-    await waitFor(() => expect(labels()).toHaveLength(3));
-    expect(picture().stored['line-L13']).toEqual(tidied.stored['line-L13']);
-    expect(picture().stored['transformer-T24']).toEqual(tidied.stored['transformer-T24']);
+    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
+    expect(picture().stored['line-L13']).toEqual(before.stored['line-L13']);
+    expect(picture().stored['transformer-T24']).toEqual(before.stored['transformer-T24']);
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied',
       expect.objectContaining({
@@ -594,8 +738,7 @@ describe('Tidy diagram that cannot route every branch', () => {
 
   it('says that the work ran out, when that is why a branch has no route', async () => {
     const success = vi.spyOn(toast, 'success');
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     forced.unrouted = ['line-L13'];
     forced.outOfSteps = true;
     run('tidy');
@@ -610,7 +753,7 @@ describe('Tidy diagram that cannot route every branch', () => {
     );
   });
 
-  it('draws a branch a re-layout finds no way for from bar to bar, and says that', async () => {
+  it('says that a re-layout found no way for a branch, which the diagram then routes as it is drawn', async () => {
     const success = vi.spyOn(toast, 'success');
     open('square.xlsx');
     await draw();
@@ -619,17 +762,17 @@ describe('Tidy diagram that cannot route every branch', () => {
     run('tidy-relayout');
 
     await waitFor(() => expect(labels()).toEqual(['tidy and re-layout']));
-    // The buses moved onto the grid: the route it had is for where they stood.
-    expect(picture().stored['line-L13']).toBeNull();
-    expect(squareCornered(routes()['line-L13']!)).toBe(true);
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied and laid out again',
       expect.objectContaining({
         description: expect.stringContaining(
-          'No way was found for 1: it is drawn straight from bar to bar.',
+          'No way was found for 1: it is drawn the most direct way, which may cross a symbol or a bar.',
         ),
       }),
     );
+    // The plan left it without a route; the diagram finds it one as it draws.
+    await waitFor(() => expect(picture().stored['line-L13']).not.toBeNull());
+    expect(squareCornered(routes()['line-L13']!)).toBe(true);
   });
 
   it('changes nothing on a diagram that is too large to route, and says so', async () => {
@@ -664,7 +807,9 @@ describe('lines that are drawn through a symbol or a bar', () => {
     expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
     expect(screen.getByTestId('sld-tidy')).toHaveAccessibleName('Tidy diagram');
 
-    // The generator is dropped on the lines that leave bus 1 downwards.
+    // The generator is dropped on the line that leaves bus 1 downwards, on a
+    // diagram where no way round it is found: the line is drawn through it.
+    forced.noRouting = true;
     dragTo('generator-G1', { x: 20, y: 60 });
     const count = await screen.findByTestId('sld-tidy-count');
     expect(Number(count.textContent)).toBeGreaterThan(0);
@@ -681,33 +826,105 @@ describe('lines that are drawn through a symbol or a bar', () => {
 });
 
 describe('Tidy diagram on a large diagram', () => {
-  it('says that it is at work before it starts, and takes no second press meanwhile', async () => {
-    // A chain of 62 buses: more branches than are routed within the press.
-    const buses = Array.from({ length: 62 }, (_, i) => i + 1);
-    mockTopology = {
-      ...square(),
-      buses: buses.map((i) => entry(i, 'Bus', {})),
-      lines: buses.slice(1).map((i) => entry(`L${i}`, 'Line', { bus1: i - 1, bus2: i })),
-      transformers: [],
+  /** A tidy of the diagram that is drawn, held back until `finish` or `fail` is called. */
+  function heldTidy() {
+    let finish: () => void = () => {};
+    let fail: (err: Error) => void = () => {};
+    const cancel = vi.fn();
+    const graph = {
+      nodes: drawn.nodes as Parameters<typeof planTidy>[0]['nodes'],
+      edges: drawn.edges as Parameters<typeof planTidy>[0]['edges'],
     };
-    open('chain.xlsx');
-    await draw();
+    const topology = mockTopology!;
+    const done = new Promise((resolve, reject) => {
+      finish = () =>
+        resolve(
+          planTidy(graph, topology, {
+            relayout: false,
+            barLengths: defaultBarLengths(topology),
+          }),
+        );
+      fail = reject;
+    });
+    forced.job = { done, cancel };
+    return { finish: () => act(async () => finish()), fail, cancel };
+  }
+
+  it('says that it is at work, and takes no second press and no drag meanwhile', async () => {
+    await openUntidy();
     const before = picture();
+    vi.mocked(startTidy).mockClear();
+    const job = heldTidy();
 
     fireEvent.click(screen.getByTestId('sld-tidy'));
-    // Nothing is routed yet: the button says so first.
     const button = screen.getByTestId('sld-tidy');
     expect(button).toHaveTextContent('Tidying…');
     expect(button).toBeDisabled();
+    expect(screen.getByTestId('sld-tidy-cancel')).toHaveTextContent('Stop');
+    // Nothing can be dragged from under the plan that is being made.
+    expect(drawn.nodesDraggable).toBe(false);
+    // Nothing is routed yet, and a second press starts nothing.
     expect(labels()).toEqual([]);
     run('tidy');
+    run('tidy-relayout');
+    expect(startTidy).toHaveBeenCalledTimes(1);
 
-    await waitFor(() => expect(labels()).toEqual(['tidy diagram']), { timeout: 15_000 });
-    await waitFor(() => expect(screen.getByTestId('sld-tidy')).toHaveTextContent('Tidy diagram'));
+    await job.finish();
+    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
+    expect(screen.getByTestId('sld-tidy')).toHaveTextContent('Tidy diagram');
     expect(screen.getByTestId('sld-tidy')).toBeEnabled();
+    expect(screen.queryByTestId('sld-tidy-cancel')).not.toBeInTheDocument();
+    expect(drawn.nodesDraggable).toBe(true);
     expect(picture().positions).toEqual(before.positions);
     expect(picture().stored).not.toEqual(before.stored);
-  }, 30_000);
+  });
+
+  it('is called off by Stop, and then changes nothing', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await openUntidy();
+    const before = { picture: picture(), routes: routes() };
+    const job = heldTidy();
+
+    run('tidy');
+    fireEvent.click(await screen.findByTestId('sld-tidy-cancel'));
+
+    expect(job.cancel).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith('Tidy stopped. Nothing was changed.');
+    expect(screen.getByTestId('sld-tidy')).toHaveTextContent('Tidy diagram');
+    expect(screen.getByTestId('sld-tidy')).toBeEnabled();
+    // A plan that still arrives is not put in place.
+    await job.finish();
+    expect(picture()).toEqual(before.picture);
+    expect(routes()).toEqual(before.routes);
+    expect(labels()).toEqual([]);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('says so when the work fails, and changes nothing', async () => {
+    const error = vi.spyOn(toast, 'error');
+    await openUntidy();
+    const before = picture();
+    const job = heldTidy();
+
+    run('tidy');
+    await act(async () => job.fail(new Error('The tidy worker failed')));
+
+    expect(error).toHaveBeenCalledWith('The diagram could not be tidied', {
+      description: 'The tidy worker failed. Nothing was changed.',
+    });
+    expect(screen.getByTestId('sld-tidy')).toBeEnabled();
+    expect(picture()).toEqual(before);
+    expect(labels()).toEqual([]);
+  });
+
+  it('calls the work off when the diagram goes away', async () => {
+    await openUntidy();
+    const job = heldTidy();
+    run('tidy');
+    expect(job.cancel).not.toHaveBeenCalled();
+    cleanup();
+    expect(job.cancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('Tidy and re-layout', () => {
@@ -765,7 +982,10 @@ describe('moves that can be taken back', () => {
     const start = positionOf('2');
     dragTo('2', { x: start.x + 77, y: start.y - 31 });
     await waitFor(() => expect(positionOf('2')).toEqual({ x: start.x + 77, y: start.y - 31 }));
-    expect(picture().stored['line-L12']).toBeNull();
+    // The line to the bus is routed to where it stands now.
+    await waitFor(() =>
+      expect(picture().stored['line-L12']).not.toEqual(before.picture.stored['line-L12']),
+    );
     expect(labels()).toEqual(['move bus Bus 2']);
     await written();
     putSidecarSpy.mockClear();
@@ -1036,8 +1256,7 @@ describe('Snap to grid', () => {
 
 describe('the Arrange menu', () => {
   it('runs Tidy and re-layout, and says how to pick several while fewer than two are picked', async () => {
-    open('square.xlsx');
-    await draw();
+    await openUntidy();
     fireEvent.click(screen.getByTestId('sld-arrange-trigger'));
     expect(await screen.findByTestId('sld-arrange-pick-hint')).toHaveTextContent(
       /hold Shift and drag a box around them, or hold Ctrl/,
@@ -1064,6 +1283,7 @@ describe('a locked diagram', () => {
     act(() => drawn.onInteractiveChange?.(false));
     await waitFor(() => expect(screen.getByTestId('sld-tidy')).toBeDisabled());
     expect(useSldStore.getState().diagramLocked).toBe(true);
+    expect(drawn.nodesDraggable).toBe(false);
 
     for (const command of ['tidy', 'tidy-relayout', 'undo-layout', 'align-left'] as const) {
       info.mockClear();
@@ -1078,29 +1298,34 @@ describe('a locked diagram', () => {
     act(() => drawn.onInteractiveChange?.(true));
     await waitFor(() => expect(screen.getByTestId('sld-tidy')).toBeEnabled());
     expect(useSldStore.getState().diagramLocked).toBe(false);
+    expect(drawn.nodesDraggable).toBe(true);
   });
 });
 
 describe('Reset to auto-layout', () => {
-  it('forgets the tidied routes, and Undo brings them back', async () => {
+  it('forgets the routes that were kept and puts the automatic ones back, and Undo undoes that', async () => {
     putSidecarSpy.mockImplementation((_vars: unknown, callbacks?: { onSuccess?: () => void }) =>
       callbacks?.onSuccess?.(),
     );
     open('square.xlsx');
     await draw();
     const automatic = { picture: picture(), routes: routes() };
-    run('tidy');
+    // A bus is moved: its lines are routed to where it stands, and kept.
+    const start = positionOf('3');
+    dragTo('3', { x: start.x + 150, y: start.y + 90 });
     await waitFor(() => expect(routes()).not.toEqual(automatic.routes));
-    const tidied = { picture: picture(), routes: routes() };
+    await waitFor(() => expect(useCaseStore.getState().routeOverrides).not.toEqual({}));
+    const moved = { picture: picture(), routes: routes() };
 
     run('reset-layout');
     await waitFor(() => expect(routes()).toEqual(automatic.routes));
+    expect(picture()).toEqual(automatic.picture);
     expect(useCaseStore.getState().routeOverrides).toEqual({});
-    expect(labels()).toEqual(['tidy diagram', 'reset to auto-layout']);
+    expect(labels()).toEqual(['move bus Bus 3', 'reset to auto-layout']);
 
     run('undo-layout');
-    await waitFor(() => expect(routes()).toEqual(tidied.routes));
-    expect(picture()).toEqual(tidied.picture);
+    await waitFor(() => expect(routes()).toEqual(moved.routes));
+    expect(picture()).toEqual(moved.picture);
   });
 
   it('does not put the old arrangement back from its toast over a change made since', async () => {
@@ -1161,46 +1386,91 @@ describe('Reset to auto-layout', () => {
 });
 
 describe('labels that keep out of the way', () => {
-  it('hands each branch the place of its label, on a run of its route', async () => {
+  /** Whether `at` is on a run of the route `points`. */
+  function onARun(at: { x: number; y: number }, points: Points): boolean {
+    return points.slice(1).some((p, i) => {
+      const a = points[i]!;
+      return (
+        at.x >= Math.min(a[0], p[0]) &&
+        at.x <= Math.max(a[0], p[0]) &&
+        at.y >= Math.min(a[1], p[1]) &&
+        at.y <= Math.max(a[1], p[1])
+      );
+    });
+  }
+  const placeOf = (edge: DrawnEdge) => edge.data?.labelAt as { x: number; y: number } | undefined;
+  const pointsOf = (edge: DrawnEdge) => (edge.data?.route as { points: Points }).points;
+
+  it('hands each transformer the place of its symbol, on a run of its route', async () => {
     open('square.xlsx');
     await draw();
-    run('tidy');
-    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
-    for (const edge of drawn.edges.filter((e) => e.type !== 'stub')) {
-      const at = edge.data?.labelAt as { x: number; y: number } | undefined;
-      const points = (edge.data?.route as { points: Points }).points;
-      expect(at, edge.id).toBeDefined();
-      const onRun = points.slice(1).some((p, i) => {
-        const a = points[i]!;
-        return (
-          at!.x >= Math.min(a[0], p[0]) &&
-          at!.x <= Math.max(a[0], p[0]) &&
-          at!.y >= Math.min(a[1], p[1]) &&
-          at!.y <= Math.max(a[1], p[1])
-        );
-      });
-      expect(onRun, edge.id).toBe(true);
-    }
-    // A device connector carries no label.
+    const transformer = drawn.edges.find((e) => e.id === 'transformer-T24')!;
+    expect(placeOf(transformer)).toBeDefined();
+    expect(onARun(placeOf(transformer)!, pointsOf(transformer))).toBe(true);
+    // A line has nothing to place until a power flow gives it a flow to show,
+    // and a device connector carries no label.
+    expect(placeOf(drawn.edges.find((e) => e.id === 'line-L13')!)).toBeUndefined();
     expect(drawn.edges.find((e) => e.type === 'stub')?.data?.labelAt).toBeUndefined();
   });
 
-  it('tells a bus what runs through the strip its label hangs in', async () => {
+  it('hands each line the place of its flow label once a power flow has run', async () => {
     open('square.xlsx');
     await draw();
-    // Bus 1 has lines leaving under it: each is a stretch for the label to clear.
-    const bus = drawn.nodes.find((n) => n.id === '1')!;
-    const clear = bus.data.labelClear as [number, number][] | undefined;
-    expect(clear).toBeDefined();
-    expect(clear!.length).toBeGreaterThan(0);
-    for (const [from, to] of clear!) expect(from).toBeLessThanOrEqual(to);
-    // A bus nothing passes under is told nothing.
+    act(() =>
+      usePflowStore.setState({
+        lastRun: {
+          run_id: parseRunId('pf-1'),
+          converged: true,
+          iterations: 4,
+          mismatch: 1e-6,
+          bus_voltages: { '1': 1.04, '2': 1.01, '3': 1.0, '4': 0.99 },
+          bus_angles: { '1': 0, '2': -1, '3': -2, '4': -3 },
+          line_flows: {
+            L12: lineFlow(120, 10, { from: '1', to: '2' }),
+            L13: lineFlow(80, 5, { from: '1', to: '3' }),
+            L14: lineFlow(40, 2, { from: '1', to: '4' }),
+          },
+        },
+        isRunning: false,
+        error: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(placeOf(drawn.edges.find((e) => e.id === 'line-L13')!)).toBeDefined(),
+    );
+    for (const edge of drawn.edges.filter((e) => e.type === 'topology')) {
+      expect(placeOf(edge), edge.id).toBeDefined();
+      expect(onARun(placeOf(edge)!, pointsOf(edge)), edge.id).toBe(true);
+    }
+    // Showing the values moved no line: the routes left room for them.
+    expect(labels()).toEqual([]);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('tells each bus where its label stands, clear of the lines that leave its bar', async () => {
+    open('square.xlsx');
+    await draw();
+    const labelAt = (id: string) =>
+      drawn.nodes.find((n) => n.id === id)!.data.labelAt as
+        | { offset: number; side: string }
+        | undefined;
+    // Bus 3 has one line, onto the top of its bar: its label hangs under the middle.
+    expect(labelAt('3')).toEqual({ offset: 46, side: 'below' });
+    // Bus 1 has lines leaving under its bar: its label is moved along, clear of them.
+    const one = labelAt('1');
+    expect(one?.side).toBe('below');
+    const taps = (drawn.nodes.find((n) => n.id === '1')!.data.bar as { taps: { x: number }[] })
+      .taps;
+    for (const tap of taps.filter((t) => (t as { side?: string }).side === 'south')) {
+      expect(Math.abs(tap.x - one!.offset), `tap at ${tap.x}`).toBeGreaterThan(20);
+    }
+    // A bus with no line is told the same place every bus starts from.
     mockTopology = { ...square(), lines: [], transformers: [] };
     cleanup();
     drawn.nodes = [];
     useCaseStore.getState().clearCase();
     open('square.xlsx');
     await draw();
-    expect(drawn.nodes.find((n) => n.id === '2')!.data.labelClear).toBeUndefined();
+    expect(labelAt('2')).toEqual({ offset: 46, side: 'below' });
   });
 });

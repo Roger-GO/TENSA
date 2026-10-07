@@ -36,6 +36,7 @@ import {
   type HandleAssignment,
   type Side,
 } from './sides';
+import { GRID_STEP } from './tidy';
 
 export {
   DEVICE_PORT,
@@ -647,6 +648,88 @@ export function unitBoxSize(
   return { width: Math.round(Math.max(symbols, name) + 14), height: 41 };
 }
 
+/** The room a bus takes on the diagram for what connects to it. */
+export interface BusRoom {
+  /** How long its bar is drawn unless a layout sets its length. */
+  bar: number;
+  /** How wide the bar and the devices beside it are together: what the automatic layout keeps free. */
+  box: number;
+}
+
+/**
+ * How many taps a bar of `length` has places for on the grid a tidied route
+ * runs along (`GRID_STEP`), when its bus stands on that grid: the lines of
+ * the grid between the middles of its two tips.
+ */
+function tapPlaces(length: number): number {
+  const reach = length / 2 - TAP_INSET;
+  const first = Math.ceil((BAR_LENGTH / 2 - reach) / GRID_STEP);
+  const last = Math.floor((BAR_LENGTH / 2 + reach) / GRID_STEP);
+  return last - first + 1;
+}
+
+/**
+ * The room each bus of `topology` needs, by bus idx. Every line,
+ * transformer and device that connects to a bus has a tap of its own on the
+ * bar (`connections.ts`), so a bar is as long as the taps of its bus need:
+ * `BAR_LENGTH` for a bus with a few connections, longer for a busy one,
+ * where a bar of that length would have no place left and a line would have
+ * to land past its tip. The tap of a device stands where the device does
+ * and not on the grid, which costs the place next to it as well, and the
+ * devices of a bus stand side by side over the bar, each square to its tap,
+ * so the bar is also as long as that takes.
+ */
+export function busRoom(topology: TopologySummary): Map<string, BusRoom> {
+  const branches = new Map<string, number>();
+  const devices = new Map<string, number[]>();
+  const count = (bus: string): void => {
+    branches.set(bus, (branches.get(bus) ?? 0) + 1);
+  };
+  for (const entry of [...topology.lines, ...topology.transformers]) {
+    const t = entryTerminals(entry);
+    if (t === null || t.from === t.to) continue;
+    count(t.from);
+    count(t.to);
+  }
+  const stand = (bus: string | null, width: number): void => {
+    if (bus === null) return;
+    const list = devices.get(bus);
+    if (list) list.push(width);
+    else devices.set(bus, [width]);
+  };
+  for (const unit of generatingUnits(topology).units) {
+    const root = unit.members[0];
+    if (root === undefined) continue;
+    const label = root.entry.name || String(root.entry.idx);
+    stand(unit.bus, unitBoxSize(label, unit.members.map(unitMemberInfo)).width);
+  }
+  for (const entry of [...(topology.loads ?? []), ...(topology.shunts ?? [])]) {
+    stand(_busFromParam(entry, 'bus'), deviceBoxSize(entry.name || String(entry.idx)).width);
+  }
+  const out = new Map<string, BusRoom>();
+  for (const bus of topology.buses) {
+    const idx = String(bus.idx);
+    const widths = [...(devices.get(idx) ?? [])].sort((a, b) => a - b);
+    const taps = (branches.get(idx) ?? 0) + Math.ceil(1.5 * widths.length);
+    let bar = BAR_LENGTH;
+    while (tapPlaces(bar) < taps) bar += GRID_STEP;
+    // Side by side, a gap between each two; the two narrowest at the ends,
+    // each with its middle over a tip.
+    const row = widths.reduce((sum, w) => sum + w, 0) + (widths.length - 1) * DEVICE_COLUMN_GAP;
+    const overTips = widths.length > 1 ? (widths[0]! + widths[1]!) / 2 : row;
+    bar = Math.max(bar, Math.ceil(row - overTips + 2 * TAP_INSET));
+    out.set(idx, { bar, box: Math.max(bar, row) });
+  }
+  return out;
+}
+
+/** The length of the bar of each bus of `topology` that needs more than `BAR_LENGTH`, by bus idx. */
+export function defaultBarLengths(topology: TopologySummary): Map<string, number> {
+  const lengths = new Map<string, number>();
+  for (const [idx, { bar }] of busRoom(topology)) if (bar > BAR_LENGTH) lengths.set(idx, bar);
+  return lengths;
+}
+
 /** A side of the symbol of a unit that its control chain can be drawn out on. */
 export type ChainSide = 'above' | 'below' | 'left' | 'right';
 
@@ -773,9 +856,8 @@ export interface Column {
  * that come out equal the one closer to `middle` is taken.
  *
  * `across` is where the other face of the bar has its taps. A connector
- * that drops onto the bar lands in line with one of them, on the same dot,
- * or a tap spacing clear of them all, so that no two dots run into each
- * other.
+ * that drops onto the bar lands a tap spacing clear of them all: every
+ * connection has a tap of its own, whichever face it comes to.
  */
 export function freeColumn(
   preferred: number,
@@ -787,8 +869,7 @@ export function freeColumn(
   across: readonly number[] = [],
 ): number {
   const reach = (c: Column): number => c.half + half + DEVICE_COLUMN_GAP;
-  const crowds = (x: number, tap: number): boolean =>
-    Math.abs(x - tap) > 1e-6 && Math.abs(x - tap) < TAP_SPACING - 1e-6;
+  const crowds = (x: number, tap: number): boolean => Math.abs(x - tap) < TAP_SPACING - 1e-6;
   const fits = (x: number): boolean =>
     taken.every((c) => Math.abs(x - c.x) >= reach(c) - 1e-6) &&
     // Past a tip the connector lands on the tip, wherever the device stands.
@@ -797,7 +878,7 @@ export function freeColumn(
   const candidates = [
     preferred,
     ...taken.flatMap((c) => [c.x - reach(c), c.x + reach(c)]),
-    ...across.flatMap((tap) => [tap - TAP_SPACING, tap, tap + TAP_SPACING]),
+    ...across.flatMap((tap) => [tap - TAP_SPACING, tap + TAP_SPACING]),
   ];
   const cost = (x: number): number =>
     Math.abs(x - preferred) + PAST_TIP_COST * Math.max(0, lo - x, x - hi);
@@ -1030,8 +1111,8 @@ export function buildGraph(
     // coord; the canvas records an override for every node at the end of any
     // drag, so the mere presence of one says nothing), or its ends are not at
     // these buses at all, it would render disconnected, floating in space.
-    // Drop it so the branch is routed from tap to tap, which follows the
-    // live node positions.
+    // Drop it: the branch is then routed afresh for where its buses stand
+    // now (`routing.ts`).
     const movedByDrag = (busId: string): boolean => {
       const override = branchDragOverrides[busId];
       const laidOut = coords[busId];
@@ -1187,6 +1268,35 @@ export function buildGraph(
     return list;
   };
 
+  // What a device that is placed here keeps clear of besides what is on
+  // the face of its own bar: the bar of every other bus with the strip its
+  // label hangs in, and every device that has its place already, whichever
+  // bus it is of. Two buses that stand one over the other have their
+  // devices in the same strip between them.
+  const standing: { owner: string; box: Rect }[] = nodes.map((n) => {
+    const at = effCoords[n.id] ?? n.position;
+    const bar = branchBars.get(n.id);
+    return {
+      owner: n.id,
+      box: {
+        left: at.x + (bar?.start ?? 0),
+        right: at.x + (bar?.end ?? BAR_LENGTH),
+        top: at.y,
+        bottom: at.y + NODE_FOOTPRINT.bus.height,
+      },
+    };
+  });
+  /** What stands in the row from `top` to `bottom` and is not of the bus `own`, as columns. */
+  const standingIn = (top: number, bottom: number, own: string): Column[] =>
+    standing
+      .filter(
+        ({ owner, box }) =>
+          owner !== own &&
+          box.bottom > top - DEVICE_COLUMN_GAP &&
+          box.top < bottom + DEVICE_COLUMN_GAP,
+      )
+      .map(({ box }) => ({ x: (box.left + box.right) / 2, half: (box.right - box.left) / 2 }));
+
   interface PendingDevice {
     entry: TopologyEntry;
     kind: 'generator' | 'load' | 'shunt';
@@ -1275,6 +1385,15 @@ export function buildGraph(
           x: fixed.x + size.width / 2,
           half: size.width / 2,
         });
+        standing.push({
+          owner: nodeId,
+          box: {
+            left: fixed.x,
+            right: fixed.x + size.width,
+            top: fixed.y,
+            bottom: fixed.y + size.height,
+          },
+        });
       }
       pending.push(device);
     }
@@ -1289,35 +1408,71 @@ export function buildGraph(
   for (const device of byWidth) {
     if (device.position !== undefined) continue;
     const { parentIdx, parentCoord, size } = device;
-    const face = deviceSides.get(parentIdx) ?? BUS_SIDE_FOR_KIND[device.kind];
     const bar = branchBars.get(parentIdx);
     const middle = parentCoord.x + BAR_LENGTH / 2;
-    // Where a connector can land on this face of the bar.
+    // Where a connector can land on a face of the bar.
     const span = bar ? faceSpan(bar) : { lo: TAP_INSET, hi: BAR_LENGTH - TAP_INSET };
     const lo = parentCoord.x + span.lo;
     const hi = parentCoord.x + span.hi;
     // Two buses one above the other put their devices in different columns.
     const rowParity = Math.round(parentCoord.y / 100) % 2 === 0 ? 1 : -1;
-    const taken = columnsOf(parentIdx, face, parentCoord.x);
-    // What lands on the other face: a branch, or a device that stands there.
-    const across = columnsOf(parentIdx, face === 'north' ? 'south' : 'north', parentCoord.x)
-      .map((c) => c.x)
-      .filter((x) => x >= lo && x <= hi);
     const preferred = Math.min(hi, Math.max(lo, middle + rowParity * DEVICE_COLUMN_OFFSET));
-    const y = parentCoord.y + (face === 'north' ? -DEVICE_ROW_OFFSET : DEVICE_ROW_OFFSET);
     const half = size.width / 2;
-    // The branches that pass through the row the device stands in, whichever
-    // buses they are of: it stands clear of those as well. Where that would
-    // take it too far from its bus it stands clear of the upright runs only,
-    // which take less room to step aside from, and failing that where it
-    // would have stood without them.
-    const passing = branchesThrough(y, y + size.height);
-    let x = preferred;
-    for (const inTheWay of [[...passing.upright, ...passing.level], passing.upright, []]) {
-      x = freeColumn(preferred, half, [...taken, ...inTheWay], lo, hi, middle, across);
-      if (Math.max(lo - x, x - hi) <= (opts.deviceDetour ?? DEVICE_DETOUR_LIMIT)) break;
+    // On the face that looks away from the network, where it has a place
+    // over the bar or over a tip of it (the bar reaches out under its
+    // middle); on the other face where it has one there and not here.
+    const away = deviceSides.get(parentIdx) ?? BUS_SIDE_FOR_KIND[device.kind];
+    let best: { face: 'north' | 'south'; x: number; y: number; past: number } | null = null;
+    for (const face of [away, away === 'north' ? 'south' : 'north'] as const) {
+      const taken = columnsOf(parentIdx, face, parentCoord.x);
+      // What lands on the other face: a branch, or a device that stands there.
+      const across = columnsOf(parentIdx, face === 'north' ? 'south' : 'north', parentCoord.x)
+        .map((c) => c.x)
+        .filter((x) => x >= lo && x <= hi);
+      const y = parentCoord.y + (face === 'north' ? -DEVICE_ROW_OFFSET : DEVICE_ROW_OFFSET);
+      // The branches that pass through the row the device stands in, whichever
+      // buses they are of, and what else stands in that row: it stands clear
+      // of those as well. Where the branches would take it too far from its
+      // bus it stands clear of the upright runs only, which take less room
+      // to step aside from, and failing that where it would have stood
+      // without them.
+      const passing = branchesThrough(y, y + size.height);
+      const others = standingIn(y, y + size.height, parentIdx);
+      let x = preferred;
+      for (const inTheWay of [[...passing.upright, ...passing.level], passing.upright, []]) {
+        x = freeColumn(preferred, half, [...taken, ...others, ...inTheWay], lo, hi, middle, across);
+        if (Math.max(lo - x, x - hi) <= (opts.deviceDetour ?? DEVICE_DETOUR_LIMIT)) break;
+      }
+      const past = Math.max(0, lo - x, x - hi);
+      if (best === null || (best.past > half && past < best.past - 1e-6)) {
+        best = { face, x, y, past };
+      }
+      if (past <= half) break;
     }
-    taken.push({ x, half });
+    const { face, y } = best!;
+    let { x } = best!;
+    if (best!.past > half) {
+      // No place over the bar or over a tip of it, on either face: the taps
+      // of the branches take what room the bar has. It stands as far out as
+      // the bar still reaches under it, where its connector drops square,
+      // if no other device stands there. A branch that lands where it now
+      // stands is routed to another tap (`routing.ts`); a connector that
+      // ran to the tip at an angle would stay as it is.
+      const nearer = x < lo ? lo - half : hi + half;
+      const devices = [
+        ...columnsOf(parentIdx, face, parentCoord.x).filter((column) => column.half > 0),
+        ...standingIn(y, y + size.height, parentIdx),
+      ];
+      const free = devices.every(
+        (column) => Math.abs(column.x - nearer) >= column.half + half + DEVICE_COLUMN_GAP,
+      );
+      if (free) x = nearer;
+    }
+    columnsOf(parentIdx, face, parentCoord.x).push({ x, half });
+    standing.push({
+      owner: device.nodeId,
+      box: { left: x - half, right: x + half, top: y, bottom: y + size.height },
+    });
     device.face = face;
     device.position = { x: x - half, y };
   }
@@ -1539,7 +1694,8 @@ export const DEVICE_VALUE_LABEL = { width: 72, height: 22 } as const;
  * hangs off the face its connector leaves by: beside the connector on its
  * `right`, and on its `left`. `box` is the device node, and `side` the side
  * of it the readout hangs off. The readout stands 4 px from the connector
- * and 2 px from the node (`DeviceValueLabel`), and is taken at its widest.
+ * and 2 px from the node (`DeviceValueLabel`), and is taken at its widest
+ * unless `width` says how wide its values are.
  *
  * `leftRoom` is what has to be free for it to stand on the left: its place
  * there and as much again beyond it, where the readout of a device further
@@ -1548,9 +1704,10 @@ export const DEVICE_VALUE_LABEL = { width: 72, height: 22 } as const;
 export function readoutPlaces(
   box: { x: number; y: number; width: number; height: number },
   side: 'above' | 'below',
+  width: number = DEVICE_VALUE_LABEL.width,
 ): { left: Rect; right: Rect; leftRoom: Rect } {
   const connector = box.x + box.width / 2;
-  const { width, height } = DEVICE_VALUE_LABEL;
+  const { height } = DEVICE_VALUE_LABEL;
   const top = side === 'below' ? box.y + box.height + 2 : box.y - 2 - height;
   const bottom = top + height;
   return {

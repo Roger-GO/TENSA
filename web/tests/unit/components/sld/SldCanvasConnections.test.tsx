@@ -95,9 +95,10 @@ import {
 } from '@/components/sld/sidecar';
 import { DEVICE_PORT, SOURCE_HANDLE, TARGET_HANDLE } from '@/components/sld/graph';
 import { useCaseStore } from '@/store/case';
+import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { __requestSldCommand, useSldStore } from '@/store/sld';
-import { parseSessionId, parseWorkspacePath } from '@/api/types';
+import { parseRunId, parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
 
 let mockTopology: TopologySummary | null = null;
@@ -184,6 +185,40 @@ function dragTo(id: string, position: { x: number; y: number }): void {
   act(() => drawn.onNodesChange?.([{ id, type: 'position', position, dragging: true }]));
 }
 
+/** Let go of `id` where it is, as the end of a drag does. */
+function drop(id: string): void {
+  const { position } = node(id);
+  act(() => drawn.onNodesChange?.([{ id, type: 'position', position, dragging: false }]));
+}
+
+/** A power flow has run: the loads show what they draw, in a readout beside each. */
+function showValues(): void {
+  act(() =>
+    usePflowStore.setState({
+      lastRun: {
+        run_id: parseRunId('pf-1'),
+        converged: true,
+        iterations: 3,
+        mismatch: 1e-6,
+        bus_voltages: { '1': 1.02, '2': 0.99 },
+        bus_angles: { '1': 0, '2': -2 },
+        line_flows: {},
+        load_consumption: {
+          PQ: { p: 120.5, q: 30.2, bus: 2 },
+          PQ2: { p: 80, q: 12, bus: 2 },
+        },
+      },
+      isRunning: false,
+      error: null,
+    }),
+  );
+}
+
+/** Whether every run of a route is level or upright. */
+function squareCornered(points: readonly (readonly number[])[]): boolean {
+  return points.slice(1).every((p, i) => p[0] === points[i]![0] || p[1] === points[i]![1]);
+}
+
 beforeEach(() => {
   mockTopology = pair();
   mockSidecar = placed();
@@ -194,6 +229,7 @@ beforeEach(() => {
   useSessionStore.setState({ sessionId: parseSessionId('sess-connections') });
   useCaseStore.getState().clearCase();
   useSldStore.getState().clearSelectedNodeId();
+  usePflowStore.setState({ lastRun: null });
 });
 
 afterEach(() => {
@@ -208,11 +244,12 @@ describe('what the canvas hands React Flow', () => {
     open('pair.xlsx');
     await draw();
 
-    // The line runs straight down between the two bars, tap to tap.
+    // The line runs straight down between the two bars, tap to tap, on a
+    // line of the grid.
     expect(routeOf('line-L')).toEqual({
       points: [
-        [46, 3],
-        [46, 203],
+        [48, 3],
+        [48, 203],
       ],
       sourceSide: 'south',
       targetSide: 'north',
@@ -223,11 +260,31 @@ describe('what the canvas hands React Flow', () => {
     expect(connector.targetSide).toBe('north');
     expect(connector.points[connector.points.length - 1]).toEqual([89, 203]);
 
-    expect(barOf('1')).toEqual({ start: 0, end: 92, taps: [{ x: 46, side: 'south' }] });
+    expect(barOf('1')).toEqual({ start: 0, end: 92, taps: [{ x: 48, side: 'south' }] });
     expect(barOf('2').taps).toEqual([
-      { x: 46, side: 'north' },
+      { x: 48, side: 'north' },
       { x: 89, side: 'north' },
     ]);
+  });
+
+  it('keeps the route it made for a line the layout has none for, and writes nothing for it', async () => {
+    open('pair.xlsx');
+    await draw();
+    // The route is part of the arrangement from here on: an Undo puts it
+    // back, and the next write of the layout holds it.
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L']).toEqual({
+        points: [
+          [48, 3],
+          [48, 203],
+        ],
+        anchors: { source: { x: 0, y: 0 }, target: { x: 0, y: 200 } },
+      }),
+    );
+    expect(useCaseStore.getState().diagramLayout?.branches?.line?.L?.routing).toBe('polyline');
+    // Opening a case is no reason to write beside it.
+    cleanup();
+    expect(putSidecarSpy).not.toHaveBeenCalled();
   });
 
   it('attaches each edge to the handles on the sides its route leaves and lands by', async () => {
@@ -335,9 +392,10 @@ describe('while a node is dragged', () => {
   it('tells a device to show its readout left of its connector when a line runs through it on the right', async () => {
     open('pair.xlsx');
     await draw();
+    showValues();
 
     // Over the left half of bar 2, between the two bars: the connector
-    // drops straight at 19, and the line comes down at 46, through where
+    // drops straight at 19, and the line comes down at 48, through where
     // the readout would stand on the right of it. The left is free.
     dragTo('load-PQ', { x: 0, y: 120 });
     expect(routeOf('stub-load-PQ').points).toEqual([
@@ -353,12 +411,17 @@ describe('while a node is dragged', () => {
     expect(node('load-PQ').data.readoutSpot).toBeUndefined();
   });
 
-  it('leaves the readout where it first stands when no place around the device is free', async () => {
+  it('places no readout before a power flow has given one something to show', async () => {
+    open('pair.xlsx');
+    await draw();
+    dragTo('load-PQ', { x: 0, y: 120 });
+    expect(node('load-PQ').data.readoutSpot).toBeUndefined();
+  });
+
+  it('stands the readout on the far side of the symbol when neither side of the connector is free', async () => {
     // A second load of bus 2, placed 100 left of where the first is dragged
     // to, past the tip of the bar: its connector runs at an angle through
-    // the place left of the first one's, its symbol stands where the readout
-    // would stand beside the first, and the line takes the right and the
-    // far side.
+    // the place left of the first one's, and the line takes the right.
     mockTopology = { ...pair(), loads: [...pair().loads, entry('PQ2', 'PQ', { bus: 2 })] };
     mockSidecar = {
       ...buildSidecarLayout(
@@ -372,17 +435,17 @@ describe('while a node is dragged', () => {
     };
     open('pair.xlsx');
     await draw();
+    showValues();
     dragTo('load-PQ', { x: 0, y: 120 });
     expect(routeOf('stub-load-PQ').points[0]).toEqual([19, 161]);
     const neighbour = routeOf('stub-load-PQ2').points;
     expect(neighbour[0]![0]).toBeLessThan(19 - 4);
     expect(neighbour[0]![0]).toBeGreaterThan(19 - 4 - 144);
-    expect(node('load-PQ').data.readoutSpot).toBeUndefined();
+    expect(node('load-PQ').data.readoutSpot).toBe('far');
   });
 
-  it('stands the readout beside the symbol of a device that has no place for it over or under', async () => {
-    // A second load of bus 2 over the west tip of the bar, whose connector
-    // drops through the place left of the first one's.
+  it('moves a line out of the way of a device that is dragged onto it', async () => {
+    // A second load of bus 2 over the west tip of the bar.
     mockTopology = { ...pair(), loads: [...pair().loads, entry('PQ2', 'PQ', { bus: 2 })] };
     mockSidecar = {
       ...buildSidecarLayout(
@@ -396,16 +459,35 @@ describe('while a node is dragged', () => {
     };
     open('pair.xlsx');
     await draw();
-    // Over the middle of bar 2, between the two bars: the connector drops
-    // onto the place the line asks for, and the line lands a spacing right
-    // of it, through the place beside the connector and the one over the
-    // load.
+    showValues();
+    expect(routeOf('line-L').points[0]![0]).toBe(48);
+
+    // Over the middle of bar 2, between the two bars, where the line comes
+    // down. The pointer is still down.
     dragTo('load-PQ', { x: 27, y: 120 });
+
+    const load = node('load-PQ');
+    const [left, right] = [load.position.x, load.position.x + (load.initialWidth ?? 0)];
     expect(routeOf('stub-load-PQ').points[0]![0]).toBe(46);
-    expect(routeOf('line-L').points.at(-1)![0]).toBe(60);
-    expect(routeOf('stub-load-PQ2').points.at(-1)![0]).toBe(-15);
-    expect(node('load-PQ').data.connectorLean).toBeUndefined();
-    expect(node('load-PQ').data.readoutSpot).toBe('east');
+    // The line still drops straight from bar to bar, beside the load now:
+    // clear of its symbol, of its connector, and of the other load's.
+    const line = routeOf('line-L').points;
+    expect(line).toHaveLength(2);
+    expect(line[0]![0]).toBe(line[1]![0]);
+    const x = line[0]![0]!;
+    expect(x < left || x > right).toBe(true);
+    expect(Math.abs(x - 46)).toBeGreaterThanOrEqual(12);
+    expect(Math.abs(x - routeOf('stub-load-PQ2').points.at(-1)![0]!)).toBeGreaterThanOrEqual(12);
+    // With the line gone from beside its connector, the readout stands
+    // where it first would.
+    expect(node('load-PQ').data.readoutSpot).toBeUndefined();
+    // Nothing is kept until the drag ends.
+    expect(useCaseStore.getState().routeOverrides['line-L']?.points[0]![0]).toBe(48);
+
+    drop('load-PQ');
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L']?.points).toEqual(line),
+    );
   });
 
   it('takes the branches of a bus along with it', async () => {
@@ -414,32 +496,36 @@ describe('while a node is dragged', () => {
 
     dragTo('2', { x: 300, y: 200 });
 
-    // Bar 2 is now at 300..392: the line steps across to it, from tip to tip.
+    // Bar 2 is now at 300..392: the line steps across to it, on the lines of
+    // the grid, and lands inside the bar, a step in from its tip.
     expect(routeOf('line-L')).toEqual({
       points: [
-        [89, 3],
-        [89, 103],
-        [303, 103],
-        [303, 203],
+        [80, 3],
+        [80, 48],
+        [304, 48],
+        [304, 203],
       ],
       sourceSide: 'south',
       targetSide: 'north',
     });
-    expect(barOf('2').taps).toContainEqual({ x: 3, side: 'north' });
+    expect(barOf('2').taps).toContainEqual({ x: 4, side: 'north' });
 
-    // Level with bar 1 it joins it end to end, and the handles follow.
+    // Level with bar 1 it does not leave by the tip, in line with the bar,
+    // where it would read as more bar: it goes over, and the handles follow.
     dragTo('2', { x: 300, y: 0 });
     expect(routeOf('line-L')).toEqual({
       points: [
-        [89, 3],
-        [303, 3],
+        [80, 3],
+        [80, -16],
+        [304, -16],
+        [304, 3],
       ],
-      sourceSide: 'east',
-      targetSide: 'west',
+      sourceSide: 'north',
+      targetSide: 'north',
     });
     expect(edge('line-L')).toMatchObject({
-      sourceHandle: SOURCE_HANDLE.east,
-      targetHandle: TARGET_HANDLE.west,
+      sourceHandle: SOURCE_HANDLE.north,
+      targetHandle: TARGET_HANDLE.north,
     });
   });
 
@@ -518,16 +604,151 @@ describe('a route the saved layout holds for a branch', () => {
     expect(routeOf('line-L').points).not.toEqual(fromTapToTap(200));
     expect(barOf('1').taps).toEqual([{ x: 46, side: 'south' }]);
     expect(barOf('2').taps).toContainEqual({ x: 46, side: 'north' });
+    // The route is kept as it is drawn, with its ends on the taps.
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L']?.points).toEqual(
+        routeOf('line-L').points,
+      ),
+    );
   });
 
-  it('gives way to a route from tap to tap while one of its buses is away from where the route was made', async () => {
+  it('is made afresh where the layout draws two lines on top of each other', async () => {
+    // A second line between the same two buses, saved on the same route as
+    // the first: what a layout written by an earlier version holds for two
+    // lines the automatic layout ran down one corridor.
+    mockTopology = {
+      ...pair(),
+      lines: [...pair().lines, entry('L2', 'Line', { bus1: 1, bus2: 2 })],
+    };
+    const saved = routed();
+    mockSidecar = {
+      ...saved,
+      branches: { line: { L: saved.branches!.line!.L!, L2: saved.branches!.line!.L! } },
+    };
+    open('pair.xlsx');
+    await draw();
+
+    const [first, second] = [routeOf('line-L').points, routeOf('line-L2').points];
+    for (const points of [first, second]) {
+      expect(squareCornered(points)).toBe(true);
+      expect(points[0]![1]).toBe(3);
+      expect(points.at(-1)![1]).toBe(203);
+    }
+    // One dot each on either bar, and no stretch where the two run closer
+    // than a line's width and its gap.
+    expect(Math.abs(first[0]![0]! - second[0]![0]!)).toBeGreaterThanOrEqual(12);
+    expect(Math.abs(first.at(-1)![0]! - second.at(-1)![0]!)).toBeGreaterThanOrEqual(12);
+    const level = (points: typeof first) =>
+      points.slice(1).flatMap((p, i) => (p[1] === points[i]![1] ? [p[1]!] : []));
+    for (const y of level(first)) {
+      for (const other of level(second)) expect(Math.abs(y - other)).toBeGreaterThanOrEqual(12);
+    }
+    // The file is left as it is until something on the diagram is changed;
+    // the change is then written with the routes as they are drawn.
+    await waitFor(() => expect(useCaseStore.getState().routeOverrides).not.toEqual({}));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    act(() => __requestSldCommand('connectors-elbow'));
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const [vars] = putSidecarSpy.mock.calls[0] as [{ layout: SidecarLayout }];
+    expect(vars.layout.branches?.line?.L2?.bend_points).toEqual(
+      routeOf('line-L2').points.map(([x, y]) => ({ x, y })),
+    );
+    expect(vars.layout.branches?.line?.L?.bend_points).toEqual(
+      routeOf('line-L').points.map(([x, y]) => ({ x, y })),
+    );
+  });
+
+  it('is drawn as the layout has it when another layout takes the place of the one that was drawn', async () => {
+    // What restoring a snapshot does: the layout beside the case is replaced
+    // while the diagram is up, and the arrangement of this visit is dropped.
+    // For one render the diagram has the routes of the new layout and the
+    // positions of the old one, where the route of the line fits neither
+    // bus: no route made for that graph may be kept, or it would stand in
+    // for the one the new layout brings.
+    const view = render(<SldCanvas />);
+    open('pair.xlsx');
+    await waitFor(() => expect(drawn.nodes.length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L']?.points).toEqual([
+        [48, 3],
+        [48, 203],
+      ]),
+    );
+
+    const saved = routed();
+    const onTaps = [
+      { x: 48, y: 3 },
+      { x: 48, y: 120 },
+      { x: 248, y: 120 },
+      { x: 248, y: 203 },
+    ];
+    // Both at once, as the restore does them.
+    act(() => {
+      mockSidecar = {
+        ...saved,
+        branches: { line: { L: { ...saved.branches!.line!.L!, bend_points: onTaps } } },
+      };
+      useCaseStore.getState().setArrangement({ dragOverrides: {}, routeOverrides: {} });
+      view.rerender(<SldCanvas />);
+    });
+
+    await waitFor(() => expect(node('2').position).toEqual({ x: 200, y: 200 }));
+    await waitFor(() => expect(routeOf('line-L').points).toEqual(onTaps.map(({ x, y }) => [x, y])));
+    // Nothing was made, so nothing is kept in place of the layout's route.
+    expect(useCaseStore.getState().routeOverrides).toEqual({});
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing of another system that is drawn for a moment under the name of the case that was open', async () => {
+    // A case is opened from another: the topology of the new one arrives
+    // while the store still holds the old case, its file name and the
+    // arrangement made in it. What is drawn for that moment is the new
+    // system under the old name, and no route made for it may be written
+    // into the old case's file.
+    const view = render(<SldCanvas />);
+    open('pair.xlsx');
+    await waitFor(() => expect(drawn.nodes.length).toBeGreaterThan(0));
+    dragTo('load-PQ', { x: 150, y: 60 });
+    drop('load-PQ');
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    putSidecarSpy.mockClear();
+    const kept = useCaseStore.getState().routeOverrides;
+    expect(Object.keys(useCaseStore.getState().dragOverrides)).toContain('load-PQ');
+
+    // Three buses in a chain, with a load of the same name on the last.
+    const other: TopologySummary = {
+      ...pair(),
+      buses: [entry(1, 'Bus', {}), entry(2, 'Bus', {}), entry(3, 'Bus', {})],
+      lines: [entry('A', 'Line', { bus1: 1, bus2: 2 }), entry('B', 'Line', { bus1: 2, bus2: 3 })],
+      loads: [entry('PQ', 'PQ', { bus: 3 })],
+    };
+    act(() => {
+      mockTopology = other;
+      view.rerender(<SldCanvas />);
+    });
+    await waitFor(() => expect(drawn.nodes.some((n) => n.id === '3')).toBe(true));
+    // Longer than a write waits.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    // The route of the line that is gone is dropped with it.
+    expect(Object.keys(kept)).toEqual(['line-L']);
+    expect(Object.keys(useCaseStore.getState().routeOverrides)).not.toContain('line-L');
+  });
+
+  it('gives way to a route made afresh while one of its buses is away from where the route was made', async () => {
     mockSidecar = routed();
     open('pair.xlsx');
     await draw();
 
-    // The pointer is still down on bus 2, 100 to the right.
+    // The pointer is still down on bus 2, 100 to the right: the line is
+    // routed to where the bar is now.
     dragTo('2', { x: 300, y: 200 });
-    expect(routeOf('line-L').points).toEqual(fromTapToTap(300));
+    const away = routeOf('line-L').points;
+    expect(squareCornered(away)).toBe(true);
+    expect(away[0]![1]).toBe(3);
+    expect(away.at(-1)![1]).toBe(203);
+    expect(away.at(-1)![0]).toBeGreaterThan(300);
+    expect(away.at(-1)![0]).toBeLessThan(392);
 
     // Back where the route was made for, the route is drawn again.
     dragTo('2', { x: 200, y: 200 });

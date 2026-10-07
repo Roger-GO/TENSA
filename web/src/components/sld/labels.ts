@@ -12,16 +12,22 @@
  *   bar, of the symbols and the bars that stand there, and of the label of a
  *   bus placed before it (`busLabelClear`, which `busLabelPlace` in
  *   `connections.ts` takes). Where the strip under the bar has no place for
- *   it and the strip over the bar has, it stands over the bar.
+ *   it and the strip over the bar has, it stands over the bar, and with no
+ *   place in either it stands beside a tip of the bar, level with it
+ *   (`placeBusLabels`).
  * - The readout of a device hangs off the face its connector leaves by,
  *   beside the connector: on its right, or on its left, whichever no
  *   connector runs through and nothing stands in. With neither it goes to
  *   the far side of the device, then beside its symbol, and with no place
- *   free it stays where it would first stand (`placeReadouts`). Every device
- *   gets its first choice before any gets its second.
+ *   free it is left off (`placeReadouts`): the values are in the tables and
+ *   in the Inspector, and a readout drawn over a line or a symbol can be
+ *   read on neither. Every device gets its first choice before any gets its
+ *   second.
  * - The label of a branch stands on a straight run of its route, or beside
  *   one, where it covers least (`placeBranchLabels`, over
- *   `branchLabelPlaces` in `connections.ts`).
+ *   `branchLabelPlaces` in `connections.ts`). The flow label of a line that
+ *   has no place clear of everything else is left off as well; the arrow of
+ *   the flow stays on the line.
  *
  * `readoutReserve` is what Tidy diagram asks for before it routes: the
  * places each readout would take with no branch drawn, of which a tidied
@@ -67,11 +73,32 @@ export interface LabelNode extends ConnectionNode {
  * flow and loading of a line at their longest (`LineFlowLabel`), and the
  * symbol of a transformer (`TransformerEdge`).
  */
-export const LINE_LABEL_BOX = { width: 84, height: 18 };
+export const LINE_LABEL_BOX = { width: 84, height: 19 };
 export const TRANSFORMER_LABEL_BOX = { width: 30, height: 30 };
 
-/** How much two boxes may reach into each other and still count as apart: the slack of a size hint. */
-const OVERLAP_SLACK = 2;
+/**
+ * How wide the flow label of a line is with these texts in it
+ * (`LineFlowLabel`: 10 px monospace, the arrow of the direction before the
+ * flow, the padding and the border of the label). `null` for a text that is
+ * not shown.
+ */
+export function flowLabelWidth(flow: string | null, loading: string | null): number {
+  const texts = [flow === null ? null : `→${flow}`, loading].filter(
+    (text): text is string => text !== null,
+  );
+  const letters = texts.reduce((sum, text) => sum + text.length, 0);
+  // A gap between the arrow and the flow, and between the flow and the loading.
+  const gaps = (flow === null ? 0 : 1) + (flow !== null && loading !== null ? 1 : 0);
+  return Math.ceil(6 * letters + 4 * gaps + 14);
+}
+
+/**
+ * How wide the P / Q readout of a device is with these two lines in it
+ * (`DeviceValueLabel`: 9 px monospace and its padding).
+ */
+export function readoutWidth(p: string | null, q: string | null): number {
+  return Math.ceil(5.4 * Math.max(p?.length ?? 0, q?.length ?? 0) + 8);
+}
 
 /** Whether two boxes share any room. */
 export function overlaps(a: Rect, b: Rect, slack = 0): boolean {
@@ -202,8 +229,14 @@ export function chainBoxes(
  */
 const LABEL_STRIP_REACH = BAR_LENGTH;
 
-/** How high the label of a bus is with a voltage and an angle in it, and with its name alone. */
-const BUS_LABEL_HEIGHT = { values: NODE_FOOTPRINT.bus.height + 4 - BAR_THICKNESS, name: 18 };
+/**
+ * How high the label of a bus is with a voltage and an angle in it, and
+ * with its name alone, from the bar it hangs under: the 4 px between the
+ * two and the lines of text (`BusNode`: two of 10 px and one of 9 px, set
+ * tight). The readout of a device that hangs under the bus at the default
+ * distance stands right under it.
+ */
+const BUS_LABEL_HEIGHT = { values: 40, name: 18 };
 
 /** The gap between a bar and a label that stands over it. */
 const BUS_LABEL_OVER_GAP = 4;
@@ -215,21 +248,37 @@ export interface BusLabelClear {
 }
 
 /**
- * What the label of each bus has to stand clear of, by bus id: the stretches
- * of the strip under its bar, and of the one over it, that are shut to it,
- * as offsets from the origin of the bus node (`busLabelPlace` takes them).
- * What shuts a stretch is a run of a connector that passes there, a symbol
- * or the bar of another bus that stands there, and the label of a bus placed
- * before this one. The labels are placed in the order of the nodes, each as
- * `BusNode` draws it: with `values`, as large as it is with a voltage and
- * an angle in it.
+ * Where the label of a bus stands: under its bar, over it, beside one of
+ * its tips, or `away` from the bar, in the nearest place to it that is
+ * clear, where none of those is.
  */
-export function busLabelClear(
+export type BusLabelSide = 'below' | 'above' | 'east' | 'west' | 'away';
+
+/** The label of a bus as it is drawn. */
+export interface BusLabel {
+  /** The x of its middle, as an offset from the origin of the bus node. */
+  offset: number;
+  side: BusLabelSide;
+  /** The box it takes on the diagram. */
+  box: Rect;
+}
+
+/** The gap between a tip of a bar and a label that stands beside it. */
+export const BUS_LABEL_BESIDE_GAP = 6;
+
+/**
+ * Place the label of every bus, one after the other in the order of the
+ * nodes, each as `BusNode` draws it (with `values`, as large as it is with
+ * a voltage and an angle in it). The answer has where each stands and what
+ * each has to stand clear of in the strips under and over its bar.
+ */
+function walkBusLabels(
   nodes: readonly LabelNode[],
   connections: ConnectionLayout,
   sizes: ReadonlyMap<string, NodeSize>,
-  values = true,
-): Map<string, BusLabelClear> {
+  values: boolean,
+  chains: ReadonlyMap<string, Rect>,
+): { clears: Map<string, BusLabelClear>; labels: Map<string, BusLabel> } {
   const runsThrough = runsIn(connections.routes);
   const standing = boxIndex(
     nodes.map((n) => ({
@@ -240,7 +289,9 @@ export function busLabelClear(
           : boxOnDiagram(n, sizes, connections.bars),
     })),
   );
-  const out = new Map<string, BusLabelClear>();
+  for (const [id, box] of chains) standing.add({ id: `chain:${id}`, box });
+  const clears = new Map<string, BusLabelClear>();
+  const labels = new Map<string, BusLabel>();
   for (const node of nodes) {
     if ((node.type ?? 'bus') !== 'bus') continue;
     const bar = connections.bars.get(node.id);
@@ -273,11 +324,181 @@ export function busLabelClear(
       ),
       above: shutIn(origin.y - BUS_LABEL_OVER_GAP - BUS_LABEL_HEIGHT.values, origin.y - 1),
     };
-    out.set(node.id, clear);
-    standing.add({ id: `label:${node.id}`, box: busLabelBox(node, values, bar, clear) });
+    clears.set(node.id, clear);
+
+    const width = busLabelWidth(String(node.data?.name || node.data?.idx || node.id), values);
+    const height = values ? BUS_LABEL_HEIGHT.values : BUS_LABEL_HEIGHT.name;
+    const place = busLabelPlace(bar, width, clear.below, clear.above);
+    let label: BusLabel = {
+      offset: place.offset,
+      side: place.above ? 'above' : 'below',
+      box: busLabelBox(node, values, bar, clear),
+    };
+    // Nothing runs through it and nothing stands in it.
+    const free = (box: Rect): boolean =>
+      runsThrough(box).length === 0 && standing.near(box).every(({ id }) => id === node.id);
+    if (!free(label.box)) {
+      // No place under the bar or over it: beside a tip, level with the bar.
+      const top = origin.y + BAR_THICKNESS / 2 - height / 2;
+      const east = origin.x + bar.end + BUS_LABEL_BESIDE_GAP;
+      const west = origin.x + bar.start - BUS_LABEL_BESIDE_GAP;
+      const beside: [BusLabelSide, Rect][] = [
+        ['east', { left: east, right: east + width, top, bottom: top + height }],
+        ['west', { left: west - width, right: west, top, bottom: top + height }],
+      ];
+      const found =
+        beside.find(([, box]) => free(box)) ?? awayFrom(origin, bar, width, height, free);
+      if (found) {
+        const middle = (found[1].left + found[1].right) / 2 - origin.x;
+        label = { offset: middle, side: found[0], box: found[1] };
+      }
+    }
+    labels.set(node.id, label);
+    standing.add({ id: `label:${node.id}`, box: label.box });
+  }
+  return { clears, labels };
+}
+
+/** How far apart the places are that a label with no place by its bar is tried in. */
+const AWAY_STEP = 8;
+
+/** How many rows under the bar, and over it, such a label is tried in. */
+const AWAY_ROWS = 6;
+
+/**
+ * The nearest place to the bar of a bus where its label is clear of
+ * everything (`free`), for a label that has no place under the bar, over it
+ * or beside a tip: in the row under the bar and the row over it, further
+ * along than a label there may otherwise stand, and then in the rows beyond
+ * those, each tried from the middle of the bar outwards. `undefined` with
+ * none.
+ */
+function awayFrom(
+  origin: { x: number; y: number },
+  bar: BarGeometry,
+  width: number,
+  height: number,
+  free: (box: Rect) => boolean,
+): ['away', Rect] | undefined {
+  const middle = origin.x + BAR_LENGTH / 2;
+  const reach = (bar.end - bar.start) / 2 + width + LABEL_STRIP_REACH;
+  for (let row = 0; row < AWAY_ROWS; row += 1) {
+    const further = row * (height + BUS_LABEL_OVER_GAP);
+    const tops = [
+      origin.y + BAR_THICKNESS + BUS_LABEL_OVER_GAP + further,
+      origin.y - BUS_LABEL_OVER_GAP - height - further,
+    ];
+    for (let off = 0; off <= reach; off += AWAY_STEP) {
+      for (const top of tops) {
+        for (const centre of off === 0 ? [middle] : [middle - off, middle + off]) {
+          const box: Rect = {
+            left: centre - width / 2,
+            right: centre + width / 2,
+            top,
+            bottom: top + height,
+          };
+          if (free(box)) return ['away', box];
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * What the label of each bus has to stand clear of, by bus id: the stretches
+ * of the strip under its bar, and of the one over it, that are shut to it,
+ * as offsets from the origin of the bus node (`busLabelPlace` takes them).
+ * What shuts a stretch is a run of a connector that passes there, a symbol
+ * or the bar of another bus that stands there, and the label of a bus placed
+ * before this one. The labels are placed in the order of the nodes, each as
+ * `BusNode` draws it: with `values`, as large as it is with a voltage and
+ * an angle in it.
+ */
+export function busLabelClear(
+  nodes: readonly LabelNode[],
+  connections: ConnectionLayout,
+  sizes: ReadonlyMap<string, NodeSize>,
+  values = true,
+): Map<string, BusLabelClear> {
+  return walkBusLabels(nodes, connections, sizes, values, new Map()).clears;
+}
+
+/**
+ * Where the label of each bus stands, by bus id: under its bar where the
+ * strip there has a place for it (`busLabelPlace`, with what `busLabelClear`
+ * finds in the way), over the bar otherwise, and with no place in either
+ * strip beside a tip of the bar, level with it, where nothing runs and
+ * nothing stands. A label that has none of those places stands in the
+ * nearest clear place to its bar (`away`), so that it is drawn on nothing
+ * else. `chains` is where the control chains that are drawn out stand; a
+ * label keeps off those as well.
+ */
+export function placeBusLabels(
+  nodes: readonly LabelNode[],
+  connections: ConnectionLayout,
+  sizes: ReadonlyMap<string, NodeSize>,
+  values: boolean,
+  chains: ReadonlyMap<string, Rect> = new Map(),
+): Map<string, BusLabel> {
+  return walkBusLabels(nodes, connections, sizes, values, chains).labels;
+}
+
+/**
+ * The places to keep free for the label of each bus while the branches are
+ * routed (`TidyOptions.keepFree`), bus by bus: under the bar and over it,
+ * about its middle and about each of its tips, and beside each tip, as
+ * large as the label is with a voltage and an angle in it. Only the places
+ * that no device connector runs through and nothing stands in count. A
+ * route leaves each bus one of them where it can, so the label has a place
+ * clear of the lines, after a power flow that is run later as well.
+ */
+export function busLabelReserve(
+  nodes: readonly LabelNode[],
+  stubs: ConnectionLayout,
+  sizes: ReadonlyMap<string, NodeSize>,
+  surroundings: Pick<ReadoutSurroundings, 'chains'> = {},
+): Rect[][] {
+  const through = routesThrough(stubs.routes);
+  const inTheWay = standingFor(nodes, stubs, sizes, surroundings);
+  const out: Rect[][] = [];
+  for (const node of nodes) {
+    if ((node.type ?? 'bus') !== 'bus') continue;
+    const bar = stubs.bars.get(node.id);
+    if (bar === undefined) continue;
+    const { x, y } = node.position;
+    const half =
+      busLabelWidth(String(node.data?.name || node.data?.idx || node.id), true) / 2 +
+      BUS_LABEL_RESERVE_MARGIN;
+    const height = BUS_LABEL_HEIGHT.values;
+    const under = y + BAR_THICKNESS;
+    const over = y - BUS_LABEL_OVER_GAP - height;
+    const level = y + BAR_THICKNESS / 2 - height / 2;
+    const about = (middle: number, top: number): Rect => ({
+      left: x + middle - half,
+      right: x + middle + half,
+      top,
+      bottom: top + height,
+    });
+    const east = bar.end + BUS_LABEL_BESIDE_GAP + half;
+    const west = bar.start - BUS_LABEL_BESIDE_GAP - half;
+    const places = [
+      about(BAR_LENGTH / 2, under),
+      about(BAR_LENGTH / 2, over),
+      about(bar.start, under),
+      about(bar.end, under),
+      about(bar.start, over),
+      about(bar.end, over),
+      about(east, level),
+      about(west, level),
+    ].filter((place) => through(place) === 0 && inTheWay(place).every(({ id }) => id === node.id));
+    if (places.length > 0) out.push(places);
   }
   return out;
 }
+
+/** The room a place kept for the label of a bus has either side of the label. */
+const BUS_LABEL_RESERVE_MARGIN = 5;
 
 /**
  * How wide the label of a bus is taken to be when its place is looked for:
@@ -317,9 +538,10 @@ export function busLabelBox(
  * Where the readout of a device stands: `right` and `left` of the connector,
  * on the face it leaves by; `centre` on the side that faces the bus, where
  * the connector leaves by another face; `far` on the side that looks away
- * from the bus; `east` and `west` beside the symbol, level with its middle.
+ * from the bus; `east` and `west` beside the symbol, level with its middle;
+ * `none` for one that has no place and is left off.
  */
-export type ReadoutSpot = 'right' | 'left' | 'centre' | 'far' | 'east' | 'west';
+export type ReadoutSpot = 'right' | 'left' | 'centre' | 'far' | 'east' | 'west' | 'none';
 
 export interface ReadoutPlace {
   spot: ReadoutSpot;
@@ -332,6 +554,12 @@ export interface ReadoutSurroundings {
   chains?: ReadonlyMap<string, Rect>;
   /** The label of each bus, by bus id; a readout stands clear of them. */
   busLabels?: ReadonlyMap<string, Rect>;
+  /**
+   * How wide the readout of each device is, by node id (`readoutWidth`): as
+   * wide as the values it shows. A device without an entry is taken to have
+   * the widest readout there is.
+   */
+  widths?: ReadonlyMap<string, number>;
 }
 
 /** The gap between a symbol and a readout that stands beside it (`DeviceValueLabel`). */
@@ -348,7 +576,12 @@ function readoutSpots(
   node: LabelNode,
   connections: ConnectionLayout,
   sizes: ReadonlyMap<string, NodeSize>,
-): { spots: Record<ReadoutSpot, Rect>; first: ReadoutSpot[]; lean: number } {
+  labelWidth: number = DEVICE_VALUE_LABEL.width,
+): {
+  spots: Record<Exclude<ReadoutSpot, 'none'>, Rect>;
+  first: Exclude<ReadoutSpot, 'none'>[];
+  lean: number;
+} {
   const size = sizes.get(node.id);
   const width = size?.width ?? node.initialWidth ?? 0;
   const height = size?.height ?? node.initialHeight ?? 0;
@@ -356,12 +589,12 @@ function readoutSpots(
     (node.data?.valueSide as 'above' | 'below' | undefined) ??
     (node.type === 'generator' ? 'below' : 'above');
   const box = { ...node.position, width, height };
-  const near = readoutPlaces(box, side);
+  const near = readoutPlaces(box, side, labelWidth);
   const middle = { x: node.position.x + width / 2, y: node.position.y + height / 2 };
   const centred = (of: Rect): Rect => ({
     ...of,
-    left: middle.x - DEVICE_VALUE_LABEL.width / 2,
-    right: middle.x + DEVICE_VALUE_LABEL.width / 2,
+    left: middle.x - labelWidth / 2,
+    right: middle.x + labelWidth / 2,
   });
   const level = {
     top: middle.y - DEVICE_VALUE_LABEL.height / 2,
@@ -380,9 +613,9 @@ function readoutSpots(
       right: near.right,
       left: near.left,
       centre: centred(near.right),
-      far: centred(readoutPlaces(box, side === 'below' ? 'above' : 'below').right),
-      east: { ...level, left: east, right: east + DEVICE_VALUE_LABEL.width },
-      west: { ...level, left: west - DEVICE_VALUE_LABEL.width, right: west },
+      far: centred(readoutPlaces(box, side === 'below' ? 'above' : 'below', labelWidth).right),
+      east: { ...level, left: east, right: east + labelWidth },
+      west: { ...level, left: west - labelWidth, right: west },
     },
     first: !beside
       ? ['centre']
@@ -432,7 +665,7 @@ function handOut(wanted: readonly (readonly (Rect | null)[])[]): number[] {
     wanted.forEach((places, device) => {
       const place = places[choice];
       if (got[device] !== -1 || place === undefined || place === null) return;
-      if (taken.some((other) => overlaps(other, place, OVERLAP_SLACK))) return;
+      if (taken.some((other) => overlaps(other, place))) return;
       got[device] = choice;
       taken.push(place);
     });
@@ -450,7 +683,7 @@ function handOut(wanted: readonly (readonly (Rect | null)[])[]): number[] {
  * symbol, the label of a bus, the readout of the device next to it), it
  * takes the other side of the connector, failing that the far side of the
  * device, and failing that a place beside the symbol. With no place free it
- * stands where it first would.
+ * is left off (`none`, with the box it would first take).
  */
 export function placeReadouts(
   nodes: readonly LabelNode[],
@@ -462,11 +695,16 @@ export function placeReadouts(
   const inTheWay = standingFor(nodes, connections, sizes, surroundings);
   const devices = nodes.filter((n) => n.type === 'generator' || n.type === 'load');
   const asked = devices.map((n) => {
-    const { spots, first, lean } = readoutSpots(n, connections, sizes);
+    const { spots, first, lean } = readoutSpots(
+      n,
+      connections,
+      sizes,
+      surroundings.widths?.get(n.id),
+    );
     // A unit whose chain is drawn out keeps to the side of its bus: the
     // chain stands beyond a readout on its own side (`GeneratorNode`).
     const chain = surroundings.chains?.has(n.id) === true;
-    const wanted: ReadoutSpot[] = chain
+    const wanted: Exclude<ReadoutSpot, 'none'>[] = chain
       ? first
       : [
           ...first,
@@ -481,8 +719,7 @@ export function placeReadouts(
       const free =
         through(place, own) === 0 &&
         inTheWay(place).every(
-          ({ id, box }) =>
-            id === n.id || id === `chain:${n.id}` || !overlaps(box, place, OVERLAP_SLACK),
+          ({ id, box }) => id === n.id || id === `chain:${n.id}` || !overlaps(box, place),
         );
       return free ? place : null;
     });
@@ -492,8 +729,11 @@ export function placeReadouts(
   const out = new Map<string, ReadoutPlace>();
   devices.forEach((n, i) => {
     const { spots, wanted } = asked[i]!;
-    const spot = wanted[got[i]!] ?? wanted[0]!;
-    out.set(n.id, { spot, box: spots[spot] });
+    const spot = wanted[got[i]!];
+    out.set(
+      n.id,
+      spot === undefined ? { spot: 'none', box: spots[wanted[0]!] } : { spot, box: spots[spot] },
+    );
   });
   return out;
 }
@@ -526,8 +766,7 @@ export function readoutReserve(
         const free =
           through(place, `stub-${n.id}`) === 0 &&
           inTheWay(place).every(
-            ({ id, box }) =>
-              id === n.id || id === `chain:${n.id}` || !overlaps(box, place, OVERLAP_SLACK),
+            ({ id, box }) => id === n.id || id === `chain:${n.id}` || !overlaps(box, place),
           );
         return free ? place : null;
       }),
@@ -544,9 +783,7 @@ export function readoutReserve(
       places.filter(
         (place): place is Rect =>
           place !== null &&
-          taken.every(
-            (other) => other.device === device || !overlaps(other.box, place, OVERLAP_SLACK),
-          ),
+          taken.every((other) => other.device === device || !overlaps(other.box, place)),
       ),
     )
     .filter((places) => places.length > 0);
@@ -558,30 +795,58 @@ export function readoutReserve(
  * Where each line carries its flow label and each transformer its symbol
  * (`branchLabelPlaces`): on a straight run of its route, or for a flow
  * label beside one, clear of the symbols, of the bars, of the labels of the
- * buses, of the readouts of the devices, and of each other.
+ * buses, of the readouts of the devices, of the control chains that are
+ * drawn out, and of each other. The symbols of the transformers are placed
+ * first: they are always drawn, and a flow label shows only with the values
+ * of a power flow (`values`; without them no line gets a place). A flow
+ * label with no place on its line or beside it stands on an upright run
+ * turned to read along it (`turned`), and one with no place clear of
+ * everything else even so is left off (`hidden`).
  */
 export function placeBranchLabels(
   nodes: readonly LabelNode[],
   edges: readonly ConnectionEdge[],
   connections: ConnectionLayout,
   sizes: ReadonlyMap<string, NodeSize>,
-  labels: { busLabels: ReadonlyMap<string, Rect>; readouts: Iterable<Rect> },
+  labels: {
+    busLabels: ReadonlyMap<string, Rect>;
+    readouts: Iterable<Rect>;
+    chains?: ReadonlyMap<string, Rect>;
+    values?: boolean;
+    /** How wide the flow label of each line is, by edge id (`flowLabelWidth`); the widest without. */
+    widths?: ReadonlyMap<string, number>;
+    /**
+     * Place each label once and look no further for the ones that are hard
+     * to place: for a diagram that is redrawn with every move of a drag.
+     */
+    quick?: boolean;
+  },
 ): Map<string, LabelPlace> {
   const boxes: Rect[] = [];
   for (const n of nodes) {
     if ((n.type ?? 'bus') === 'bus') boxes.push(barBox(n, connections.bars));
     else boxes.push(boxOnDiagram(n, sizes, connections.bars));
   }
-  boxes.push(...labels.busLabels.values(), ...labels.readouts);
+  boxes.push(...labels.busLabels.values(), ...labels.readouts, ...(labels.chains?.values() ?? []));
+  const branches = edges.filter((edge) => edge.type !== 'stub');
   return branchLabelPlaces(
     connections.routes,
-    edges
-      .filter((edge) => edge.type !== 'stub')
-      .map((edge) =>
-        edge.type === 'transformer'
-          ? { id: edge.id, ...TRANSFORMER_LABEL_BOX }
-          : { id: edge.id, ...LINE_LABEL_BOX, beside: true },
-      ),
+    [
+      ...branches
+        .filter((edge) => edge.type === 'transformer')
+        .map((edge) => ({ id: edge.id, ...TRANSFORMER_LABEL_BOX })),
+      ...(labels.values === false ? [] : branches)
+        .filter((edge) => edge.type !== 'transformer')
+        .map((edge) => ({
+          id: edge.id,
+          ...LINE_LABEL_BOX,
+          width: labels.widths?.get(edge.id) ?? LINE_LABEL_BOX.width,
+          beside: true,
+          mayTurn: true,
+          mayHide: true,
+        })),
+    ],
     boxes,
+    { quick: labels.quick },
   );
 }

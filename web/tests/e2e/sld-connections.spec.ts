@@ -112,12 +112,19 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
   expect(diagonals(asSaved)).toEqual([]);
 
   // A layout placed by hand: the load of bus 2 beyond the generator beside
-  // it, so that the generator stands between the load and its tap.
+  // it and clear past the end of the bar, so that the generator stands
+  // between the load and its tap. (Nearer, with its box still over the end
+  // of the bar as the lines of the bus draw it, it would drop square.)
   const layout = saved.request().postDataJSON() as {
     non_bus_coordinates: Record<string, Record<string, { x: number; y: number }>>;
   };
   const generator = first.nodes['generator-2']!;
-  const beyond = { x: generator.x + generator.width + 24, y: first.nodes['load-PQ_1']!.y };
+  const bar = first.nodes['2']!;
+  const pastTheBar = bar.x + (bar.barLeft ?? 0) + (bar.barLength ?? 0) + 40;
+  const beyond = {
+    x: Math.max(generator.x + generator.width + 24, pastTheBar),
+    y: first.nodes['load-PQ_1']!.y,
+  };
   for (const key of ['PQ', 'load']) {
     Object.assign(layout.non_bus_coordinates[key]!.PQ_1!, beyond);
   }

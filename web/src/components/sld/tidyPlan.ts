@@ -30,7 +30,7 @@ import {
   type NodeSize,
 } from './connections';
 import { buildGraph, type BuildGraphOptions } from './graph';
-import { chainBoxes, readoutReserve } from './labels';
+import { busLabelReserve, chainBoxes, readoutReserve } from './labels';
 import { TIDY_STEPS, alignToGrid, tidyRoutes, type TidyResult } from './tidy';
 
 export interface TidyPlanOptions {
@@ -85,7 +85,7 @@ export function planTidy(
     for (const n of nodes) {
       if (n.type === 'bus') buses[n.id] = { x: n.position.x, y: n.position.y };
     }
-    const aligned = alignToGrid(buses);
+    const aligned = alignToGrid(buses, barLengths);
     const bare = buildGraph(
       { ...topology, generators: [], loads: [], shunts: [], controllers: [] },
       aligned,
@@ -113,6 +113,9 @@ export function planTidy(
       controllerCoords: options.controllerCoords,
       unitStates: options.unitStates,
       deviceDetour: 0,
+      // Each device was given a place clear of what stands around it; a
+      // push afterwards would only take it off its bar.
+      applyPushOut: false,
     });
     nodes = placed.nodes;
     edges = placed.edges;
@@ -130,6 +133,7 @@ export function planTidy(
     ...connectionOptions,
     obstacles: [...chains.values()],
     keepFree: readoutReserve(nodes, connectors, sizes, { chains }),
+    preferFree: busLabelReserve(nodes, connectors, sizes, { chains }),
     steps,
   });
   return { nodes, edges, tidied };

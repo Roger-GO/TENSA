@@ -98,18 +98,20 @@ vi.mock('@/components/sld/elkClient', () => ({
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { useCaseStore } from '@/store/case';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
+import { buildSidecarLayout } from '@/components/sld/sidecar';
 import { parseWorkspacePath } from '@/api/types';
-import type { TopologySummary, TopologyEntry } from '@/api/types';
+import type { SidecarLayout, TopologySummary, TopologyEntry } from '@/api/types';
 
 // Mutable topology + sidecar for the test harness.
 let mockTopology: TopologySummary | null = null;
+let mockSidecar: SidecarLayout | null = null;
 
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
     ...actual,
     useGetSidecar: () => ({
-      data: null,
+      data: mockSidecar,
       isLoading: false,
       isError: false,
       error: null,
@@ -168,6 +170,7 @@ describe('SldCanvas — push-out animation gating', () => {
   beforeEach(() => {
     rfRenders.length = 0;
     mockTopology = null;
+    mockSidecar = null;
     __resetCascadeForTests();
     wireStoreCascade();
   });
@@ -206,7 +209,12 @@ describe('SldCanvas — push-out animation gating', () => {
   });
 
   it('applies transition: transform 200ms when a node is relocated between renders', async () => {
-    // First render: bus-1 alone with one generator.
+    // First render: bus-1 alone with one generator. The layout beside the
+    // case places the bus and nothing else, so the generator stands where
+    // the diagram puts a device that has no place of its own. (With no
+    // layout at all the automatic arrangement gives every device its place,
+    // and none is moved out of the way of another.)
+    mockSidecar = buildSidecarLayout({ '1': { x: 0, y: 0 } });
     mockTopology = makeTopology({
       buses: [bus(1)],
       generators: [gen('G1', 1)],
