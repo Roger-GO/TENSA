@@ -87,6 +87,7 @@ import { GRID_STEP } from './tidy';
 import { branchesThroughSymbols, type TidyPlan } from './tidyPlan';
 import { startTidy, type TidyJob } from './tidyClient';
 import { pictureOf } from './picture';
+import { clearDrop, type DropObstacle } from './dropPlace';
 import { flowLabelWidth, readoutWidth } from './labels';
 import { getDeviceOverlayState, getLineOverlayState } from './overlay';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
@@ -177,6 +178,18 @@ const SETTLING_ROUNDS = 4;
 
 /** What the Undo of a toast says when its change is no longer the newest one. */
 const CHANGED_SINCE_NOTICE = 'The diagram was changed since. Use Undo in the Edit menu to go back.';
+
+/**
+ * What a bus or device was dropped on, as the notice says it when the drop
+ * is put in the nearest free place (`clearDrop`).
+ */
+const DROPPED_ON: Record<DropObstacle, string> = {
+  'symbol-symbol': 'It was dropped on another symbol, or right beside one.',
+  'symbol-bar': 'A symbol and the bar of a bus were on each other, or right beside each other.',
+  'bar-bar': 'Two bars were too close to each other for a label or a line to fit between them.',
+  connector: 'It was dropped on the connector of a device.',
+  'bar-between': 'The bar of another bus stood between the device and its own bus.',
+};
 
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
@@ -709,19 +722,70 @@ function SldCanvasInner({
     }
     return { readouts, flows };
   }, [baseGraph, pflowResult, valuesShown]);
-  const picture = useMemo(
-    () =>
-      pictureOf(nodes, edges as ConnectionEdge[], {
-        sizes,
-        connectorStyle,
-        barLengths,
-        values: valuesShown,
-        labelWidths,
-        dragging,
-      }),
-    [nodes, edges, sizes, connectorStyle, barLengths, valuesShown, labelWidths, dragging],
-  );
+  // The routes the picture made in the moves of the drag in hand, by edge
+  // id. The next move is drawn from them: on a large diagram a route follows
+  // its bus from one move to the next (`routing.ts`), and a search that
+  // found a way round something is not made again with every move. They are
+  // let go of when the drag ends: the diagram at rest is routed from the
+  // routes it keeps.
+  const dragRoutesRef = useRef<Map<string, NonNullable<RouteOverrides[string]>>>(new Map());
+  const picture = useMemo(() => {
+    const carried = dragRoutesRef.current;
+    const at = new Map(nodes.map((n) => [n.id, n.position]));
+    const sits = (id: string, then: { x: number; y: number } | undefined): boolean => {
+      const now = at.get(id);
+      return (
+        now !== undefined &&
+        then !== undefined &&
+        Math.abs(now.x - then.x) < 0.01 &&
+        Math.abs(now.y - then.y) < 0.01
+      );
+    };
+    const drawn =
+      dragging && carried.size > 0
+        ? (edges as ConnectionEdge[]).map((edge) => {
+            const route = carried.get(edge.id);
+            // Back where the route it keeps was made for, a branch is drawn
+            // along that one again.
+            const kept = edge.data?.bendAnchors as
+              | NonNullable<RouteOverrides[string]>['anchors']
+              | undefined;
+            if (
+              route === undefined ||
+              (sits(edge.source, kept?.source) && sits(edge.target, kept?.target))
+            ) {
+              return edge;
+            }
+            return {
+              ...edge,
+              data: { ...edge.data, bendPoints: route.points, bendAnchors: route.anchors },
+            };
+          })
+        : (edges as ConnectionEdge[]);
+    const made = pictureOf(nodes, drawn, {
+      sizes,
+      connectorStyle,
+      barLengths,
+      values: valuesShown,
+      labelWidths,
+      dragging,
+    });
+    if (dragging) for (const [id, route] of made.changed) carried.set(id, route);
+    else carried.clear();
+    return made;
+  }, [nodes, edges, sizes, connectorStyle, barLengths, valuesShown, labelWidths, dragging]);
   const connections = picture.connections;
+  // The diagram as it was last drawn, for the handler that ends a move: where
+  // a node may be dropped depends on the bars and the connectors around it.
+  const drawnRef = useRef({ connections, sizes, atRest: connections });
+  useEffect(() => {
+    drawnRef.current = {
+      connections,
+      sizes,
+      // As it stood before the drag in hand, while there is one.
+      atRest: dragging ? drawnRef.current.atRest : connections,
+    };
+  }, [connections, sizes, dragging]);
   // The lines and transformers that are drawn through a symbol or a bar:
   // the Tidy diagram button counts them. Not while a node is being dragged,
   // when a line passes through things on its way to where the node is
@@ -774,6 +838,12 @@ function SldCanvasInner({
   const routesToFollowRef = useRef(false);
   const dragOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
   const moveStartRef = useRef<{ nodes: Node[]; dragged: boolean } | null>(null);
+  // What the last tidy came to, shown beside the Tidy diagram button until
+  // the diagram is arranged some other way: a notice that fades after a few
+  // seconds is easily missed, and "already tidy" changes nothing else that
+  // could be seen.
+  const [tidyNote, setTidyNote] = useState<string | null>(null);
+  useEffect(() => setTidyNote(null), [topology]);
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
     dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
     setDraggedIds(dragged.map((n) => n.id));
@@ -804,6 +874,7 @@ function SldCanvasInner({
       }
       const moving = changes.some((c) => c.type === 'position' && c.position !== undefined);
       if (!moving) return;
+      setTidyNote(null);
       const start = (moveStartRef.current ??= { nodes: nodesRef.current, dragged: false });
       if (changes.some((c) => c.type === 'position' && c.dragging === true)) start.dragged = true;
       let next = applyPositionChanges(nodesRef.current, changes);
@@ -822,6 +893,48 @@ function SldCanvasInner({
       // A press that slipped puts everything back, the devices its bus took
       // along as well.
       if (slipped) next = withPositions(next, new Map(start.nodes.map((n) => [n.id, n.position])));
+      // What was dropped on a symbol, on a bar or on a connector, or with
+      // its bar right under another, goes to the nearest place where it is
+      // on nothing (`clearDrop`): the lines and the labels go round what
+      // stands on the diagram, and two symbols on each other they cannot.
+      if (dragEnded && !slipped && baseGraphRef.current !== null) {
+        const dropped = new Set(movedNodes(start.nodes, next).map((n) => n.id));
+        // A badge that is docked follows its node when the graph is built
+        // again: where it stands now is where that node was.
+        const standing = next.filter((n) => {
+          const data = n.data as { parentNodeId?: string; placed?: boolean };
+          return !(
+            n.type === 'controller' &&
+            data.placed !== true &&
+            dropped.has(data.parentNodeId ?? '')
+          );
+        });
+        const shift = clearDrop(
+          standing,
+          baseGraphRef.current.edges as ConnectionEdge[],
+          dropped,
+          drawnRef.current.connections,
+          {
+            sizes: drawnRef.current.sizes,
+            step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
+            atRest: drawnRef.current.atRest,
+          },
+        );
+        if (shift !== null) {
+          next = withPositions(
+            next,
+            new Map(
+              next
+                .filter((n) => dropped.has(n.id))
+                .map((n) => [n.id, { x: n.position.x + shift.dx, y: n.position.y + shift.dy }]),
+            ),
+          );
+          toast.info('Moved to the nearest free place', {
+            description: `${DROPPED_ON[shift.onto]} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Undo puts it back where it was before the move.`,
+            duration: 8_000,
+          });
+        }
+      }
       if (next !== nodesRef.current) {
         nodesRef.current = next;
         setNodes(next);
@@ -1129,6 +1242,7 @@ function SldCanvasInner({
                     offset: label.offset,
                     side: label.side,
                     ...(label.side === 'away' ? { top: label.box.top - n.position.y } : {}),
+                    ...(label.compact === true ? { compact: true } : {}),
                   },
                 }
               : {}),
@@ -1443,6 +1557,7 @@ function SldCanvasInner({
         .record(label, arrangementOf(nodesRef.current, graph.edges));
       useCaseStore.getState().setArrangement({ dragOverrides: positions, routeOverrides: routes });
       persistRequestedRef.current = true;
+      setTidyNote(null);
       return step;
     },
     [],
@@ -1456,6 +1571,7 @@ function SldCanvasInner({
       unitExpansion: snapshot.units,
     });
     persistRequestedRef.current = true;
+    setTidyNote(null);
   }, []);
   const stepThroughHistory = useCallback(
     (way: 'undo' | 'redo') => {
@@ -1539,10 +1655,12 @@ function SldCanvasInner({
       }
       const positions = positionsOf(placedNodes);
       if (sameArrangement(before, { positions, routes: chosen })) {
+        setTidyNote('Already tidy: nothing was changed');
         toast.info('The diagram is already tidy.', {
           description: relayout
-            ? 'Every bus is on the grid, every device beside its bus, and no line would be routed differently.'
-            : 'No line or transformer would be routed differently.',
+            ? 'Every bus is on the grid, every device beside its bus, and no line would be routed differently. Nothing was changed.'
+            : 'No line or transformer would be routed differently. Nothing was changed.',
+          duration: 8_000,
         });
         return;
       }
@@ -1559,6 +1677,7 @@ function SldCanvasInner({
           ? 'it keeps the route it had'
           : 'they keep the routes they had';
       const left = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
+      setTidyNote(`Tidied: ${lines}`);
       toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
         description: relayout
           ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${left} Saved with the layout.`
@@ -1864,6 +1983,7 @@ function SldCanvasInner({
           locked={locked}
           busy={tidying}
           onCancel={cancelTidy}
+          note={tidyNote}
           untidy={draggedIds.length > 0 ? 0 : untidyCount}
           pickedCount={pickedCount}
           snap={snapToGrid}

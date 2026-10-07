@@ -507,28 +507,66 @@ describe('place, save, reload', () => {
     expect(isDrawnOut()).toBe(false);
   });
 
-  it('a device dropped against another comes back where it was dropped, not pushed aside', async () => {
-    // The pass that separates overlapping devices runs on every build of the
-    // diagram. It must leave a saved position alone, or what the user placed
-    // close together reopens somewhere else.
+  it('a device dropped on another is put beside it, and comes back where it was put', async () => {
     open('kundur.xlsx');
     await draw();
     const shuntAt = drawn.nodes.find((n) => n.id === 'shunt-Shunt_1')!.position;
+    const before = { ...drawn.nodes.find((n) => n.id === 'load-PQ_1')!.position };
     const dropped = { x: shuntAt.x + 10, y: shuntAt.y + 5 };
 
     dropAt('load-PQ_1', dropped);
     await waitFor(() =>
-      expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')?.position).toEqual(dropped),
+      expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')?.position).not.toEqual(before),
     );
+    // Not where it was dropped, on the shunt, but in the nearest free place.
+    const put = { ...drawn.nodes.find((n) => n.id === 'load-PQ_1')!.position };
+    expect(put).not.toEqual(dropped);
+    const size = (id: string) => {
+      const node = drawn.nodes.find((n) => n.id === id)! as unknown as {
+        initialWidth?: number;
+        initialHeight?: number;
+      };
+      return { width: node.initialWidth ?? 0, height: node.initialHeight ?? 0 };
+    };
+    const [load, other] = [size('load-PQ_1'), size('shunt-Shunt_1')];
+    const apart =
+      put.x >= shuntAt.x + other.width ||
+      shuntAt.x >= put.x + load.width ||
+      put.y >= shuntAt.y + other.height ||
+      shuntAt.y >= put.y + load.height;
+    expect(apart).toBe(true);
     const placed = picture();
     await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
     const [vars] = putSidecarSpy.mock.calls[0] as [{ layout: SidecarLayout }];
 
     await reload('kundur.xlsx', vars.layout);
 
-    expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')?.position).toEqual(dropped);
+    expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')?.position).toEqual(put);
     expect(drawn.nodes.find((n) => n.id === 'shunt-Shunt_1')?.position).toEqual(shuntAt);
     expect(picture()).toEqual(placed);
+  });
+
+  it('a layout that holds two devices on each other reopens as it was saved, not pushed aside', async () => {
+    // The pass that separates overlapping devices runs on every build of the
+    // diagram. It must leave a saved position alone, or what a layout of an
+    // earlier version holds close together reopens somewhere else.
+    open('kundur.xlsx');
+    await draw();
+    const shuntAt = { ...drawn.nodes.find((n) => n.id === 'shunt-Shunt_1')!.position };
+    const loadAt = drawn.nodes.find((n) => n.id === 'load-PQ_1')!.position;
+    dropAt('load-PQ_1', { x: loadAt.x, y: loadAt.y - 1 });
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    const [vars] = putSidecarSpy.mock.calls[0] as [{ layout: SidecarLayout }];
+    // The same layout with the load on the shunt.
+    const onShunt = { x: shuntAt.x + 10, y: shuntAt.y + 5 };
+    const saved: SidecarLayout = JSON.parse(JSON.stringify(vars.layout)) as SidecarLayout;
+    const held = saved.non_bus_coordinates!.PQ!.PQ_1!;
+    saved.non_bus_coordinates!.PQ!.PQ_1 = { ...held, ...onShunt };
+
+    await reload('kundur.xlsx', saved);
+
+    expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')?.position).toEqual(onShunt);
+    expect(drawn.nodes.find((n) => n.id === 'shunt-Shunt_1')?.position).toEqual(shuntAt);
   });
 
   it('keeps nothing from the moment a new bus is drawn before it has been laid out', async () => {

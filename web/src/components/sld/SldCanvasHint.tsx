@@ -29,7 +29,9 @@ export interface SldCanvasHintProps {
  * in the way of that: the lock, or a diagram too small to read. A diagram is
  * fitted to its pane when it opens, and in a short pane the fit leaves a bus a
  * few pixels long, where a drag cannot be aimed and a connector cannot be
- * followed. The line then gives the zoom and says how to get closer, and a
+ * followed. The line then gives the zoom and says how to get closer (to
+ * full size in one press, or a step at a time with the zoom buttons of the
+ * diagram and the wheel, which is how to get to a size in between), and a
  * button beside it zooms to full size in one press: on the selected bus or
  * device when there is one, which the button names, and where the view is
  * otherwise. The lock does not stop the zoom, so the button stays while the
@@ -44,7 +46,7 @@ export const SldCanvasHint = memo(function SldCanvasHint({
   const zoomLabel = selectedName !== null ? `Zoom to ${selectedName}` : 'Zoom to 100%';
   // Short enough for the two lines beside the longest button the row gets.
   const tooSmall = `The diagram is zoomed out to ${tooSmallPercent ?? 0}%, too small to read.`;
-  const wayCloser = `Press ${zoomLabel}, or pick a bus or a device in a table below to zoom to it.`;
+  const wayCloser = `Press ${zoomLabel}, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus or a device in a table below to zoom to it.`;
   return (
     <>
       {/* Two lines at most, which is the height the buttons beside it give

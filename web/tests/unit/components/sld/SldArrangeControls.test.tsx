@@ -145,6 +145,26 @@ describe('<SldArrangeControls />', () => {
     expect(screen.queryByTestId('sld-tidy-cancel')).not.toBeInTheDocument();
   });
 
+  it('says what the last tidy came to beside the button, and nothing while one is worked out', () => {
+    controls();
+    const note = screen.getByTestId('sld-tidy-note');
+    // There all along, so that what it comes to say is announced.
+    expect(note).toHaveAttribute('aria-live', 'polite');
+    expect(note).toHaveTextContent('');
+    expect(note.className).toContain('sr-only');
+    cleanup();
+
+    controls({ note: 'Already tidy: nothing was changed' });
+    const shown = screen.getByTestId('sld-tidy-note');
+    expect(shown).toHaveTextContent('Already tidy: nothing was changed');
+    expect(shown).toHaveAttribute('title', 'Already tidy: nothing was changed');
+    expect(shown.className).not.toContain('sr-only');
+    cleanup();
+
+    controls({ note: 'Already tidy: nothing was changed', busy: true });
+    expect(screen.getByTestId('sld-tidy-note')).toHaveTextContent('');
+  });
+
   it('greys everything that arranges out while the diagram is locked, and says why', async () => {
     const { onCommand } = controls({ locked: true, pickedCount: 3 });
     const tidy = screen.getByTestId('sld-tidy');

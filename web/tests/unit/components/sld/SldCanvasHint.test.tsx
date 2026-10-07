@@ -41,7 +41,7 @@ describe('<SldCanvasHint />', () => {
     render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
     const notice = screen.getByTestId('sld-canvas-too-small');
     expect(notice).toHaveTextContent(
-      'The diagram is zoomed out to 19%, too small to read. Press Zoom to 100%, or pick a bus or a device in a table below to zoom to it.',
+      'The diagram is zoomed out to 19%, too small to read. Press Zoom to 100%, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus or a device in a table below to zoom to it.',
     );
     expect(notice).toHaveAttribute('data-zoom-percent', '19');
     // Where the line is cut, the tooltip has the whole of it.

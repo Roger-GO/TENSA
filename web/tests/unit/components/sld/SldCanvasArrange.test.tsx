@@ -475,6 +475,63 @@ describe('a case that opens with no saved layout', () => {
   });
 });
 
+describe('a bus or device that is dropped on something', () => {
+  /** The box a node is drawn in, by the size it was built with. */
+  function boxOf(id: string) {
+    const node = drawn.nodes.find((n) => n.id === id)! as DrawnNode & {
+      initialWidth?: number;
+      initialHeight?: number;
+    };
+    return {
+      left: node.position.x,
+      right: node.position.x + (node.initialWidth ?? 0),
+      top: node.position.y,
+      bottom: node.position.y + (node.initialHeight ?? 0),
+    };
+  }
+
+  it('is put in the nearest free place, says so, and goes back with one Undo', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    const before = positionOf('load-PQ_1');
+    const machine = positionOf('generator-G1');
+
+    // The load on the machine of bus 1.
+    dragTo('load-PQ_1', { x: machine.x + 12, y: machine.y + 6 });
+
+    const [load, other] = [boxOf('load-PQ_1'), boxOf('generator-G1')];
+    const apart =
+      load.left >= other.right ||
+      other.left >= load.right ||
+      load.top >= other.bottom ||
+      other.top >= load.bottom;
+    expect(apart).toBe(true);
+    expect(positionOf('load-PQ_1')).not.toEqual({ x: machine.x + 12, y: machine.y + 6 });
+    expect(info).toHaveBeenCalledWith(
+      'Moved to the nearest free place',
+      expect.objectContaining({
+        description: expect.stringContaining('dropped on another symbol') as string,
+      }),
+    );
+    // It is the place that is kept, and one move for Undo.
+    expect(useCaseStore.getState().dragOverrides['load-PQ_1']).toEqual(positionOf('load-PQ_1'));
+    expect(labels()).toHaveLength(1);
+    run('undo-layout');
+    await waitFor(() => expect(positionOf('load-PQ_1')).toEqual(before));
+  });
+
+  it('stays where it is dropped on free ground, and nothing is said', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    const at = positionOf('3');
+    dragTo('3', { x: at.x + 16, y: at.y + 8 });
+    expect(positionOf('3')).toEqual({ x: at.x + 16, y: at.y + 8 });
+    expect(info).not.toHaveBeenCalledWith('Moved to the nearest free place', expect.anything());
+  });
+});
+
 describe('Tidy diagram', () => {
   it('routes every branch afresh, moves nothing, and writes the result beside the case', async () => {
     const success = vi.spyOn(toast, 'success');
@@ -588,6 +645,32 @@ describe('Tidy diagram', () => {
     expect(info).toHaveBeenCalledWith('The diagram is already tidy.', expect.anything());
     expect(routes()).toEqual(tidied);
     expect(labels()).toEqual(['tidy diagram']);
+  });
+
+  it('says what the last tidy came to beside its button, until the diagram is arranged some other way', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await openUntidy();
+    const note = () => screen.getByTestId('sld-tidy-note');
+    expect(note()).toHaveTextContent('');
+    const before = routes();
+    run('tidy');
+    await waitFor(() => expect(routes()).not.toEqual(before));
+    expect(note()).toHaveTextContent(
+      /^Tidied: \d+ lines? (and transformers|or transformer) re-routed$/,
+    );
+
+    // A second tidy changes nothing that could be seen: the note says so,
+    // and stays after the notice has gone. The notice stays for 8 s.
+    run('tidy');
+    expect(note()).toHaveTextContent('Already tidy: nothing was changed');
+    const [, shown] = info.mock.calls.find(([text]) => text === 'The diagram is already tidy.')!;
+    expect(shown).toMatchObject({ duration: 8_000 });
+    expect(shown!.description).toMatch(/Nothing was changed\.$/);
+
+    // A move makes it a diagram the tidy has not seen.
+    const at = positionOf('3');
+    dragTo('3', { x: at.x + 40, y: at.y + 8 });
+    expect(note()).toHaveTextContent('');
   });
 
   it('says there is nothing to tidy on a diagram with no branch', async () => {

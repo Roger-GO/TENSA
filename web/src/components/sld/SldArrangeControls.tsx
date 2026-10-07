@@ -8,7 +8,9 @@
  *   wants again and again. While lines are drawn through a symbol or a bar
  *   it counts them, which is how a diagram says that it wants a tidy. While
  *   a large diagram is being tidied it says so, and a Stop button beside it
- *   calls the work off.
+ *   calls the work off. What the last tidy came to stands beside the button
+ *   until the diagram is arranged some other way: a tidy of a tidy diagram
+ *   changes nothing that could be seen, and the notice that says so fades.
  * - **Arrange** is a menu: Tidy and re-layout, which also moves things (the
  *   buses onto the grid, the devices back beside their bus), Snap to grid,
  *   and Align and Distribute for the nodes that are picked. With fewer than
@@ -172,6 +174,11 @@ export interface SldArrangeControlsProps {
   /** Call that tidy off; while it is worked out the controls offer to. */
   onCancel?: () => void;
   /**
+   * What the last tidy came to ("Already tidy: nothing was changed"), while
+   * the diagram stands as that tidy left it; `null` otherwise.
+   */
+  note?: string | null;
+  /**
    * How many lines and transformers are drawn through a symbol or a bar
    * (`branchesThroughSymbols`): the button counts them and says what it
    * would do about them.
@@ -189,6 +196,7 @@ export function SldArrangeControls({
   locked,
   busy = false,
   onCancel,
+  note = null,
   untidy = 0,
   pickedCount,
   snap,
@@ -245,6 +253,18 @@ export function SldArrangeControls({
           Stop
         </Button>
       ) : null}
+      {/* Always there, so that what it comes to say is announced. */}
+      <span
+        aria-live="polite"
+        data-testid="sld-tidy-note"
+        title={note !== null && !busy ? note : undefined}
+        className={cn(
+          'text-foreground max-w-[16rem] shrink-0 truncate text-xs font-medium',
+          note === null || busy ? 'sr-only' : undefined,
+        )}
+      >
+        {busy ? '' : (note ?? '')}
+      </span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
