@@ -47,7 +47,7 @@ vi.mock('@xyflow/react', async () => {
 });
 
 import { TopologyEdge } from '@/components/sld/edges/TopologyEdge';
-import type { ConnectorRoute } from '@/components/sld/connections';
+import type { ConnectorRoute, LabelPlace } from '@/components/sld/connections';
 import {
   ARROW_MAX_SIZE,
   ARROW_MIN_SIZE,
@@ -64,7 +64,7 @@ interface RenderEdgeProps {
     idx?: string;
     bucket?: 'line' | 'transformer';
     route?: ConnectorRoute;
-    labelAt?: { x: number; y: number; angleDeg: number };
+    labelAt?: LabelPlace;
   };
 }
 
@@ -181,6 +181,46 @@ describe('<TopologyEdge /> the line', () => {
     expect(getByTestId('line-flow-arrow-edge-1').style.transform).toBe(
       'translate(89px, 40px) rotate(90deg)',
     );
+  });
+
+  it('stands the flow label beside the line where the canvas found no room on it, and leaves the arrow on the line', () => {
+    setPflow(120);
+    const beside = (side: 'left' | 'right' | 'above' | 'below', x: number, y: number) =>
+      renderEdge({
+        data: {
+          bucket: 'line',
+          idx: 'l-1',
+          route: STEPPED,
+          labelAt: { x: 89, y: 40, angleDeg: 90, label: { x, y, side } },
+        },
+      });
+    // Left of the run down: hung by its right edge, 6 from the line.
+    const left = beside('left', 83, 40);
+    const label = left.getByTestId('line-flow-label-edge-1');
+    expect(label).toHaveAttribute('data-beside', 'left');
+    expect(label.style.transform).toBe('translate(-100%, -50%) translate(83px, 40px)');
+    expect(left.getByTestId('line-flow-arrow-edge-1').style.transform).toBe(
+      'translate(89px, 40px) rotate(90deg)',
+    );
+    cleanup();
+    expect(beside('right', 95, 40).getByTestId('line-flow-label-edge-1').style.transform).toBe(
+      'translate(0, -50%) translate(95px, 40px)',
+    );
+    cleanup();
+    expect(beside('above', 121, 97).getByTestId('line-flow-label-edge-1').style.transform).toBe(
+      'translate(-50%, -100%) translate(121px, 97px)',
+    );
+    cleanup();
+    expect(beside('below', 121, 109).getByTestId('line-flow-label-edge-1').style.transform).toBe(
+      'translate(-50%, 0) translate(121px, 109px)',
+    );
+    cleanup();
+    // On the line it is hung by its middle, and says nothing of a side.
+    const on = renderEdge({
+      data: { bucket: 'line', idx: 'l-1', route: STEPPED, labelAt: { x: 89, y: 40, angleDeg: 90 } },
+    }).getByTestId('line-flow-label-edge-1');
+    expect(on).not.toHaveAttribute('data-beside');
+    expect(on.style.transform).toBe('translate(-50%, -50%) translate(89px, 40px)');
   });
 
   it('lays the arrow along the run it sits on, pointing the way the power flows', () => {

@@ -27,9 +27,11 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  *
  * After a power flow a line (`data.bucket === 'line'`) carries an arrow and
  * a magnitude label, at the place the canvas found for them on a straight run
- * of the route (`data.labelAt`; half way along without one). The arrow lies
- * along the run it sits on and points the way the active power flows; the stroke turns amber or
- * red, and heavier, as the line nears or passes its rating.
+ * of the route (`data.labelAt`; half way along without one). The label stands
+ * on the line there, or beside it where the line has no room for it
+ * (`data.labelAt.label`). The arrow lies along the run it sits on and points
+ * the way the active power flows; the stroke turns amber or red, and heavier,
+ * as the line nears or passes its rating.
  */
 interface EdgeData {
   idx?: string;
@@ -37,7 +39,7 @@ interface EdgeData {
   kind?: string;
   bucket?: 'line' | 'transformer';
   route?: ConnectorRoute;
-  /** Where the flow label stands on the route; absent: half way along. */
+  /** Where the arrow and the flow label stand on the route; absent: half way along. */
   labelAt?: LabelPlace;
 }
 
@@ -93,7 +95,14 @@ export const TopologyEdge = memo(function TopologyEdge({
         />
       ) : null}
       {overlay ? (
-        <LineFlowLabel id={id} x={mid.x} y={mid.y} overlay={overlay} hideLabels={hideLabels} />
+        <LineFlowLabel
+          id={id}
+          x={edgeData.labelAt?.label?.x ?? mid.x}
+          y={edgeData.labelAt?.label?.y ?? mid.y}
+          side={edgeData.labelAt?.label?.side}
+          overlay={overlay}
+          hideLabels={hideLabels}
+        />
       ) : null}
     </>
   );

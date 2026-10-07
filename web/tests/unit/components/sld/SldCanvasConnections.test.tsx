@@ -345,18 +345,20 @@ describe('while a node is dragged', () => {
       [19, 203],
     ]);
     expect(node('load-PQ').data.connectorLean).toBeUndefined();
-    expect(node('load-PQ').data.readoutLeft).toBe(true);
+    expect(node('load-PQ').data.readoutSpot).toBe('left');
 
     // Over the right half: the line is on its left now, and nothing on its right.
     dragTo('load-PQ', { x: 60, y: 120 });
     expect(routeOf('stub-load-PQ').points[0]).toEqual([79, 161]);
-    expect(node('load-PQ').data.readoutLeft).toBeUndefined();
+    expect(node('load-PQ').data.readoutSpot).toBeUndefined();
   });
 
-  it('leaves the readout on the right when the left has no room for it and for a neighbour', async () => {
-    // A second load of bus 2, placed 100 left of where the first is
-    // dragged to: its connector comes down through the room the readout of
-    // the first would need on the left.
+  it('leaves the readout where it first stands when no place around the device is free', async () => {
+    // A second load of bus 2, placed 100 left of where the first is dragged
+    // to, past the tip of the bar: its connector runs at an angle through
+    // the place left of the first one's, its symbol stands where the readout
+    // would stand beside the first, and the line takes the right and the
+    // far side.
     mockTopology = { ...pair(), loads: [...pair().loads, entry('PQ2', 'PQ', { bus: 2 })] };
     mockSidecar = {
       ...buildSidecarLayout(
@@ -375,7 +377,35 @@ describe('while a node is dragged', () => {
     const neighbour = routeOf('stub-load-PQ2').points;
     expect(neighbour[0]![0]).toBeLessThan(19 - 4);
     expect(neighbour[0]![0]).toBeGreaterThan(19 - 4 - 144);
-    expect(node('load-PQ').data.readoutLeft).toBeUndefined();
+    expect(node('load-PQ').data.readoutSpot).toBeUndefined();
+  });
+
+  it('stands the readout beside the symbol of a device that has no place for it over or under', async () => {
+    // A second load of bus 2 over the west tip of the bar, whose connector
+    // drops through the place left of the first one's.
+    mockTopology = { ...pair(), loads: [...pair().loads, entry('PQ2', 'PQ', { bus: 2 })] };
+    mockSidecar = {
+      ...buildSidecarLayout(
+        { '1': { x: 0, y: 0 }, '2': { x: 0, y: 200 } },
+        {
+          nonBusCoords: {
+            load: { PQ: { x: 150, y: 120, bus: '2' }, PQ2: { x: -34, y: 120, bus: '2' } },
+          },
+        },
+      ),
+    };
+    open('pair.xlsx');
+    await draw();
+    // Over the middle of bar 2, between the two bars: the connector drops
+    // onto the place the line asks for, and the line lands a spacing right
+    // of it, through the place beside the connector and the one over the
+    // load.
+    dragTo('load-PQ', { x: 27, y: 120 });
+    expect(routeOf('stub-load-PQ').points[0]![0]).toBe(46);
+    expect(routeOf('line-L').points.at(-1)![0]).toBe(60);
+    expect(routeOf('stub-load-PQ2').points.at(-1)![0]).toBe(-15);
+    expect(node('load-PQ').data.connectorLean).toBeUndefined();
+    expect(node('load-PQ').data.readoutSpot).toBe('east');
   });
 
   it('takes the branches of a bus along with it', async () => {

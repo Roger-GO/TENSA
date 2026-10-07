@@ -678,8 +678,9 @@ describe('BusNode, the bar and its taps', () => {
     const { getByTestId } = render(
       <BusNode {...withBar({ start: 0, end: 92, taps: [{ x: 46, side: 'south' }] })} />,
     );
-    // "BUS1" is 4 characters: 32 wide, so its middle keeps 20 from the feeder.
-    expect(getByTestId('bus-label-1').style.left).toBe('-20px');
+    // "BUS1" with room for a limit marker beside it is taken as 6 characters,
+    // 44 wide (`busLabelWidth`): its middle keeps 26 from the feeder.
+    expect(getByTestId('bus-label-1').style.left).toBe('-26px');
   });
 
   it('moves the label clear of a line that passes under the bar', () => {
@@ -689,8 +690,32 @@ describe('BusNode, the bar and its taps', () => {
         data={{ ...withBar({ start: 0, end: 92, taps: [] }).data, labelClear: [[46, 46]] }}
       />,
     );
-    // As beside a feeder of its own: 20 from where the line passes.
-    expect(getByTestId('bus-label-1').style.left).toBe('-20px');
+    // As beside a feeder of its own: 26 from where the line passes.
+    expect(getByTestId('bus-label-1').style.left).toBe('-26px');
+  });
+
+  it('stands the label over the bar when there is no place for it under the bar', () => {
+    // A symbol takes up the strip under the bar and well past both tips,
+    // and nothing stands over the bar.
+    const bare = withBar({ start: 0, end: 92, taps: [] });
+    const { getByTestId } = render(
+      <BusNode {...bare} data={{ ...bare.data, labelClear: [[-200, 300]], labelClearAbove: [] }} />,
+    );
+    const label = getByTestId('bus-label-1');
+    expect(label).toHaveAttribute('data-label-side', 'above');
+    expect(label.className).toContain('bottom-full');
+    // About the middle of the bar.
+    expect(label.style.left).toBe('46px');
+  });
+
+  it('keeps the label under the bar when it is not told what stands over it', () => {
+    const bare = withBar({ start: 0, end: 92, taps: [] });
+    const { getByTestId } = render(
+      <BusNode {...bare} data={{ ...bare.data, labelClear: [[-200, 300]] }} />,
+    );
+    const label = getByTestId('bus-label-1');
+    expect(label).not.toHaveAttribute('data-label-side');
+    expect(label.className).not.toContain('bottom-full');
   });
 
   it('makes room for the values a power flow adds to the label', () => {
@@ -702,8 +727,9 @@ describe('BusNode, the bar and its taps', () => {
     const { getByTestId } = render(
       <BusNode {...withBar({ start: 0, end: 92, taps: [{ x: 46, side: 'south' }] })} />,
     );
-    // "1.000 pu" is 8 characters: 56 wide, so its middle keeps 32 from the feeder.
+    // With values the label is taken as 9 characters, 62 wide, whatever the
+    // values are: its middle keeps 35 from the feeder.
     expect(getByTestId('bus-voltage-1').textContent).toBe('1.000 pu');
-    expect(getByTestId('bus-label-1').style.left).toBe('-32px');
+    expect(getByTestId('bus-label-1').style.left).toBe('-35px');
   });
 });

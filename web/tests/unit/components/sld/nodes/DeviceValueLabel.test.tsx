@@ -322,7 +322,7 @@ describe('GeneratorNode P / Q label', () => {
           kind: 'PQ',
           valueSide: 'above',
           connectorFace: 'north',
-          readoutLeft: true,
+          readoutSpot: 'left',
         })}
       />,
     ).getByTestId('load-values-PQ_1');
@@ -339,12 +339,60 @@ describe('GeneratorNode P / Q label', () => {
           kind: 'PQ',
           valueSide: 'above',
           connectorFace: 'east',
-          readoutLeft: true,
+          readoutSpot: 'left',
         })}
       />,
     ).getByTestId('load-values-PQ_1');
     expect(centred).not.toHaveAttribute('data-beside-connector');
     expect(centred.className).toContain('-translate-x-1/2');
+  });
+
+  it('hangs off the far side of the device when the canvas found no place on the side of the bus', () => {
+    // A line lands either side of the connector.
+    setPflow(makePflow());
+    const label = render(
+      <LoadNode
+        {...props<typeof LoadNode>({
+          idx: 'PQ_1',
+          kind: 'PQ',
+          valueSide: 'above',
+          connectorFace: 'north',
+          readoutSpot: 'far',
+        })}
+      />,
+    ).getByTestId('load-values-PQ_1');
+    // Under the load, about its middle, and not beside the connector.
+    expect(label).toHaveAttribute('data-readout-spot', 'far');
+    expect(label).not.toHaveAttribute('data-beside-connector');
+    expect(label.className).toContain('top-full');
+    expect(label.className).toContain('-translate-x-1/2');
+    expect(label.className).not.toContain('bottom-full');
+  });
+
+  it('stands beside the symbol when the canvas found no place over or under it', () => {
+    setPflow(makePflow());
+    const beside = (readoutSpot: 'east' | 'west') =>
+      render(
+        <LoadNode
+          {...props<typeof LoadNode>({
+            idx: 'PQ_1',
+            kind: 'PQ',
+            valueSide: 'above',
+            connectorFace: 'north',
+            readoutSpot,
+          })}
+        />,
+      ).getByTestId('load-values-PQ_1');
+    const east = beside('east');
+    expect(east).toHaveAttribute('data-readout-spot', 'east');
+    expect(east).not.toHaveAttribute('data-beside-connector');
+    expect(east.className).toContain('left-full');
+    expect(east.className).toContain('top-1/2');
+    expect(east.className).not.toContain('bottom-full');
+    cleanup();
+    const west = beside('west');
+    expect(west.className).toContain('right-full');
+    expect(west.className).toContain('text-right');
   });
 
   it('takes no notice of which way the connector goes when it leaves by another face', () => {
@@ -501,6 +549,10 @@ describe('GeneratorNode reactive limit marker', () => {
     const gen = getByTestId('generator-node-2');
     expect(gen).toHaveAttribute('data-q-limit', 'above-max');
     expect(gen.className).toContain('border-danger');
+    // The outline is heavier inside the border, not by a wider border: the
+    // box, and so the port the connector leaves by, stays where it was.
+    expect(gen.className).not.toContain('border-2');
+    expect(gen.className).toContain('shadow-[inset_0_0_0_1px_var(--color-danger)]');
     const marker = getByTestId('generator-q-marker-2');
     expect(marker).toHaveAttribute('data-band', 'danger');
     expect(marker).toHaveAttribute('data-side', 'high');
@@ -520,6 +572,7 @@ describe('GeneratorNode reactive limit marker', () => {
     const gen = getByTestId('generator-node-2');
     expect(gen).toHaveAttribute('data-q-limit', 'at-max');
     expect(gen.className).toContain('border-warning');
+    expect(gen.className).not.toContain('border-2');
     expect(getByTestId('generator-q-marker-2')).toHaveAttribute('data-band', 'warning');
   });
 

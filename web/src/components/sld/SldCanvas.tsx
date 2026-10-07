@@ -110,35 +110,35 @@ import { curatedLayoutFor } from './curated';
 import {
   buildGraph,
   chooseChainSide,
-  readoutPlaces,
   unitChainPlaces,
   unitChainSize,
-  DEVICE_VALUE_LABEL,
   DEVICE_PORT,
-  NODE_FOOTPRINT,
   SOURCE_HANDLE,
   TARGET_HANDLE,
+  type ChainSide,
   type UnitNodeData,
 } from './graph';
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
   DEFAULT_CONNECTOR_STYLE,
-  branchLabelPlaces,
-  busLabelOffset,
   layoutConnections,
   routesThrough,
-  runsIn,
   type ConnectionEdge,
-  type ConnectionLayout,
   type ConnectorRoute,
   type ConnectorStyle,
   type LabelPlace,
-  type BarGeometry,
   type NodeSize,
   type Rect,
-  type RouteRun,
 } from './connections';
+import {
+  boxOnDiagram,
+  busLabelBox,
+  busLabelClear,
+  overlaps,
+  placeBranchLabels,
+  placeReadouts,
+} from './labels';
 import { FULL_ZOOM, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
 
@@ -180,14 +180,6 @@ const DRAG_SLOP_PX = 2;
 
 /** The grid a node snaps to while Snap to grid is on: the dots of the background. */
 const SNAP_GRID: [number, number] = [GRID_STEP, GRID_STEP];
-
-/**
- * The room the label of a branch is given when its place is looked for
- * (`branchLabelPlaces`): the flow and loading of a line at their longest
- * (`LineFlowLabel`), and the symbol of a transformer (`TransformerEdge`).
- */
-const LINE_LABEL_BOX = { width: 84, height: 18 };
-const TRANSFORMER_LABEL_BOX = { width: 30, height: 30 };
 
 /**
  * The most branches Tidy diagram routes within the press that asked for it.
@@ -678,10 +670,25 @@ function SldCanvasInner({
     () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
     [nodes, edges, sizes, connectorStyle, barLengths],
   );
-  // How many connectors pass through a box, for the readouts below, and
-  // which runs pass through one, for the labels of the buses.
+  // How many connectors pass through a box, for the chains that are drawn out.
   const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
-  const runsThroughBox = useMemo(() => runsIn(connections.routes), [connections]);
+  // What the label of each bus has to stand clear of, under its bar and over
+  // it (`labels.ts`): the runs that pass there and the symbols that stand there.
+  // The labels are placed one after the other, each as large as it is drawn:
+  // with a voltage and an angle in it once a power flow has run. The readouts
+  // of the devices show only then, so they are placed against the labels as
+  // they are then.
+  const pflowShown = usePflowStore((s) => s.lastRun !== null);
+  const labelsHidden = useUiStore((s) => s.hideLabels);
+  const valuesShown = pflowShown && !labelsHidden;
+  const labelClearsWithValues = useMemo(
+    () => busLabelClear(nodes, connections, sizes, true),
+    [nodes, connections, sizes],
+  );
+  const labelClears = useMemo(
+    () => (valuesShown ? labelClearsWithValues : busLabelClear(nodes, connections, sizes, false)),
+    [nodes, connections, sizes, valuesShown, labelClearsWithValues],
+  );
   // The devices whose connector is picked out (`StubEdge`): the one that is
   // selected and the ones under the pointer in a drag, so it shows which
   // connector is the device's and that it follows the device to the bar.
@@ -904,13 +911,61 @@ function SldCanvasInner({
   const connectivityResult = useConnectivityStore((s) => s.result);
   const energisedBusIdxes = useConnectivityStore((s) => s.energisedBusIdxes);
 
-  // What stands on the diagram, as boxes: worked out when a unit has its
-  // control chain drawn out and the chain needs a place, not otherwise.
-  const standingAround = useMemo(() => {
+  // Where the control chains that are drawn out stand. A chain is drawn out
+  // on the side of its unit away from the bus. Where a bar, another symbol
+  // or a line is in the way there and not beside the symbol, it goes beside
+  // the symbol.
+  const chains = useMemo(() => {
+    const out = new Map<string, { side: ChainSide; box: Rect }>();
+    // What stands on the diagram, as boxes: worked out when a unit has its
+    // chain drawn out and the chain needs a place, not otherwise.
     let standing: { id: string; box: Rect }[] | null = null;
-    return (): { id: string; box: Rect }[] =>
-      (standing ??= nodes.map((n) => ({ id: n.id, box: boxOnDiagram(n, sizes, connections) })));
-  }, [nodes, sizes, connections]);
+    for (const n of nodes) {
+      const unit = (n.data as { unit?: UnitNodeData }).unit;
+      if (n.type !== 'generator' || unit?.expanded !== true) continue;
+      const around = (standing ??= nodes.map((m) => ({
+        id: m.id,
+        box: boxOnDiagram(m, sizes, connections.bars),
+      })));
+      const measured = sizes.get(n.id);
+      const places = unitChainPlaces(
+        {
+          ...n.position,
+          width: measured?.width ?? n.initialWidth ?? 0,
+          height: measured?.height ?? n.initialHeight ?? 0,
+        },
+        unitChainSize(unit.members),
+      );
+      const side = chooseChainSide(
+        unit.side === 'below' ? 'below' : 'above',
+        places,
+        (place) =>
+          around.filter(({ id, box }) => id !== n.id && overlaps(box, place)).length +
+          connectorsThrough(place, `stub-${n.id}`),
+      );
+      out.set(n.id, { side, box: places[side] });
+    }
+    return out;
+  }, [nodes, sizes, connections, connectorsThrough]);
+  // Where the P / Q readout of each generator and load stands (`labels.ts`):
+  // beside its connector where no other connector runs through it and
+  // nothing stands there, on the far side of the device otherwise. Placed
+  // against the labels of the buses as they are with values in them, which
+  // is when the readouts show.
+  const readouts = useMemo(() => {
+    const busLabels = new Map<string, Rect>();
+    for (const n of nodes) {
+      if ((n.type ?? 'bus') !== 'bus') continue;
+      busLabels.set(
+        n.id,
+        busLabelBox(n, true, connections.bars.get(n.id), labelClearsWithValues.get(n.id)),
+      );
+    }
+    return placeReadouts(nodes, connections, sizes, {
+      chains: new Map([...chains].map(([id, { box }]) => [id, box])),
+      busLabels,
+    });
+  }, [nodes, connections, sizes, labelClearsWithValues, chains]);
 
   // The buses and devices picked together (`pickedNodeIds`), when there are
   // two or more of them that are still on the diagram and can be moved.
@@ -977,9 +1032,10 @@ function SldCanvasInner({
         // What the connection pass worked out for this node: the bar of a
         // bus with its taps, and the face a device's connector leaves by.
         const bar = isBus ? connections.bars.get(n.id) : undefined;
-        // What runs through the strip the label of the bus hangs in, for the
-        // label to stand clear of: the stretch of the strip each run covers.
-        const labelClear = bar === undefined ? [] : runsUnderBar(n.position, bar, runsThroughBox);
+        // What the label of the bus stands clear of: the stretches of the
+        // strip under its bar that are shut to it, and of the one over it.
+        const clear = bar === undefined ? undefined : labelClears.get(n.id);
+        const labelClear = clear !== undefined && clear.below.length > 0 ? clear : undefined;
         const connector = isBus ? undefined : connections.routes.get(`stub-${n.id}`);
         const connectorFace = connector?.sourceSide;
         // Which way the connector goes from that face: to the left, to the
@@ -995,52 +1051,24 @@ function SldCanvasInner({
         // The P / Q readout of a generator or load stands right of a
         // connector that runs straight out of the face it hangs off. Where
         // another connector runs through it there (a line lands on the bar
-        // just right of the device) and the left is free, for it and for
-        // the readout of a neighbour, it stands on the left.
-        let readoutLeft = false;
-        if ((n.type === 'generator' || n.type === 'load') && connector && connectorLean === 0) {
-          const valueSide =
-            (n.data as { valueSide?: 'above' | 'below' }).valueSide ??
-            (n.type === 'generator' ? 'below' : 'above');
-          if (connectorFace === (valueSide === 'below' ? 'south' : 'north')) {
-            const places = readoutPlaces(
-              {
-                ...n.position,
-                width: measured?.width ?? n.initialWidth ?? 0,
-                height: measured?.height ?? n.initialHeight ?? 0,
-              },
-              valueSide,
-            );
-            const own = `stub-${n.id}`;
-            readoutLeft =
-              connectorsThrough(places.right, own) > 0 &&
-              connectorsThrough(places.leftRoom, own) === 0;
-          }
-        }
-        // The control chain of a unit is drawn out on the side away from its
-        // bus. Where a bar, another symbol or a line is in the way there and
-        // not beside the symbol, it goes beside the symbol.
+        // just right of the device), or something stands there, it stands
+        // somewhere else (`placeReadouts`), and the node is told where.
+        const spot = readouts.get(n.id)?.spot;
+        const readoutSpot =
+          spot === undefined ||
+          spot === 'right' ||
+          spot === 'centre' ||
+          (spot === 'left' && connectorLean === 1)
+            ? undefined
+            : spot;
+        // The side the chain of a unit is drawn out on, where that is not
+        // the one `buildGraph` gave it.
         const unit = (n.data as { unit?: UnitNodeData }).unit;
-        let drawnOut: { unit: UnitNodeData } | undefined;
-        if (n.type === 'generator' && unit?.expanded) {
-          const away = unit.side === 'below' ? 'below' : 'above';
-          const places = unitChainPlaces(
-            {
-              ...n.position,
-              width: measured?.width ?? n.initialWidth ?? 0,
-              height: measured?.height ?? n.initialHeight ?? 0,
-            },
-            unitChainSize(unit.members),
-          );
-          const side = chooseChainSide(
-            away,
-            places,
-            (place) =>
-              standingAround().filter(({ id, box }) => id !== n.id && overlaps(box, place)).length +
-              connectorsThrough(place, `stub-${n.id}`),
-          );
-          if (side !== unit.side) drawnOut = { unit: { ...unit, side } };
-        }
+        const chain = chains.get(n.id);
+        const drawnOut =
+          unit !== undefined && chain !== undefined && chain.side !== unit.side
+            ? { unit: { ...unit, side: chain.side } }
+            : undefined;
         return {
           ...n,
           ...(measured !== undefined ? { measured } : {}),
@@ -1049,10 +1077,12 @@ function SldCanvasInner({
           data: {
             ...(n.data as Record<string, unknown>),
             ...(bar !== undefined ? { bar } : {}),
-            ...(labelClear.length > 0 ? { labelClear } : {}),
+            ...(labelClear !== undefined
+              ? { labelClear: labelClear.below, labelClearAbove: labelClear.above }
+              : {}),
             ...(connectorFace !== undefined ? { connectorFace } : {}),
             ...(connectorLean !== 0 ? { connectorLean } : {}),
-            ...(readoutLeft ? { readoutLeft } : {}),
+            ...(readoutSpot !== undefined ? { readoutSpot } : {}),
             ...drawnOut,
             // Attribute echoed onto BusNode's wrapper via the spread
             // pattern in the React Flow node mapping; tests assert on
@@ -1078,9 +1108,9 @@ function SldCanvasInner({
       connectivityResult,
       energisedBusIdxes,
       connections,
-      connectorsThrough,
-      runsThroughBox,
-      standingAround,
+      labelClears,
+      readouts,
+      chains,
       sizes,
     ],
   );
@@ -1092,32 +1122,24 @@ function SldCanvasInner({
     selectedIdsRef.current = nodesWithSelection.filter((n) => n.selected).map((n) => n.id);
   }, [nodesWithSelection]);
 
-  // Where each line carries its flow label and each transformer its symbol:
-  // on a straight run of its route, clear of the symbols, of the labels of
-  // the buses, of the P / Q readouts of the devices, and of each other.
-  const pflowShown = usePflowStore((s) => s.lastRun !== null);
-  const labelsHidden = useUiStore((s) => s.hideLabels);
+  // Where each line carries its flow label and each transformer its symbol
+  // (`labels.ts`): on a straight run of its route, or beside one, clear of
+  // the symbols, of the labels of the buses, of the P / Q readouts of the
+  // devices, and of each other.
   const labelPlaces = useMemo(() => {
-    const valuesShown = pflowShown && !labelsHidden;
-    const boxes: Rect[] = [];
-    for (const n of nodesWithSelection) {
-      boxes.push(boxOnDiagram(n, sizes, connections));
-      if (n.type === 'bus') boxes.push(busLabelBox(n, valuesShown));
-      else if (valuesShown && (n.type === 'generator' || n.type === 'load')) {
-        boxes.push(readoutBox(n, sizes));
-      }
+    const busLabels = new Map<string, Rect>();
+    for (const n of nodes) {
+      if ((n.type ?? 'bus') !== 'bus') continue;
+      busLabels.set(
+        n.id,
+        busLabelBox(n, valuesShown, connections.bars.get(n.id), labelClears.get(n.id)),
+      );
     }
-    return branchLabelPlaces(
-      connections.routes,
-      edges
-        .filter((edge) => edge.type !== 'stub')
-        .map((edge) => ({
-          id: edge.id,
-          ...(edge.type === 'transformer' ? TRANSFORMER_LABEL_BOX : LINE_LABEL_BOX),
-        })),
-      boxes,
-    );
-  }, [edges, connections, nodesWithSelection, sizes, pflowShown, labelsHidden]);
+    return placeBranchLabels(nodes, edges, connections, sizes, {
+      busLabels,
+      readouts: valuesShown ? [...readouts.values()].map(({ box }) => box) : [],
+    });
+  }, [nodes, edges, connections, sizes, labelClears, readouts, valuesShown]);
   // The edges with their routes. An edge whose route did not change keeps its
   // object, so React Flow redraws only the connectors that moved.
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
@@ -1998,122 +2020,6 @@ function centreOf(node: Node, size: NodeSize | undefined): { x: number; y: numbe
   const width = size?.width ?? node.initialWidth ?? 0;
   const height = size?.height ?? node.initialHeight ?? 0;
   return { x: node.position.x + width / 2, y: node.position.y + height / 2 };
-}
-
-/**
- * The room `node` takes on the diagram: the box it is drawn in, and for a
- * bus its bar, as long as it is drawn, with the label under it.
- */
-function boxOnDiagram(
-  node: Node,
-  sizes: ReadonlyMap<string, NodeSize>,
-  connections: ConnectionLayout,
-): Rect {
-  const { x, y } = node.position;
-  if ((node.type ?? 'bus') === 'bus') {
-    const bar = connections.bars.get(node.id);
-    return {
-      left: x + (bar?.start ?? 0),
-      right: x + (bar?.end ?? NODE_FOOTPRINT.bus.width),
-      top: y,
-      bottom: y + NODE_FOOTPRINT.bus.height,
-    };
-  }
-  const size = sizes.get(node.id);
-  return {
-    left: x,
-    right: x + (size?.width ?? node.initialWidth ?? 0),
-    top: y,
-    bottom: y + (size?.height ?? node.initialHeight ?? 0),
-  };
-}
-
-/**
- * How far either side of its bar the strip reaches in which the label of a
- * bus looks for a place: as far as the label may stand past a tip, and its
- * own half width.
- */
-const LABEL_STRIP_REACH = BAR_LENGTH;
-
-/**
- * The runs of connectors that pass under the bar of a bus, through the strip
- * its label hangs in: the stretch of the strip each covers, as offsets from
- * the origin of the bus node (`busLabelOffset` takes them as `passing`).
- */
-function runsUnderBar(
-  origin: { x: number; y: number },
-  bar: BarGeometry,
-  runsThroughBox: (box: Rect) => RouteRun[],
-): [number, number][] {
-  const strip: Rect = {
-    left: origin.x + bar.start - LABEL_STRIP_REACH,
-    right: origin.x + bar.end + LABEL_STRIP_REACH,
-    top: origin.y + BAR_THICKNESS + 1,
-    bottom: origin.y + NODE_FOOTPRINT.bus.height,
-  };
-  return runsThroughBox(strip).map(({ a, b }): [number, number] => [
-    Math.max(Math.min(a[0], b[0]), strip.left) - origin.x,
-    Math.min(Math.max(a[0], b[0]), strip.right) - origin.x,
-  ]);
-}
-
-/**
- * The box the label of a bus takes under its bar, about where `BusNode`
- * draws it: the name, and with `values` the voltage and the angle a power
- * flow adds (10 px monospace, as wide as the longer of the two).
- */
-function busLabelBox(node: Node, values: boolean): Rect {
-  const data = node.data as {
-    name?: string;
-    idx?: string;
-    bar?: BarGeometry;
-    labelClear?: [number, number][];
-  };
-  const name = String(data.name || data.idx || node.id);
-  const width = 6 * Math.max(name.length + 2, values ? 9 : 0) + 8;
-  const middle = node.position.x + busLabelOffset(data.bar, width, data.labelClear);
-  return {
-    left: middle - width / 2,
-    right: middle + width / 2,
-    top: node.position.y + BAR_THICKNESS,
-    bottom: node.position.y + (values ? NODE_FOOTPRINT.bus.height + 4 : 24),
-  };
-}
-
-/**
- * The box the P / Q readout of a generator or load takes, where
- * `DeviceValueLabel` draws it: beside the connector when it hangs off the
- * face the connector leaves by, under or over the middle of the node
- * otherwise.
- */
-function readoutBox(node: Node, sizes: ReadonlyMap<string, NodeSize>): Rect {
-  const data = node.data as {
-    valueSide?: 'above' | 'below';
-    connectorFace?: string;
-    connectorLean?: number;
-    readoutLeft?: boolean;
-  };
-  const size = sizes.get(node.id);
-  const width = size?.width ?? node.initialWidth ?? 0;
-  const side = data.valueSide ?? (node.type === 'generator' ? 'below' : 'above');
-  const places = readoutPlaces(
-    { ...node.position, width, height: size?.height ?? node.initialHeight ?? 0 },
-    side,
-  );
-  if (data.connectorFace !== (side === 'below' ? 'south' : 'north')) {
-    const middle = node.position.x + width / 2;
-    return {
-      ...places.right,
-      left: middle - DEVICE_VALUE_LABEL.width / 2,
-      right: middle + DEVICE_VALUE_LABEL.width / 2,
-    };
-  }
-  return data.connectorLean === 1 || data.readoutLeft === true ? places.left : places.right;
-}
-
-/** Whether two boxes share any room. */
-function overlaps(a: Rect, b: Rect): boolean {
-  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
 /** An edge as the canvas last handed it to React Flow, and what it was made from. */

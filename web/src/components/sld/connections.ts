@@ -1450,6 +1450,9 @@ const LABEL_CLEARANCE = 4;
  */
 const LABEL_REACH = BAR_LENGTH / 2;
 
+/** A stretch along a bar, from one x offset from the origin of the bus node to another. */
+export type Stretch = readonly [number, number];
+
 /**
  * Where the label of a bus hangs under its bar: the x of its middle, as an
  * offset from the origin of the bus node, for a label `width` wide.
@@ -1459,27 +1462,43 @@ const LABEL_REACH = BAR_LENGTH / 2;
  * that is nearest the middle and wide enough, or beside the outermost one,
  * so a line never runs through the name and the values of a bus.
  *
- * `passing` is what else runs through the strip the label hangs in: the
- * runs of other connectors, each as the stretch of the strip it covers
- * (offsets from the origin of the bus node, like the taps). The label stands
- * clear of those as well, where there is a place for it no further than
- * `LABEL_REACH` past a tip of the bar; with none it stands clear of its own
- * bus's connectors, as it does without `passing`.
+ * `passing` is what else is in the strip the label hangs in: the runs of
+ * other connectors and the symbols that stand there, each as the stretch of
+ * the strip it covers (offsets from the origin of the bus node, like the
+ * taps). The label stands clear of those as well, where there is a place
+ * for it no further than `LABEL_REACH` past a tip of the bar; with none it
+ * stands clear of its own bus's connectors, as it does without `passing`.
  */
 export function busLabelOffset(
   bar: BarGeometry | undefined,
   width: number,
-  passing: readonly (readonly [number, number])[] = [],
+  passing: readonly Stretch[] = [],
 ): number {
+  return busLabelPlace(bar, width, passing).offset;
+}
+
+/**
+ * Where the label of a bus stands: `busLabelOffset`, and whether that is
+ * over the bar. The label hangs under its bar. Where the strip under the
+ * bar has no place for it (`below`: a generator dragged under the bar, with
+ * a line beside it) and the strip over the bar has (`above`, with the taps
+ * of the north face), it stands over the bar instead. Without `above` it
+ * hangs under the bar whatever is there.
+ */
+export function busLabelPlace(
+  bar: BarGeometry | undefined,
+  width: number,
+  below: readonly Stretch[] = [],
+  above?: readonly Stretch[],
+): { offset: number; above: boolean } {
   const middle = BAR_LENGTH / 2;
-  if (!bar) return middle;
+  if (!bar) return { offset: middle, above: false };
   const reach = width / 2 + LABEL_CLEARANCE;
-  const taps = bar.taps
-    .filter((tap) => tap.side === 'south')
-    .map((tap): [number, number] => [tap.x, tap.x]);
+  const tapsOn = (side: Side): [number, number][] =>
+    bar.taps.filter((tap) => tap.side === side).map((tap): [number, number] => [tap.x, tap.x]);
   // The place nearest the middle that is `reach` clear of every stretch;
   // of two equally near, the one to the left.
-  const nearest = (stretches: readonly (readonly [number, number])[]): number => {
+  const nearest = (stretches: readonly Stretch[]): number => {
     // Where the middle of the label cannot be, as stretches in ascending order.
     const shut = stretches
       .map(([from, to]): [number, number] => [from - reach, to + reach])
@@ -1503,14 +1522,24 @@ export function busLabelOffset(
     }
     return found ? best : middle;
   };
-  if (passing.length > 0) {
-    const clear = nearest([...taps, ...passing]);
-    const shut = [...taps, ...passing].some(
+  // The place nearest the middle that is clear of all of `stretches` and no
+  // further out than the label still reads as that of the bus; `null` with none.
+  const clearOf = (stretches: readonly Stretch[]): number | null => {
+    const clear = nearest(stretches);
+    const shut = stretches.some(
       ([from, to]) => clear > from - reach + EPS && clear < to + reach - EPS,
     );
-    if (!shut && clear >= bar.start - LABEL_REACH && clear <= bar.end + LABEL_REACH) return clear;
+    const near = clear >= bar.start - LABEL_REACH && clear <= bar.end + LABEL_REACH;
+    return !shut && near ? clear : null;
+  };
+  const taps = tapsOn('south');
+  if (below.length > 0) {
+    const under = clearOf([...taps, ...below]);
+    if (under !== null) return { offset: under, above: false };
+    const over = above === undefined ? null : clearOf([...tapsOn('north'), ...above]);
+    if (over !== null) return { offset: over, above: true };
   }
-  return nearest(taps);
+  return { offset: nearest(taps), above: false };
 }
 
 /** A box on the canvas, by its edges. */
@@ -1630,6 +1659,45 @@ export interface LabelPlace {
   x: number;
   y: number;
   angleDeg: number;
+  /**
+   * Where the label is, when it stands beside its line and not on it: the
+   * `side` of the line it stands on, and the middle of the edge it turns to
+   * the line, which is where it is hung from, so that a label shorter or
+   * longer than the room it was given keeps its distance from the line.
+   * The arrow of the flow stays on the line, at `x`, `y`.
+   */
+  label?: { x: number; y: number; side: 'left' | 'right' | 'above' | 'below' };
+}
+
+/**
+ * The box a label `width` by `height` takes at `place`: about the point on
+ * its route, or beside the line there, turned to it by the edge it is hung
+ * from.
+ */
+export function labelBoxAt(place: LabelPlace, width: number, height: number): Rect {
+  const hung = place.label;
+  const cx =
+    hung === undefined
+      ? place.x
+      : hung.side === 'left'
+        ? hung.x - width / 2
+        : hung.side === 'right'
+          ? hung.x + width / 2
+          : hung.x;
+  const cy =
+    hung === undefined
+      ? place.y
+      : hung.side === 'above'
+        ? hung.y - height / 2
+        : hung.side === 'below'
+          ? hung.y + height / 2
+          : hung.y;
+  return {
+    left: cx - width / 2,
+    right: cx + width / 2,
+    top: cy - height / 2,
+    bottom: cy + height / 2,
+  };
 }
 
 /** How far apart the places tried for a label are, along the route. */
@@ -1642,13 +1710,25 @@ const LABEL_GAP = 2;
 const LABEL_CELL = 96;
 
 /**
- * What a label costs where it stands on a bend of its route, and for each
- * other connector that runs through it, as an area of symbol covered: a
- * label on a bend, or over the line beside its own, is worse than one that
- * clips the corner of a symbol.
+ * What a label costs where it stands, on top of the area it covers of what
+ * is near it: on a bend of its route, for each other connector that runs
+ * through it, for each symbol, bar, bus label or readout it reaches into,
+ * and for each label of another branch it reaches into. A label over the
+ * line beside its own is bad; one that is drawn on a symbol or through the
+ * values of a device is worse, and text on text is worst.
  */
 const LABEL_ON_BEND = 400;
 const LABEL_OVER_LINE = 300;
+const LABEL_OVER_BOX = 600;
+const LABEL_OVER_LABEL = 1000;
+
+/**
+ * What it costs a label to stand beside its line: next to nothing, so it
+ * stands on its line wherever that costs nothing, and how far from the line
+ * its near edge then is, which leaves the arrow of the flow free.
+ */
+const LABEL_BESIDE = 1;
+const LABEL_BESIDE_GAP = 6;
 
 /**
  * Where each branch carries its label (the flow of a line, the symbol of a
@@ -1662,15 +1742,26 @@ const LABEL_OVER_LINE = 300;
  * taken, and of two that cost the same the one nearer the middle. A label
  * with room on a straight run, clear of everything, costs nothing.
  *
+ * A label that may stand `beside` its line (the flow of a line; not the
+ * symbol of a transformer, which is part of the line) is also tried on
+ * either side of each place: over or under a level run, left or right of
+ * an upright one. Where a symbol stands close beside a line there is often
+ * room on the other side of the line and none on it.
+ *
  * `labels` lists the branches in the order they are placed, each with the
  * box its label takes; `boxes` is what stands on the diagram.
  */
 export function branchLabelPlaces(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
-  labels: readonly { id: string; width: number; height: number }[],
+  labels: readonly { id: string; width: number; height: number; beside?: boolean }[],
   boxes: readonly Rect[],
 ): Map<string, LabelPlace> {
-  const cells = new Map<string, Rect[]>();
+  interface Standing {
+    box: Rect;
+    /** Whether it is the label of a branch placed before. */
+    label: boolean;
+  }
+  const cells = new Map<string, Standing[]>();
   const cellsOf = (box: Rect): string[] => {
     const keys: string[] = [];
     const [c0, c1] = [Math.floor(box.left / LABEL_CELL), Math.floor(box.right / LABEL_CELL)];
@@ -1678,34 +1769,38 @@ export function branchLabelPlaces(
     for (let c = c0; c <= c1; c += 1) for (let r = r0; r <= r1; r += 1) keys.push(`${c}|${r}`);
     return keys;
   };
-  const stand = (box: Rect): void => {
-    for (const key of cellsOf(box)) {
+  const stand = (standing: Standing): void => {
+    for (const key of cellsOf(standing.box)) {
       const list = cells.get(key);
-      if (list) list.push(box);
-      else cells.set(key, [box]);
+      if (list) list.push(standing);
+      else cells.set(key, [standing]);
     }
   };
-  /** How much of what stands there a label in `box` would cover, the gap it keeps counted in. */
+  /**
+   * What a label in `box` costs for what stands there: the area it covers,
+   * the gap it keeps counted in, and what it reaches into.
+   */
   const covered = (box: Rect): number => {
-    const seen = new Set<Rect>();
-    let area = 0;
+    const seen = new Set<Standing>();
+    let cost = 0;
     for (const key of cellsOf(box)) {
       for (const other of cells.get(key) ?? []) {
         if (seen.has(other)) continue;
         seen.add(other);
-        const across =
-          Math.min(box.right, other.right) - Math.max(box.left, other.left) + LABEL_GAP;
-        const down = Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) + LABEL_GAP;
-        if (across > 0 && down > 0) area += across * down;
+        const across = Math.min(box.right, other.box.right) - Math.max(box.left, other.box.left);
+        const down = Math.min(box.bottom, other.box.bottom) - Math.max(box.top, other.box.top);
+        if (across + LABEL_GAP <= 0 || down + LABEL_GAP <= 0) continue;
+        cost += (across + LABEL_GAP) * (down + LABEL_GAP);
+        if (across > 0 && down > 0) cost += other.label ? LABEL_OVER_LABEL : LABEL_OVER_BOX;
       }
     }
-    return area;
+    return cost;
   };
-  for (const box of boxes) stand(box);
+  for (const box of boxes) stand({ box, label: false });
   const through = routesThrough(routes);
 
   const out = new Map<string, LabelPlace>();
-  for (const { id, width, height } of labels) {
+  for (const { id, width, height, beside } of labels) {
     const points = routes.get(id)?.points;
     if (points === undefined || points.length < 2) continue;
     // The runs of the route, with how far along it each starts.
@@ -1721,18 +1816,30 @@ export function branchLabelPlaces(
       out.set(id, routeMidpoint(points));
       continue;
     }
-    const best: { at: { place: LabelPlace; box: Rect; cost: number } | null } = { at: null };
+    const best: {
+      at: { place: LabelPlace; box: Rect; cost: number; along: number } | null;
+    } = { at: null };
+    /** How far along the route the place is that is being weighed. */
+    let weighed = 0;
+    const offer = (place: LabelPlace, box: Rect, cost: number): void => {
+      // Tried from the middle outwards, so the first of two alike is the nearer.
+      if (best.at === null || cost < best.at.cost - 1e-9) {
+        best.at = { place, box, cost, along: weighed };
+      }
+    };
+    const settled = (): boolean => best.at !== null && best.at.cost <= 0;
     const weigh = (along: number): void => {
+      weighed = along;
       const run = runs.find((r) => along <= r.from + r.length) ?? runs[runs.length - 1]!;
       const t = (along - run.from) / run.length;
       const x = run.a[0] + t * (run.b[0] - run.a[0]);
       const y = run.a[1] + t * (run.b[1] - run.a[1]);
-      const box: Rect = {
-        left: x - width / 2,
-        right: x + width / 2,
-        top: y - height / 2,
-        bottom: y + height / 2,
-      };
+      const boxAt = (cx: number, cy: number): Rect => ({
+        left: cx - width / 2,
+        right: cx + width / 2,
+        top: cy - height / 2,
+        bottom: cy + height / 2,
+      });
       // On a bend: less of the run either side than the label covers of it.
       // The two ends of the route are on bars, which the boxes keep it off.
       const level = Math.abs(run.b[1] - run.a[1]) < Math.abs(run.b[0] - run.a[0]);
@@ -1740,20 +1847,46 @@ export function branchLabelPlaces(
       const onBend =
         (run !== runs[0] && along - run.from < reach) ||
         (run !== runs[runs.length - 1] && run.from + run.length - along < reach);
-      const cost = covered(box) + (onBend ? LABEL_ON_BEND : 0) + LABEL_OVER_LINE * through(box, id);
-      // Tried from the middle outwards, so the first of two alike is the nearer.
-      if (best.at !== null && cost >= best.at.cost - 1e-9) return;
       const angleDeg = (Math.atan2(run.b[1] - run.a[1], run.b[0] - run.a[0]) * 180) / Math.PI;
-      best.at = { place: { x, y, angleDeg }, box, cost };
+      const on = boxAt(x, y);
+      offer(
+        { x, y, angleDeg },
+        on,
+        covered(on) + (onBend ? LABEL_ON_BEND : 0) + LABEL_OVER_LINE * through(on, id),
+      );
+      if (beside !== true || settled()) return;
+      // Beside the line: its own route counts among the ones that may run
+      // through the label there, where it turns close by.
+      const off = LABEL_BESIDE_GAP + (level ? height : width) / 2;
+      for (const sign of [-1, 1]) {
+        const box = level ? boxAt(x, y + sign * off) : boxAt(x + sign * off, y);
+        const label: NonNullable<LabelPlace['label']> = level
+          ? { x, y: y + sign * LABEL_BESIDE_GAP, side: sign < 0 ? 'above' : 'below' }
+          : { x: x + sign * LABEL_BESIDE_GAP, y, side: sign < 0 ? 'left' : 'right' };
+        offer(
+          { x, y, angleDeg, label },
+          box,
+          LABEL_BESIDE + covered(box) + LABEL_OVER_LINE * through(box),
+        );
+      }
     };
-    const settled = (): boolean => best.at !== null && best.at.cost <= 0;
     for (let k = 0; k * LABEL_STEP <= total / 2 && !settled(); k += 1) {
       weigh(total / 2 + k * LABEL_STEP);
       if (k > 0 && !settled()) weigh(total / 2 - k * LABEL_STEP);
     }
+    // A gap between two symbols that the label just fits falls between two
+    // of the places tried a step apart: around the best of those, every
+    // place in between is tried as well.
+    if (best.at !== null && !settled()) {
+      const around = best.at.along;
+      for (let d = 1; d < LABEL_STEP && !settled(); d += 1) {
+        if (around + d <= total) weigh(around + d);
+        if (around - d >= 0 && !settled()) weigh(around - d);
+      }
+    }
     if (best.at === null) continue;
     out.set(id, best.at.place);
-    stand(best.at.box);
+    stand({ box: best.at.box, label: true });
   }
   return out;
 }

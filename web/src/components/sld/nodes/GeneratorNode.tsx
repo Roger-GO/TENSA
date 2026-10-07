@@ -32,7 +32,9 @@ const NO_MEMBERS: readonly UnitMemberInfo[] = [];
  * reactive output is on or past a limit gets an amber or red outline and a
  * triangle on its corner (up at `qmax`, down at `qmin`; empty on the limit,
  * filled past it) so the state does not rest on colour alone. The triangle
- * hangs off the corner and adds nothing to the node's box.
+ * hangs off the corner and the outline is doubled inside the border, so
+ * neither adds to the node's box: a power flow leaves the connector, and
+ * the lines that were routed around the symbol, where they were.
  *
  * A unit of more than one model (`data.unit`) names the others in chips on
  * either side of the glyph, has a control at the end of its name that draws
@@ -92,9 +94,9 @@ export const GeneratorNode = memo(function GeneratorNode({ data, selected }: Nod
         selected
           ? 'border-[var(--color-ring)] ring-2 ring-[var(--color-ring)]'
           : band === 'danger'
-            ? 'border-danger border-2'
+            ? 'border-danger shadow-[inset_0_0_0_1px_var(--color-danger)]'
             : band === 'warning'
-              ? 'border-warning border-2'
+              ? 'border-warning shadow-[inset_0_0_0_1px_var(--color-warning)]'
               : 'border-border',
         isPendingDependent ? 'ring-warning/60 ring-2' : '',
         'transition-colors duration-[var(--duration-fast)]',

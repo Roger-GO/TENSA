@@ -23,7 +23,9 @@ import {
   barLengthFor,
   branchLabelPlaces,
   busLabelOffset,
+  busLabelPlace,
   faceSpan,
+  labelBoxAt,
   layoutConnections,
   routeMidpoint,
   routePath,
@@ -2338,6 +2340,45 @@ describe('busLabelOffset: connectors that pass under the bar', () => {
   });
 });
 
+describe('busLabelPlace: over the bar when there is no place under it', () => {
+  const bare = { start: 0, end: 92, taps: [] };
+
+  it('hangs under the bar, where `busLabelOffset` has it, while there is a place there', () => {
+    expect(busLabelPlace(bare, 40)).toEqual({ offset: 46, above: false });
+    expect(busLabelPlace(bare, 40, [[30, 70]], [])).toEqual({ offset: 6, above: false });
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'south' as const }] };
+    expect(busLabelPlace(bar, 40, [[20, 20]], []).offset).toBe(busLabelOffset(bar, 40, [[20, 20]]));
+  });
+
+  it('stands over the bar when a symbol takes up the whole strip under it', () => {
+    // A generator dragged under the bar, wider than the bar and what the
+    // label may stand past its tips.
+    expect(busLabelPlace(bare, 40, [[-200, 300]], [])).toEqual({ offset: 46, above: true });
+  });
+
+  it('keeps clear of the connectors that land on the north face, and of what stands over the bar', () => {
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'north' as const }] };
+    // Beside the connector that comes down onto the middle of the bar.
+    expect(busLabelPlace(bar, 40, [[-200, 300]], [])).toEqual({ offset: 22, above: true });
+    // A symbol over the left of the bar as well: on the other side.
+    expect(busLabelPlace(bar, 40, [[-200, 300]], [[-10, 30]])).toEqual({
+      offset: 70,
+      above: true,
+    });
+  });
+
+  it('hangs under the bar after all when the strip over it has no place either', () => {
+    const bar = { start: 0, end: 92, taps: [{ x: 46, side: 'south' as const }] };
+    // Clear of its own connector, as with nothing else about.
+    expect(busLabelPlace(bar, 40, [[-200, 300]], [[-200, 300]])).toEqual({
+      offset: 22,
+      above: false,
+    });
+    // And when it is not told what stands over the bar.
+    expect(busLabelPlace(bar, 40, [[-200, 300]])).toEqual({ offset: 22, above: false });
+  });
+});
+
 describe('runsIn', () => {
   const routes = new Map<string, { points: Point[] }>([
     [
@@ -2476,6 +2517,110 @@ describe('branchLabelPlaces', () => {
     ]);
     const place = branchLabelPlaces(routes, [{ id: 'l', ...label }], []).get('l')!;
     expect(Math.abs(place.y - 100)).toBeGreaterThanOrEqual(8);
+  });
+
+  it('stands a flow label beside its line where a symbol stands close beside the line', () => {
+    // A symbol 8 clear of the line, all the way down: a label on the line
+    // would reach 12 into it wherever it stood.
+    const device = { left: 108, right: 160, top: 0, bottom: 200 };
+    const routes = new Map([['l', down(100)]]);
+    const beside = branchLabelPlaces(routes, [{ id: 'l', ...label, beside: true }], [device]);
+    // The arrow stays on the line, half way along; the label stands left of
+    // it, hung by its right edge 6 from the line.
+    expect(beside.get('l')).toEqual({
+      x: 100,
+      y: 100,
+      angleDeg: 90,
+      label: { x: 94, y: 100, side: 'left' },
+    });
+    // The symbol of a transformer is part of its line and stays on it.
+    const on = branchLabelPlaces(routes, [{ id: 'l', ...label }], [device]).get('l')!;
+    expect(on.label).toBeUndefined();
+    expect(on.x).toBe(100);
+  });
+
+  it('gives the box a label takes on its line, and beside it by the edge it is hung from', () => {
+    const on = { x: 100, y: 50, angleDeg: 90 };
+    expect(labelBoxAt(on, 40, 16)).toEqual({ left: 80, right: 120, top: 42, bottom: 58 });
+    const beside = (label: { x: number; y: number; side: 'left' | 'right' | 'above' | 'below' }) =>
+      labelBoxAt({ ...on, label }, 40, 16);
+    expect(beside({ x: 94, y: 50, side: 'left' })).toEqual({
+      left: 54,
+      right: 94,
+      top: 42,
+      bottom: 58,
+    });
+    expect(beside({ x: 106, y: 50, side: 'right' })).toMatchObject({ left: 106, right: 146 });
+    expect(beside({ x: 100, y: 44, side: 'above' })).toMatchObject({ top: 28, bottom: 44 });
+    expect(beside({ x: 100, y: 56, side: 'below' })).toMatchObject({ top: 56, bottom: 72 });
+  });
+
+  it('stands a flow label on its line wherever the line has a place clear of everything', () => {
+    // The symbol is beside the upper half only.
+    const device = { left: 108, right: 160, top: 0, bottom: 100 };
+    const place = branchLabelPlaces(
+      new Map([['l', down(100)]]),
+      [{ id: 'l', ...label, beside: true }],
+      [device],
+    ).get('l')!;
+    expect(place.label).toBeUndefined();
+    expect(place.y - 8).toBeGreaterThanOrEqual(100 + 2);
+  });
+
+  it('stands a label over or under a level run, not left or right of it', () => {
+    const route = {
+      points: [
+        [0, 100],
+        [200, 100],
+      ] as Point[],
+    };
+    // A symbol over the whole run and a little under it, and nothing below.
+    const device = { left: -30, right: 230, top: 60, bottom: 104 };
+    const place = branchLabelPlaces(
+      new Map([['l', route]]),
+      [{ id: 'l', ...label, beside: true }],
+      [device],
+    ).get('l')!;
+    // Hung by its top edge, 6 under the run.
+    expect(place.label).toEqual({ x: 100, y: 106, side: 'below' });
+  });
+
+  it('covers the line beside its own rather than a symbol', () => {
+    // A symbol close on the right of the line and another line on its left:
+    // on the line and right of it the label would be drawn on the symbol.
+    const device = { left: 104, right: 150, top: 0, bottom: 200 };
+    const routes = new Map([
+      ['l', down(100)],
+      ['other', down(74)],
+    ]);
+    const place = branchLabelPlaces(routes, [{ id: 'l', ...label, beside: true }], [device]).get(
+      'l',
+    )!;
+    expect(place.label).toEqual({ x: 94, y: 100, side: 'left' });
+  });
+
+  it('stands beside its line rather than on the label of the line next to it', () => {
+    // Two short lines 30 apart: a label 40 wide on each would overlap.
+    const short = (x: number): { points: Point[] } => ({
+      points: [
+        [x, 0],
+        [x, 30],
+      ],
+    });
+    const places = branchLabelPlaces(
+      new Map([
+        ['a', short(100)],
+        ['b', short(130)],
+      ]),
+      [
+        { id: 'a', ...label, beside: true },
+        { id: 'b', ...label, beside: true },
+      ],
+      [],
+    );
+    expect(places.get('a')).toEqual({ x: 100, y: 15, angleDeg: 90 });
+    // The second stands right of its line, clear of the first.
+    expect(places.get('b')!.label).toEqual({ x: 136, y: 15, side: 'right' });
   });
 
   it('places only the branches it is asked for, and none without a route', () => {
