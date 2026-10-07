@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { CaseNav } from '@/components/case/CaseNav';
@@ -46,6 +47,11 @@ import { cn } from '@/lib/cn';
  * drop what they do when they land. The search of the palette is kept the
  * same way.
  *
+ * A panel can send the user to the other tab (the empty case card links to
+ * Components), and what was pressed is then hidden with its panel. The
+ * keyboard focus goes to the tab that was opened, so it is not lost and a
+ * screen reader says where the user is now.
+ *
  * The Project panel scrolls as one when its content overflows; each
  * section grows to fit its content rather than competing for fixed
  * heights. The palette keeps its search box in view and scrolls its list.
@@ -76,11 +82,33 @@ export function LeftSidebar({ className }: LeftSidebarProps) {
   // What the browser kept is not checked when it is read back, and a tab
   // that does not exist would show neither panel.
   const tab = isLeftSidebarTab(storedTab) ? storedTab : DEFAULT_LAYOUT.leftSidebarTab;
+
+  // When something other than the tab strip changes the tab under the focus
+  // (it was in the panel that is hidden now), the tab that was opened takes
+  // it. A layout effect, so that it runs before the browser drops the focus
+  // of what it no longer shows. A click or an arrow key on the strip leaves
+  // the focus on a tab as it is.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const byTabStripRef = useRef(false);
+  useLayoutEffect(() => {
+    const byTabStrip = byTabStripRef.current;
+    byTabStripRef.current = false;
+    if (byTabStrip) return;
+    const held = document.activeElement;
+    if (held === null || rootRef.current?.contains(held) !== true) return;
+    if (held.closest('[hidden]') === null) return;
+    tabListRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+  }, [tab]);
+
   return (
     <TabsPrimitive.Root
+      ref={rootRef}
       value={tab}
       onValueChange={(next) => {
-        if (isLeftSidebarTab(next)) setTab(next);
+        if (!isLeftSidebarTab(next)) return;
+        byTabStripRef.current = true;
+        setTab(next);
       }}
       data-testid="left-sidebar"
       className={cn(
@@ -92,6 +120,7 @@ export function LeftSidebar({ className }: LeftSidebarProps) {
       )}
     >
       <TabsPrimitive.List
+        ref={tabListRef}
         aria-label="Left sidebar tabs"
         className="border-border bg-muted/30 flex h-8 shrink-0 items-stretch border-b"
       >

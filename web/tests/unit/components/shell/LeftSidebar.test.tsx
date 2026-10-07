@@ -10,6 +10,8 @@
  *    after a reload, and a value the store should not hold shows Project.
  *  - The panel that is not shown stays mounted and hidden, so what it holds
  *    (the search of the palette, a load in flight) is there on the way back.
+ *  - A tab opened from inside the other panel takes the keyboard focus, which
+ *    the hidden panel cannot keep.
  *
  * Network is stubbed via the api/queries mock so SavedCasesList +
  * CaseNav (which both consume `useListWorkspaceFiles`) don't fire real
@@ -259,6 +261,54 @@ describe('<LeftSidebar />', () => {
       await user.click(screen.getByRole('button', { name: 'Components tab' }));
       expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByTestId('component-library')).toBeVisible();
+    });
+  });
+
+  describe('the keyboard focus when the tab changes under it', () => {
+    it('goes to the tab that the link of the empty case card opened, not to nowhere', async () => {
+      const user = userEvent.setup();
+      render(withClient(<LeftSidebar />));
+      const link = screen.getByRole('button', { name: 'Components tab' });
+      act(() => link.focus());
+      await user.keyboard('{Enter}');
+      // The link is hidden with its panel, so it cannot keep the focus.
+      expect(link).not.toBeVisible();
+      expect(componentsTab()).toHaveFocus();
+      expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('goes to the tab something else opened while the focus was in the other panel', () => {
+      useLayoutStore.setState({ leftSidebarTab: 'components' });
+      render(withClient(<LeftSidebar />));
+      const search = screen.getByTestId('component-library-search');
+      act(() => search.focus());
+      act(() => useLayoutStore.getState().showLeftSidebarTab('project'));
+      expect(projectTab()).toHaveFocus();
+    });
+
+    it('stays where it is when it was not in the panel that was hidden', () => {
+      render(
+        withClient(
+          <>
+            <button type="button">Elsewhere</button>
+            <LeftSidebar />
+          </>,
+        ),
+      );
+      const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+      act(() => elsewhere.focus());
+      act(() => useLayoutStore.getState().showLeftSidebarTab('components'));
+      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(elsewhere).toHaveFocus();
+    });
+
+    it('stays on the tab that was clicked or reached with the arrow keys', async () => {
+      const user = userEvent.setup();
+      render(withClient(<LeftSidebar />));
+      await user.click(componentsTab());
+      expect(componentsTab()).toHaveFocus();
+      await user.keyboard('{ArrowLeft}');
+      expect(projectTab()).toHaveFocus();
     });
   });
 
