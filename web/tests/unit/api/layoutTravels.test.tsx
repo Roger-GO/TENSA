@@ -31,6 +31,7 @@ import {
 } from '@/components/sld/sidecar';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useJobsStore } from '@/store/jobs';
 import { useSessionStore } from '@/store/session';
 
@@ -92,10 +93,12 @@ describe('the layout travels with what is saved', () => {
     useCaseStore.setState({
       selection: { primaryPath: CASE, addfiles: [] },
       dragOverrides: {},
+      routeOverrides: {},
       connectorStyle: null,
       unitExpansion: {},
       diagramLayout: null,
     });
+    useLayoutHistoryStore.getState().clear();
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
   });
 
@@ -106,6 +109,7 @@ describe('the layout travels with what is saved', () => {
     useCaseStore.setState({
       selection: null,
       dragOverrides: {},
+      routeOverrides: {},
       connectorStyle: null,
       unitExpansion: {},
       diagramLayout: null,
@@ -229,6 +233,88 @@ describe('the layout travels with what is saved', () => {
       });
     });
 
+    /** A route chosen in this visit, by Tidy diagram, for a line between buses 1 and 2. */
+    const chosenRoute = {
+      points: [
+        [9, 3],
+        [9, 60],
+      ] as [number, number][],
+      anchors: { source: { x: 9, y: 9 }, target: { x: 8, y: 8 } },
+    };
+    /** `carried()` with a route stored for that line. */
+    function carriedWithRoute(): SidecarLayout {
+      return {
+        ...carried(),
+        branches: {
+          line: {
+            L1: {
+              routing: 'polyline',
+              bend_points: [
+                { x: 520, y: 43 },
+                { x: 520, y: 90 },
+                { x: 720, y: 90 },
+                { x: 720, y: 43 },
+              ],
+              bus1: '1',
+              bus2: '2',
+              source_face: null,
+              target_face: null,
+            },
+          },
+        },
+      };
+    }
+
+    it('restored into an opened case lets go of the routes chosen since, with the drags', async () => {
+      const { Wrapper } = makeWrapper();
+      useCaseStore.setState({
+        dragOverrides: { '1': { x: 9, y: 9 } },
+        routeOverrides: { 'line-L1': chosenRoute, 'line-L2': null },
+      });
+      fetchSpy.mockResolvedValue(restoreResponse(carriedWithRoute()));
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      // They would sit on top of the routes the snapshot's layout holds.
+      expect(useCaseStore.getState().routeOverrides).toEqual({});
+    });
+
+    it('restored into a system built from scratch applies its routes as chosen routes', async () => {
+      useCaseStore.setState({ selection: { primaryPath: null, addfiles: [], blank: true } });
+      fetchSpy.mockResolvedValue(restoreResponse(carriedWithRoute()));
+      const { Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      expect(useCaseStore.getState().routeOverrides).toEqual({
+        'line-L1': {
+          points: [
+            [520, 43],
+            [520, 90],
+            [720, 90],
+            [720, 43],
+          ],
+          // Where the snapshot's layout has the two buses.
+          anchors: { source: { x: 500, y: 40 }, target: { x: 700, y: 40 } },
+        },
+      });
+    });
+
+    it('restored leaves no move or tidy of before it for Undo to step back to', async () => {
+      useLayoutHistoryStore
+        .getState()
+        .record('tidy diagram', { positions: { '1': { x: 9, y: 9 } }, routes: {} });
+      fetchSpy.mockResolvedValue(restoreResponse(carried()));
+      const { Wrapper } = makeWrapper();
+      const restore = renderHook(() => useRestoreSnapshot(), { wrapper: Wrapper });
+
+      await restore.result.current.mutateAsync({ sessionId: SESSION, name: 'a' });
+
+      expect(useLayoutHistoryStore.getState().past).toEqual([]);
+    });
+
     it('restored into an opened case lets the connector style of its layout show', async () => {
       // A style chosen in this visit sits on top of the saved layout's, as
       // the drags do, and would hide the one the snapshot was saved with.
@@ -327,6 +413,33 @@ describe('the layout travels with what is saved', () => {
         expect(String(url)).toContain('/workspace/layout?case_path=ieee14.raw');
         expect((init as RequestInit).method).toBe('PUT');
         expect(JSON.parse(String((init as RequestInit).body))).toEqual(drawnBefore);
+      });
+
+      it('gives back the routes that were chosen with the arrangement', async () => {
+        const routes = {
+          'line-L1': {
+            points: [
+              [9, 12],
+              [9, 80],
+            ] as [number, number][],
+            anchors: { source: { x: 9, y: 9 }, target: { x: 300, y: 9 } },
+          },
+        };
+        useCaseStore.setState({
+          diagramLayout: arranged(),
+          dragOverrides: dragged,
+          routeOverrides: routes,
+        });
+        const { Wrapper } = makeWrapper();
+        fetchSpy.mockResolvedValueOnce(restoreResponse(carried()));
+        const info = await restoreAndGetOffer(Wrapper);
+        expect(useCaseStore.getState().routeOverrides).toEqual({});
+
+        fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+        info.mock.calls[0]![1]!.action!.onClick();
+
+        expect(useCaseStore.getState().routeOverrides).toEqual(routes);
+        expect(useCaseStore.getState().dragOverrides).toEqual(dragged);
       });
 
       it('says nothing when the snapshot has the diagram as it is drawn', async () => {

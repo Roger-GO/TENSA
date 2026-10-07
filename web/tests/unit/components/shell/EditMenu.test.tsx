@@ -139,7 +139,9 @@ describe('<EditMenu />', () => {
     const undo = await screen.findByTestId('topbar-menu-edit-undo');
     const save = screen.getByTestId('topbar-menu-edit-clone-save-as');
     expect(undo).toHaveAttribute('aria-disabled', 'true');
-    expect(undo).toHaveTextContent(/Nothing to undo yet. Add, change or delete an element first/);
+    expect(undo).toHaveTextContent(
+      /Nothing to undo yet. Move something on the diagram, or add, change or delete an element first/,
+    );
     expect(save).toHaveAttribute('aria-disabled', 'true');
     expect(save).toHaveTextContent('Save parameter edits as case…');
     expect(save).toHaveTextContent(/Nothing to save yet/);

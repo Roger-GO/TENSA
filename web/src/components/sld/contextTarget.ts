@@ -13,6 +13,8 @@ import type { SelectedElement } from '@/store/case';
 /** What a right-click landed on. */
 export type SldContextTarget =
   | { kind: 'canvas' }
+  /** Several buses and devices picked together: `count` of them. */
+  | { kind: 'selection'; count: number }
   | { kind: 'bus'; idx: string; name: string; nodeId: string }
   | { kind: 'branch'; idx: string; name: string; transformer: boolean }
   | {

@@ -7,6 +7,7 @@ import {
   cancelPendingSidecarPut,
   connectorStyleOf,
   dragOverridesFromLayout,
+  routeOverridesFromLayout,
   samePlacement,
   unitStatesOf,
 } from '@/components/sld/sidecar';
@@ -15,6 +16,7 @@ import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useEditJournalStore } from '@/store/editJournal';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useSessionStore } from '@/store/session';
 import { queryKeys, snapshotsKey } from './keys';
 import { useCaseReady } from './caseReady';
@@ -144,8 +146,9 @@ export function useSaveSnapshot(): UseMutationResult<
  * there. The drags of this visit sit on top of any saved layout and would hide
  * it, so they go, and a write of them still waiting to be sent is dropped: it
  * would put the layout of before the restore back. A system built from scratch
- * has no file to keep a layout beside; its positions are applied as drags, and
- * its connector style and the control chains it draws out as the ones chosen.
+ * has no file to keep a layout beside; its positions are applied as drags, its
+ * branch routes as chosen routes, and its connector style and the control
+ * chains it draws out as the ones chosen.
  *
  * A diagram arranged since the snapshot was saved is work, and the restore was
  * asked for the operating point. So when the diagram on screen changes, a toast
@@ -159,11 +162,18 @@ function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): v
   const before = {
     drawn: store.diagramLayout,
     overrides: store.dragOverrides,
+    routes: store.routeOverrides,
     connectorStyle: store.connectorStyle,
     unitExpansion: store.unitExpansion,
   };
+  // The moves and tidies made so far led to the arrangement that is being
+  // replaced: there is nothing of them left for Undo to step back through.
+  useLayoutHistoryStore.getState().clear();
   if (primaryPath === null) {
-    store.setDragOverrides(dragOverridesFromLayout(layout));
+    store.setArrangement({
+      dragOverrides: dragOverridesFromLayout(layout),
+      routeOverrides: routeOverridesFromLayout(layout),
+    });
     store.setConnectorStyle(connectorStyleOf(layout));
     store.setUnitExpansion(
       Object.fromEntries([...unitStatesOf(layout)].map(([idx, unit]) => [idx, unit.expanded])),
@@ -171,7 +181,8 @@ function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): v
   } else {
     cancelPendingSidecarPut(primaryPath);
     queryClient.setQueryData(queryKeys.sidecar(primaryPath), layout);
-    store.setDragOverrides({});
+    // The routes chosen in this visit go with the drags, for the same reason.
+    store.setArrangement({ dragOverrides: {}, routeOverrides: {} });
     // The connector style chosen in this visit sits on top of the saved
     // layout's, as the drags do, and goes with them. So do the control
     // chains drawn out or folded away in it.
@@ -188,7 +199,9 @@ function applyRestoredLayout(queryClient: QueryClient, layout: SidecarLayout): v
     // diagram on screen is only touched while it is still this case's.
     const stillOpen = useCaseStore.getState().selection === selection;
     if (stillOpen) {
-      useCaseStore.getState().setDragOverrides(before.overrides);
+      useCaseStore
+        .getState()
+        .setArrangement({ dragOverrides: before.overrides, routeOverrides: before.routes });
       useCaseStore.getState().setConnectorStyle(before.connectorStyle);
       useCaseStore.getState().setUnitExpansion(before.unitExpansion);
     }

@@ -3,11 +3,12 @@ import { cn } from '@/lib/cn';
 import { useTooSmallZoomPercent } from './zoom';
 
 /**
- * What the diagram offers that nothing on it shows: the drag, the arrow keys and
- * the right-click menu, and that an arrangement is kept.
+ * What the diagram offers that nothing on it shows: the drag, the arrow keys,
+ * picking several at once, taking a move back, and the right-click menu, and
+ * that an arrangement is kept.
  */
 const INTERACTION_HINT =
-  'Drag a bus or device to move it, or click it and press the arrow keys. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
+  'Drag a bus or device to move it, or click it and press the arrow keys. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 export interface SldCanvasHintProps {
   /** The lock button of the controls is on: nothing can be dragged or selected. */

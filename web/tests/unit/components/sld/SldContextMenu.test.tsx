@@ -52,6 +52,8 @@ vi.mock('@/api/queries', async () => {
 const onFitView = vi.fn();
 const onResetLayout = vi.fn();
 const onConnectorStyle = vi.fn();
+const onArrange = vi.fn();
+const onSnapChange = vi.fn();
 
 /**
  * Opens the menu for `target`. The surface holds a stand-in for the node React
@@ -63,7 +65,8 @@ function openMenu(
   {
     locked = false,
     connectorStyle,
-  }: { locked?: boolean; connectorStyle?: 'straight' | 'elbow' } = {},
+    snap = false,
+  }: { locked?: boolean; connectorStyle?: 'straight' | 'elbow'; snap?: boolean } = {},
 ) {
   const client = new QueryClient();
   render(
@@ -88,6 +91,9 @@ function openMenu(
           onResetLayout={onResetLayout}
           connectorStyle={connectorStyle}
           onConnectorStyle={onConnectorStyle}
+          onArrange={onArrange}
+          snap={snap}
+          onSnapChange={onSnapChange}
         />
       </ContextMenu>
     </QueryClientProvider>,
@@ -103,6 +109,8 @@ beforeEach(() => {
   onFitView.mockReset();
   onResetLayout.mockReset();
   onConnectorStyle.mockReset();
+  onArrange.mockReset();
+  onSnapChange.mockReset();
   currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
@@ -453,9 +461,98 @@ describe('menu for the canvas', () => {
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(4);
+    // Add element, Fit view, the two tidies, Reset, Snap to grid, Save snapshot.
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(7);
   });
 
+  it('offers Tidy diagram and Tidy and re-layout, which run the commands of the same name', async () => {
+    const menu = await openMenu({ kind: 'canvas' });
+    await userEvent.click(within(menu).getByTestId('sld-context-tidy'));
+    expect(onArrange).toHaveBeenCalledWith('tidy');
+
+    cleanup();
+    const again = await openMenu({ kind: 'canvas' });
+    expect(within(again).getByTestId('sld-context-tidy-relayout')).toHaveTextContent(
+      'Tidy and re-layout',
+    );
+    await userEvent.click(within(again).getByTestId('sld-context-tidy-relayout'));
+    expect(onArrange).toHaveBeenLastCalledWith('tidy-relayout');
+  });
+
+  it('greys the tidies out, and says why, while the diagram is locked', async () => {
+    const menu = await openMenu({ kind: 'canvas' }, { locked: true });
+    for (const id of ['sld-context-tidy', 'sld-context-tidy-relayout']) {
+      const item = within(menu).getByTestId(id);
+      expect(item).toHaveAttribute('aria-disabled', 'true');
+      expect(item).toHaveTextContent('diagram is locked');
+    }
+    // Fit view and Reset are not arrangements made by hand, and stay.
+    expect(within(menu).getByTestId('sld-context-fit-view')).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('says whether Snap to grid is on, and turns it the other way', async () => {
+    const off = await openMenu({ kind: 'canvas' });
+    const item = within(off).getByTestId('sld-context-snap');
+    expect(item).toHaveTextContent('Snap to grid: off');
+    expect(item).toHaveAttribute('data-state', 'unchecked');
+    await userEvent.click(item);
+    expect(onSnapChange).toHaveBeenCalledWith(true);
+
+    cleanup();
+    const on = await openMenu({ kind: 'canvas' }, { snap: true });
+    expect(within(on).getByTestId('sld-context-snap')).toHaveTextContent('Snap to grid: on');
+    await userEvent.click(within(on).getByTestId('sld-context-snap'));
+    expect(onSnapChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe('menu for several nodes picked together', () => {
+  it('is titled with how many are picked, and offers the six alignments', async () => {
+    const menu = await openMenu({ kind: 'selection', count: 2 });
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
+      '2 elements picked',
+    );
+    for (const [mode, label] of [
+      ['left', 'Align left'],
+      ['centre', 'Align centre'],
+      ['right', 'Align right'],
+      ['top', 'Align top'],
+      ['middle', 'Align middle'],
+      ['bottom', 'Align bottom'],
+    ] as const) {
+      expect(within(menu).getByTestId(`sld-context-align-${mode}`)).toHaveTextContent(label);
+    }
+    await userEvent.click(within(menu).getByTestId('sld-context-align-top'));
+    expect(onArrange).toHaveBeenCalledWith('align-top');
+    // Nothing of the canvas's menu, and nothing about one element.
+    expect(screen.queryByTestId('sld-context-fit-view')).toBeNull();
+    expect(screen.queryByTestId('sld-context-inspect')).toBeNull();
+  });
+
+  it('offers Distribute from three picked, and says so with two', async () => {
+    const two = await openMenu({ kind: 'selection', count: 2 });
+    const greyed = within(two).getByTestId('sld-context-distribute-horizontal');
+    expect(greyed).toHaveAttribute('aria-disabled', 'true');
+    expect(greyed).toHaveTextContent('needs three or more');
+
+    cleanup();
+    const three = await openMenu({ kind: 'selection', count: 3 });
+    const item = within(three).getByTestId('sld-context-distribute-vertical');
+    expect(item).not.toHaveAttribute('aria-disabled');
+    await userEvent.click(item);
+    expect(onArrange).toHaveBeenCalledWith('distribute-vertical');
+  });
+
+  it('greys everything out while the diagram is locked', async () => {
+    const menu = await openMenu({ kind: 'selection', count: 3 }, { locked: true });
+    for (const id of ['sld-context-align-left', 'sld-context-distribute-horizontal']) {
+      expect(within(menu).getByTestId(id)).toHaveAttribute('aria-disabled', 'true');
+      expect(within(menu).getByTestId(id)).toHaveTextContent('diagram is locked');
+    }
+  });
+});
+
+describe('menu for the canvas: connectors and snapshots', () => {
   it('says how the connectors of devices are drawn, and lets the other way be chosen', async () => {
     const menu = await openMenu({ kind: 'canvas' });
     const straight = within(menu).getByTestId('sld-context-connectors-straight');

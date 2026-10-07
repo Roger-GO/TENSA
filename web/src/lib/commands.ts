@@ -53,6 +53,8 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
+import { useEditJournalStore } from '@/store/editJournal';
+import { redoTarget, undoTarget, useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useReportDialogStore } from '@/store/reportDialog';
 import {
   useAbortRun,
@@ -67,7 +69,13 @@ import {
 } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import type { TopologySummary } from '@/api/types';
-import { __requestOpenSldSearch, __requestSldCommand } from '@/store/sld';
+import { __requestOpenSldSearch, __requestSldCommand, useSldStore } from '@/store/sld';
+import {
+  ALIGN_LABEL,
+  DISTRIBUTE_LABEL,
+  type AlignMode,
+  type DistributeAxis,
+} from '@/components/sld/arrange';
 import { useThemeStore } from '@/store/theme';
 import { useLayoutStore } from '@/store/layout';
 import { requestEigLogToggle, requestEigViewReset } from '@/lib/eigViewBus';
@@ -297,6 +305,37 @@ function useCommandSets(): CommandSets {
   const pfConverged = lastPfRun?.converged === true;
   const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
 
+  // ---- the arrangement of the diagram -----------------------------------
+  // Moves, Tidy diagram and alignments have a history of their own, kept by
+  // the canvas (`store/layoutHistory.ts`). Undo and Redo act on whichever of
+  // the two histories holds the newest change; the canvas has to be on screen
+  // to put an arrangement back.
+  const layoutUndoStep = useLayoutHistoryStore((s) => s.past[s.past.length - 1] ?? null);
+  const layoutRedoStep = useLayoutHistoryStore((s) => s.future[s.future.length - 1] ?? null);
+  const journalEntries = useEditJournalStore((s) => s.entries);
+  const journalRevision = useEditJournalStore((s) => s.revision);
+  const journalReplayable = useEditJournalStore((s) => s.replayable);
+  const editClock = {
+    entries: journalEntries,
+    revision: journalRevision,
+    replayable: journalReplayable,
+  };
+  const undoes = undoTarget(
+    diagramVisible ? layoutUndoStep : null,
+    elementUndo !== null || parameterUndo,
+    editClock,
+  );
+  const redoes = redoTarget(
+    diagramVisible ? layoutRedoStep : null,
+    elementRedo !== null || parameterRedo,
+    editClock,
+  );
+  const layoutUndoLabel = undoes === 'layout' ? (layoutUndoStep?.label ?? null) : null;
+  const layoutRedoLabel = redoes === 'layout' ? (layoutRedoStep?.label ?? null) : null;
+  const diagramLocked = useSldStore((s) => s.diagramLocked);
+  const pickedCount = useSldStore((s) => s.pickedNodeIds.length);
+  const snapToGrid = useLayoutStore((s) => s.sldSnapToGrid);
+
   return useMemo<CommandSets>(() => {
     const handleSelectRoutine = (routine: RunRoutine, opts?: { cpfSubMode?: 'nose' | 'qv' }) => {
       setActiveRoutine(routine);
@@ -464,16 +503,35 @@ function useCommandSets(): CommandSets {
       {
         id: 'edit.undo',
         label:
-          elementUndo !== null
-            ? `Undo: ${describeStep(elementUndo)}`
-            : parameterUndo
-              ? 'Undo: parameter edit'
-              : 'Undo',
+          layoutUndoLabel !== null
+            ? `Undo: ${layoutUndoLabel}`
+            : elementUndo !== null
+              ? `Undo: ${describeStep(elementUndo)}`
+              : parameterUndo
+                ? 'Undo: parameter edit'
+                : 'Undo',
         description:
-          'Takes back your last change to the system: an element added, changed or deleted before a run, or a controller parameter changed in Edit mode. A deleted element comes back with everything that was deleted with it.',
+          'Takes back your last change: a bus or device moved on the diagram, a tidy or an alignment, an element added, changed or deleted before a run, or a controller parameter changed in Edit mode. A deleted element comes back with everything that was deleted with it.',
         group: 'edit',
-        keywords: ['undo', 'revert', 'last', 'add', 'addition', 'delete', 'change', 'parameter'],
+        keywords: [
+          'undo',
+          'revert',
+          'last',
+          'add',
+          'addition',
+          'delete',
+          'change',
+          'parameter',
+          'move',
+          'drag',
+          'tidy',
+          'layout',
+        ],
         action: () => {
+          if (layoutUndoLabel !== null) {
+            __requestSldCommand('undo-layout');
+            return;
+          }
           if (sessionId === null) return;
           if (elementUndo !== null) {
             // ``mutateAsync``: the note has to be left also when the palette
@@ -486,11 +544,14 @@ function useCommandSets(): CommandSets {
           }
         },
         when: () =>
-          sessionId !== null && !undoRedoPending && (elementUndo !== null || parameterUndo),
+          layoutUndoLabel !== null ||
+          (sessionId !== null && !undoRedoPending && (elementUndo !== null || parameterUndo)),
         // Listed greyed out while there is nothing to undo, saying what Undo takes back.
         unavailableReason: () => {
           if (sessionId === null || topology === null || undoRedoPending) return null;
-          if (!committed) return 'Nothing to undo yet. Add, change or delete an element first.';
+          if (!committed) {
+            return 'Nothing to undo yet. Move something on the diagram, or add, change or delete an element first.';
+          }
           if (cloneInitialized) return 'No controller parameter has been changed yet.';
           return editMode === 'edit'
             ? 'Nothing to undo since the run. Change a controller parameter in the Inspector first.'
@@ -501,15 +562,21 @@ function useCommandSets(): CommandSets {
       {
         id: 'edit.redo',
         label:
-          elementRedo !== null
-            ? `Redo: ${describeStep(elementRedo)}`
-            : parameterRedo
-              ? 'Redo: parameter edit'
-              : 'Redo',
+          layoutRedoLabel !== null
+            ? `Redo: ${layoutRedoLabel}`
+            : elementRedo !== null
+              ? `Redo: ${describeStep(elementRedo)}`
+              : parameterRedo
+                ? 'Redo: parameter edit'
+                : 'Redo',
         description: 'Puts back the change you just took back with Undo.',
         group: 'edit',
         keywords: ['redo', 'reapply', 'undo', 'again'],
         action: () => {
+          if (layoutRedoLabel !== null) {
+            __requestSldCommand('redo-layout');
+            return;
+          }
           if (sessionId === null) return;
           if (elementRedo !== null) {
             void redoMutation
@@ -520,7 +587,8 @@ function useCommandSets(): CommandSets {
           }
         },
         when: () =>
-          sessionId !== null && !undoRedoPending && (elementRedo !== null || parameterRedo),
+          layoutRedoLabel !== null ||
+          (sessionId !== null && !undoRedoPending && (elementRedo !== null || parameterRedo)),
         shortcut: 'ctrl+shift+z, meta+shift+z, ctrl+y',
       },
       {
@@ -856,6 +924,88 @@ function useCommandSets(): CommandSets {
         action: () => __requestSldCommand('reset-layout'),
         when: () => diagramVisible,
       },
+      // Tidy diagram routes every line and transformer afresh and moves
+      // nothing; Tidy and re-layout also lines the buses up on the grid and
+      // puts the devices back beside them. Either is one step for Undo. They
+      // are a button and a menu above the diagram too, and in its right-click
+      // menu.
+      {
+        id: 'view.tidy',
+        label: 'Tidy diagram',
+        description:
+          'Routes every line and transformer afresh: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. Nothing is moved, and Undo takes it back in one step.',
+        group: 'view',
+        keywords: [
+          'tidy',
+          'clean',
+          'route',
+          'reroute',
+          'lines',
+          'crossings',
+          'orthogonal',
+          'arrange',
+          'diagram',
+          'sld',
+        ],
+        action: () => __requestSldCommand('tidy'),
+        when: () => diagramVisible && !diagramLocked,
+        unavailableReason: () =>
+          diagramVisible && diagramLocked
+            ? 'The diagram is locked. Unlock it with the padlock at its bottom left.'
+            : null,
+      },
+      {
+        id: 'view.tidy-relayout',
+        label: 'Tidy and re-layout diagram',
+        description:
+          'Tidies the lines after moving things: the buses onto the grid and into line with their neighbours, and each generator, load and shunt back beside its bus. Undo takes it back in one step.',
+        group: 'view',
+        keywords: [
+          'tidy',
+          'layout',
+          're-layout',
+          'relayout',
+          'arrange',
+          'grid',
+          'line up',
+          'clean',
+          'diagram',
+          'sld',
+        ],
+        action: () => __requestSldCommand('tidy-relayout'),
+        when: () => diagramVisible && !diagramLocked,
+      },
+      {
+        id: 'view.snap-to-grid',
+        label: snapToGrid ? 'Snap to grid: turn off' : 'Snap to grid: turn on',
+        description:
+          'With snap on, a bus or device you drag or move with the arrow keys lands on the grid of the background dots.',
+        group: 'view',
+        keywords: ['snap', 'grid', 'align', 'drag', 'nudge', 'diagram', 'sld'],
+        action: () => useLayoutStore.getState().toggleSldSnapToGrid(),
+        when: () => diagramVisible,
+      },
+      // Align and Distribute act on the buses and devices picked together on
+      // the diagram (a box drawn with Shift held, or clicks with Ctrl held),
+      // so they are listed once two are picked (three for Distribute).
+      ...(['left', 'centre', 'right', 'top', 'middle', 'bottom'] as const).map<Command>(
+        (mode: AlignMode) => ({
+          id: `view.align-${mode}`,
+          label: `${ALIGN_LABEL[mode]} (${pickedCount} picked)`,
+          group: 'view',
+          keywords: ['align', 'line up', mode, 'selection', 'picked', 'diagram', 'sld'],
+          action: () => __requestSldCommand(`align-${mode}`),
+          when: () => diagramVisible && !diagramLocked && pickedCount >= 2,
+        }),
+      ),
+      ...(['horizontal', 'vertical'] as const).map<Command>((axis: DistributeAxis) => ({
+        id: `view.distribute-${axis}`,
+        label: `${DISTRIBUTE_LABEL[axis]} (${pickedCount} picked)`,
+        group: 'view',
+        keywords: ['distribute', 'space', 'evenly', 'gaps', axis, 'selection', 'picked', 'sld'],
+        action: () => __requestSldCommand(`distribute-${axis}`),
+        when: () => diagramVisible && !diagramLocked && pickedCount >= 3,
+      })),
       // How the connector of a generator, load or shunt to its bus is drawn.
       // The canvas keeps the choice with the layout.
       {
@@ -1108,6 +1258,11 @@ function useCommandSets(): CommandSets {
     abortableRun,
     abortMutation,
     diagramVisible,
+    layoutUndoLabel,
+    layoutRedoLabel,
+    diagramLocked,
+    pickedCount,
+    snapToGrid,
   ]);
 }
 

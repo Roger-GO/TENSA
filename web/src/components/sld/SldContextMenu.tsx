@@ -16,10 +16,13 @@
  *  - **A controller**: Inspect. Its badge is placed from what it acts on and
  *    cannot be moved on its own. (A controller of a generating unit has no
  *    badge: the symbol of the unit names it.)
- *  - **The canvas**: Add element, Fit view and Reset to auto-layout (the same two
- *    commands the palette has), how the connectors of generators, loads and
- *    shunts are drawn (straight, or with a right angle), and Save snapshot, which
- *    keeps the diagram as it is placed with the operating point.
+ *  - **The canvas**: Add element, Fit view, Tidy diagram, Tidy and re-layout and
+ *    Reset to auto-layout (the same commands the palette has), Snap to grid, how
+ *    the connectors of generators, loads and shunts are drawn (straight, or with
+ *    a right angle), and Save snapshot, which keeps the diagram as it is placed
+ *    with the operating point.
+ *  - **Several nodes picked together** (a box drawn with Shift held, or clicks
+ *    with Ctrl held): Align and Distribute, the same as the bar over the diagram.
  *
  * Move with arrow keys is the way to place something without a drag: it selects
  * the element and gives it the keyboard focus, where React Flow moves a selected
@@ -65,8 +68,13 @@ import { usePlotStore } from '@/store/plot';
 import { useRunsStore } from '@/store/runs';
 import { __requestUnitExpanded, useSldStore } from '@/store/sld';
 import { useSnapshotStore } from '@/store/snapshot';
+import { ALIGN_LABEL, DISTRIBUTE_LABEL, type AlignMode, type DistributeAxis } from './arrange';
+import type { ArrangeCommand } from './SldArrangeControls';
 import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
+
+const ALIGN_MODES: readonly AlignMode[] = ['left', 'centre', 'right', 'top', 'middle', 'bottom'];
+const DISTRIBUTE_AXES: readonly DistributeAxis[] = ['horizontal', 'vertical'];
 
 /**
  * A node id is the idx as text, but the substrate matches an idx by type, so a
@@ -85,6 +93,8 @@ function titleOf(target: SldContextTarget): string {
   switch (target.kind) {
     case 'canvas':
       return 'Diagram';
+    case 'selection':
+      return `${target.count} elements picked`;
     case 'bus':
       return `Bus ${labelOf(target.idx, target.name)}`;
     case 'branch':
@@ -233,6 +243,16 @@ export interface SldContextMenuBodyProps {
   /** How the connectors of devices are drawn now, and the way to change it. */
   connectorStyle?: ConnectorStyle;
   onConnectorStyle?: (style: ConnectorStyle) => void;
+  /** Tidy the diagram, or align and distribute what is picked. */
+  onArrange?: (command: ArrangeCommand) => void;
+  /** Whether a moved node snaps to the grid, and the way to change it. */
+  snap?: boolean;
+  onSnapChange?: (snap: boolean) => void;
+}
+
+/** The note a greyed-out item carries while the diagram is locked. */
+function LockedNote() {
+  return <span className="text-muted-foreground ml-auto pl-3 text-xs">diagram is locked</span>;
 }
 
 /**
@@ -246,6 +266,9 @@ export function SldContextMenuBody({
   onResetLayout,
   connectorStyle = 'straight',
   onConnectorStyle,
+  onArrange,
+  snap = false,
+  onSnapChange,
 }: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
@@ -359,14 +382,74 @@ export function SldContextMenuBody({
             ) : null}
           </>
         ) : null}
+        {target.kind === 'selection' ? (
+          <>
+            {ALIGN_MODES.map((mode) => (
+              <ContextMenuItem
+                key={mode}
+                data-testid={`sld-context-align-${mode}`}
+                disabled={locked}
+                onSelect={() => onArrange?.(`align-${mode}`)}
+              >
+                <span>{ALIGN_LABEL[mode]}</span>
+                {locked ? <LockedNote /> : null}
+              </ContextMenuItem>
+            ))}
+            <ContextMenuSeparator />
+            {DISTRIBUTE_AXES.map((axis) => (
+              <ContextMenuItem
+                key={axis}
+                data-testid={`sld-context-distribute-${axis}`}
+                disabled={locked || target.count < 3}
+                onSelect={() => onArrange?.(`distribute-${axis}`)}
+              >
+                <span>{DISTRIBUTE_LABEL[axis]}</span>
+                {locked ? (
+                  <LockedNote />
+                ) : target.count < 3 ? (
+                  <span className="text-muted-foreground ml-auto pl-3 text-xs">
+                    needs three or more
+                  </span>
+                ) : null}
+              </ContextMenuItem>
+            ))}
+          </>
+        ) : null}
         {target.kind === 'canvas' ? (
           <>
             <AddElementItem busIdx={null} />
             <ContextMenuItem data-testid="sld-context-fit-view" onSelect={onFitView}>
               Fit view
             </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-testid="sld-context-tidy"
+              disabled={locked}
+              onSelect={() => onArrange?.('tidy')}
+            >
+              <span>Tidy diagram</span>
+              {locked ? <LockedNote /> : null}
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-testid="sld-context-tidy-relayout"
+              disabled={locked}
+              onSelect={() => onArrange?.('tidy-relayout')}
+            >
+              <span>Tidy and re-layout</span>
+              {locked ? <LockedNote /> : null}
+            </ContextMenuItem>
             <ContextMenuItem data-testid="sld-context-reset-layout" onSelect={onResetLayout}>
               Reset to auto-layout
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-testid="sld-context-snap"
+              data-state={snap ? 'checked' : 'unchecked'}
+              onSelect={() => onSnapChange?.(!snap)}
+            >
+              <span>{snap ? 'Snap to grid: on' : 'Snap to grid: off'}</span>
+              <span className="text-muted-foreground ml-auto pl-3 text-xs">
+                {snap ? 'turn off' : 'turn on'}
+              </span>
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuLabel>Device connectors</ContextMenuLabel>

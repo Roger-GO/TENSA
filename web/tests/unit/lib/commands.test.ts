@@ -33,8 +33,10 @@ import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useRunsStore } from '@/store/runs';
 import { useHistoryStore } from '@/store/history';
-import { subscribeSldCommand } from '@/store/sld';
+import { subscribeSldCommand, useSldStore } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
+import { useEditJournalStore } from '@/store/editJournal';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
@@ -129,6 +131,9 @@ beforeEach(() => {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   window.localStorage.clear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
+  useEditJournalStore.getState().reset();
+  useLayoutHistoryStore.getState().clear();
+  useSldStore.setState({ pickedNodeIds: [], diagramLocked: false });
 });
 
 afterEach(() => {
@@ -313,7 +318,9 @@ describe('useMenuCommands: commands kept in view while they cannot run', () => {
     const undo = menu.current.find((c) => c.id === 'edit.undo');
     expect(save?.unavailable).toMatch(/Nothing to save yet.*Switch to Edit mode/);
     expect(undo?.label).toBe('Undo');
-    expect(undo?.unavailable).toBe('Nothing to undo yet. Add, change or delete an element first.');
+    expect(undo?.unavailable).toBe(
+      'Nothing to undo yet. Move something on the diagram, or add, change or delete an element first.',
+    );
     // The command still runs nothing by itself: its gate is the same one.
     expect(save?.when?.()).toBe(false);
     expect(undo?.when?.()).toBe(false);
@@ -1160,5 +1167,169 @@ describe('palette dialog bridge', () => {
     expect(b).toHaveBeenCalledWith('sweep');
     unsubA();
     unsubB();
+  });
+});
+
+describe('useCommandRegistry: Undo and Redo of a change to the arrangement', () => {
+  const ADD: EditStep = { op: 'add', model: 'Bus', idx: 15, params: [], also: 0 };
+  const arrangement = { positions: { '1': { x: 0, y: 0 } }, routes: {} };
+  const record = (label: string) => useLayoutHistoryStore.getState().record(label, arrangement);
+
+  /** Run `run` with what the commands post to the canvas collected. */
+  function posted(run: () => void): SldCommand[] {
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      run();
+    } finally {
+      unsubscribe();
+    }
+    return seen;
+  }
+
+  it('names the move or the tidy it would take back, and asks the canvas for it', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    act(() => {
+      record('tidy diagram');
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const undo = find(result.current, 'edit.undo');
+    expect(undo?.label).toBe('Undo: tidy diagram');
+    expect(undo?.description).toMatch(/moved on the diagram, a tidy or an alignment/);
+    expect(posted(() => act(() => undo?.action()))).toEqual(['undo-layout']);
+    expect(undoMutate).not.toHaveBeenCalled();
+    // Nothing was taken back yet, so there is nothing to redo.
+    expect(find(result.current, 'edit.redo')).toBeUndefined();
+  });
+
+  it('puts back the change last taken back', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    act(() => {
+      record('move bus BUS1');
+      useLayoutHistoryStore.getState().undo(arrangement);
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const redo = find(result.current, 'edit.redo');
+    expect(redo?.label).toBe('Redo: move bus BUS1');
+    expect(posted(() => act(() => redo?.action()))).toEqual(['redo-layout']);
+    expect(find(result.current, 'edit.undo')).toBeUndefined();
+  });
+
+  it('takes back whichever was changed last: the arrangement, or the system', () => {
+    // An element added, then a bus moved: the move is the newer.
+    MOCK_TOPOLOGY = { ...oneBusTopology(), undo: ADD };
+    act(() => {
+      useEditJournalStore.getState().record({ op: 'add', model: 'Bus', params: {} });
+      record('move bus BUS1');
+    });
+    const moved = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(moved.result.current, 'edit.undo')?.label).toBe('Undo: move bus BUS1');
+    moved.unmount();
+
+    // Another element added since: that one goes first.
+    act(() => {
+      useEditJournalStore.getState().record({ op: 'add', model: 'Bus', params: {} });
+    });
+    const edited = renderHook(() => useCommandRegistry(), { wrapper });
+    const undo = find(edited.result.current, 'edit.undo');
+    expect(undo?.label).toBe('Undo: add Bus 15');
+    expect(posted(() => act(() => undo?.action()))).toEqual([]);
+    expect(undoMutate).toHaveBeenCalledWith('test-session');
+  });
+
+  it('leaves the arrangement alone while the diagram is not on screen to put one back', () => {
+    MOCK_TOPOLOGY = { ...oneBusTopology(), undo: ADD };
+    act(() => {
+      record('tidy diagram');
+    });
+    useLayoutStore.setState({ resultsViewActive: true });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'edit.undo')?.label).toBe('Undo: add Bus 15');
+  });
+
+  it('says in the menu that a move counts, while there is nothing to undo', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    expect(result.current.find((c) => c.id === 'edit.undo')?.unavailable).toMatch(
+      /Move something on the diagram/,
+    );
+  });
+});
+
+describe('useCommandRegistry: Tidy diagram, Snap to grid, Align and Distribute', () => {
+  it('offers the two tidies while a diagram is on screen, and posts them to the canvas', () => {
+    const empty = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(empty.result.current, 'view.tidy')).toBeUndefined();
+    expect(find(empty.result.current, 'view.tidy-relayout')).toBeUndefined();
+    empty.unmount();
+
+    MOCK_TOPOLOGY = oneBusTopology();
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      const tidy = find(result.current, 'view.tidy');
+      expect(tidy).toMatchObject({ group: 'view', label: 'Tidy diagram' });
+      expect(tidy?.description).toMatch(/Nothing is moved/);
+      expect(tidy?.keywords).toEqual(expect.arrayContaining(['tidy', 'route', 'crossings']));
+      expect(find(result.current, 'view.tidy-relayout')?.label).toBe('Tidy and re-layout diagram');
+      act(() => tidy?.action());
+      act(() => find(result.current, 'view.tidy-relayout')?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['tidy', 'tidy-relayout']);
+  });
+
+  it('keeps Tidy diagram in the menu, greyed out with why, while the diagram is locked', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    act(() => useSldStore.setState({ diagramLocked: true }));
+    const registry = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(registry.result.current, 'view.tidy')).toBeUndefined();
+    expect(find(registry.result.current, 'view.tidy-relayout')).toBeUndefined();
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    expect(menu.result.current.find((c) => c.id === 'view.tidy')?.unavailable).toMatch(
+      /^The diagram is locked\./,
+    );
+  });
+
+  it('turns Snap to grid on and off, and says which a press does', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const { result, rerender } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(result.current, 'view.snap-to-grid')?.label).toBe('Snap to grid: turn on');
+    act(() => find(result.current, 'view.snap-to-grid')?.action());
+    expect(useLayoutStore.getState().sldSnapToGrid).toBe(true);
+    rerender();
+    expect(find(result.current, 'view.snap-to-grid')?.label).toBe('Snap to grid: turn off');
+  });
+
+  it('offers Align from two picked nodes and Distribute from three, and says how many', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const none = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(none.result.current, 'view.align-left')).toBeUndefined();
+    expect(find(none.result.current, 'view.distribute-horizontal')).toBeUndefined();
+    none.unmount();
+
+    act(() => useSldStore.getState().setPickedNodeIds(['1', '2']));
+    const two = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(two.result.current, 'view.align-left')?.label).toBe('Align left (2 picked)');
+    expect(find(two.result.current, 'view.align-middle')).toBeDefined();
+    expect(find(two.result.current, 'view.distribute-horizontal')).toBeUndefined();
+    two.unmount();
+
+    act(() => useSldStore.getState().setPickedNodeIds(['1', '2', '3']));
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      expect(find(result.current, 'view.distribute-vertical')?.label).toBe(
+        'Distribute vertically (3 picked)',
+      );
+      act(() => find(result.current, 'view.align-bottom')?.action());
+      act(() => find(result.current, 'view.distribute-horizontal')?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['align-bottom', 'distribute-horizontal']);
   });
 });

@@ -21,21 +21,28 @@ import type {
   NodeChange,
   NodeDimensionChange,
   NodePositionChange,
+  NodeSelectionChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
-import type { SelectedElement } from '@/store/case';
+import type { DragOverrides, RouteOverrides, SelectedElement } from '@/store/case';
+import { useLayoutStore } from '@/store/layout';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
+import type { LayoutSnapshot } from '@/store/layoutHistory';
 import { subKindForControllerClass } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
 import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
+import { usePflowStore } from '@/store/pflow';
+import { useUiStore } from '@/store/ui';
 import {
   useSldStore,
   __requestOpenSldSearch,
   subscribeSldCommand,
   subscribeUnitExpanded,
 } from '@/store/sld';
+import type { SldCommand } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from '@/lib/toast';
@@ -66,6 +73,17 @@ import { TopologyEdge } from './edges/TopologyEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldCanvasHint } from './SldCanvasHint';
+import { SldArrangeControls, SldSelectionBar, type ArrangeCommand } from './SldArrangeControls';
+import {
+  ALIGN_LABEL,
+  DISTRIBUTE_LABEL,
+  alignBoxes,
+  distributeBoxes,
+  type AlignMode,
+  type ArrangeBox,
+  type DistributeAxis,
+} from './arrange';
+import { GRID_STEP, alignToGrid, tidyRoutes } from './tidy';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -74,7 +92,6 @@ import { useAutoLayout } from './useAutoLayout';
 import {
   CONNECTOR_STYLE_SETTING,
   barLengthsOf,
-  branchPolylines,
   buildSidecarLayout,
   cancelPendingSidecarPut,
   captureLayout,
@@ -85,6 +102,7 @@ import {
   hasSavedPositions,
   mergeWithDrift,
   resolveDeviceCoords,
+  storedBranchRoutes,
   unitStatesOf,
   type CoordsByIdx,
 } from './sidecar';
@@ -95,6 +113,7 @@ import {
   readoutPlaces,
   unitChainPlaces,
   unitChainSize,
+  DEVICE_VALUE_LABEL,
   DEVICE_PORT,
   NODE_FOOTPRINT,
   SOURCE_HANDLE,
@@ -102,14 +121,23 @@ import {
   type UnitNodeData,
 } from './graph';
 import {
+  BAR_LENGTH,
+  BAR_THICKNESS,
   DEFAULT_CONNECTOR_STYLE,
+  branchLabelPlaces,
+  busLabelOffset,
   layoutConnections,
   routesThrough,
+  runsIn,
+  type ConnectionEdge,
   type ConnectionLayout,
   type ConnectorRoute,
   type ConnectorStyle,
+  type LabelPlace,
+  type BarGeometry,
   type NodeSize,
   type Rect,
+  type RouteRun,
 } from './connections';
 import { FULL_ZOOM, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
@@ -149,6 +177,29 @@ const MIN_ZOOM = 0.1;
  * click and not a drag (see `onNodesChange`).
  */
 const DRAG_SLOP_PX = 2;
+
+/** The grid a node snaps to while Snap to grid is on: the dots of the background. */
+const SNAP_GRID: [number, number] = [GRID_STEP, GRID_STEP];
+
+/**
+ * The room the label of a branch is given when its place is looked for
+ * (`branchLabelPlaces`): the flow and loading of a line at their longest
+ * (`LineFlowLabel`), and the symbol of a transformer (`TransformerEdge`).
+ */
+const LINE_LABEL_BOX = { width: 84, height: 18 };
+const TRANSFORMER_LABEL_BOX = { width: 30, height: 30 };
+
+/**
+ * The most branches Tidy diagram routes within the press that asked for it.
+ * With more it first lets the button say that it is at work (`TIDY_PAINT_MS`
+ * later, a frame or two), since routing them takes long enough to notice.
+ */
+const TIDY_AT_ONCE = 60;
+const TIDY_PAINT_MS = 30;
+
+/** What a command that arranges the diagram says, and does not do, while the lock is on. */
+const LOCKED_NOTICE =
+  'The diagram is locked. Unlock it with the padlock at its bottom left to change its layout.';
 
 /**
  * React Flow's name for the lock button is "Toggle Interactivity", which does not
@@ -339,6 +390,13 @@ function SldCanvasInner({
   // hint, which would promise a drag that does nothing.
   const [locked, setLocked] = useState<boolean>(false);
   const onInteractiveChange = useCallback((interactive: boolean) => setLocked(!interactive), []);
+  // The commands that arrange the diagram are greyed out while it is locked,
+  // wherever they are listed, so the lock is kept where they can read it.
+  const setDiagramLocked = useSldStore((s) => s.setDiagramLocked);
+  useEffect(() => {
+    setDiagramLocked(locked);
+    return () => setDiagramLocked(false);
+  }, [locked, setDiagramLocked]);
 
   // Curated layout takes precedence over auto-layout. Computed once
   // per primaryPath; the result is folded into mergeWithDrift below.
@@ -387,10 +445,28 @@ function SldCanvasInner({
   // ones that were on screen when it was written, so a diagram saved from
   // auto-layout comes back with the same lines.
   const usingAutoLayout = curated === null && storedSidecar === null;
-  const storedBends = useMemo(
-    () => branchPolylines(storedSidecar, topology),
+  const storedRoutes = useMemo(
+    () => storedBranchRoutes(storedSidecar, topology),
     [storedSidecar, topology],
   );
+  // The routes chosen in this visit (Tidy diagram, or an undo that put an
+  // earlier arrangement back) sit on top of those, as the drags sit on top
+  // of the positions; `null` takes a route away.
+  const routeOverrides = useCaseStore((s) => s.routeOverrides);
+  const branchRoutes = useMemo(() => {
+    const bendPoints = new Map(usingAutoLayout ? (autoBendPoints ?? []) : storedRoutes.polylines);
+    const bendAnchors = new Map(usingAutoLayout ? [] : storedRoutes.anchors);
+    for (const [id, chosen] of Object.entries(routeOverrides)) {
+      if (chosen === null) {
+        bendPoints.delete(id);
+        bendAnchors.delete(id);
+      } else {
+        bendPoints.set(id, chosen.points);
+        bendAnchors.set(id, chosen.anchors);
+      }
+    }
+    return { bendPoints, bendAnchors };
+  }, [usingAutoLayout, autoBendPoints, storedRoutes, routeOverrides]);
   const controllerCoords = useMemo(() => controllerCoordsAsMap(storedSidecar), [storedSidecar]);
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
@@ -436,9 +512,9 @@ function SldCanvasInner({
   }, [savedLayout, chosenUnits]);
   const baseGraph = useMemo(() => {
     if (!coords) return null;
-    const bendPoints = usingAutoLayout ? (autoBendPoints ?? undefined) : storedBends;
     const built = buildGraph(topology, coords, {
-      bendPoints,
+      bendPoints: branchRoutes.bendPoints,
+      bendAnchors: branchRoutes.bendAnchors,
       barLengths,
       nonBusCoords: nonBusCoordsMap,
       controllerCoords,
@@ -511,9 +587,7 @@ function SldCanvasInner({
   }, [
     topology,
     coords,
-    autoBendPoints,
-    usingAutoLayout,
-    storedBends,
+    branchRoutes,
     controllerCoords,
     unitStates,
     dragOverrides,
@@ -555,6 +629,15 @@ function SldCanvasInner({
       else changed = true;
     }
     if (changed) setDragOverrides(next);
+    // The same for the routes chosen for branches that are gone.
+    const liveEdges = new Set(baseGraph.edges.map((e) => e.id));
+    const routes = useCaseStore.getState().routeOverrides;
+    const stale = Object.keys(routes).filter((id) => !liveEdges.has(id));
+    if (stale.length > 0) {
+      const kept = { ...routes };
+      for (const id of stale) delete kept[id];
+      useCaseStore.getState().setRouteOverrides(kept);
+    }
   }, [baseGraph, setDragOverrides]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -563,6 +646,9 @@ function SldCanvasInner({
   // besides moving nodes (recording the overrides) happens in the handler and
   // not inside a state updater, which React runs while rendering.
   const nodesRef = useRef<Node[]>([]);
+  // The graph those nodes came from, for a handler that needs its edges: how
+  // each branch is routed is part of the arrangement an undo puts back.
+  const baseGraphRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
   // The size React Flow measured each node at. A device's box is as wide as
   // its name, and its connector leaves from the middle of a face, so the
   // connection pass below needs the real box and not the size hint.
@@ -571,6 +657,7 @@ function SldCanvasInner({
   useEffect(() => {
     if (!baseGraph) return;
     nodesRef.current = baseGraph.nodes;
+    baseGraphRef.current = baseGraph;
     setNodes(baseGraph.nodes);
     setEdges(baseGraph.edges);
   }, [baseGraph]);
@@ -588,8 +675,10 @@ function SldCanvasInner({
     () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
     [nodes, edges, sizes, connectorStyle, barLengths],
   );
-  // How many connectors pass through a box, for the readouts below.
+  // How many connectors pass through a box, for the readouts below, and
+  // which runs pass through one, for the labels of the buses.
   const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
+  const runsThroughBox = useMemo(() => runsIn(connections.routes), [connections]);
   // The devices whose connector is picked out (`StubEdge`): the one that is
   // selected and the ones under the pointer in a drag, so it shows which
   // connector is the device's and that it follows the device to the bar.
@@ -599,28 +688,6 @@ function SldCanvasInner({
     if (selectedDrawnId !== null) ids.add(selectedDrawnId);
     return ids;
   }, [draggedIds, selectedDrawnId]);
-  // The edges with their routes. An edge whose route did not change keeps its
-  // object, so React Flow redraws only the connectors that moved.
-  const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
-  const routedEdges = useMemo(() => {
-    const next = new Map<string, RoutedEdgeEntry>();
-    const out = edges.map((edge) => {
-      const route = connections.routes.get(edge.id);
-      if (!route) return edge;
-      const active = edge.type === 'stub' && activeDeviceIds.has(edge.source);
-      const signature = `${active ? 'active' : ''}${JSON.stringify(route)}`;
-      const held = routedEdgesRef.current.get(edge.id);
-      const entry =
-        held !== undefined && held.base === edge && held.signature === signature
-          ? held
-          : { base: edge, signature, edge: withRoute(edge, route, active) };
-      next.set(edge.id, entry);
-      return entry.edge;
-    });
-    routedEdgesRef.current = next;
-    return out;
-  }, [edges, connections, activeDeviceIds]);
-
   // On drag stop, persist the updated coords. Two channels:
   //
   // - In-memory `dragOverrides`: applied to the next baseGraph derivation
@@ -643,8 +710,16 @@ function SldCanvasInner({
   // goes back and nothing is recorded. `dragOriginRef` holds where the nodes of
   // the drag in hand started, between React Flow's drag-start and drag-stop; a
   // move by the arrow keys has neither and is always kept.
+  //
+  // A move can be taken back (Undo, Ctrl/Cmd+Z): when it ends, the
+  // arrangement it started from goes into the layout history
+  // (`store/layoutHistory.ts`). `moveStartRef` holds that arrangement, from
+  // the first position change of a drag, or of a press of an arrow key, to
+  // the change that ends it. Presses of the arrow keys on the same nodes in
+  // quick succession are one move.
   const persistRequestedRef = useRef(false);
   const dragOriginRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const moveStartRef = useRef<{ nodes: Node[]; dragged: boolean } | null>(null);
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
     dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
     setDraggedIds(dragged.map((n) => n.id));
@@ -653,9 +728,30 @@ function SldCanvasInner({
     dragOriginRef.current = null;
     setDraggedIds(NO_IDS);
   }, []);
+  const setPickedNodeIds = useSldStore((s) => s.setPickedNodeIds);
+  // The ids the diagram last showed as selected, which React Flow's own
+  // selection changes are applied to (see `nodesWithSelection`).
+  const selectedIdsRef = useRef<readonly string[]>(NO_IDS);
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       setSizes((held) => withMeasuredSizes(held, changes));
+      // What React Flow selects (a box drawn with Shift held, a click with
+      // Ctrl or Cmd held) is the set of nodes picked together. Its changes
+      // are against the selection it was last given, which is the one the
+      // diagram last showed.
+      const selections = changes.filter((c): c is NodeSelectionChange => c.type === 'select');
+      if (selections.length > 0) {
+        const picked = new Set(selectedIdsRef.current);
+        for (const c of selections) {
+          if (c.selected) picked.add(c.id);
+          else picked.delete(c.id);
+        }
+        setPickedNodeIds([...picked]);
+      }
+      const moving = changes.some((c) => c.type === 'position' && c.position !== undefined);
+      if (!moving) return;
+      const start = (moveStartRef.current ??= { nodes: nodesRef.current, dragged: false });
+      if (changes.some((c) => c.type === 'position' && c.dragging === true)) start.dragged = true;
       let next = applyPositionChanges(nodesRef.current, changes);
       const dragEnded = changes.some(
         (c): c is NodePositionChange =>
@@ -668,26 +764,35 @@ function SldCanvasInner({
         dragEnded &&
         origin !== null &&
         Math.round(farthestMove(origin, next) * rf.getZoom()) <= DRAG_SLOP_PX;
-      if (slipped) next = withPositions(next, origin);
+      // A press that slipped puts everything back, the devices its bus took
+      // along as well.
+      if (slipped) next = withPositions(next, new Map(start.nodes.map((n) => [n.id, n.position])));
       if (next !== nodesRef.current) {
         nodesRef.current = next;
         setNodes(next);
       }
-      if (!dragEnded || slipped) return;
+      if (!dragEnded) return;
+      moveStartRef.current = null;
+      if (slipped) return;
+      // The move can be taken back: keep the arrangement it started from.
+      const moved = movedNodes(start.nodes, next);
+      if (moved.length > 0 && baseGraphRef.current !== null) {
+        useLayoutHistoryStore.getState().record(
+          moveLabel(moved),
+          arrangementOf(start.nodes, baseGraphRef.current.edges),
+          // A press of an arrow key has no drag in it.
+          start.dragged ? null : `nudge:${moved.map((n) => n.id).join('|')}`,
+        );
+      }
       // Capture the current position of every node that can be dragged
       // into the override map. The map keys by React Flow node id (bus
       // idx for buses, `${kind}-${idx}` for non-bus nodes). A controller
       // badge cannot be dragged: its place follows from what it is docked
       // to, and an override would pin it where that used to be.
-      const overrides: Record<string, { x: number; y: number }> = {};
-      for (const n of next) {
-        if (n.draggable === false) continue;
-        overrides[n.id] = { x: n.position.x, y: n.position.y };
-      }
-      setDragOverrides(overrides);
+      setDragOverrides(positionsOf(next));
       persistRequestedRef.current = true;
     },
-    [setDragOverrides, rf],
+    [setDragOverrides, setPickedNodeIds, rf],
   );
 
   // Keep the layout of the diagram as drawn where a save can reach it
@@ -804,6 +909,17 @@ function SldCanvasInner({
       (standing ??= nodes.map((n) => ({ id: n.id, box: boxOnDiagram(n, sizes, connections) })));
   }, [nodes, sizes, connections]);
 
+  // The buses and devices picked together (`pickedNodeIds`), when there are
+  // two or more of them that are still on the diagram and can be moved.
+  const pickedNodeIds = useSldStore((s) => s.pickedNodeIds);
+  const pickedSet = useMemo(() => {
+    if (pickedNodeIds.length < 2) return null;
+    const movable = new Set(nodes.filter((n) => n.draggable !== false).map((n) => n.id));
+    const picked = pickedNodeIds.filter((id) => movable.has(id));
+    return picked.length >= 2 ? new Set(picked) : null;
+  }, [pickedNodeIds, nodes]);
+  const pickedCount = pickedSet?.size ?? 0;
+
   // Sync React Flow's `selected` state with the case store so a
   // selection driven from the results table (Unit 9) reflects on the
   // canvas without needing a callback round-trip. Also threads the
@@ -824,7 +940,12 @@ function SldCanvasInner({
         //     11). Either one alone is enough; we union them so the
         //     visual stays consistent regardless of which channel
         //     wrote.
-        const selected = isSelectedNode(n, selectedElement, selectedDrawnId);
+        // Nodes picked together take the place of both: while two or more
+        // are picked, they are the selection.
+        const selected =
+          pickedSet !== null
+            ? pickedSet.has(n.id)
+            : isSelectedNode(n, selectedElement, selectedDrawnId);
         // Greying only applies to bus nodes — non-bus device nodes are
         // children of buses for the purposes of energisation, but
         // their own grey-out cascade is handled by the connectivity
@@ -839,6 +960,9 @@ function SldCanvasInner({
         // What the connection pass worked out for this node: the bar of a
         // bus with its taps, and the face a device's connector leaves by.
         const bar = isBus ? connections.bars.get(n.id) : undefined;
+        // What runs through the strip the label of the bus hangs in, for the
+        // label to stand clear of: the stretch of the strip each run covers.
+        const labelClear = bar === undefined ? [] : runsUnderBar(n.position, bar, runsThroughBox);
         const connector = isBus ? undefined : connections.routes.get(`stub-${n.id}`);
         const connectorFace = connector?.sourceSide;
         // Which way the connector goes from that face: to the left, to the
@@ -908,6 +1032,7 @@ function SldCanvasInner({
           data: {
             ...(n.data as Record<string, unknown>),
             ...(bar !== undefined ? { bar } : {}),
+            ...(labelClear.length > 0 ? { labelClear } : {}),
             ...(connectorFace !== undefined ? { connectorFace } : {}),
             ...(connectorLean !== 0 ? { connectorLean } : {}),
             ...(readoutLeft ? { readoutLeft } : {}),
@@ -932,14 +1057,72 @@ function SldCanvasInner({
       nodes,
       selectedElement,
       selectedDrawnId,
+      pickedSet,
       connectivityResult,
       energisedBusIdxes,
       connections,
       connectorsThrough,
+      runsThroughBox,
       standingAround,
       sizes,
     ],
   );
+  // What the handlers read of the diagram as it was last drawn: which nodes
+  // show as selected, and where the chains that are drawn out stand.
+  const drawnNodesRef = useRef<Node[]>([]);
+  useEffect(() => {
+    drawnNodesRef.current = nodesWithSelection;
+    selectedIdsRef.current = nodesWithSelection.filter((n) => n.selected).map((n) => n.id);
+  }, [nodesWithSelection]);
+
+  // Where each line carries its flow label and each transformer its symbol:
+  // on a straight run of its route, clear of the symbols, of the labels of
+  // the buses, of the P / Q readouts of the devices, and of each other.
+  const pflowShown = usePflowStore((s) => s.lastRun !== null);
+  const labelsHidden = useUiStore((s) => s.hideLabels);
+  const labelPlaces = useMemo(() => {
+    const valuesShown = pflowShown && !labelsHidden;
+    const boxes: Rect[] = [];
+    for (const n of nodesWithSelection) {
+      boxes.push(boxOnDiagram(n, sizes, connections));
+      if (n.type === 'bus') boxes.push(busLabelBox(n, valuesShown));
+      else if (valuesShown && (n.type === 'generator' || n.type === 'load')) {
+        boxes.push(readoutBox(n, sizes));
+      }
+    }
+    return branchLabelPlaces(
+      connections.routes,
+      edges
+        .filter((edge) => edge.type !== 'stub')
+        .map((edge) => ({
+          id: edge.id,
+          ...(edge.type === 'transformer' ? TRANSFORMER_LABEL_BOX : LINE_LABEL_BOX),
+        })),
+      boxes,
+    );
+  }, [edges, connections, nodesWithSelection, sizes, pflowShown, labelsHidden]);
+  // The edges with their routes. An edge whose route did not change keeps its
+  // object, so React Flow redraws only the connectors that moved.
+  const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
+  const routedEdges = useMemo(() => {
+    const next = new Map<string, RoutedEdgeEntry>();
+    const out = edges.map((edge) => {
+      const route = connections.routes.get(edge.id);
+      if (!route) return edge;
+      const active = edge.type === 'stub' && activeDeviceIds.has(edge.source);
+      const labelAt = labelPlaces.get(edge.id);
+      const signature = `${active ? 'active' : ''}${JSON.stringify(route)}${JSON.stringify(labelAt ?? null)}`;
+      const held = routedEdgesRef.current.get(edge.id);
+      const entry =
+        held !== undefined && held.base === edge && held.signature === signature
+          ? held
+          : { base: edge, signature, edge: withRoute(edge, route, active, labelAt) };
+      next.set(edge.id, entry);
+      return entry.edge;
+    });
+    routedEdgesRef.current = next;
+    return out;
+  }, [edges, connections, activeDeviceIds, labelPlaces]);
 
   // Pan-on-selection effect (Unit 11). When `selectedNodeId` flips,
   // centre the React Flow viewport on the matching node — keeping the
@@ -955,6 +1138,9 @@ function SldCanvasInner({
   // mounted node (e.g., topology changed since the id was set).
   useEffect(() => {
     if (selectedDrawnId === null) return;
+    // A click that adds a node to the ones already picked is not a request
+    // to be shown it: the view stays where the selection is being made.
+    if (useSldStore.getState().pickedNodeIds.length >= 2) return;
     const node = nodes.find((n) => n.id === selectedDrawnId);
     if (!node) return;
     const currentZoom = rf.getZoom();
@@ -1062,6 +1248,7 @@ function SldCanvasInner({
   // Undo, which puts all of it back.
   const resetLayout = useCallback(() => {
     const previousOverrides = useCaseStore.getState().dragOverrides;
+    const previousRoutes = useCaseStore.getState().routeOverrides;
     const previousUnits = useCaseStore.getState().unitExpansion;
     // What the file holds that a reset takes back: positions, or the chains
     // it says are drawn out.
@@ -1072,6 +1259,7 @@ function SldCanvasInner({
         : null);
     if (
       Object.keys(previousOverrides).length === 0 &&
+      Object.keys(previousRoutes).length === 0 &&
       Object.keys(previousUnits).length === 0 &&
       previousSaved === null
     ) {
@@ -1079,18 +1267,35 @@ function SldCanvasInner({
       return;
     }
     if (primaryPath) cancelPendingSidecarPut(primaryPath);
-    setDragOverrides({});
+    // The arrangement as it is drawn, chains and all, for Undo (Ctrl/Cmd+Z)
+    // to put back once the toast below is gone.
+    const history = useLayoutHistoryStore.getState();
+    const step =
+      baseGraphRef.current === null
+        ? null
+        : history.record(
+            'reset to auto-layout',
+            arrangementOf(nodesRef.current, baseGraphRef.current.edges, true),
+          );
     // A chain that is drawn out is part of how the diagram was arranged: the
     // units go back to their symbols, in this visit and in the file.
-    const setUnitExpansion = useCaseStore.getState().setUnitExpansion;
-    setUnitExpansion({});
+    const setArrangement = useCaseStore.getState().setArrangement;
+    setArrangement({ dragOverrides: {}, routeOverrides: {}, unitExpansion: {} });
+    const putBack = () => {
+      setArrangement({
+        dragOverrides: previousOverrides,
+        routeOverrides: previousRoutes,
+        unitExpansion: previousUnits,
+      });
+      // Taken back here, so there is no step left for Undo to take back.
+      if (step !== null) useLayoutHistoryStore.getState().discard(step);
+    };
     const reported = () =>
       toast.success('Layout reset to auto-layout', {
         action: {
           label: 'Undo',
           onClick: () => {
-            setDragOverrides(previousOverrides);
-            setUnitExpansion(previousUnits);
+            putBack();
             if (previousSaved !== null) putSidecar(previousSaved);
           },
         },
@@ -1110,12 +1315,299 @@ function SldCanvasInner({
     putSidecar(buildSidecarLayout({}, { sections: { figure } }), {
       onSuccess: reported,
       onError: (err) => {
-        setDragOverrides(previousOverrides);
-        setUnitExpansion(previousUnits);
+        putBack();
         toast.error(`Could not reset the saved layout: ${err.message}`);
       },
     });
-  }, [primaryPath, storedSidecar, savedLayout, putSidecar, setDragOverrides]);
+  }, [primaryPath, storedSidecar, savedLayout, putSidecar]);
+
+  // ---- Tidy, align and distribute, and taking a change back ---------------
+  //
+  // Each of these puts a new arrangement in place: where the nodes stand
+  // (`dragOverrides`) and how the branches run (`routeOverrides`), in one
+  // step, and asks for it to be written beside the case as a drag is. The
+  // arrangement it replaces goes into the layout history first, so one Undo
+  // takes the whole change back.
+  const arrange = useCallback(
+    (label: string, positions: DragOverrides, routes: RouteOverrides): number | null => {
+      const graph = baseGraphRef.current;
+      if (graph === null) return null;
+      const step = useLayoutHistoryStore
+        .getState()
+        .record(label, arrangementOf(nodesRef.current, graph.edges));
+      useCaseStore.getState().setArrangement({ dragOverrides: positions, routeOverrides: routes });
+      persistRequestedRef.current = true;
+      return step;
+    },
+    [],
+  );
+
+  // Put an arrangement from the layout history back.
+  const applyArrangement = useCallback((snapshot: LayoutSnapshot) => {
+    useCaseStore.getState().setArrangement({
+      dragOverrides: snapshot.positions,
+      routeOverrides: snapshot.routes,
+      unitExpansion: snapshot.units,
+    });
+    persistRequestedRef.current = true;
+  }, []);
+  const stepThroughHistory = useCallback(
+    (way: 'undo' | 'redo') => {
+      const graph = baseGraphRef.current;
+      const history = useLayoutHistoryStore.getState();
+      const stack = way === 'undo' ? history.past : history.future;
+      const newest = stack[stack.length - 1];
+      if (graph === null || newest === undefined) {
+        toast.info(
+          way === 'undo' ? 'Nothing to undo on the diagram.' : 'Nothing to redo on the diagram.',
+        );
+        return;
+      }
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      // What comes back holds the chains only for a change that folded them.
+      const current = arrangementOf(
+        nodesRef.current,
+        graph.edges,
+        newest.snapshot.units !== undefined,
+      );
+      const step = way === 'undo' ? history.undo(current) : history.redo(current);
+      if (step === null) return;
+      applyArrangement(step.snapshot);
+      toast.info(`${way === 'undo' ? 'Undone' : 'Redone'}: ${step.label}`);
+    },
+    [applyArrangement, locked],
+  );
+  // The Undo of a toast: takes its own change back while that is still the
+  // newest, and says so when something was arranged since.
+  const undoStep = useCallback(
+    (step: number | null) => {
+      const past = useLayoutHistoryStore.getState().past;
+      if (step !== null && past[past.length - 1]?.id === step) stepThroughHistory('undo');
+      else toast.info('The diagram was changed since. Use Undo in the Edit menu to go back.');
+    },
+    [stepThroughHistory],
+  );
+
+  // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
+  // `relayout` the buses are first lined up on the grid and every generator,
+  // load and shunt is put back beside its bus, where the diagram places one
+  // that was never moved.
+  const runTidy = useCallback(
+    (relayout: boolean) => {
+      const graph = baseGraphRef.current;
+      if (graph === null) return;
+      let placedNodes: Node[] = nodesRef.current;
+      let placedEdges: Edge[] = graph.edges;
+      const tidyOptions = { sizes, connectorStyle, barLengths };
+      /** The routes `tidyRoutes` found, as routes chosen for the buses where `nodes` has them. */
+      const chosenFor = (
+        nodes: readonly Node[],
+        edges: readonly Edge[],
+        routes: ReadonlyMap<string, [number, number][]>,
+      ): RouteOverrides => {
+        const at = new Map(nodes.map((n) => [n.id, n.position]));
+        const out: RouteOverrides = {};
+        for (const edge of edges) {
+          if (edge.type === 'stub') continue;
+          const points = routes.get(edge.id);
+          const source = at.get(edge.source);
+          const target = at.get(edge.target);
+          out[edge.id] =
+            points === undefined || source === undefined || target === undefined
+              ? null
+              : {
+                  points: points.map(([x, y]): [number, number] => [x, y]),
+                  anchors: { source: { ...source }, target: { ...target } },
+                };
+        }
+        return out;
+      };
+      if (relayout) {
+        // The buses onto the grid; then the branches between the buses alone,
+        // which gives each the way it would have with nothing else about;
+        // then every device beside its bus, clear of those, where the diagram
+        // places one that was never moved. The branches are routed once more
+        // below, around the devices as they now stand.
+        const buses: Record<string, { x: number; y: number }> = {};
+        for (const n of placedNodes) {
+          if (n.type === 'bus') buses[n.id] = { x: n.position.x, y: n.position.y };
+        }
+        const aligned = alignToGrid(buses);
+        const bare = buildGraph(
+          { ...topology, generators: [], loads: [], shunts: [], controllers: [] },
+          aligned,
+          { barLengths },
+        );
+        const first = chosenFor(
+          bare.nodes,
+          bare.edges,
+          tidyRoutes(bare.nodes, bare.edges as ConnectionEdge[], { barLengths }).routes,
+        );
+        const bendPoints = new Map<string, [number, number][]>();
+        const bendAnchors = new Map<string, NonNullable<RouteOverrides[string]>['anchors']>();
+        for (const [id, route] of Object.entries(first)) {
+          if (route === null) continue;
+          bendPoints.set(id, route.points);
+          bendAnchors.set(id, route.anchors);
+        }
+        const placed = buildGraph(topology, aligned, {
+          bendPoints,
+          bendAnchors,
+          barLengths,
+          controllerCoords,
+          unitStates,
+        });
+        placedNodes = placed.nodes;
+        placedEdges = placed.edges;
+      }
+      const branches = placedEdges.filter((e) => e.type !== 'stub');
+      if (branches.length === 0 && !relayout) {
+        toast.info('Nothing to tidy: the diagram has no lines or transformers.');
+        return;
+      }
+      const { routes, unrouted } = tidyRoutes(placedNodes, placedEdges as ConnectionEdge[], {
+        ...tidyOptions,
+        // The chains that are drawn out, where they stand or will stand.
+        obstacles: chainBoxes(relayout ? placedNodes : drawnNodesRef.current, sizes),
+      });
+      const chosen = chosenFor(placedNodes, placedEdges, routes);
+      const positions = positionsOf(placedNodes);
+      const before = arrangementOf(nodesRef.current, graph.edges);
+      if (sameArrangement(before, { positions, routes: chosen })) {
+        toast.info('The diagram is already tidy.', {
+          description: relayout
+            ? 'Every bus is on the grid, every device beside its bus, and no line would be routed differently.'
+            : 'No line or transformer would be routed differently.',
+        });
+        return;
+      }
+      const step = arrange(relayout ? 'tidy and re-layout' : 'tidy diagram', positions, chosen);
+      const rerouted = branches.length - unrouted.length;
+      const lines = `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed`;
+      const left =
+        unrouted.length === 0
+          ? ''
+          : ` No way was found for ${unrouted.length}, which ${unrouted.length === 1 ? 'is' : 'are'} drawn as before.`;
+      toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
+        description: relayout
+          ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${left} Saved with the layout.`
+          : `${lines}. Nothing was moved.${left} Saved with the layout.`,
+        duration: 8_000,
+        action: { label: 'Undo', onClick: () => undoStep(step) },
+      });
+    },
+    [topology, barLengths, controllerCoords, unitStates, sizes, connectorStyle, arrange, undoStep],
+  );
+  // A diagram of a few dozen branches is tidied before the next frame. A
+  // large one takes a second or more, in which the page cannot answer, so
+  // the button says what is going on before the work begins.
+  const [tidying, setTidying] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const tidy = useCallback(
+    (relayout: boolean) => {
+      const graph = baseGraphRef.current;
+      if (graph === null || tidying) return;
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      if (graph.edges.filter((e) => e.type !== 'stub').length <= TIDY_AT_ONCE) {
+        runTidy(relayout);
+        return;
+      }
+      setTidying(true);
+      window.setTimeout(() => {
+        if (!mountedRef.current) return;
+        try {
+          runTidy(relayout);
+        } finally {
+          setTidying(false);
+        }
+      }, TIDY_PAINT_MS);
+    },
+    [runTidy, locked, tidying],
+  );
+
+  // Align or distribute the nodes that are picked together. They are lined
+  // up by their boxes (`arrangeBoxOf`: a bus by its bar), and one step of Undo
+  // takes it back.
+  const arrangePicked = useCallback(
+    (command: `align-${AlignMode}` | `distribute-${DistributeAxis}`) => {
+      const graph = baseGraphRef.current;
+      if (graph === null) return;
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      const picked = nodesRef.current.filter(
+        (n) => pickedSet?.has(n.id) === true && n.draggable !== false,
+      );
+      const [verb, how] = command.split('-') as ['align' | 'distribute', string];
+      const needed = verb === 'align' ? 2 : 3;
+      if (picked.length < needed) {
+        toast.info(
+          verb === 'align'
+            ? 'Pick two or more buses or devices to align.'
+            : 'Pick three or more buses or devices to distribute.',
+          {
+            description:
+              'Hold Shift and drag a box around them, or hold Ctrl (Cmd on a Mac) and click each.',
+          },
+        );
+        return;
+      }
+      const boxes = picked.map((n) => arrangeBoxOf(n, sizes));
+      const snap = useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : null;
+      const label =
+        verb === 'align' ? ALIGN_LABEL[how as AlignMode] : DISTRIBUTE_LABEL[how as DistributeAxis];
+      const moves =
+        verb === 'align'
+          ? alignBoxes(boxes, how as AlignMode, snap)
+          : distributeBoxes(boxes, how as DistributeAxis, snap);
+      const count = Object.keys(moves).length;
+      if (count === 0) {
+        toast.info(`${label}: nothing to move.`, {
+          description: `The ${picked.length} picked elements are already arranged that way.`,
+        });
+        return;
+      }
+      // A bus that moves takes its devices along, as in a drag. Every other
+      // node keeps its place, and a branch whose bus moved is routed from
+      // where it stands now.
+      const carried = new Map(Object.entries(moves));
+      carryDevices(nodesRef.current, carried);
+      const positions = { ...positionsOf(nodesRef.current), ...Object.fromEntries(carried) };
+      const step = arrange(
+        `${label.toLowerCase()} (${picked.length} elements)`,
+        positions,
+        useCaseStore.getState().routeOverrides,
+      );
+      toast.success(`${label}: ${count} of ${picked.length} moved`, {
+        description: 'Saved with the layout.',
+        action: { label: 'Undo', onClick: () => undoStep(step) },
+      });
+    },
+    [pickedSet, sizes, locked, arrange, undoStep],
+  );
+
+  const snapToGrid = useLayoutStore((s) => s.sldSnapToGrid);
+  const changeSnap = useCallback((snap: boolean) => {
+    useLayoutStore.getState().setSldSnapToGrid(snap);
+    toast.info(snap ? 'Snap to grid is on' : 'Snap to grid is off', {
+      description: snap
+        ? `What you drag, or move with the arrow keys, lands on the ${GRID_STEP} px grid of the background dots. Nothing moves until you move it; Tidy and re-layout lines everything up at once.`
+        : 'A bus or device stays exactly where you drop it.',
+    });
+  }, []);
 
   // Draw the device connectors straight, or with a right angle. The choice is
   // a setting of the diagram and is kept like a drag: in the store for this
@@ -1141,14 +1633,43 @@ function SldCanvasInner({
     [connectorStyle, setConnectorStyle],
   );
 
-  useEffect(
-    () =>
-      subscribeSldCommand((command) => {
-        if (command === 'fit-view') fitView();
-        else if (command === 'reset-layout') resetLayout();
-        else chooseConnectorStyle(command === 'connectors-elbow' ? 'elbow' : 'straight');
-      }),
-    [fitView, resetLayout, chooseConnectorStyle],
+  const runCommand = useCallback(
+    (command: SldCommand) => {
+      switch (command) {
+        case 'fit-view':
+          fitView();
+          break;
+        case 'reset-layout':
+          resetLayout();
+          break;
+        case 'connectors-straight':
+          chooseConnectorStyle('straight');
+          break;
+        case 'connectors-elbow':
+          chooseConnectorStyle('elbow');
+          break;
+        case 'tidy':
+          tidy(false);
+          break;
+        case 'tidy-relayout':
+          tidy(true);
+          break;
+        case 'undo-layout':
+          stepThroughHistory('undo');
+          break;
+        case 'redo-layout':
+          stepThroughHistory('redo');
+          break;
+        default:
+          arrangePicked(command);
+      }
+    },
+    [fitView, resetLayout, chooseConnectorStyle, tidy, stepThroughHistory, arrangePicked],
+  );
+  useEffect(() => subscribeSldCommand(runCommand), [runCommand]);
+  const runArrangeCommand = useCallback(
+    (command: ArrangeCommand) => runCommand(command),
+    [runCommand],
   );
 
   // Draw the control chain of a generating unit out, or fold it away: asked
@@ -1198,8 +1719,22 @@ function SldCanvasInner({
     },
     [nodesWithSelection, routedEdges],
   );
-  const onNodeContextMenu: NodeMouseHandler = useCallback((_e, node) => {
-    setContextTarget(contextTargetFromNode(node));
+  const onNodeContextMenu: NodeMouseHandler = useCallback(
+    (_e, node) => {
+      // A right-click on one of several picked nodes is on the selection.
+      setContextTarget(
+        pickedSet?.has(node.id) === true
+          ? { kind: 'selection', count: pickedSet.size }
+          : contextTargetFromNode(node),
+      );
+    },
+    [pickedSet],
+  );
+  // After a box is drawn with Shift held, React Flow lays a frame over the
+  // picked nodes, and a right-click on it is on the selection as well.
+  const onSelectionContextMenu = useCallback((_e: React.MouseEvent, picked: Node[]) => {
+    const count = picked.filter((n) => n.draggable !== false).length;
+    if (count >= 2) setContextTarget({ kind: 'selection', count });
   }, []);
   const onEdgeContextMenu: EdgeMouseHandler = useCallback((_e, edge) => {
     setContextTarget(contextTargetFromEdge(edge));
@@ -1227,6 +1762,14 @@ function SldCanvasInner({
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
       <div className="flex items-center gap-2 px-2 py-1">
         <SldCanvasHint locked={locked} selectedName={selectedName} onZoomIn={zoomToFullSize} />
+        <SldArrangeControls
+          locked={locked}
+          busy={tidying}
+          pickedCount={pickedCount}
+          snap={snapToGrid}
+          onSnapChange={changeSnap}
+          onCommand={runArrangeCommand}
+        />
         <ConnectivityRecomputeButton />
         <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
       </div>
@@ -1270,17 +1813,20 @@ function SldCanvasInner({
               onEdgeClick={onEdgeClick}
               onNodeContextMenu={onNodeContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
+              onSelectionContextMenu={onSelectionContextMenu}
               fitView
               minZoom={MIN_ZOOM}
               ariaLabelConfig={locked ? ARIA_LABELS_LOCKED : ARIA_LABELS_UNLOCKED}
               nodesDraggable
               nodeDragThreshold={0}
+              snapToGrid={snapToGrid}
+              snapGrid={SNAP_GRID}
               selectionMode={SelectionMode.Partial}
               proOptions={{ hideAttribution: true }}
             >
               <Background
                 variant={BackgroundVariant.Dots}
-                gap={16}
+                gap={GRID_STEP}
                 size={1}
                 color={DOT_GRID_COLOR}
                 data-testid="sld-canvas-dot-grid"
@@ -1308,6 +1854,10 @@ function SldCanvasInner({
               <SldVoltageLegend />
               <SldLimitsLegend />
             </div>
+            {/* Align and Distribute, while several nodes are picked together. */}
+            <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
+              <SldSelectionBar count={pickedCount} locked={locked} onCommand={runArrangeCommand} />
+            </div>
             {/* Floating search affordance — sits inside the canvas surface
             so it overlays the React Flow chrome rather than displacing
             it. Bottom-right matches the React Flow Controls position
@@ -1330,6 +1880,9 @@ function SldCanvasInner({
           onResetLayout={resetLayout}
           connectorStyle={connectorStyle}
           onConnectorStyle={chooseConnectorStyle}
+          onArrange={runArrangeCommand}
+          snap={snapToGrid}
+          onSnapChange={changeSnap}
         />
       </ContextMenu>
     </div>
@@ -1449,6 +2002,89 @@ function boxOnDiagram(
   };
 }
 
+/**
+ * How far either side of its bar the strip reaches in which the label of a
+ * bus looks for a place: as far as the label may stand past a tip, and its
+ * own half width.
+ */
+const LABEL_STRIP_REACH = BAR_LENGTH;
+
+/**
+ * The runs of connectors that pass under the bar of a bus, through the strip
+ * its label hangs in: the stretch of the strip each covers, as offsets from
+ * the origin of the bus node (`busLabelOffset` takes them as `passing`).
+ */
+function runsUnderBar(
+  origin: { x: number; y: number },
+  bar: BarGeometry,
+  runsThroughBox: (box: Rect) => RouteRun[],
+): [number, number][] {
+  const strip: Rect = {
+    left: origin.x + bar.start - LABEL_STRIP_REACH,
+    right: origin.x + bar.end + LABEL_STRIP_REACH,
+    top: origin.y + BAR_THICKNESS + 1,
+    bottom: origin.y + NODE_FOOTPRINT.bus.height,
+  };
+  return runsThroughBox(strip).map(({ a, b }): [number, number] => [
+    Math.max(Math.min(a[0], b[0]), strip.left) - origin.x,
+    Math.min(Math.max(a[0], b[0]), strip.right) - origin.x,
+  ]);
+}
+
+/**
+ * The box the label of a bus takes under its bar, about where `BusNode`
+ * draws it: the name, and with `values` the voltage and the angle a power
+ * flow adds (10 px monospace, as wide as the longer of the two).
+ */
+function busLabelBox(node: Node, values: boolean): Rect {
+  const data = node.data as {
+    name?: string;
+    idx?: string;
+    bar?: BarGeometry;
+    labelClear?: [number, number][];
+  };
+  const name = String(data.name || data.idx || node.id);
+  const width = 6 * Math.max(name.length + 2, values ? 9 : 0) + 8;
+  const middle = node.position.x + busLabelOffset(data.bar, width, data.labelClear);
+  return {
+    left: middle - width / 2,
+    right: middle + width / 2,
+    top: node.position.y + BAR_THICKNESS,
+    bottom: node.position.y + (values ? NODE_FOOTPRINT.bus.height + 4 : 24),
+  };
+}
+
+/**
+ * The box the P / Q readout of a generator or load takes, where
+ * `DeviceValueLabel` draws it: beside the connector when it hangs off the
+ * face the connector leaves by, under or over the middle of the node
+ * otherwise.
+ */
+function readoutBox(node: Node, sizes: ReadonlyMap<string, NodeSize>): Rect {
+  const data = node.data as {
+    valueSide?: 'above' | 'below';
+    connectorFace?: string;
+    connectorLean?: number;
+    readoutLeft?: boolean;
+  };
+  const size = sizes.get(node.id);
+  const width = size?.width ?? node.initialWidth ?? 0;
+  const side = data.valueSide ?? (node.type === 'generator' ? 'below' : 'above');
+  const places = readoutPlaces(
+    { ...node.position, width, height: size?.height ?? node.initialHeight ?? 0 },
+    side,
+  );
+  if (data.connectorFace !== (side === 'below' ? 'south' : 'north')) {
+    const middle = node.position.x + width / 2;
+    return {
+      ...places.right,
+      left: middle - DEVICE_VALUE_LABEL.width / 2,
+      right: middle + DEVICE_VALUE_LABEL.width / 2,
+    };
+  }
+  return data.connectorLean === 1 || data.readoutLeft === true ? places.left : places.right;
+}
+
 /** Whether two boxes share any room. */
 function overlaps(a: Rect, b: Rect): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
@@ -1466,9 +2102,15 @@ interface RoutedEdgeEntry {
  * leaves and lands by: the port of the device's face, the face or end of the
  * bar. The components draw from the route; the handles keep what React Flow
  * itself knows of the edge true to the picture. `active` marks the connector
- * of a device that is selected or being dragged, which is drawn picked out.
+ * of a device that is selected or being dragged, which is drawn picked out,
+ * and `labelAt` is where a branch carries its label.
  */
-function withRoute(edge: Edge, route: ConnectorRoute, active: boolean): Edge {
+function withRoute(
+  edge: Edge,
+  route: ConnectorRoute,
+  active: boolean,
+  labelAt: LabelPlace | undefined,
+): Edge {
   return {
     ...edge,
     sourceHandle:
@@ -1478,6 +2120,7 @@ function withRoute(edge: Edge, route: ConnectorRoute, active: boolean): Edge {
       ...(edge.data as Record<string, unknown> | undefined),
       route,
       ...(active ? { active: true } : {}),
+      ...(labelAt !== undefined ? { labelAt } : {}),
     },
   };
 }
@@ -1503,7 +2146,145 @@ function withMeasuredSizes(
   return next ?? held;
 }
 
-/** Apply React Flow position changes to a node array. */
+/** Where every node that can be moved stands, by node id: the form the drags are kept in. */
+function positionsOf(nodes: readonly Node[]): DragOverrides {
+  const positions: DragOverrides = {};
+  for (const n of nodes) {
+    if (n.draggable === false) continue;
+    positions[n.id] = { x: n.position.x, y: n.position.y };
+  }
+  return positions;
+}
+
+/**
+ * The arrangement of the diagram as drawn, for the layout history: where
+ * `nodes` stand, and how each branch among `edges` is routed (the points and
+ * anchors `buildGraph` gave the edge, or `null` for one routed from where its
+ * buses stand). With `withUnits`, also which control chains are drawn out.
+ */
+function arrangementOf(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+  withUnits = false,
+): LayoutSnapshot {
+  const routes: RouteOverrides = {};
+  for (const edge of edges) {
+    if (edge.type === 'stub') continue;
+    const data = edge.data as
+      | {
+          bendPoints?: [number, number][];
+          bendAnchors?: NonNullable<RouteOverrides[string]>['anchors'];
+        }
+      | undefined;
+    routes[edge.id] =
+      data?.bendPoints !== undefined && data.bendAnchors !== undefined
+        ? { points: data.bendPoints, anchors: data.bendAnchors }
+        : null;
+  }
+  const snapshot: LayoutSnapshot = { positions: positionsOf(nodes), routes };
+  if (!withUnits) return snapshot;
+  const units: Record<string, boolean> = {};
+  for (const n of nodes) {
+    const data = n.data as { idx?: string; unit?: UnitNodeData };
+    if (n.type === 'generator' && data.unit !== undefined && typeof data.idx === 'string') {
+      units[data.idx] = data.unit.expanded;
+    }
+  }
+  return { ...snapshot, units };
+}
+
+/** Whether two arrangements draw the same diagram: every node in one place, every branch on one route. */
+function sameArrangement(
+  a: Pick<LayoutSnapshot, 'positions' | 'routes'>,
+  b: Pick<LayoutSnapshot, 'positions' | 'routes'>,
+): boolean {
+  const ids = new Set([...Object.keys(a.positions), ...Object.keys(b.positions)]);
+  for (const id of ids) {
+    const [p, q] = [a.positions[id], b.positions[id]];
+    if (p === undefined || q === undefined || p.x !== q.x || p.y !== q.y) return false;
+  }
+  const edges = new Set([...Object.keys(a.routes), ...Object.keys(b.routes)]);
+  for (const id of edges) {
+    if (
+      JSON.stringify(a.routes[id]?.points ?? null) !== JSON.stringify(b.routes[id]?.points ?? null)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** The nodes of `after` that stand somewhere else than in `before`. */
+function movedNodes(before: readonly Node[], after: readonly Node[]): Node[] {
+  const was = new Map(before.map((n) => [n.id, n.position]));
+  return after.filter((n) => {
+    const from = was.get(n.id);
+    return from !== undefined && (from.x !== n.position.x || from.y !== n.position.y);
+  });
+}
+
+/**
+ * What a move of `moved` is called in the Edit menu: `move bus BUS3`,
+ * `move 4 elements`. The devices a bus took along are part of its move.
+ */
+function moveLabel(moved: readonly Node[]): string {
+  const ids = new Set(moved.map((n) => n.id));
+  const own = moved.filter((n) => {
+    const parent = (n.data as { parentBus?: unknown }).parentBus;
+    return typeof parent !== 'string' || !ids.has(parent);
+  });
+  const only = own[0];
+  if (own.length !== 1 || only === undefined) return `move ${own.length} elements`;
+  const data = only.data as { name?: string; idx?: string };
+  const noun = (only.type ?? 'bus') === 'bus' ? 'bus' : (only.type ?? 'element');
+  return `move ${noun} ${data.name || data.idx || only.id}`;
+}
+
+/**
+ * The box of `node` that Align and Distribute line up: the bar of a bus (not
+ * the label under it), the box a device is drawn in.
+ */
+function arrangeBoxOf(node: Node, sizes: ReadonlyMap<string, NodeSize>): ArrangeBox {
+  const { x, y } = node.position;
+  if ((node.type ?? 'bus') === 'bus') {
+    return { id: node.id, x, y, left: 0, top: 0, width: BAR_LENGTH, height: BAR_THICKNESS };
+  }
+  const size = sizes.get(node.id);
+  return {
+    id: node.id,
+    x,
+    y,
+    left: 0,
+    top: 0,
+    width: size?.width ?? node.initialWidth ?? 0,
+    height: size?.height ?? node.initialHeight ?? 0,
+  };
+}
+
+/** Where the control chains that are drawn out stand, for a route to keep clear of. */
+function chainBoxes(nodes: readonly Node[], sizes: ReadonlyMap<string, NodeSize>): Rect[] {
+  const boxes: Rect[] = [];
+  for (const n of nodes) {
+    const unit = (n.data as { unit?: UnitNodeData }).unit;
+    if (n.type !== 'generator' || unit?.expanded !== true) continue;
+    const size = sizes.get(n.id);
+    const places = unitChainPlaces(
+      {
+        ...n.position,
+        width: size?.width ?? n.initialWidth ?? 0,
+        height: size?.height ?? n.initialHeight ?? 0,
+      },
+      unitChainSize(unit.members),
+    );
+    boxes.push(places[unit.side ?? 'above']);
+  }
+  return boxes;
+}
+
+/**
+ * Apply React Flow position changes to a node array. A bus that moves takes
+ * its generators, loads and shunts along (`carryDevices`).
+ */
 function applyPositionChanges(nodes: Node[], changes: NodeChange[]): Node[] {
   const positionById = new Map<string, { x: number; y: number }>();
   for (const c of changes) {
@@ -1511,7 +2292,34 @@ function applyPositionChanges(nodes: Node[], changes: NodeChange[]): Node[] {
       positionById.set(c.id, c.position);
     }
   }
+  carryDevices(nodes, positionById);
   return withPositions(nodes, positionById);
+}
+
+/**
+ * Add to `moves` the devices of each bus that `moves` moves, shifted as far
+ * as their bus: a generator, load or shunt hangs off its bus, and a bus that
+ * is dragged, nudged or lined up leaves them where they hang. A device that
+ * `moves` moves itself (it is picked along with its bus) goes where that
+ * says.
+ */
+function carryDevices(nodes: readonly Node[], moves: Map<string, { x: number; y: number }>): void {
+  const shift = new Map<string, { dx: number; dy: number }>();
+  for (const n of nodes) {
+    const to = n.type === 'bus' ? moves.get(n.id) : undefined;
+    if (to === undefined) continue;
+    const [dx, dy] = [to.x - n.position.x, to.y - n.position.y];
+    if (dx !== 0 || dy !== 0) shift.set(n.id, { dx, dy });
+  }
+  if (shift.size === 0) return;
+  for (const n of nodes) {
+    const parent = (n.data as { parentBus?: unknown }).parentBus;
+    if (n.type === 'bus' || typeof parent !== 'string' || moves.has(n.id)) continue;
+    const by = shift.get(parent);
+    if (by !== undefined && n.draggable !== false) {
+      moves.set(n.id, { x: n.position.x + by.dx, y: n.position.y + by.dy });
+    }
+  }
 }
 
 /** `nodes` with each node that `positionById` names put at its position there. */

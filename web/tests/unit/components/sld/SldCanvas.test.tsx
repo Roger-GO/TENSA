@@ -426,8 +426,9 @@ describe('SldCanvas', () => {
     mockSidecar = null;
     fitViewSpy.mockReset();
     putSidecarSpy.mockReset();
-    act(() => useCaseStore.setState({ dragOverrides: {}, unitExpansion: {} }));
+    act(() => useCaseStore.setState({ dragOverrides: {}, routeOverrides: {}, unitExpansion: {} }));
     act(() => useSldStore.getState().clearSelectedNodeId());
+    act(() => useSldStore.setState({ pickedNodeIds: [], diagramLocked: false }));
     vi.mocked(elkLayout).mockClear();
     mockConnectivityIsFetching = false;
     mockConnectivityIsError = false;
@@ -1418,9 +1419,10 @@ describe('SldCanvas', () => {
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
       /Drag a bus.*Right-click a bus, line or the background/,
     );
-    // The way to move something without a drag, and that an arrangement is kept.
+    // The way to move something without a drag, how to pick several and take
+    // a move back, and that an arrangement is kept.
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      /click it and press the arrow keys\. Your layout is saved with the case\./,
+      /click it and press the arrow keys\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
     );
   });
 
@@ -1664,6 +1666,32 @@ describe('SldCanvas', () => {
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent('Diagram');
     expect(within(menu).getByTestId('sld-context-fit-view')).toBeInTheDocument();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
+  });
+
+  it('a right-click on one of several picked nodes offers to line them up', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    act(() => useSldStore.getState().setPickedNodeIds(['1', '2']));
+    const picked = screen.getByTestId('bus-node-1').closest('[data-rf-node-id]') as HTMLElement;
+    fireEvent.contextMenu(picked);
+    const menu = await screen.findByTestId('sld-context-menu');
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
+      '2 elements picked',
+    );
+    expect(within(menu).getByTestId('sld-context-align-left')).toBeInTheDocument();
+    // Not the menu of the one bus that was under the pointer.
+    expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
+  });
+
+  it('the canvas menu tidies the diagram', async () => {
+    const success = vi.spyOn(toast, 'success');
+    loadSavedCase();
+    await renderLoaded();
+    fireEvent.contextMenu(screen.getByTestId('sld-canvas-surface'));
+    const menu = await screen.findByTestId('sld-context-menu');
+    await userEvent.click(within(menu).getByTestId('sld-context-tidy'));
+    expect(success).toHaveBeenCalledWith('Diagram tidied', expect.anything());
+    success.mockRestore();
   });
 
   it('a right-click inside the node search popover leaves the browser its own menu', async () => {
