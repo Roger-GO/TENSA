@@ -51,6 +51,17 @@
  * those surroundings are more than one grid holds, the branches are routed
  * one at a time, each in the surroundings of its own two buses.
  *
+ * A route that was drawn by hand (`data.bendManual`) is the user's, and is
+ * never taken out for what it is on: what lies on it or too near it is
+ * routed again around it, and what cannot go round it (a symbol that was
+ * dropped on it) stays on it for the canvas to refuse. The one exception is
+ * a route whose own bus has moved since it was drawn. It is brought along
+ * with the bus (`bringAlong`, in the connection pass), and where that leaves
+ * it on something it is routed afresh like any other and is the user's no
+ * longer (`RoutedDiagram.released`). The connector of a device that was
+ * drawn by hand goes the same way: the connection pass says which of them
+ * it could keep.
+ *
  * A pass in a drag has a fraction of those bounds (`DRAG_STEPS`,
  * `DRAG_GRID_POINTS`), which is enough for nearly every move. Where it is
  * not, and a line would be left on a bar, a symbol or another line (a bus
@@ -170,13 +181,23 @@ export interface RoutedDiagram<E extends ConnectionEdge> {
    * here, and one whose end had to move along its bar. The canvas keeps
    * these as the stored routes once the diagram is at rest, so the next
    * pass finds them in place.
+   * `manual` is set on one that was drawn by hand and still is the user's:
+   * a route brought along with a bus that moved, and the connector of a
+   * device that was.
    */
-  changed: Map<string, { points: [number, number][]; anchors: RouteAnchors }>;
+  changed: Map<string, { points: [number, number][]; anchors: RouteAnchors; manual?: true }>;
   /**
    * The branches no way was found for, by edge id: drawn from tap to tap,
    * stepped or straight, whichever is on least.
    */
   unrouted: string[];
+  /**
+   * The routes drawn by hand that are no longer drawn as they were, by edge
+   * id: what they are attached to has moved to where they do not fit. A
+   * branch among them was routed afresh (it is in `changed`, or in
+   * `unrouted`); the connector of a device is worked out like any other.
+   */
+  released: string[];
   /** Where each transformer carries its symbol on the route it is drawn along, by edge id. */
   symbols: Map<string, LabelPlace>;
 }
@@ -402,20 +423,48 @@ function routeOnce<E extends ConnectionEdge>(
     source: { ...at.get(edge.source)! },
     target: { ...at.get(edge.target)! },
   });
-  /** `edge` drawn along `points`, as a route for its buses where they are. */
-  const along = (edge: E, points: readonly Point[]): E => ({
+  /**
+   * `edge` drawn along `points`, as a route for its buses where they are:
+   * the user's still (`byHand`) where it was and is drawn as it was.
+   */
+  const along = (
+    edge: E,
+    points: readonly Point[],
+    byHand = edge.data?.bendManual === true,
+  ): E => ({
     ...edge,
     data: {
       ...edge.data,
       bendPoints: points.map(([x, y]): [number, number] => [x, y]),
       bendAnchors: anchorsNow(edge),
+      bendManual: byHand ? true : undefined,
     },
   });
   /** `edge` without a route: the connection pass draws it from tap to tap. */
   const bare = (edge: E): E => ({
     ...edge,
-    data: { ...edge.data, bendPoints: undefined, bendAnchors: undefined },
+    data: { ...edge.data, bendPoints: undefined, bendAnchors: undefined, bendManual: undefined },
   });
+  const sits = (now: { x: number; y: number }, then: { x: number; y: number }): boolean =>
+    Math.abs(now.x - then.x) < 0.01 && Math.abs(now.y - then.y) < 0.01;
+
+  // ---- the routes drawn by hand ----
+  // The user's: none is taken out for what it is on (`fixed`), but one whose
+  // own bus has moved since it was drawn (`loose`), which the connection
+  // pass brings along and which is routed afresh where that puts it on
+  // something.
+  const byHand = new Set<string>();
+  const loose = new Set<string>();
+  for (const edge of edges) {
+    if (edge.type === 'stub' || edge.data?.bendManual !== true) continue;
+    const anchors = edge.data.bendAnchors as RouteAnchors | undefined;
+    const [source, target] = [at.get(edge.source), at.get(edge.target)];
+    if (!Array.isArray(edge.data.bendPoints) || !anchors?.source || !anchors.target) continue;
+    if (!source || !target) continue;
+    byHand.add(edge.id);
+    if (!sits(source, anchors.source) || !sits(target, anchors.target)) loose.add(edge.id);
+  }
+  const fixed = (id: string): boolean => byHand.has(id) && !loose.has(id);
 
   // ---- the routes whose buses have moved ----
   // Each brought along with its buses. While a node is dragged on a large
@@ -432,8 +481,8 @@ function routeOnce<E extends ConnectionEdge>(
     if (!Array.isArray(points) || !anchors?.source || !anchors.target || !source || !target) {
       continue;
     }
-    const sits = (now: { x: number; y: number }, then: { x: number; y: number }): boolean =>
-      Math.abs(now.x - then.x) < 0.01 && Math.abs(now.y - then.y) < 0.01;
+    // One drawn by hand is brought along by the connection pass itself.
+    if (byHand.has(edge.id)) continue;
     if (sits(source, anchors.source) && sits(target, anchors.target)) continue;
     const brought = followBuses(points as [number, number][], anchors, source, target);
     if (brought !== null) followed.set(edge.id, brought);
@@ -447,6 +496,12 @@ function routeOnce<E extends ConnectionEdge>(
       })
     : [...edges];
   let connections = layoutConnections(nodes, drawn, connectionOptions);
+  // A route drawn by hand whose bus has moved, as it is brought along: what
+  // is left for it where no other way is found.
+  for (const id of loose) {
+    const brought = connections.routes.get(id)?.points;
+    if (brought !== undefined) followed.set(id, brought);
+  }
   const isBranch = new Set(
     edges
       .filter((edge) => edge.type !== 'stub' && connections.routes.has(edge.id))
@@ -537,6 +592,8 @@ function routeOnce<E extends ConnectionEdge>(
     // ---- which routes hold ----
     const symbols = symbolBoxes(symbolsOn(drawn, connections));
     const kept = (id: string): boolean => isBranch.has(id) && connections.kept.has(id);
+    // One that is drawn by hand where its buses stand is never taken out.
+    const mayGo = (id: string): boolean => kept(id) && !fixed(id);
     const broken = new Set<string>();
     for (const id of isBranch) {
       if (!connections.kept.has(id) && !unrouted.has(id)) broken.add(id);
@@ -544,31 +601,33 @@ function routeOnce<E extends ConnectionEdge>(
     // A transformer whose symbol has no place on its route that is clear of
     // the bars and the devices is routed again, by a way that has one.
     for (const id of symbolsWithoutRoom(symbols, nodes, connections, options)) {
-      if (kept(id)) broken.add(id);
+      if (mayGo(id)) broken.add(id);
     }
     // A route whose end has moved the tap of a device aside is routed
     // again, to a tap that leaves the connector of the device where it was.
-    for (const id of crowdingTaps(drawn, connections)) if (kept(id)) broken.add(id);
+    for (const id of crowdingTaps(drawn, connections)) if (mayGo(id)) broken.add(id);
     for (const overlap of overlapsOn(drawn, connections, symbols)) {
       if (overlap.kind === 'line-box' && overlap.b.startsWith(SYMBOL)) {
         // A line through the symbol of a transformer goes round it. The
-        // connector of a device cannot, and leaves it to the transformer to
-        // find another way. A branch that has no route of its own takes
-        // nothing down with it, and neither does the symbol of one.
+        // connector of a device cannot, and neither can a line that was
+        // drawn by hand: they leave it to the transformer to find another
+        // way. A branch that has no route of its own takes nothing down
+        // with it, and neither does the symbol of one.
         const owner = overlap.b.slice(SYMBOL.length);
         if (!kept(owner)) continue;
-        if (kept(overlap.a)) broken.add(overlap.a);
-        else if (!isBranch.has(overlap.a)) broken.add(owner);
+        if (mayGo(overlap.a)) broken.add(overlap.a);
+        else if ((!isBranch.has(overlap.a) || fixed(overlap.a)) && mayGo(owner)) broken.add(owner);
         continue;
       }
       // Two lines on each other: both go, and are routed again one around
       // the other. A line on a bar or a symbol: the line. One that has no
       // route of its own, and is drawn from tap to tap for now, takes none
-      // that has down with it.
+      // that has down with it. One that was drawn by hand stays, and the
+      // other goes round it.
       const lines = overlap.kind === 'line-line' || overlap.kind === 'shared-tap';
       const both = lines ? [overlap.a, overlap.b] : [overlap.a];
       if (both.some((id) => isBranch.has(id) && !connections.kept.has(id))) continue;
-      for (const id of both) if (isBranch.has(id)) broken.add(id);
+      for (const id of both) if (isBranch.has(id) && !fixed(id)) broken.add(id);
     }
     if (broken.size === 0) {
       held = true;
@@ -643,7 +702,8 @@ function routeOnce<E extends ConnectionEdge>(
       const points = made.get(edge.id);
       if (points !== undefined) {
         routedHere.add(edge.id);
-        return along(edge, points);
+        // Made here, whoever drew the route it takes the place of.
+        return along(edge, points, false);
       }
       // No way was found: without the route that did not hold, the
       // connection pass draws it from tap to tap.
@@ -668,7 +728,8 @@ function routeOnce<E extends ConnectionEdge>(
       const edgesNow = drawn.map((edge): E => {
         const how = ways.get(edge.id);
         if (how === 'straight') straight.add(edge.id);
-        return how === 'followed' ? along(edge, followed.get(edge.id)!) : edge;
+        // Along the route it had: for one that was drawn by hand, the user's again.
+        return how === 'followed' ? along(edge, followed.get(edge.id)!, byHand.has(edge.id)) : edge;
       });
       return {
         edges: edgesNow,
@@ -732,7 +793,26 @@ function routeOnce<E extends ConnectionEdge>(
 
   // What is drawn along another route than the one stored for it.
   const changed: RoutedDiagram<E>['changed'] = new Map();
+  const released: string[] = [];
   for (const edge of drawn) {
+    if (edge.type === 'stub') {
+      // The connector of a device that was drawn by hand: brought along
+      // with its device, or given up for one that is worked out.
+      const was = stored.get(edge.id);
+      if (edge.data?.bendManual !== true || !Array.isArray(was)) continue;
+      const points = connections.routes.get(edge.id)?.points;
+      if (points === undefined) continue;
+      if (!connections.byHand.has(edge.id)) released.push(edge.id);
+      else if (!sameRoute(points, was)) {
+        changed.set(edge.id, {
+          points: points.map(([x, y]): [number, number] => [x, y]),
+          anchors: anchorsNow(edge),
+          manual: true,
+        });
+      }
+      continue;
+    }
+    if (byHand.has(edge.id) && edge.data?.bendManual !== true) released.push(edge.id);
     if (!isBranch.has(edge.id) || unrouted.has(edge.id)) continue;
     const points = connections.routes.get(edge.id)!.points;
     const was = stored.get(edge.id);
@@ -740,6 +820,7 @@ function routeOnce<E extends ConnectionEdge>(
     changed.set(edge.id, {
       points: points.map(([x, y]): [number, number] => [x, y]),
       anchors: anchorsNow(edge),
+      ...(edge.data?.bendManual === true ? { manual: true as const } : {}),
     });
   }
   return {
@@ -747,6 +828,7 @@ function routeOnce<E extends ConnectionEdge>(
     connections,
     changed,
     unrouted: [...unrouted],
+    released,
     symbols: symbolsOn(drawn, connections),
     left: stillOn,
   };

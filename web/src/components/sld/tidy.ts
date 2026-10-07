@@ -954,15 +954,24 @@ export function tidyRoutes(
     }
     // The lines the kept routes run along, so that each is on the grid,
     // where the grid reaches: a run of one that passes further out is in
-    // nobody's way.
+    // nobody's way. The lines across its two ends as well, so that a run
+    // is taken up from end to end where the run before or after it is at
+    // an angle (a route drawn by hand); an end on a bar is on the line of
+    // that bar already.
     for (const { points } of heldRoutes) {
       for (let i = 1; i < points.length; i += 1) {
         const [p, q] = [points[i - 1]!, points[i]!];
         const [x0, x1] = [Math.min(p[0], q[0]), Math.max(p[0], q[0])];
         const [y0, y1] = [Math.min(p[1], q[1]), Math.max(p[1], q[1])];
         if (x1 < reach.left || x0 > reach.right || y1 < reach.top || y0 > reach.bottom) continue;
-        if (x1 - x0 <= EPS) columns.push({ at: p[0], kind: 'aux' });
-        else if (y1 - y0 <= EPS) rows.push({ at: p[1], kind: 'aux' });
+        if (x1 - x0 <= EPS) {
+          columns.push({ at: p[0], kind: 'aux' });
+          if (i > 1) rows.push({ at: p[1], kind: 'aux' });
+          if (i < points.length - 1) rows.push({ at: q[1], kind: 'aux' });
+        } else if (y1 - y0 <= EPS) {
+          rows.push({ at: p[1], kind: 'aux' });
+          columns.push({ at: p[0], kind: 'aux' }, { at: q[0], kind: 'aux' });
+        }
       }
     }
     // The lines that just clear a device: the way between two that stand

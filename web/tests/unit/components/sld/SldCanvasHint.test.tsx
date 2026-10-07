@@ -36,6 +36,27 @@ describe('<SldCanvasHint />', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it('says that a line can be moved by hand, which nothing on the diagram shows', () => {
+    render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
+    expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
+      'Click a line to move its route by hand.',
+    );
+  });
+
+  it('leaves its place to the bar of a line that is picked, and hands over where that is', () => {
+    const slot = vi.fn();
+    const { rerender } = render(
+      <SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} routeBarSlot={slot} />,
+    );
+    const place = screen.getByTestId('sld-canvas-route-slot');
+    expect(slot).toHaveBeenCalledWith(place);
+    expect(screen.queryByTestId('sld-canvas-hint')).not.toBeInTheDocument();
+    // The lock notice comes before it: nothing can be moved then.
+    rerender(<SldCanvasHint locked selectedName={null} onZoomIn={vi.fn()} routeBarSlot={slot} />);
+    expect(screen.getByTestId('sld-canvas-locked')).toBeInTheDocument();
+    expect(screen.queryByTestId('sld-canvas-route-slot')).not.toBeInTheDocument();
+  });
+
   it('says that the diagram is too small to read, at what zoom, and how to get closer', () => {
     view.zoom = 0.192876;
     render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);

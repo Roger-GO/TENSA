@@ -132,10 +132,42 @@ describe('contextTargetFromEdge', () => {
     });
   });
 
-  it('gives the canvas menu for a stub, which is no element of its own, or an edge without an idx', () => {
+  it('gives the canvas menu for an edge without an idx, or a stub whose edge is not known', () => {
     expect(contextTargetFromEdge({ type: 'stub', data: { idx: '1' } })).toEqual({ kind: 'canvas' });
     expect(contextTargetFromEdge({ type: 'topology', data: {} })).toEqual({ kind: 'canvas' });
     expect(contextTargetFromEdge({ type: 'topology' })).toEqual({ kind: 'canvas' });
+  });
+
+  it('names the edge of a branch and says whether its route was drawn by hand', () => {
+    expect(
+      contextTargetFromEdge({ id: 'line-5', type: 'routed', data: { idx: '5', name: 'L5' } }),
+    ).toEqual({
+      kind: 'branch',
+      idx: '5',
+      name: 'L5',
+      transformer: false,
+      edgeId: 'line-5',
+      manual: false,
+    });
+    const byHand = contextTargetFromEdge({
+      id: 'transformer-9',
+      type: 'transformer',
+      data: { idx: '9', bendManual: true },
+    });
+    expect(byHand).toMatchObject({ edgeId: 'transformer-9', manual: true, transformer: true });
+  });
+
+  it('reads a stub as the connector of its device', () => {
+    expect(
+      contextTargetFromEdge({ id: 'stub-load-PQ_1', type: 'stub', data: { name: 'PQ_1' } }),
+    ).toEqual({ kind: 'connector', edgeId: 'stub-load-PQ_1', name: 'PQ_1', manual: false });
+    expect(
+      contextTargetFromEdge({
+        id: 'stub-load-PQ_1',
+        type: 'stub',
+        data: { name: 'PQ_1', bendManual: true },
+      }),
+    ).toMatchObject({ kind: 'connector', manual: true });
   });
 });
 
@@ -186,15 +218,22 @@ describe('contextTargetAt', () => {
     });
   });
 
-  it('reads a press on an edge as that edge, and on a stub as the canvas', () => {
+  it('reads a press on an edge as that edge, and on a stub as the connector of its device', () => {
     const root = canvas();
     expect(at(root, '#line-path')).toEqual({
       kind: 'branch',
       idx: '5',
       name: 'L5',
       transformer: false,
+      edgeId: 'line-5',
+      manual: false,
     });
-    expect(at(root, '#stub-path')).toEqual({ kind: 'canvas' });
+    expect(at(root, '#stub-path')).toEqual({
+      kind: 'connector',
+      edgeId: 'stub-g2',
+      name: 'the device',
+      manual: false,
+    });
   });
 
   it('reads a press on nothing, or on a wrapper of a node or edge the canvas no longer draws, as the canvas', () => {

@@ -178,6 +178,15 @@ export interface BuildGraphOptions {
     { source: { x: number; y: number }; target: { x: number; y: number } }
   >;
   /**
+   * The edges whose polyline in `bendPoints` was drawn by hand, by edge id:
+   * a branch, or the connector of a device (`stub-<node id>`, whose anchors
+   * are where the device and its bus stood). Such an edge keeps its polyline
+   * and its anchors wherever its two ends stand now, and the diagram brings
+   * the route along with them (`connections.ts`). One without anchors is not
+   * taken for drawn by hand.
+   */
+  bendManual?: ReadonlySet<string>;
+  /**
    * The length a layout sets for a bus's bar, by bus idx (`barLengthsOf`).
    * A device that is placed here keeps to the bar as it will be drawn.
    */
@@ -1125,17 +1134,24 @@ export function buildGraph(
     // A polyline that says where its buses stood when it was made is kept
     // exactly while they stand there, wherever they were moved in between.
     const madeFor = opts.bendAnchors?.get(id);
+    // One drawn by hand is kept wherever its buses stand: it follows them.
+    const byHand =
+      opts.bendManual?.has(id) === true &&
+      candidate !== undefined &&
+      candidate.length >= 2 &&
+      madeFor !== undefined;
     const fits =
       candidate !== undefined &&
-      (madeFor !== undefined
-        ? candidate.length >= 2 &&
-          standsAt(effCoords[t.from], madeFor.source) &&
-          standsAt(effCoords[t.to], madeFor.target)
-        : routeFitsBuses(
-            candidate,
-            { coord: coords[t.from], moved: movedByDrag(t.from) },
-            { coord: coords[t.to], moved: movedByDrag(t.to) },
-          ));
+      (byHand ||
+        (madeFor !== undefined
+          ? candidate.length >= 2 &&
+            standsAt(effCoords[t.from], madeFor.source) &&
+            standsAt(effCoords[t.to], madeFor.target)
+          : routeFitsBuses(
+              candidate,
+              { coord: coords[t.from], moved: movedByDrag(t.from) },
+              { coord: coords[t.to], moved: movedByDrag(t.to) },
+            )));
     const polyline = fits ? candidate : undefined;
     const anchors = madeFor ?? { source: { ...coords[t.from]! }, target: { ...coords[t.to]! } };
     // Transformers always render via TransformerEdge (which carries the
@@ -1170,6 +1186,7 @@ export function buildGraph(
           polyline === undefined
             ? undefined
             : { source: { ...anchors.source }, target: { ...anchors.target } },
+        ...(byHand ? { bendManual: true } : {}),
         // Transformer-specific: 3-winding fallback gets a "3w" badge
         // overlaid on the 2-winding glyph (per Scope Boundaries).
         winding: detectWinding(entry),
@@ -1525,6 +1542,11 @@ export function buildGraph(
     // connector really leaves the device and lands on the bar is worked out
     // from where the two sit (`connections.ts`), and follows a drag.
     const stubId = `stub-${nodeId}`;
+    // A connector that was drawn by hand keeps its points, and where the
+    // device and the bus stood when it was drawn: the diagram brings it
+    // along from there (`connections.ts`).
+    const drawnByHand = opts.bendManual?.has(stubId) === true ? bends.get(stubId) : undefined;
+    const drawnFor = opts.bendAnchors?.get(stubId);
     edges.push({
       id: stubId,
       ariaLabel: `${deviceLabel}, connection to bus ${parentIdx}`,
@@ -1536,6 +1558,14 @@ export function buildGraph(
       data: {
         kind: entry.kind,
         bucket: kind,
+        name: entry.name,
+        ...(drawnByHand !== undefined && drawnByHand.length >= 2 && drawnFor !== undefined
+          ? {
+              bendPoints: drawnByHand,
+              bendAnchors: { source: { ...drawnFor.source }, target: { ...drawnFor.target } },
+              bendManual: true,
+            }
+          : {}),
       },
     });
   }

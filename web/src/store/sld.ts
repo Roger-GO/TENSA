@@ -79,6 +79,13 @@ export interface SldState {
    */
   diagramLocked: boolean;
   setDiagramLocked: (locked: boolean) => void;
+  /**
+   * How many lines, transformers and device connectors of the diagram are
+   * routed by hand: what Reset manual routes has to act on. Written by the
+   * mounted canvas, and 0 with none mounted.
+   */
+  manualRouteCount: number;
+  setManualRouteCount: (count: number) => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
@@ -102,6 +109,8 @@ export const useSldStore = create<SldState>((set) => ({
   setPickedCount: (count: number) => set({ pickedCount: count }),
   diagramLocked: false,
   setDiagramLocked: (locked: boolean) => set({ diagramLocked: locked }),
+  manualRouteCount: 0,
+  setManualRouteCount: (count: number) => set({ manualRouteCount: count }),
 }));
 
 // The nodes picked together are those of one diagram. A bus goes by its idx,
@@ -156,8 +165,9 @@ export function subscribeOpenSldSearch(listener: Listener): () => void {
 // Canvas command bridge.
 //
 // Fit view, Reset to auto-layout, the choice of how device connectors are
-// drawn, Tidy diagram, undoing a change to the arrangement and aligning what
-// is picked are commands in the registry (palette, shortcuts) but act on
+// drawn, Tidy diagram, resetting the routes drawn by hand, undoing a change to
+// the arrangement and aligning what is picked are commands in the registry
+// (palette, shortcuts) but act on
 // state only the mounted canvas holds: React Flow's viewport, and the diagram
 // as it is drawn. Same shape as the search bridge above: the registry posts an
 // intent, the canvas subscribes once on mount. With no canvas mounted (no case
@@ -176,6 +186,8 @@ export type SldCommand =
   | 'tidy-relayout'
   | 'undo-layout'
   | 'redo-layout'
+  /** Give every line that was routed by hand back to the automatic routing. */
+  | 'reset-manual-routes'
   | 'align-left'
   | 'align-centre'
   | 'align-right'

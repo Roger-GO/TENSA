@@ -4,11 +4,11 @@ import { useTooSmallZoomPercent } from './zoom';
 
 /**
  * What the diagram offers that nothing on it shows: the drag, the arrow keys,
- * picking several at once, taking a move back, and the right-click menu, and
- * that an arrangement is kept.
+ * moving a line by hand, picking several at once, taking a move back, and
+ * the right-click menu, and that an arrangement is kept.
  */
 const INTERACTION_HINT =
-  'Drag a bus or device to move it, or click it and press the arrow keys. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
+  'Drag a bus or device to move it, or click it and press the arrow keys. Click a line to move its route by hand. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 export interface SldCanvasHintProps {
   /** The lock button of the controls is on: nothing can be dragged or selected. */
@@ -20,6 +20,12 @@ export interface SldCanvasHintProps {
   selectedName: string | null;
   /** Show the diagram at full size, on the selected node when there is one. */
   onZoomIn: () => void;
+  /**
+   * Set while a line of the diagram is picked to be moved by hand: the
+   * place of the usual line is left to the bar of that line
+   * (`SldRouteEditor`), and this is handed the element it is drawn in.
+   */
+  routeBarSlot?: ((slot: HTMLDivElement | null) => void) | null;
 }
 
 /**
@@ -35,12 +41,16 @@ export interface SldCanvasHintProps {
  * button beside it zooms to full size in one press: on the selected bus or
  * device when there is one, which the button names, and where the view is
  * otherwise. The lock does not stop the zoom, so the button stays while the
- * lock notice is shown.
+ * lock notice is shown. While a line is picked to be moved by hand, the
+ * place of the line is the bar of that line's (`routeBarSlot`): as high as
+ * the two lines it takes the place of, so that the diagram does not move
+ * when a line is picked.
  */
 export const SldCanvasHint = memo(function SldCanvasHint({
   locked,
   selectedName,
   onZoomIn,
+  routeBarSlot = null,
 }: SldCanvasHintProps) {
   const tooSmallPercent = useTooSmallZoomPercent();
   const zoomLabel = selectedName !== null ? `Zoom to ${selectedName}` : 'Zoom to 100%';
@@ -69,6 +79,8 @@ export const SldCanvasHint = memo(function SldCanvasHint({
         >
           <span className="font-semibold">{tooSmall}</span> {wayCloser}
         </p>
+      ) : routeBarSlot !== null ? (
+        <div ref={routeBarSlot} data-testid="sld-canvas-route-slot" className="min-w-0 flex-1" />
       ) : (
         <p
           data-testid="sld-canvas-hint"

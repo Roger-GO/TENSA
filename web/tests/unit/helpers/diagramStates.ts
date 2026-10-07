@@ -1,17 +1,18 @@
 /**
  * The states a diagram goes through in the app, for the tests that hold a
  * whole drawing to a rule: as a case opens with no saved layout (the
- * automatic arrangement), after Tidy diagram, after Tidy and re-layout, and
- * after a bus or a device was dragged. Each state is made the way the
- * canvas makes it (`useAutoLayout`, `planTidy`, `pictureOf`), so what a
- * test checks is what the canvas draws.
+ * automatic arrangement), after Tidy diagram, after Tidy and re-layout,
+ * after a bus or a device was dragged, and after a line was moved by hand.
+ * Each state is made the way the canvas makes it (`useAutoLayout`,
+ * `planTidy`, `pictureOf`, `routesDrawClear`), so what a test checks is what
+ * the canvas draws.
  *
  * A test that opens a case mocks `@/components/sld/elkClient` with the ELK
  * engine run in-thread: jsdom has no `Worker`.
  */
 import type { Edge, Node } from '@xyflow/react';
 import type { TopologySummary } from '@/api/types';
-import type { ConnectionEdge } from '@/components/sld/connections';
+import type { ConnectionEdge, Point } from '@/components/sld/connections';
 import { clearDrop } from '@/components/sld/dropPlace';
 import { buildGraph, defaultBarLengths, type BuildGraphOptions } from '@/components/sld/graph';
 import { autoLayout } from '@/components/sld/layout';
@@ -20,6 +21,7 @@ import {
   drawnDiagram,
   drawsClear,
   pictureOf,
+  routesDrawClear,
   type Picture,
   type PictureOptions,
 } from '@/components/sld/picture';
@@ -87,18 +89,70 @@ export function tidied(
   if (plan.refused !== undefined) return diagram;
   const at = new Map(plan.nodes.map((n) => [n.id, n.position]));
   const edges = plan.edges.map((edge) => {
-    const points = plan.tidied.routes.get(edge.id);
-    if (points === undefined) return edge;
+    // A route that was drawn by hand stays as the plan has it, and is still
+    // the user's; any other is the one the plan made.
+    const kept = plan.byHand?.get(edge.id);
+    const points = kept ?? plan.tidied.routes.get(edge.id);
+    if (edge.type === 'stub' || points === undefined) return edge;
     return {
       ...edge,
       data: {
         ...edge.data,
         bendPoints: points,
         bendAnchors: { source: { ...at.get(edge.source)! }, target: { ...at.get(edge.target)! } },
+        bendManual: kept !== undefined ? true : undefined,
       },
     };
   });
   return { ...diagram, nodes: plan.nodes, edges };
+}
+
+/**
+ * `diagram` with the route of the edge `id` drawn by hand through `points`,
+ * as the canvas keeps a route its editor hands it: with where the two ends
+ * stand as what it was drawn for, and only where the picture the diagram
+ * then gives has nothing drawn over anything else that it has not now
+ * (`routesDrawClear`). `null` where the canvas refuses the route.
+ */
+export function routedByHand(
+  diagram: Diagram,
+  id: string,
+  points: readonly Point[],
+): Diagram | null {
+  const at = new Map(diagram.nodes.map((n) => [n.id, n.position]));
+  const edges = diagram.edges.map((edge) =>
+    edge.id !== id
+      ? edge
+      : {
+          ...edge,
+          data: {
+            ...edge.data,
+            bendPoints: points.map(([x, y]): [number, number] => [x, y]),
+            bendAnchors: {
+              source: { ...at.get(edge.source)! },
+              target: { ...at.get(edge.target)! },
+            },
+            bendManual: true,
+          },
+        },
+  );
+  const clear = routesDrawClear(diagram.nodes, diagram.edges as ConnectionEdge[], {
+    barLengths: diagram.barLengths,
+    values: false,
+  });
+  if (!clear(edges as ConnectionEdge[])) return null;
+  return settled({ ...diagram, edges });
+}
+
+/** The edges of `diagram` whose route is drawn by hand, each with the points it is drawn through. */
+export function routesByHand(diagram: Diagram): Map<string, Point[]> {
+  const { connections } = drawn(diagram);
+  const out = new Map<string, Point[]>();
+  for (const edge of diagram.edges) {
+    const points = connections.routes.get(edge.id)?.points;
+    if (edge.data?.bendManual === true && points !== undefined) out.set(edge.id, points);
+  }
+  return out;
 }
 
 /** The nodes that go along when the node `id` is dragged: itself, and for a bus its devices. */

@@ -34,6 +34,13 @@
  *   are routed again around those. A plan that would still draw something
  *   over something else is not put in place (`TidyPlan.refused`).
  *
+ * A route that was drawn by hand (`data.bendManual`) is the user's and is
+ * not made afresh: it stays as it is drawn (`TidyPlan.byHand`), and the
+ * other lines are routed around it. After a re-layout it is brought along
+ * with its buses, and one that is then on something is routed with the rest
+ * (`TidyPlan.released`). The connector of a device that was drawn by hand
+ * stays with its device the same way (`connections.ts`).
+ *
  * Pure: no React, nothing read but the arguments. The canvas (`tidy` in
  * `SldCanvas.tsx`) puts the plan in place as one step for Undo.
  */
@@ -56,6 +63,7 @@ import { buildGraph, type BuildGraphOptions } from './graph';
 import { busLabelLack, busLabelReserve, chainBoxes, readoutReserve } from './labels';
 import { describeOverlaps, findOverlaps, type Overlap } from './overlapCheck';
 import { drawnDiagram, pictureOf, type Picture, type PictureOptions } from './picture';
+import { routeDiagram } from './routing';
 import { TIDY_STEPS, alignToGrid, tidyRoutes, type TidyResult } from './tidy';
 
 export interface TidyPlanOptions {
@@ -90,8 +98,19 @@ export interface TidyPlan {
   /** The diagram as it will stand: `graph` itself for a tidy that moves nothing. */
   nodes: Node[];
   edges: Edge[];
-  /** The routes of its branches. */
+  /** The routes of its branches: of the ones that were routed afresh. */
   tidied: TidyResult;
+  /**
+   * The routes that were drawn by hand and stay as they are, by edge id:
+   * each as it is drawn with the nodes where the plan has them. Absent
+   * where the diagram has none.
+   */
+  byHand?: Map<string, Point[]>;
+  /**
+   * The routes that were drawn by hand and no longer fit where a re-layout
+   * puts their buses, by edge id: routed afresh with the rest.
+   */
+  released?: string[];
   /**
    * Set where the plan is not to be put in place: what it would draw over
    * what, as text (`describeOverlaps`), none of which the diagram has as it
@@ -105,23 +124,34 @@ const nameOf = ({ kind, a, b }: Overlap): string => `${kind}|${a}|${b}`;
 
 /**
  * `edges` as the canvas has them once `routes` are put in place for the
- * nodes `nodes`: each branch along its new route, and one that got none
- * along the route it had, or after a re-layout along none.
+ * nodes `nodes`: each branch along its new route, one that was drawn by
+ * hand and stays (`byHand`) along that, and one that got none along the
+ * route it had, or after a re-layout along none.
  */
 function alongRoutes(
   nodes: readonly Node[],
   edges: readonly Edge[],
   routes: TidyResult['routes'],
   relayout: boolean,
+  byHand: ReadonlyMap<string, readonly Point[]>,
 ): ConnectionEdge[] {
   const at = new Map(nodes.map((n) => [n.id, n.position]));
   return (edges as ConnectionEdge[]).map((edge) => {
     if (edge.type === 'stub') return edge;
-    const points = routes.get(edge.id);
+    const kept = byHand.get(edge.id);
+    const points = kept ?? routes.get(edge.id);
     const [source, target] = [at.get(edge.source), at.get(edge.target)];
     if (points === undefined || source === undefined || target === undefined) {
       return relayout
-        ? { ...edge, data: { ...edge.data, bendPoints: undefined, bendAnchors: undefined } }
+        ? {
+            ...edge,
+            data: {
+              ...edge.data,
+              bendPoints: undefined,
+              bendAnchors: undefined,
+              bendManual: undefined,
+            },
+          }
         : edge;
     }
     return {
@@ -130,6 +160,7 @@ function alongRoutes(
         ...edge.data,
         bendPoints: points.map(([x, y]): [number, number] => [x, y]),
         bendAnchors: { source: { ...source }, target: { ...target } },
+        bendManual: kept !== undefined ? true : undefined,
       },
     };
   });
@@ -192,7 +223,26 @@ export function planTidy(
       applyPushOut: false,
     });
     nodes = placed.nodes;
-    edges = placed.edges;
+    // The diagram was built again from the topology: the routes that were
+    // drawn by hand go back on their edges, as they were drawn and for
+    // where their ends stood then, to be brought along from there.
+    const drawnByHand = new Map(
+      graph.edges.filter((edge) => edge.data?.bendManual === true).map((edge) => [edge.id, edge]),
+    );
+    edges = placed.edges.map((edge) => {
+      const held = drawnByHand.get(edge.id)?.data;
+      return held === undefined
+        ? edge
+        : {
+            ...edge,
+            data: {
+              ...edge.data,
+              bendPoints: held.bendPoints,
+              bendAnchors: held.bendAnchors,
+              bendManual: true,
+            },
+          };
+    });
   }
   // The chains that are drawn out, where they stand or will stand, and where
   // the readouts of the devices stand with no branch drawn: a route goes
@@ -210,9 +260,35 @@ export function planTidy(
   const drawnNow =
     shown === null || relayout ? null : pictureOf(nodes, edges as ConnectionEdge[], shown);
   const labels = [...(drawnNow?.busLabels.values() ?? [])].map(({ box }) => box);
+  // The routes that were drawn by hand: each as it is drawn with the nodes
+  // where they will stand, among the device connectors alone. One whose bus
+  // a re-layout has moved is brought along, and one that is then on
+  // something is routed with the rest.
+  const byHand = new Map<string, Point[]>();
+  const released: string[] = [];
+  const handDrawn = (edges as ConnectionEdge[]).filter(
+    (edge) => edge.type !== 'stub' && edge.data?.bendManual === true,
+  );
+  if (handDrawn.length > 0) {
+    const stubs = (edges as ConnectionEdge[]).filter((edge) => edge.type === 'stub');
+    const held = routeDiagram(nodes, [...stubs, ...handDrawn], {
+      ...connectionOptions,
+      obstacles: [...chains.values()],
+      steps: 0,
+    });
+    const letGo = new Set([...held.released, ...held.unrouted]);
+    for (const edge of handDrawn) {
+      const points = held.connections.routes.get(edge.id)?.points;
+      if (points === undefined || letGo.has(edge.id)) released.push(edge.id);
+      else byHand.set(edge.id, points);
+    }
+  }
+  const kept = byHand.size > 0 ? { byHand } : {};
+  const given = released.length > 0 ? { released } : {};
   /**
-   * The routes, made afresh: all of them, or all but the ones in `keep`,
-   * and with `shut` through no place where the label of a bus stands.
+   * The routes, made afresh: all of them but the ones drawn by hand, or
+   * all but those and the ones in `keep`, and with `shut` through no place
+   * where the label of a bus stands.
    */
   const route = (keep?: ReadonlyMap<string, readonly Point[]>, shut = false): TidyResult =>
     tidyRoutes(nodes, edges as ConnectionEdge[], {
@@ -222,10 +298,10 @@ export function planTidy(
       keepFree: readoutReserve(nodes, connectors, sizes, { chains }),
       preferFree: busLabelReserve(nodes, connectors, sizes, { chains }),
       steps,
-      keep,
+      keep: byHand.size === 0 ? keep : new Map([...(keep ?? []), ...byHand]),
     });
   const tidied = route();
-  if (shown === null) return { nodes, edges, tidied };
+  if (shown === null) return { nodes, edges, tidied, ...kept, ...given };
 
   // ---- held to the picture it gives ----
   const overlapsOf = (picture: Picture<ConnectionEdge>, drawnNodes: readonly Node[]): Overlap[] =>
@@ -240,7 +316,7 @@ export function planTidy(
    */
   let known: Set<string> | null = null;
   const faults = (routes: TidyResult['routes']): { overlaps: Overlap[]; labels: string[] } => {
-    const picture = pictureOf(nodes, alongRoutes(nodes, edges, routes, relayout), shown);
+    const picture = pictureOf(nodes, alongRoutes(nodes, edges, routes, relayout, byHand), shown);
     const found = overlapsOf(picture, nodes);
     let overlaps: Overlap[] = [];
     if (found.length > 0) {
@@ -262,7 +338,7 @@ export function planTidy(
   type Faults = ReturnType<typeof faults>;
   const none = (found: Faults): boolean => found.overlaps.length === 0 && found.labels.length === 0;
   const first = faults(tidied.routes);
-  if (none(first)) return { nodes, edges, tidied };
+  if (none(first)) return { nodes, edges, tidied, ...kept, ...given };
   // The plan that leaves least wrong, of the ones tried: nothing drawn over
   // anything comes before a label that is as well off as it was.
   let best = { tidied, found: first };
@@ -278,7 +354,7 @@ export function planTidy(
   if (drawnNow !== null) {
     // With no route through a place where a label stands.
     if (first.labels.length > 0 && offer(route(undefined, true))) {
-      return { nodes, edges, tidied: best.tidied };
+      return { nodes, edges, tidied: best.tidied, ...kept, ...given };
     }
     // With the lines of the buses that have a part in it kept as they are
     // drawn now, and with them the bars their length and the symbols of the
@@ -297,6 +373,7 @@ export function planTidy(
     const keep = new Map<string, Point[]>();
     for (const edge of edges) {
       if (edge.type === 'stub' || (!buses.has(edge.source) && !buses.has(edge.target))) continue;
+      if (byHand.has(edge.id)) continue;
       const points = drawnNow.connections.routes.get(edge.id)?.points;
       if (points !== undefined && !drawnNow.unrouted.includes(edge.id)) {
         keep.set(
@@ -308,13 +385,22 @@ export function planTidy(
     if (keep.size > 0) {
       const around = route(keep, true);
       if (offer({ ...around, routes: new Map([...around.routes, ...keep]) })) {
-        return { nodes, edges, tidied: best.tidied };
+        return { nodes, edges, tidied: best.tidied, ...kept, ...given };
       }
     }
   }
   // A label that is worse off is no reason to leave the lines untidied.
-  if (best.found.overlaps.length === 0) return { nodes, edges, tidied: best.tidied };
-  return { nodes, edges, tidied, refused: describeOverlaps(best.found.overlaps) };
+  if (best.found.overlaps.length === 0) {
+    return { nodes, edges, tidied: best.tidied, ...kept, ...given };
+  }
+  return {
+    nodes,
+    edges,
+    tidied,
+    ...kept,
+    ...given,
+    refused: describeOverlaps(best.found.overlaps),
+  };
 }
 
 /**

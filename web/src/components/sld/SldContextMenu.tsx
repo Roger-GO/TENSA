@@ -8,7 +8,11 @@
  *    disturbance dialog with a fault on this bus), Plot voltage (puts the bus's
  *    voltage on the time-series plot of the active run).
  *  - **A line or transformer**: Inspect, Trip line (the dialog with a toggle on
- *    this branch).
+ *    this branch), Move route by hand (picks the line, which shows its handles
+ *    and the bar that goes with them: `SldRouteEditor`), and Reset route, which
+ *    gives a route that was drawn by hand back to the automatic routing.
+ *  - **The connector of a generator, load or shunt**: Move route by hand and
+ *    Reset route, as for a line.
  *  - **A generator, load or shunt**: Inspect, Move with arrow keys. A generator
  *    that stands for a unit of several models (a machine, its exciter, its
  *    governor) also has Show control chain, or Hide control chain once it is
@@ -16,7 +20,8 @@
  *  - **A controller**: Inspect. Its badge is placed from what it acts on and
  *    cannot be moved on its own. (A controller of a generating unit has no
  *    badge: the symbol of the unit names it.)
- *  - **The canvas**: Add element, Fit view, Tidy diagram, Tidy and re-layout and
+ *  - **The canvas**: Add element, Fit view, Tidy diagram, Tidy and re-layout,
+ *    Reset manual routes (every line that was routed by hand, at once) and
  *    Reset to auto-layout (the same commands the palette has), Snap to grid, how
  *    the connectors of generators, loads and shunts are drawn (straight, or with
  *    a right angle), and Save snapshot, which keeps the diagram as it is placed
@@ -72,6 +77,7 @@ import { ALIGN_LABEL, DISTRIBUTE_LABEL, type AlignMode, type DistributeAxis } fr
 import type { ArrangeCommand } from './SldArrangeControls';
 import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
+import { ROUTE_FOCUS_ATTR } from './routeEdit';
 
 const ALIGN_MODES: readonly AlignMode[] = ['left', 'centre', 'right', 'top', 'middle', 'bottom'];
 const DISTRIBUTE_AXES: readonly DistributeAxis[] = ['horizontal', 'vertical'];
@@ -99,6 +105,8 @@ function titleOf(target: SldContextTarget): string {
       return `Bus ${labelOf(target.idx, target.name)}`;
     case 'branch':
       return `${target.transformer ? 'Transformer' : 'Line'} ${labelOf(target.idx, target.name)}`;
+    case 'connector':
+      return `Connector of ${target.name}`;
     case 'device': {
       const kind = target.element.kind;
       const noun =
@@ -113,6 +121,11 @@ function inspect(element: SelectedElement, nodeId: string | null): void {
   useCaseStore.getState().setSelectedElement(element);
   if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
   useLayoutStore.getState().setRightInspectorCollapsed(false);
+}
+
+/** The handle of the line that is picked which takes the keyboard focus: its longest run. */
+function routeHandle(): SVGElement | null {
+  return document.querySelector<SVGElement>(`[${ROUTE_FOCUS_ATTR}]`);
 }
 
 /** The React Flow wrapper of a node, which is what takes the keyboard focus. */
@@ -248,6 +261,57 @@ export interface SldContextMenuBodyProps {
   /** Whether a moved node snaps to the grid, and the way to change it. */
   snap?: boolean;
   onSnapChange?: (snap: boolean) => void;
+  /** Pick a line or a connector, by the id of its edge, to move its route by hand. */
+  onEditRoute?: (edgeId: string) => void;
+  /** Give the route of one back to the automatic routing. */
+  onResetRoute?: (edgeId: string) => void;
+  /** How many routes of the diagram are drawn by hand, and the way to reset them all. */
+  manualRoutes?: number;
+  onResetManualRoutes?: () => void;
+}
+
+/**
+ * "Move route by hand" and "Reset route", for a line, a transformer or the
+ * connector of a device. The first picks the line, which shows its handles;
+ * the second is greyed out, with the reason, for a route the diagram made.
+ */
+function RouteItems({
+  edgeId,
+  manual,
+  locked,
+  onEditRoute,
+  onResetRoute,
+}: {
+  edgeId: string;
+  manual: boolean;
+  locked: boolean;
+  onEditRoute?: (edgeId: string) => void;
+  onResetRoute?: (edgeId: string) => void;
+}) {
+  return (
+    <>
+      <ContextMenuItem
+        data-testid="sld-context-edit-route"
+        disabled={locked}
+        onSelect={() => onEditRoute?.(edgeId)}
+      >
+        <span>Move route by hand</span>
+        {locked ? <LockedNote /> : null}
+      </ContextMenuItem>
+      <ContextMenuItem
+        data-testid="sld-context-reset-route"
+        disabled={locked || !manual}
+        onSelect={() => onResetRoute?.(edgeId)}
+      >
+        <span>Reset route</span>
+        {locked ? (
+          <LockedNote />
+        ) : manual ? null : (
+          <span className="text-muted-foreground ml-auto pl-3 text-xs">routed automatically</span>
+        )}
+      </ContextMenuItem>
+    </>
+  );
 }
 
 /** The note a greyed-out item carries while the diagram is locked. */
@@ -269,6 +333,10 @@ export function SldContextMenuBody({
   onArrange,
   snap = false,
   onSnapChange,
+  onEditRoute,
+  onResetRoute,
+  manualRoutes = 0,
+  onResetManualRoutes,
 }: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
@@ -283,6 +351,14 @@ export function SldContextMenuBody({
     useCaseStore.getState().setSelectedElement(element);
     useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
     moveNodeRef.current = nodeId;
+  };
+  // The same for Move route by hand: the longest run of the line takes the
+  // focus as the menu closes, so that the arrow keys slide it at once and
+  // Tab goes on to its other handles.
+  const editRouteRef = useRef(false);
+  const editRoute = (edgeId: string) => {
+    editRouteRef.current = true;
+    onEditRoute?.(edgeId);
   };
 
   const save = (spec: DisturbanceSpec) => {
@@ -301,9 +377,11 @@ export function SldContextMenuBody({
         onCloseAutoFocus={(event) => {
           const node = moveNodeRef.current === null ? null : nodeElement(moveNodeRef.current);
           moveNodeRef.current = null;
-          if (node === null) return;
+          const to = node ?? (editRouteRef.current ? routeHandle() : null);
+          editRouteRef.current = false;
+          if (to === null) return;
           event.preventDefault();
-          node.focus();
+          to.focus();
         }}
       >
         <ContextMenuLabel data-testid="sld-context-menu-title">{titleOf(target)}</ContextMenuLabel>
@@ -352,7 +430,28 @@ export function SldContextMenuBody({
             >
               Trip line…
             </ContextMenuItem>
+            {target.edgeId !== undefined ? (
+              <>
+                <ContextMenuSeparator />
+                <RouteItems
+                  edgeId={target.edgeId}
+                  manual={target.manual === true}
+                  locked={locked}
+                  onEditRoute={editRoute}
+                  onResetRoute={onResetRoute}
+                />
+              </>
+            ) : null}
           </>
+        ) : null}
+        {target.kind === 'connector' ? (
+          <RouteItems
+            edgeId={target.edgeId}
+            manual={target.manual}
+            locked={locked}
+            onEditRoute={editRoute}
+            onResetRoute={onResetRoute}
+          />
         ) : null}
         {target.kind === 'device' ? (
           <>
@@ -437,6 +536,22 @@ export function SldContextMenuBody({
             >
               <span>Tidy and re-layout</span>
               {locked ? <LockedNote /> : null}
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-testid="sld-context-reset-manual-routes"
+              disabled={locked || manualRoutes === 0}
+              onSelect={() => onResetManualRoutes?.()}
+            >
+              <span>
+                {manualRoutes > 0 ? `Reset manual routes (${manualRoutes})` : 'Reset manual routes'}
+              </span>
+              {locked ? (
+                <LockedNote />
+              ) : manualRoutes === 0 ? (
+                <span className="text-muted-foreground ml-auto pl-3 text-xs">
+                  no line is routed by hand
+                </span>
+              ) : null}
             </ContextMenuItem>
             <ContextMenuItem data-testid="sld-context-reset-layout" onSelect={onResetLayout}>
               Reset to auto-layout

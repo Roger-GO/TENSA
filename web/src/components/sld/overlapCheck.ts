@@ -138,7 +138,7 @@ interface Run {
 }
 
 /** The part of the run from `a` to `b` that is inside `rect`, as a length; 0 when it stays outside. */
-function lengthInside(a: Point, b: Point, rect: Rect): number {
+export function lengthInside(a: Point, b: Point, rect: Rect): number {
   let from = 0;
   let to = 1;
   const clip = (delta: number, near: number, far: number): boolean => {

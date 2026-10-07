@@ -16,7 +16,18 @@ export type SldContextTarget =
   /** Several buses and devices picked together: `count` of them. */
   | { kind: 'selection'; count: number }
   | { kind: 'bus'; idx: string; name: string; nodeId: string }
-  | { kind: 'branch'; idx: string; name: string; transformer: boolean }
+  | {
+      kind: 'branch';
+      idx: string;
+      name: string;
+      transformer: boolean;
+      /** The id of its edge, which is what a route is kept under; absent where it is not known. */
+      edgeId?: string;
+      /** Whether its route was drawn by hand. */
+      manual?: boolean;
+    }
+  /** The connector of a generator, load or shunt to its bus: `name` is the device's. */
+  | { kind: 'connector'; edgeId: string; name: string; manual: boolean }
   | {
       kind: 'device';
       element: SelectedElement;
@@ -81,18 +92,27 @@ export function contextTargetFromNode(node: Pick<Node, 'id' | 'type' | 'data'>):
 
 /**
  * The target for a right-click on a React Flow edge. A stub (the short link from a
- * generator, load or shunt to its bus) is not an element of its own, so it gives
- * the canvas menu, as a click on it selects nothing.
+ * generator, load or shunt to its bus) is not an element of its own: its menu is
+ * about how it is drawn, which can be changed by hand like the route of a line.
  */
-export function contextTargetFromEdge(edge: Pick<Edge, 'type' | 'data'>): SldContextTarget {
-  const data = edge.data as { idx?: string; name?: string } | undefined;
+export function contextTargetFromEdge(
+  edge: Pick<Edge, 'type' | 'data'> & { id?: string },
+): SldContextTarget {
+  const data = edge.data as { idx?: string; name?: string; bendManual?: boolean } | undefined;
+  const manual = data?.bendManual === true;
+  if (edge.type === 'stub') {
+    return edge.id === undefined
+      ? { kind: 'canvas' }
+      : { kind: 'connector', edgeId: edge.id, name: data?.name ?? 'the device', manual };
+  }
   const idx = data?.idx;
-  if (!idx || edge.type === 'stub') return { kind: 'canvas' };
+  if (!idx) return { kind: 'canvas' };
   return {
     kind: 'branch',
     idx,
     name: data?.name ?? idx,
     transformer: edge.type === 'transformer',
+    ...(edge.id === undefined ? {} : { edgeId: edge.id, manual }),
   };
 }
 

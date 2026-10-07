@@ -12,6 +12,11 @@
  * `COMMAND_GROUP_ORDER`. Each row renders the command label on the
  * left and the shortcut as a sequence of `<kbd>` chips on the right.
  *
+ * After the commands comes what the diagram answers to that is no
+ * command and has no entry in the registry (`DIAGRAM_GESTURES`): how a
+ * line is moved by hand, with the mouse and with the keys. Nothing on
+ * the diagram shows it until a line is clicked, so it is listed here.
+ *
  * Close: Escape (Radix default), backdrop click. The `?` hotkey that
  * opens the cheatsheet is registered at AppShell, not here.
  */
@@ -37,6 +42,46 @@ const GROUP_HEADINGS: Record<CommandGroup, string> = {
   navigation: 'Navigation',
   help: 'Help',
 };
+
+/**
+ * How a line of the diagram is moved by hand: what is done, and with what.
+ * A row is a gesture of the pointer, a key, or both.
+ */
+const DIAGRAM_GESTURES: readonly { id: string; label: string; keys: readonly string[] }[] = [
+  {
+    id: 'pick',
+    label: 'Pick a line, a transformer or a device connector, to move its route by hand',
+    keys: ['Click'],
+  },
+  { id: 'slide', label: 'Slide a run of the picked line', keys: ['Drag', 'or', '← → ↑ ↓'] },
+  {
+    id: 'bend',
+    label: 'Move a bend (the square handles)',
+    keys: ['Drag', 'or', '← → ↑ ↓'],
+  },
+  {
+    id: 'alone',
+    label: 'Move a bend alone, leaving its runs at an angle',
+    keys: ['Alt', 'or', 'Shift', 'Drag'],
+  },
+  {
+    id: 'add',
+    label: 'Add a bend to a run',
+    keys: ['Double-click', 'or', 'Enter'],
+  },
+  {
+    id: 'pull',
+    label: 'Pull a new bend out of a run (the round + handles)',
+    keys: ['Drag'],
+  },
+  {
+    id: 'remove',
+    label: 'Remove a bend',
+    keys: ['Double-click', 'or', 'Delete'],
+  },
+  { id: 'steps', label: 'Bigger steps with the arrow keys', keys: ['Shift'] },
+  { id: 'done', label: 'Let go of the line', keys: ['Esc'] },
+];
 
 export function ShortcutCheatsheet() {
   const open = useShortcutCheatsheetStore((s) => s.open);
@@ -135,6 +180,54 @@ export function ShortcutCheatsheet() {
                 </section>
               );
             })}
+            <section
+              data-testid="shortcut-cheatsheet-group-diagram"
+              className="flex flex-col gap-1"
+            >
+              <h3 className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase">
+                Diagram: moving a line by hand
+              </h3>
+              <ul className="flex flex-col">
+                {DIAGRAM_GESTURES.map((gesture) => (
+                  <li
+                    key={gesture.id}
+                    data-testid={`shortcut-cheatsheet-gesture-${gesture.id}`}
+                    className={cn(
+                      'flex items-center justify-between gap-3',
+                      'rounded-[var(--radius-sm)] px-2 py-1.5',
+                      'hover:bg-muted/40',
+                    )}
+                  >
+                    <span className="text-sm">{gesture.label}</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {gesture.keys.map((key, i) =>
+                        key === 'or' ? (
+                          <span key={i} className="text-muted-foreground/80 text-[11px]">
+                            or
+                          </span>
+                        ) : (
+                          <kbd
+                            key={i}
+                            className={cn(
+                              'inline-flex h-5 min-w-[1.5rem] items-center justify-center px-1.5',
+                              'rounded border font-mono text-[10px] whitespace-nowrap',
+                              'border-border bg-muted text-foreground',
+                            )}
+                          >
+                            {key}
+                          </kbd>
+                        ),
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-muted-foreground px-2 text-xs leading-snug">
+                A line you moved is left as it is by Tidy diagram. Reset route, on the bar above the
+                diagram while the line is picked, gives it back to the automatic routing, and Reset
+                manual routes in the Arrange menu does so for all of them.
+              </p>
+            </section>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

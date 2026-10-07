@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 import {
   ArrangeButtons,
+  MANUAL_ROUTE_HINT,
   PICK_SEVERAL_HINT,
   SldArrangeControls,
   SldSelectionBar,
@@ -88,6 +89,36 @@ describe('<SldArrangeControls />', () => {
     expect(screen.queryByTestId('sld-arrange-pick-hint')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('sld-align-centre'));
     expect(onCommand).toHaveBeenCalledWith('align-centre');
+  });
+
+  it('says how a line is moved by hand, and that there is none to reset while that is so', async () => {
+    const { onCommand } = controls();
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange the diagram' }));
+    const menu = await screen.findByTestId('sld-arrange-menu');
+    expect(menu).toHaveTextContent('Lines moved by hand');
+    expect(screen.getByTestId('sld-arrange-route-hint')).toHaveTextContent(MANUAL_ROUTE_HINT);
+    expect(MANUAL_ROUTE_HINT).toMatch(/Click a line.*drag a run/);
+    const reset = screen.getByRole('button', { name: 'Reset manual routes' });
+    expect(reset).toBeDisabled();
+    // The reason stands beside the button.
+    expect(screen.getByTestId('sld-arrange-no-manual-routes')).toHaveTextContent(
+      'No line is routed by hand, so there is nothing to reset.',
+    );
+    fireEvent.click(reset);
+    expect(onCommand).not.toHaveBeenCalled();
+  });
+
+  it('counts the lines routed by hand, and resets them all', async () => {
+    const { onCommand } = controls({ manualRoutes: 3 });
+    fireEvent.click(screen.getByRole('button', { name: 'Arrange the diagram' }));
+    const menu = await screen.findByTestId('sld-arrange-menu');
+    expect(menu).toHaveTextContent('Lines moved by hand (3)');
+    expect(menu).toHaveTextContent('Gives all 3 back to the automatic routing');
+    expect(screen.queryByTestId('sld-arrange-no-manual-routes')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset manual routes' }));
+    expect(onCommand).toHaveBeenCalledWith('reset-manual-routes');
+    // A command closes the menu.
+    expect(screen.queryByTestId('sld-arrange-menu')).not.toBeInTheDocument();
   });
 
   it('counts the lines that run through a symbol or a bar on the Tidy diagram button', () => {

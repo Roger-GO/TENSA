@@ -70,6 +70,18 @@
  *   bar, where it would read as the bar going on. Two bars that stand level
  *   have no face that looks at the other: the branch between them leaves
  *   both by the north face and bridges over, and the next one by the south.
+ * - A route that was drawn by hand (`data.bendManual`, on a branch or on
+ *   the connector of a device) is drawn through its points as they are. Its
+ *   ends hold their places on the bars most firmly of all (`TAP_HOLD.manual`),
+ *   an end that leaves a bar at an angle included, and the connector of a
+ *   device still leaves by the middle of the face it left by. It is made for
+ *   where its two ends stood (`data.bendAnchors`), and where one of them has
+ *   moved since it is brought along (`bringAlong`): the end goes with what it
+ *   is attached to, the run that ends there stays square, and the rest stays
+ *   where it was. The connector of a device that was moved is drawn that way
+ *   only while it runs through nothing and still leaves by a face that does
+ *   not look away from the bar; otherwise it is worked out afresh
+ *   (`ConnectionPass.byHand` says which were kept).
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -245,6 +257,12 @@ export interface ConnectionLayout {
 export interface ConnectionPass extends ConnectionLayout {
   /** The branches that are drawn along the route stored for them, by edge id. */
   kept: Set<string>;
+  /**
+   * The connectors of devices that are drawn along the route made for them
+   * by hand, by edge id. One that carries such a route and is not here was
+   * worked out afresh: its device was moved to where the route no longer fits.
+   */
+  byHand: Set<string>;
 }
 
 // ---- taps -------------------------------------------------------------------
@@ -265,8 +283,17 @@ export interface ConnectionPass extends ConnectionLayout {
  * - `round`: the connector of a device that steps round something that
  *   stands between it and the bar. It lands beside that, and a tap further
  *   along would take it through what it goes round.
+ * - `manual`: an end of a route that was drawn by hand. It stays where it
+ *   was put.
  */
-export const TAP_HOLD = { free: 0, route: 1, square: 2, straight: 3, round: 4 } as const;
+export const TAP_HOLD = {
+  free: 0,
+  route: 1,
+  square: 2,
+  straight: 3,
+  round: 4,
+  manual: 5,
+} as const;
 
 /** Where one connection would like to land on a face. */
 export interface TapWish {
@@ -578,6 +605,63 @@ export function stepRoute(a: Point, aSide: Side, b: Point, bSide: Side): Point[]
   return simplifyRoute([a, outA, [outB[0], outA[1]], outB, b]);
 }
 
+/** Whether the run from `a` to `b` is level, upright, or at an angle. */
+export type RunKind = 'level' | 'upright' | 'angled';
+
+export function runKind(a: readonly [number, number], b: readonly [number, number]): RunKind {
+  if (Math.abs(a[1] - b[1]) <= EPS) return 'level';
+  if (Math.abs(a[0] - b[0]) <= EPS) return 'upright';
+  return 'angled';
+}
+
+/**
+ * `points`, a route made by hand for two ends that have moved since, brought
+ * along with them: the first point by `bySource`, the last by `byTarget`.
+ * Moved alike, the whole route goes with them. Otherwise each end goes with
+ * what it is attached to, and the run that ends there stays as it was, level
+ * or upright: the bend it ends in follows the end across it. Everything in
+ * between stays where it was. A single run that was square, and whose two
+ * ends are no longer in line, steps across half way.
+ *
+ * What comes back runs through as many points as the route did, or two more
+ * for the step. It is a route for the ends where they are, not one that is
+ * clear of the rest of the diagram.
+ */
+export function bringAlong(
+  points: readonly (readonly [number, number])[],
+  bySource: readonly [number, number],
+  byTarget: readonly [number, number],
+): Point[] {
+  const out = points.map(([x, y]): Point => [x, y]);
+  const last = out.length - 1;
+  if (last < 1) return out;
+  const alike =
+    Math.abs(bySource[0] - byTarget[0]) <= 0.01 && Math.abs(bySource[1] - byTarget[1]) <= 0.01;
+  if (alike) return out.map(([x, y]): Point => [x + bySource[0], y + bySource[1]]);
+  const first = runKind(out[0]!, out[1]!);
+  const final = runKind(out[last - 1]!, out[last]!);
+  const a: Point = [out[0]![0] + bySource[0], out[0]![1] + bySource[1]];
+  const b: Point = [out[last]![0] + byTarget[0], out[last]![1] + byTarget[1]];
+  if (last === 1) {
+    if (first === 'upright' && !sameX(a, b)) {
+      const y = (a[1] + b[1]) / 2;
+      return [a, [a[0], y], [b[0], y], b];
+    }
+    if (first === 'level' && !sameY(a, b)) {
+      const x = (a[0] + b[0]) / 2;
+      return [a, [x, a[1]], [x, b[1]], b];
+    }
+    return [a, b];
+  }
+  out[0] = a;
+  out[last] = b;
+  if (first === 'upright') out[1]![0] += bySource[0];
+  else if (first === 'level') out[1]![1] += bySource[1];
+  if (final === 'upright') out[last - 1]![0] += byTarget[0];
+  else if (final === 'level') out[last - 1]![1] += byTarget[1];
+  return out;
+}
+
 // ---- the pass ---------------------------------------------------------------
 
 /** A bus's bar, in canvas coordinates. */
@@ -878,6 +962,11 @@ function sits(at: { x: number; y: number }, anchorPoint: Anchor): boolean {
   return Math.abs(at.x - anchorPoint.x) < 0.01 && Math.abs(at.y - anchorPoint.y) < 0.01;
 }
 
+/** How far what stands at `at` has moved since it stood at `anchorPoint`. */
+function movedBy(at: { x: number; y: number }, anchorPoint: Anchor): [number, number] {
+  return [at.x - anchorPoint.x, at.y - anchorPoint.y];
+}
+
 /**
  * How far apart, up and down, two bars are that count as standing level: a
  * line from a face of one to a face of the other would be all but in line
@@ -1018,18 +1107,32 @@ function layoutPass(
   };
 
   // The end of a stored route stays where the route has it, and the others
-  // make room; one drawn at an angle lands under where it heads.
-  const routeEnd = (bar: Bar, other: Bar, terminal: Terminal, straight: boolean): Request => {
+  // make room; one drawn at an angle lands under where it heads. The end of
+  // a route drawn by hand (`byHand`: where it was put) stays there whichever
+  // way the route leaves it, and holds the place against everything else.
+  const routeEnd = (
+    bar: Bar,
+    other: Bar,
+    terminal: Terminal,
+    straight: boolean,
+    byHand: number | null,
+  ): Request => {
     if (terminal.kind === 'end') {
       claimedEnds.add(`${bar.id}|${terminal.side}`);
       return ask(bar, terminal.side, terminal.x, theEnd);
     }
     if (terminal.kind === 'free') {
+      if (byHand !== null) {
+        return ask(bar, terminal.side, byHand, () => ({
+          desired: byHand,
+          hold: TAP_HOLD.manual,
+        }));
+      }
       return ask(bar, terminal.side, terminal.x, (b) => ({
         desired: clamp(terminal.x, lo(b), hi(b)),
       }));
     }
-    const hold = straight ? TAP_HOLD.straight : TAP_HOLD.route;
+    const hold = byHand !== null ? TAP_HOLD.manual : straight ? TAP_HOLD.straight : TAP_HOLD.route;
     // The run that moves along with the tap: as far as the first bend, or
     // all the way to the other bar. Where the route has it, it is clear.
     const moves = straight || terminal.slides;
@@ -1052,17 +1155,30 @@ function layoutPass(
     const source = bars.get(edge.source);
     const target = bars.get(edge.target);
     if (!source || !target || source === target) continue;
-    const stored = pointsOf(edge.data?.bendPoints);
+    let stored = pointsOf(edge.data?.bendPoints);
     const anchors = anchorsOf(edge.data?.bendAnchors);
-    const fits =
+    const byHand = edge.data?.bendManual === true;
+    let fits =
       stored !== null &&
       anchors !== null &&
       sits(origins[edge.source]!, anchors.source) &&
       sits(origins[edge.target]!, anchors.target);
-    if (!fits) {
+    if (!fits && byHand && stored !== null && anchors !== null) {
+      // Drawn by hand for where its buses stood: brought along with them.
+      stored = bringAlong(
+        stored,
+        movedBy(origins[edge.source]!, anchors.source),
+        movedBy(origins[edge.target]!, anchors.target),
+      );
+      fits = true;
+    }
+    if (!fits || stored === null) {
       unrouted.push({ edge, source, target });
       continue;
     }
+    // Where each end was put, for a route drawn by hand: read before the
+    // route is cut down to where it leaves its bar.
+    const putAt = byHand ? ([stored[0]![0], stored[stored.length - 1]![0]] as const) : null;
     // Each end is read with the route turned to start at its bus.
     const sourceTerminal = readTerminal(stored, source);
     stored.reverse();
@@ -1076,11 +1192,11 @@ function layoutPass(
       straight,
       source: {
         terminal: sourceTerminal,
-        request: routeEnd(source, target, sourceTerminal, straight),
+        request: routeEnd(source, target, sourceTerminal, straight, putAt?.[0] ?? null),
       },
       target: {
         terminal: targetTerminal,
-        request: routeEnd(target, source, targetTerminal, straight),
+        request: routeEnd(target, source, targetTerminal, straight, putAt?.[1] ?? null),
       },
     });
   }
@@ -1200,18 +1316,63 @@ function layoutPass(
   // way of a connector is chosen by; the routes are held to the bars as
   // they are drawn, below.
   const blockedEarly = obstaclesNow(true);
+  // ---- device connectors drawn by hand ----
+  // Each along the points it was drawn through, from the middle of the face
+  // it leaves by. One whose device or bus has moved since is brought along,
+  // and kept only while that leaves it through nothing and out of a face
+  // that does not look away from the bar: otherwise the connector is worked
+  // out like any other.
+  const handDrawn = new Map<string, { points: Point[]; face: Side }>();
+  for (const { edge, box, bar } of stubs) {
+    if (edge.data?.bendManual !== true) continue;
+    const stored = pointsOf(edge.data.bendPoints);
+    const anchors = anchorsOf(edge.data.bendAnchors);
+    if (stored === null || anchors === null) continue;
+    const device = { x: box.cx - box.hw, y: box.cy - box.hh };
+    const bus = origins[edge.target]!;
+    const loose = !sits(device, anchors.source) || !sits(bus, anchors.target);
+    let points = loose
+      ? bringAlong(stored, movedBy(device, anchors.source), movedBy(bus, anchors.target))
+      : stored;
+    // The face whose middle it leaves: the box may have been measured since
+    // the route was drawn, which moves that middle a little.
+    const face = nearestFace(box, points[0]!);
+    const from = port(box, face);
+    if (!sameX(from, points[0]!) || !sameY(from, points[0]!)) {
+      points = bringAlong(points, [from[0] - points[0]![0], from[1] - points[0]![1]], [0, 0]);
+    }
+    if (loose) {
+      const lands = points[points.length - 1]!;
+      const away =
+        (face === 'north' && bar.cy > box.cy + box.hh) ||
+        (face === 'south' && bar.cy < box.cy - box.hh) ||
+        (face === 'east' && lands[0] < box.cx - box.hw) ||
+        (face === 'west' && lands[0] > box.cx + box.hw);
+      const throughOwn = points.some((q, k) => k > 0 && runsThrough(points[k - 1]!, q, box));
+      const offBar =
+        Math.abs(lands[1] - bar.cy) > EPS ||
+        lands[0] < bar.start - DETOUR_REACH ||
+        lands[0] > bar.end + DETOUR_REACH;
+      if (away || throughOwn || offBar || blockedEarly(box, bar)(points, true)) continue;
+    }
+    handDrawn.set(edge.id, { points, face });
+  }
   // The way every device connector takes with nothing about, from its
   // device to the bar: one that steps round something keeps off these as
   // one line keeps off another.
-  const direct = stubs.map(({ box, bar }) => {
+  const direct = stubs.flatMap(({ edge, box, bar }) => {
+    const drawn = handDrawn.get(edge.id);
+    if (drawn !== undefined) {
+      return drawn.points.slice(1).map((b, k) => ({ box, a: drawn.points[k]!, b }));
+    }
     const side = deviceSide(box, bar, style);
     if (!isVertical(side)) {
       const tip: Point = [side === 'east' ? bar.end - TAP_INSET : bar.start + TAP_INSET, bar.cy];
-      return { box, a: port(box, side === 'east' ? 'west' : 'east'), b: tip };
+      return [{ box, a: port(box, side === 'east' ? 'west' : 'east'), b: tip }];
     }
     const over = box.cx + box.hw >= bar.start && box.cx - box.hw <= bar.end;
     const x = over ? box.cx : clamp(box.cx, bar.start + TAP_INSET, bar.end - TAP_INSET);
-    return { box, a: port(box, side === 'north' ? 'south' : 'north'), b: [x, bar.cy] as Point };
+    return [{ box, a: port(box, side === 'north' ? 'south' : 'north'), b: [x, bar.cy] as Point }];
   });
   /** Whether a connector of the device at `own` through `points` is on the connector of another device. */
   const onAnother = (own: Box, points: readonly Point[]): boolean =>
@@ -1301,14 +1462,20 @@ function layoutPass(
       }
     }
     // The tap of a device that drops square onto this bar, or steps round
-    // something itself, is not moved for this one: the place beside it is
-    // tried as well, and none nearer to it than a spacing. (The end of a
-    // line gives way: where the connectors land does not depend on how the
-    // lines are routed, which are routed round the connectors.)
+    // something itself, is not moved for this one, and neither is an end
+    // that was put where it is by hand: the place beside it is tried as
+    // well, and none nearer to it than a spacing. (The end of a line that
+    // was routed gives way: where the connectors land does not depend on
+    // how the lines are routed, which are routed round the connectors.)
     const held = requests
       .filter((r) => r.bar === bar && isVertical(r.side))
       .map((r) => r.wish(bar))
-      .filter((wish) => wish.hold === TAP_HOLD.square || wish.hold === TAP_HOLD.round)
+      .filter(
+        (wish) =>
+          wish.hold === TAP_HOLD.square ||
+          wish.hold === TAP_HOLD.round ||
+          wish.hold === TAP_HOLD.manual,
+      )
       .map((wish) => wish.desired);
     for (const x of held) besides.push(x - TAP_SPACING, x + TAP_SPACING);
     const lowest = bar.start + TAP_INSET - DETOUR_REACH;
@@ -1376,6 +1543,8 @@ function layoutPass(
     box: Box;
     request: Request;
     detour?: Detour;
+    /** The points of one drawn by hand, and the face it leaves by. */
+    drawn?: { points: Point[]; face: Side };
   }[] = [];
   // A device that sits level with a bar runs into its end, and an end takes
   // one connection: the nearest to level, unless a branch already has it.
@@ -1443,7 +1612,31 @@ function layoutPass(
       ),
     });
   };
+  // One drawn by hand lands where it was drawn to: on a face, at a place it
+  // holds against everything else, or in the end of the bar it runs into.
   for (const { edge, box, bar } of stubs) {
+    const drawn = handDrawn.get(edge.id);
+    if (drawn === undefined) continue;
+    const lands = drawn.points[drawn.points.length - 1]!;
+    const before = drawn.points[drawn.points.length - 2]!;
+    if (sameY(before, lands)) {
+      const side: Side = before[0] > lands[0] ? 'east' : 'west';
+      claimedEnds.add(`${bar.id}|${side}`);
+      connectors.push({ edge, box, drawn, request: ask(bar, side, lands[0], theEnd) });
+      continue;
+    }
+    connectors.push({
+      edge,
+      box,
+      drawn,
+      request: ask(bar, before[1] < bar.cy ? 'north' : 'south', lands[0], () => ({
+        desired: lands[0],
+        hold: TAP_HOLD.manual,
+      })),
+    });
+  }
+  for (const { edge, box, bar } of stubs) {
+    if (handDrawn.has(edge.id)) continue;
     const side = deviceSide(box, bar, style);
     if (isVertical(side)) {
       onFace(edge, box, bar);
@@ -1702,7 +1895,21 @@ function layoutPass(
       held.last = Math.max(held.last, r.tap[0]);
     }
   }
-  for (const { edge, box, request: asked, detour } of connectors) {
+  const byHand = new Set<string>();
+  for (const { edge, box, request: asked, detour, drawn } of connectors) {
+    if (drawn !== undefined) {
+      // As it was drawn, with its end on the tap it was given: the run that
+      // lands there goes along where the tap had to move.
+      const lands = drawn.points[drawn.points.length - 1]!;
+      const points = bringAlong(
+        drawn.points,
+        [0, 0],
+        [asked.tap[0] - lands[0], asked.tap[1] - lands[1]],
+      );
+      routes.set(edge.id, { points, sourceSide: drawn.face, targetSide: asked.side });
+      byHand.add(edge.id);
+      continue;
+    }
     const { first, last } = outermost.get(asked.bar)!;
     const atTip = box.cx < asked.bar.cx ? asked.tap[0] <= first + EPS : asked.tap[0] >= last - EPS;
     if (detour !== undefined) {
@@ -1753,9 +1960,21 @@ function layoutPass(
     });
   }
   return {
-    pass: { bars: out, routes, kept: new Set(routed.map(({ edge }) => edge.id)) },
+    pass: { bars: out, routes, kept: new Set(routed.map(({ edge }) => edge.id)), byHand },
     blocked: blockedStub,
   };
+}
+
+/** The face of `box` whose middle `point` is nearest. */
+function nearestFace(box: Box, point: Point): Side {
+  let best: Side = 'south';
+  let least = Infinity;
+  for (const face of ['north', 'south', 'east', 'west'] as const) {
+    const [x, y] = port(box, face);
+    const apart = Math.hypot(point[0] - x, point[1] - y);
+    if (apart < least) [best, least] = [face, apart];
+  }
+  return best;
 }
 
 /**

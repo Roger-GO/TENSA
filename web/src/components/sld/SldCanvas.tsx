@@ -26,7 +26,7 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
-import type { DragOverrides, RouteOverrides, SelectedElement } from '@/store/case';
+import type { DragOverrides, RouteOverride, RouteOverrides, SelectedElement } from '@/store/case';
 import { useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import type { LayoutSnapshot } from '@/store/layoutHistory';
@@ -86,7 +86,10 @@ import {
 import { GRID_STEP } from './tidy';
 import { branchesThroughSymbols, type TidyPlan } from './tidyPlan';
 import { startTidy, type TidyJob } from './tidyClient';
-import { drawsClear, pictureOf, type PictureOptions } from './picture';
+import { drawsClear, pictureOf, routesDrawClear, type PictureOptions } from './picture';
+import { routeChecker } from './routeCheck';
+import { routeEndsOf } from './routeEdit';
+import { SldRouteEditor } from './SldRouteEditor';
 import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
 import { flowLabelWidth, readoutWidth } from './labels';
 import { getDeviceOverlayState, getLineOverlayState } from './overlay';
@@ -109,6 +112,7 @@ import {
   mergeWithDrift,
   resolveDeviceCoords,
   storedBranchRoutes,
+  storedConnectorRoutes,
   unitStatesOf,
   type CoordsByIdx,
 } from './sidecar';
@@ -130,6 +134,7 @@ import {
   type ConnectorStyle,
   type LabelPlace,
   type NodeSize,
+  type Point,
 } from './connections';
 import { FULL_ZOOM, fitPadding, locateZoom } from './zoom';
 import { cn } from '@/lib/cn';
@@ -402,6 +407,9 @@ function SldCanvasInner({
   // hint, which would promise a drag that does nothing.
   const [locked, setLocked] = useState<boolean>(false);
   const onInteractiveChange = useCallback((interactive: boolean) => setLocked(!interactive), []);
+  // A tidy of a large diagram is being worked out (`tidy`, below): nothing
+  // can be moved meanwhile.
+  const [tidying, setTidying] = useState(false);
   // The commands that arrange the diagram are greyed out while it is locked,
   // wherever they are listed, so the lock is kept where they can read it.
   const setDiagramLocked = useSldStore((s) => s.setDiagramLocked);
@@ -460,28 +468,44 @@ function SldCanvasInner({
     () => storedBranchRoutes(storedSidecar, topology),
     [storedSidecar, topology],
   );
-  // The routes chosen in this visit (Tidy diagram, or an undo that put an
-  // earlier arrangement back) sit on top of those, as the drags sit on top
-  // of the positions; `null` takes a route away.
+  // The connectors of devices the saved layout holds as drawn by hand.
+  const storedConnectors = useMemo(
+    () => storedConnectorRoutes(storedSidecar, topology),
+    [storedSidecar, topology],
+  );
+  // The routes chosen in this visit (Tidy diagram, a route moved by hand, or
+  // an undo that put an earlier arrangement back) sit on top of those, as
+  // the drags sit on top of the positions; `null` takes a route away.
   const routeOverrides = useCaseStore((s) => s.routeOverrides);
   const branchRoutes = useMemo(() => {
     const bendPoints = new Map(
-      usingAutoLayout ? (autoArrangement?.routes ?? []) : storedRoutes.polylines,
+      usingAutoLayout
+        ? (autoArrangement?.routes ?? [])
+        : [...storedRoutes.polylines, ...storedConnectors.polylines],
     );
     const bendAnchors = new Map(
-      usingAutoLayout ? (autoArrangement?.anchors ?? []) : storedRoutes.anchors,
+      usingAutoLayout
+        ? (autoArrangement?.anchors ?? [])
+        : [...storedRoutes.anchors, ...storedConnectors.anchors],
+    );
+    // The ones that were drawn by hand: the diagram keeps those as they are.
+    const bendManual = new Set(
+      usingAutoLayout ? [] : [...storedRoutes.manual, ...storedConnectors.polylines.keys()],
     );
     for (const [id, chosen] of Object.entries(routeOverrides)) {
       if (chosen === null) {
         bendPoints.delete(id);
         bendAnchors.delete(id);
+        bendManual.delete(id);
       } else {
         bendPoints.set(id, chosen.points);
         bendAnchors.set(id, chosen.anchors);
+        if (chosen.manual === true) bendManual.add(id);
+        else bendManual.delete(id);
       }
     }
-    return { bendPoints, bendAnchors };
-  }, [usingAutoLayout, autoArrangement, storedRoutes, routeOverrides]);
+    return { bendPoints, bendAnchors, bendManual };
+  }, [usingAutoLayout, autoArrangement, storedRoutes, storedConnectors, routeOverrides]);
   const controllerCoords = useMemo(() => controllerCoordsAsMap(storedSidecar), [storedSidecar]);
   // Drag overrides — per-node coordinate overrides applied AFTER
   // buildGraph so user drags persist across topology re-fetches (Unit 9
@@ -538,6 +562,7 @@ function SldCanvasInner({
     const built = buildGraph(topology, coords, {
       bendPoints: branchRoutes.bendPoints,
       bendAnchors: branchRoutes.bendAnchors,
+      bendManual: branchRoutes.bendManual,
       barLengths,
       nonBusCoords: nonBusCoordsMap,
       controllerCoords,
@@ -761,8 +786,12 @@ function SldCanvasInner({
             const kept = edge.data?.bendAnchors as
               | NonNullable<RouteOverrides[string]>['anchors']
               | undefined;
+            // A route that was drawn by hand is brought along from where it
+            // was drawn at every move, so that what the drag shows is what
+            // the drop gives.
             if (
               route === undefined ||
+              edge.data?.bendManual === true ||
               (sits(edge.source, kept?.source) && sits(edge.target, kept?.target))
             ) {
               return edge;
@@ -786,6 +815,11 @@ function SldCanvasInner({
     return made;
   }, [nodes, edges, sizes, connectorStyle, barLengths, valuesShown, labelWidths, dragging]);
   const connections = picture.connections;
+  // The picture as it was last made, for a handler that asks it about a route.
+  const pictureRef = useRef(picture);
+  useEffect(() => {
+    pictureRef.current = picture;
+  }, [picture]);
   // The diagram as it was last drawn, for the handler that ends a move: where
   // a node may be dropped depends on the bars and the connectors around it.
   const drawnRef = useRef<{
@@ -850,6 +884,8 @@ function SldCanvasInner({
   // the change that ends it. Presses of the arrow keys on the same nodes in
   // quick succession are one move.
   const persistRequestedRef = useRef(false);
+  // Whether the user has been told what a route drawn by hand is.
+  const explainedByHandRef = useRef(false);
   // Whether a change of this visit was just written, and the routes the
   // diagram makes for it are still to come: they are written as well. Until
   // the diagram is at rest again with nothing left to route.
@@ -1069,14 +1105,47 @@ function SldCanvasInner({
     const held = useCaseStore.getState().routeOverrides;
     const next: RouteOverrides = { ...held };
     let changed = false;
+    // The routes that were drawn by hand and are no longer: what they are
+    // attached to was moved to where they do not fit.
+    const givenUp: string[] = [];
+    const drawnByHand = new Set(
+      edges.filter((edge) => edge.data?.bendManual === true).map((edge) => edge.id),
+    );
     for (const [id, route] of picture.changed) {
-      if (JSON.stringify(held[id]?.points ?? null) === JSON.stringify(route.points)) continue;
+      if (
+        JSON.stringify(held[id]?.points ?? null) === JSON.stringify(route.points) &&
+        (held[id]?.manual === true) === (route.manual === true)
+      ) {
+        continue;
+      }
       next[id] = route;
       changed = true;
+      if (drawnByHand.has(id) && route.manual !== true) givenUp.push(id);
+    }
+    // A connector that was drawn by hand and is worked out again has no
+    // route to keep: `null` says so over whatever the saved layout holds.
+    for (const id of picture.released) {
+      if (!id.startsWith('stub-') || !drawnByHand.has(id)) continue;
+      next[id] = null;
+      changed = true;
+      givenUp.push(id);
     }
     if (!changed) return;
     settlingRef.current += 1;
     useCaseStore.getState().setRouteOverrides(next);
+    if (givenUp.length > 0) {
+      const first = edges.find((edge) => edge.id === givenUp[0]);
+      toast.info(
+        givenUp.length === 1 && first !== undefined
+          ? `The route you drew for ${routeNameOf(first)} no longer fits`
+          : `${givenUp.length} routes you drew no longer fit`,
+        {
+          description:
+            'What it is attached to was moved to where the route would run over something, so it is routed automatically again. Undo takes the move back, and the route with it.',
+          duration: 8_000,
+        },
+      );
+    }
     // They are written with the change that led to them (`routesToFollowRef`):
     // a move, or anything else that was just written for this diagram. A
     // diagram that was only opened is not written for being drawn, whether
@@ -1089,6 +1158,18 @@ function SldCanvasInner({
     if (routesToFollowRef.current) persistRequestedRef.current = true;
   }, [picture, dragging, coordsAreCurrent, baseGraph, edges]);
 
+  // The lines that are routed by hand, counted for the commands that reset
+  // them, and gone with the diagram.
+  const manualRoutes = useMemo(
+    () => edges.filter((edge) => edge.data?.bendManual === true).length,
+    [edges],
+  );
+  const setManualRouteCount = useSldStore((s) => s.setManualRouteCount);
+  useEffect(() => {
+    setManualRouteCount(manualRoutes);
+  }, [manualRoutes, setManualRouteCount]);
+  useEffect(() => () => setManualRouteCount(0), [setManualRouteCount]);
+
   // A write still waiting out its delay when the canvas goes away (another
   // view, another case) is sent then, not dropped: the drag stays on screen
   // through `dragOverrides`, and the file would otherwise be a drag behind
@@ -1099,8 +1180,16 @@ function SldCanvasInner({
     return () => flushPendingSidecarPut(path);
   }, [primaryPath]);
 
+  // The line, transformer or device connector whose route is being moved by
+  // hand, by the id of its edge: the one that was last clicked. It shows its
+  // handles (`SldRouteEditor`) until something else is clicked.
+  const [routeEditId, setRouteEditId] = useState<string | null>(null);
+  // Where the bar of that line is drawn: in the row above the diagram, in
+  // the place of the line that says what can be done on it.
+  const [routeBarSlot, setRouteBarSlot] = useState<HTMLDivElement | null>(null);
   const onNodeClick: NodeMouseHandler = useCallback(
     (_e, node) => {
+      setRouteEditId(null);
       const data = node.data as { idx?: string; kind?: string };
       const idx = data.idx ?? node.id;
       // Map the React Flow nodeType back to the inspector's element-kind
@@ -1142,19 +1231,24 @@ function SldCanvasInner({
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
     (_e, edge) => {
+      const edgeType = edge.type ?? 'topology';
+      // A click picks the line to move its route by hand, the connector of
+      // a device included. Not while nothing can be moved.
+      setRouteEditId(locked || tidying ? null : edge.id);
+      // A connector is not an element of its own: the Inspector keeps what
+      // it shows.
+      if (edgeType === 'stub') return;
       const data = edge.data as { idx?: string; bucket?: string } | undefined;
       const idx = data?.idx;
       if (!idx) return;
-      // Stub edges (non-bus → bus connectors) aren't independently
-      // selectable — clicking one routes to the bus side, but in
-      // practice the user clicks the device or bus node instead.
-      const edgeType = edge.type ?? 'topology';
-      if (edgeType === 'stub') return;
       const kind: 'line' | 'transformer' = edgeType === 'transformer' ? 'transformer' : 'line';
       setSelectedElement({ kind, idx: String(idx) });
+      // The line is what is selected now, not the node that was before it.
+      useSldStore.getState().clearSelectedNodeId();
     },
-    [setSelectedElement],
+    [setSelectedElement, locked, tidying],
   );
+  const onPaneClick = useCallback(() => setRouteEditId(null), []);
 
   // Connectivity / island-detection overlay (Unit 17). Subscribes to
   // the connectivity slice; when a result is present we flag every
@@ -1652,12 +1746,193 @@ function SldCanvasInner({
     [stepThroughHistory],
   );
 
+  // ---- Moving a line by hand ------------------------------------------------
+  //
+  // The line that is picked shows its handles (`SldRouteEditor`), which hand
+  // a route here when a move of them ends. The route is the user's from then
+  // on (`manual`): a tidy routes the other lines around it, and it follows
+  // its ends when they are moved. It is kept like a route a tidy chose, in
+  // `routeOverrides`, with the arrangement it replaces in the layout history
+  // and a write of the layout beside the case.
+  const editedEdge = useMemo(
+    () => (routeEditId === null ? null : (edges.find((edge) => edge.id === routeEditId) ?? null)),
+    [edges, routeEditId],
+  );
+  // Nothing is picked while nothing can be moved, while several nodes are
+  // picked together (their bar takes the place of this one), or once the
+  // line is gone.
+  useEffect(() => {
+    if (routeEditId === null) return;
+    if (locked || tidying || pickedSet !== null || (baseGraph !== null && editedEdge === null)) {
+      setRouteEditId(null);
+    }
+  }, [routeEditId, locked, tidying, pickedSet, baseGraph, editedEdge]);
+  const commitRoute = useCallback(
+    (edgeId: string, points: Point[], what: string, coalesce: string | null): string | null => {
+      const graph = baseGraphRef.current;
+      const edge = graph?.edges.find((e) => e.id === edgeId);
+      const at = new Map(nodesRef.current.map((n) => [n.id, n.position]));
+      const source = edge === undefined ? undefined : at.get(edge.source);
+      const target = edge === undefined ? undefined : at.get(edge.target);
+      if (!graph || !edge || !source || !target) return 'the line is no longer on the diagram';
+      if (locked) return 'the diagram is locked';
+      const route: RouteOverride = {
+        points: points.map(([x, y]): [number, number] => [x, y]),
+        anchors: { source: { ...source }, target: { ...target } },
+        manual: true,
+      };
+      // The whole picture with the route in place: the taps as they are
+      // handed out with it, the symbol of a transformer on it, the labels
+      // around it. A route that leaves something drawn over something else
+      // is not kept.
+      const before = graph.edges as ConnectionEdge[];
+      const after = before.map((e) =>
+        e.id === edgeId
+          ? {
+              ...e,
+              data: {
+                ...e.data,
+                bendPoints: route.points,
+                bendAnchors: route.anchors,
+                bendManual: true,
+              },
+            }
+          : e,
+      );
+      if (!routesDrawClear(nodesRef.current, before, drawnRef.current.options)(after)) {
+        return 'with the line there, something on the diagram would be drawn over something else';
+      }
+      const name = routeNameOf(edge);
+      useLayoutHistoryStore
+        .getState()
+        .record(`${what} ${name}`, arrangementOf(nodesRef.current, graph.edges), coalesce);
+      useCaseStore
+        .getState()
+        .setRouteOverrides({ ...useCaseStore.getState().routeOverrides, [edgeId]: route });
+      persistRequestedRef.current = true;
+      setTidyNote(null);
+      // What that means is said once: after that the bar of the line says
+      // which lines are the user's, and a notice for each would be noise.
+      if (edge.data?.bendManual !== true && !explainedByHandRef.current) {
+        explainedByHandRef.current = true;
+        toast.info(`${name.charAt(0).toUpperCase()}${name.slice(1)} is now routed by hand`, {
+          description:
+            'Tidy diagram leaves it as it is, and it follows its ends when they are moved. Reset route gives it back to the automatic routing. Saved with the layout.',
+          duration: 8_000,
+        });
+      }
+      return null;
+    },
+    [locked],
+  );
+  // Give routes that were drawn by hand back to the automatic routing: the
+  // one of `only`, or all of them. One step for Undo.
+  const resetRoutes = useCallback(
+    (only: string | null) => {
+      const graph = baseGraphRef.current;
+      if (graph === null) return;
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      const drawnByHand = graph.edges.filter(
+        (edge) => edge.data?.bendManual === true && (only === null || edge.id === only),
+      );
+      const one = drawnByHand.length === 1 ? drawnByHand[0] : undefined;
+      if (drawnByHand.length === 0) {
+        toast.info(
+          only === null
+            ? 'No line is routed by hand.'
+            : 'This line is routed automatically already.',
+          {
+            description:
+              'To draw a route by hand, click a line on the diagram and drag its runs and bends.',
+          },
+        );
+        return;
+      }
+      const step = useLayoutHistoryStore
+        .getState()
+        .record(
+          one !== undefined
+            ? `reset the route of ${routeNameOf(one)}`
+            : `reset ${drawnByHand.length} manual routes`,
+          arrangementOf(nodesRef.current, graph.edges),
+        );
+      // `null`: no route of its own, whatever the saved layout holds for it.
+      const next: RouteOverrides = { ...useCaseStore.getState().routeOverrides };
+      for (const edge of drawnByHand) next[edge.id] = null;
+      useCaseStore.getState().setRouteOverrides(next);
+      persistRequestedRef.current = true;
+      setTidyNote(null);
+      const name = one === undefined ? '' : routeNameOf(one);
+      toast.success(
+        one !== undefined
+          ? `${name.charAt(0).toUpperCase()}${name.slice(1)} is routed automatically again`
+          : `${drawnByHand.length} routes are routed automatically again`,
+        {
+          description: `Tidy diagram can now route ${one !== undefined ? 'it' : 'them'} with the rest. Saved with the layout.`,
+          action: { label: 'Undo', onClick: () => undoStep(step) },
+        },
+      );
+    },
+    [locked, undoStep],
+  );
+  const makeRouteCheck = useCallback(() => {
+    const edge = baseGraphRef.current?.edges.find((e) => e.id === routeEditId);
+    if (edge === undefined) return () => 'the line is no longer on the diagram';
+    const { options } = drawnRef.current;
+    return routeChecker(nodesRef.current, pictureRef.current, edge as ConnectionEdge, {
+      sizes: options.sizes,
+      values: options.values,
+      labelWidths: options.labelWidths,
+    });
+  }, [routeEditId]);
+  // What the editor draws from: the route as it is drawn now, and what its
+  // two ends are attached to.
+  const editedRoute = useMemo(() => {
+    if (editedEdge === null) return null;
+    const points = connections.routes.get(editedEdge.id)?.points;
+    if (points === undefined) return null;
+    const at = new Map(nodes.map((n) => [n.id, n.position]));
+    return {
+      points,
+      ends: routeEndsOf(editedEdge as ConnectionEdge, points, at, connections.bars),
+      name: routeNameOf(editedEdge),
+      manual: editedEdge.data?.bendManual === true,
+    };
+  }, [editedEdge, connections, nodes]);
+  const commitEditedRoute = useCallback(
+    (points: Point[], what: string, coalesce: string | null) =>
+      routeEditId === null ? 'no line is picked' : commitRoute(routeEditId, points, what, coalesce),
+    [routeEditId, commitRoute],
+  );
+  const resetEditedRoute = useCallback(() => resetRoutes(routeEditId), [routeEditId, resetRoutes]);
+  const resetAllRoutes = useCallback(() => resetRoutes(null), [resetRoutes]);
+  const endRouteEdit = useCallback(() => setRouteEditId(null), []);
+  // Pick a line from its right-click menu, as a click on it does.
+  const editRoute = useCallback(
+    (edgeId: string) => {
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      setRouteEditId(edgeId);
+    },
+    [locked],
+  );
+
   // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
   // `relayout` the buses are first lined up on the grid and every generator,
   // load and shunt is put back beside its bus, where the diagram places one
   // that was never moved. `applyTidy` puts a plan in place (`planTidy`).
   const applyTidy = useCallback(
-    ({ nodes: placedNodes, edges: placedEdges, tidied, refused }: TidyPlan, relayout: boolean) => {
+    (plan: TidyPlan, relayout: boolean) => {
+      const { nodes: placedNodes, edges: placedEdges, tidied, refused } = plan;
+      // The routes that were drawn by hand: the ones that stay as they are,
+      // and the ones a re-layout left no room for.
+      const byHand = plan.byHand ?? new Map<string, Point[]>();
+      const released = plan.released ?? [];
       const graph = baseGraphRef.current;
       if (graph === null) return;
       const branches = placedEdges.filter((e) => e.type !== 'stub');
@@ -1693,7 +1968,8 @@ function SldCanvasInner({
       const at = new Map(placedNodes.map((n) => [n.id, n.position]));
       const chosen: RouteOverrides = {};
       for (const edge of branches) {
-        const points = routes.get(edge.id);
+        const kept = byHand.get(edge.id);
+        const points = kept ?? routes.get(edge.id);
         const source = at.get(edge.source);
         const target = at.get(edge.target);
         chosen[edge.id] =
@@ -1702,22 +1978,40 @@ function SldCanvasInner({
             : {
                 points: points.map(([x, y]): [number, number] => [x, y]),
                 anchors: { source: { ...source }, target: { ...target } },
+                ...(kept !== undefined ? { manual: true as const } : {}),
               };
+      }
+      // The connector of a device that was drawn by hand stays with its
+      // device: the diagram brings it along from where it was drawn.
+      for (const edge of placedEdges) {
+        if (edge.type === 'stub') chosen[edge.id] = before.routes[edge.id] ?? null;
       }
       const positions = positionsOf(placedNodes);
       if (sameArrangement(before, { positions, routes: chosen })) {
+        const handNote =
+          byHand.size === 0
+            ? ''
+            : ` ${byHand.size} routed by hand ${byHand.size === 1 ? 'is' : 'are'} left as ${byHand.size === 1 ? 'it is' : 'they are'}: Reset manual routes, in the Arrange menu, gives ${byHand.size === 1 ? 'it' : 'them'} back to the tidy.`;
         setTidyNote('Already tidy: nothing was changed');
         toast.info('The diagram is already tidy.', {
           description: relayout
-            ? 'Every bus is on the grid, every device beside its bus, and no line would be routed differently. Nothing was changed.'
-            : 'No line or transformer would be routed differently. Nothing was changed.',
+            ? `Every bus is on the grid, every device beside its bus, and no line would be routed differently. Nothing was changed.${handNote}`
+            : `No line or transformer would be routed differently. Nothing was changed.${handNote}`,
           duration: 8_000,
         });
         return;
       }
       const step = arrange(relayout ? 'tidy and re-layout' : 'tidy diagram', positions, chosen);
-      const rerouted = branches.length - unrouted.length;
+      const rerouted = branches.length - byHand.size - unrouted.length;
       const lines = `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed`;
+      // What became of the routes that were drawn by hand.
+      const hand =
+        (byHand.size === 0
+          ? ''
+          : ` ${byHand.size} routed by hand ${byHand.size === 1 ? 'was left as it is' : 'were left as they are'}: Reset manual routes, in the Arrange menu, gives ${byHand.size === 1 ? 'it' : 'them'} back to the tidy.`) +
+        (released.length === 0
+          ? ''
+          : ` ${released.length} routed by hand no longer fitted where ${released.length === 1 ? 'its' : 'their'} buses now stand and ${released.length === 1 ? 'was' : 'were'} routed afresh.`);
       const one = unrouted.length === 1;
       const why = tidied.outOfSteps
         ? `${unrouted.length} could not be routed in the time a tidy takes`
@@ -1728,11 +2022,13 @@ function SldCanvasInner({
           ? 'it keeps the route it had'
           : 'they keep the routes they had';
       const left = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
-      setTidyNote(`Tidied: ${lines}`);
+      setTidyNote(
+        byHand.size === 0 ? `Tidied: ${lines}` : `Tidied: ${lines}, ${byHand.size} by hand kept`,
+      );
       toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
         description: relayout
-          ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${left} Saved with the layout.`
-          : `${lines}. Nothing was moved.${left} Saved with the layout.`,
+          ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${hand}${left} Saved with the layout.`
+          : `${lines}. Nothing was moved.${hand}${left} Saved with the layout.`,
         duration: 8_000,
         action: { label: 'Undo', onClick: () => undoStep(step) },
       });
@@ -1744,7 +2040,6 @@ function SldCanvasInner({
   // the main thread (`tidyClient.ts`): the button says what is going on, the
   // diagram keeps answering, and the work can be called off. Nothing can be
   // dragged meanwhile, so the plan fits the diagram it is put on.
-  const [tidying, setTidying] = useState(false);
   const tidyJobRef = useRef<TidyJob | null>(null);
   useEffect(
     () => () => {
@@ -1940,11 +2235,22 @@ function SldCanvasInner({
         case 'redo-layout':
           stepThroughHistory('redo');
           break;
+        case 'reset-manual-routes':
+          resetRoutes(null);
+          break;
         default:
           arrangePicked(command);
       }
     },
-    [fitView, resetLayout, chooseConnectorStyle, tidy, stepThroughHistory, arrangePicked],
+    [
+      fitView,
+      resetLayout,
+      chooseConnectorStyle,
+      tidy,
+      stepThroughHistory,
+      resetRoutes,
+      arrangePicked,
+    ],
   );
   useEffect(() => subscribeSldCommand(runCommand), [runCommand]);
   const runArrangeCommand = useCallback(
@@ -1976,6 +2282,10 @@ function SldCanvasInner({
   // change its items as it fades out.
   const [contextTarget, setContextTarget] = useState<SldContextTarget>({ kind: 'canvas' });
   const contextMenuOpenRef = useRef(false);
+  const editedEdgeRef = useRef<Edge | null>(null);
+  useEffect(() => {
+    editedEdgeRef.current = editedEdge;
+  }, [editedEdge]);
   const onContextMenuOpenChange = useCallback((open: boolean) => {
     contextMenuOpenRef.current = open;
   }, []);
@@ -1988,7 +2298,13 @@ function SldCanvasInner({
       e.stopPropagation();
       return;
     }
-    setContextTarget({ kind: 'canvas' });
+    // The handles of the line that is picked lie over it: a right-click on
+    // one is on that line.
+    const picked =
+      e.target instanceof Element && e.target.closest('[data-testid="sld-route-editor"]') !== null
+        ? editedEdgeRef.current
+        : null;
+    setContextTarget(picked === null ? { kind: 'canvas' } : contextTargetFromEdge(picked));
   }, []);
   const onSurfacePointerDownCapture = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -2041,7 +2357,12 @@ function SldCanvasInner({
   return (
     <div className="flex h-full w-full flex-col" data-testid="sld-canvas">
       <div className="flex items-center gap-2 px-2 py-1">
-        <SldCanvasHint locked={locked} selectedName={selectedName} onZoomIn={zoomToFullSize} />
+        <SldCanvasHint
+          locked={locked}
+          selectedName={selectedName}
+          onZoomIn={zoomToFullSize}
+          routeBarSlot={routeEditId !== null && editedRoute !== null ? setRouteBarSlot : null}
+        />
         <SldArrangeControls
           locked={locked}
           busy={tidying}
@@ -2049,6 +2370,7 @@ function SldCanvasInner({
           note={tidyNote}
           untidy={draggedIds.length > 0 ? 0 : untidyCount}
           pickedCount={pickedCount}
+          manualRoutes={manualRoutes}
           snap={snapToGrid}
           onSnapChange={changeSnap}
           onCommand={runArrangeCommand}
@@ -2094,6 +2416,7 @@ function SldCanvasInner({
               edgeTypes={EDGE_TYPES}
               onNodeClick={onNodeClick}
               onEdgeClick={onEdgeClick}
+              onPaneClick={onPaneClick}
               onNodeContextMenu={onNodeContextMenu}
               onEdgeContextMenu={onEdgeContextMenu}
               onSelectionContextMenu={onSelectionContextMenu}
@@ -2131,6 +2454,24 @@ function SldCanvasInner({
                 maskStrokeColor={MINIMAP_MASK_STYLE.stroke as string}
                 maskStrokeWidth={MINIMAP_MASK_STYLE.strokeWidth as number}
               />
+              {/* The handles of the line whose route is moved by hand, and
+                  the bar that goes with them. Not while a node is dragged:
+                  the line is on its way to where the node is dropped. */}
+              {routeEditId !== null && editedRoute !== null && !dragging ? (
+                <SldRouteEditor
+                  edgeId={routeEditId}
+                  name={editedRoute.name}
+                  points={editedRoute.points}
+                  manual={editedRoute.manual}
+                  ends={editedRoute.ends}
+                  makeCheck={makeRouteCheck}
+                  grid={snapToGrid ? GRID_STEP : null}
+                  onCommit={commitEditedRoute}
+                  onReset={resetEditedRoute}
+                  onDone={endRouteEdit}
+                  barSlot={routeBarSlot}
+                />
+              ) : null}
             </ReactFlow>
             {/* Keys to the bus colours and limit markers, and to the line
             loading and generator limit markers. Inside the surface so the PNG
@@ -2169,6 +2510,10 @@ function SldCanvasInner({
           onArrange={runArrangeCommand}
           snap={snapToGrid}
           onSnapChange={changeSnap}
+          onEditRoute={editRoute}
+          onResetRoute={resetRoutes}
+          manualRoutes={manualRoutes}
+          onResetManualRoutes={resetAllRoutes}
         />
       </ContextMenu>
     </div>
@@ -2328,9 +2673,10 @@ function positionsOf(nodes: readonly Node[]): DragOverrides {
 
 /**
  * The arrangement of the diagram as drawn, for the layout history: where
- * `nodes` stand, and how each branch among `edges` is routed (the points and
- * anchors `buildGraph` gave the edge, or `null` for one routed from where its
- * buses stand). With `withUnits`, also which control chains are drawn out.
+ * `nodes` stand, and how each branch and connector among `edges` is routed
+ * (the points and anchors `buildGraph` gave the edge, marked `manual` for a
+ * route drawn by hand, or `null` for one routed from where its ends stand).
+ * With `withUnits`, also which control chains are drawn out.
  */
 function arrangementOf(
   nodes: readonly Node[],
@@ -2339,16 +2685,22 @@ function arrangementOf(
 ): LayoutSnapshot {
   const routes: RouteOverrides = {};
   for (const edge of edges) {
-    if (edge.type === 'stub') continue;
     const data = edge.data as
       | {
           bendPoints?: [number, number][];
           bendAnchors?: NonNullable<RouteOverrides[string]>['anchors'];
+          bendManual?: boolean;
         }
       | undefined;
+    // A connector has a route to keep only where one was drawn for it by
+    // hand; `null` for the others puts them back to being worked out.
     routes[edge.id] =
       data?.bendPoints !== undefined && data.bendAnchors !== undefined
-        ? { points: data.bendPoints, anchors: data.bendAnchors }
+        ? {
+            points: data.bendPoints,
+            anchors: data.bendAnchors,
+            ...(data.bendManual === true ? { manual: true as const } : {}),
+          }
         : null;
   }
   const snapshot: LayoutSnapshot = { positions: positionsOf(nodes), routes };
@@ -2380,8 +2732,20 @@ function sameArrangement(
     ) {
       return false;
     }
+    if ((a.routes[id]?.manual === true) !== (b.routes[id]?.manual === true)) return false;
   }
   return true;
+}
+
+/**
+ * What the line of `edge` is called in a notice and in the Edit menu:
+ * `line Line_3`, `transformer T1`, `the connector of PQ_2`.
+ */
+function routeNameOf(edge: Pick<Edge, 'id' | 'type' | 'data'>): string {
+  const data = edge.data as { name?: string; idx?: string } | undefined;
+  const name = data?.name || data?.idx || edge.id;
+  if (edge.type === 'stub') return `the connector of ${name}`;
+  return `${edge.type === 'transformer' ? 'transformer' : 'line'} ${name}`;
 }
 
 /** The nodes of `after` that stand somewhere else than in `before`. */

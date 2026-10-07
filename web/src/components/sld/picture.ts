@@ -24,6 +24,8 @@
  * `drawsClear` is the same check asked before a node comes to stand where
  * it was dropped (`clearDrop`): whether the diagram, drawn with the nodes
  * there, has anything on anything else that was not so before the move.
+ * `routesDrawClear` asks it of a route that was drawn by hand, before the
+ * diagram keeps it.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -344,27 +346,61 @@ export function drawsClear<E extends DrawnEdge>(
   edges: readonly E[],
   options: PictureOptions,
 ): (nodes: readonly LabelNode[]) => boolean {
-  const found = (nodes: readonly LabelNode[]): string[] => {
-    // What is drawn whatever is in the way. A readout or a flow label that
-    // has no place is left off, so neither is ever on anything, and placing
-    // them is most of the work of a picture with values on it.
-    const { routed, chains, busLabels } = drawnAlways(nodes, edges, options);
-    const picture = {
-      ...routed,
-      chains,
-      busLabels,
-      readouts: new Map<string, ReadoutPlace>(),
-      labelPlaces: routed.symbols,
-    };
-    return findOverlaps(drawnDiagram(nodes, picture, { sizes: options.sizes, values: false })).map(
-      ({ kind, a, b }) => `${kind}|${a}|${b}`,
-    );
-  };
   let known: Set<string> | null = null;
   return (nodes) => {
-    const now = found(nodes);
+    const now = overlapsDrawn(nodes, edges, options);
     if (now.length === 0) return true;
-    known ??= new Set(found(before));
+    known ??= new Set(overlapsDrawn(before, edges, options));
+    return now.every((overlap) => known!.has(overlap));
+  };
+}
+
+/**
+ * What is on what in the picture of `nodes` and `edges`, each as one name:
+ * of what is drawn whatever is in the way. A readout or a flow label that
+ * has no place is left off, so neither is ever on anything, and placing
+ * them is most of the work of a picture with values on it.
+ */
+function overlapsDrawn<E extends DrawnEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): string[] {
+  const { routed, chains, busLabels } = drawnAlways(nodes, edges, options);
+  const picture = {
+    ...routed,
+    chains,
+    busLabels,
+    readouts: new Map<string, ReadoutPlace>(),
+    labelPlaces: routed.symbols,
+  };
+  return findOverlaps(drawnDiagram(nodes, picture, { sizes: options.sizes, values: false })).map(
+    ({ kind, a, b }) => `${kind}|${a}|${b}`,
+  );
+}
+
+/**
+ * Whether a diagram can be drawn with a route of it changed by hand, as the
+ * canvas asks before it keeps one (`routeCheck.ts` has said that the route
+ * itself is on nothing; this is the picture the whole diagram then gives:
+ * the taps as they are handed out with the route in place, the symbol of a
+ * transformer where it has room on it, the labels of the buses around it).
+ *
+ * `before` are the edges with the routes kept for them now. The answer
+ * says, of the same edges with other routes, whether their picture has
+ * nothing on anything else (`findOverlaps`) that the picture as it is does
+ * not have.
+ */
+export function routesDrawClear<E extends DrawnEdge>(
+  nodes: readonly LabelNode[],
+  before: readonly E[],
+  options: PictureOptions,
+): (edges: readonly E[]) => boolean {
+  let known: Set<string> | null = null;
+  return (edges) => {
+    const now = overlapsDrawn(nodes, edges, options);
+    if (now.length === 0) return true;
+    known ??= new Set(overlapsDrawn(nodes, before, options));
     return now.every((overlap) => known!.has(overlap));
   };
 }

@@ -1293,6 +1293,49 @@ describe('useCommandRegistry: Tidy diagram, Snap to grid, Align and Distribute',
     );
   });
 
+  it('offers Reset manual routes while a line is routed by hand, and says how many are', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const none = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(none.result.current, 'view.reset-manual-routes')).toBeUndefined();
+    // The menu keeps it in view, with how a line comes to be routed by hand.
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    const greyed = menu.result.current.find((c) => c.id === 'view.reset-manual-routes');
+    expect(greyed?.label).toBe('Reset manual routes');
+    expect(greyed?.unavailable).toMatch(/^No line is routed by hand\. Click a line on the diagram/);
+    none.unmount();
+    menu.unmount();
+
+    act(() => useSldStore.setState({ manualRouteCount: 2 }));
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      const reset = find(result.current, 'view.reset-manual-routes');
+      expect(reset).toMatchObject({ group: 'view', label: 'Reset manual routes (2)' });
+      expect(reset?.keywords).toEqual(expect.arrayContaining(['route', 'manual', 'reset']));
+      act(() => reset?.action());
+    } finally {
+      unsubscribe();
+      act(() => useSldStore.setState({ manualRouteCount: 0 }));
+    }
+    expect(seen).toEqual(['reset-manual-routes']);
+  });
+
+  it('says that the diagram is locked for Reset manual routes, as for a tidy', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    act(() => useSldStore.setState({ diagramLocked: true, manualRouteCount: 1 }));
+    try {
+      const registry = renderHook(() => useCommandRegistry(), { wrapper });
+      expect(find(registry.result.current, 'view.reset-manual-routes')).toBeUndefined();
+      const menu = renderHook(() => useMenuCommands(), { wrapper });
+      expect(
+        menu.result.current.find((c) => c.id === 'view.reset-manual-routes')?.unavailable,
+      ).toMatch(/^The diagram is locked\./);
+    } finally {
+      act(() => useSldStore.setState({ manualRouteCount: 0 }));
+    }
+  });
+
   it('turns Snap to grid on and off, and says which a press does', () => {
     MOCK_TOPOLOGY = oneBusTopology();
     const { result, rerender } = renderHook(() => useCommandRegistry(), { wrapper });

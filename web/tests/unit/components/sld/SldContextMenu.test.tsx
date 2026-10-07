@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SldContextMenuBody } from '@/components/sld/SldContextMenu';
 import type { SldContextTarget } from '@/components/sld/contextTarget';
+import { ROUTE_FOCUS_ATTR } from '@/components/sld/routeEdit';
 import { useCaseStore } from '@/store/case';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
@@ -54,6 +55,9 @@ const onResetLayout = vi.fn();
 const onConnectorStyle = vi.fn();
 const onArrange = vi.fn();
 const onSnapChange = vi.fn();
+const onEditRoute = vi.fn();
+const onResetRoute = vi.fn();
+const onResetManualRoutes = vi.fn();
 
 /**
  * Opens the menu for `target`. The surface holds a stand-in for the node React
@@ -66,7 +70,13 @@ function openMenu(
     locked = false,
     connectorStyle,
     snap = false,
-  }: { locked?: boolean; connectorStyle?: 'straight' | 'elbow'; snap?: boolean } = {},
+    manualRoutes = 0,
+  }: {
+    locked?: boolean;
+    connectorStyle?: 'straight' | 'elbow';
+    snap?: boolean;
+    manualRoutes?: number;
+  } = {},
 ) {
   const client = new QueryClient();
   render(
@@ -94,6 +104,10 @@ function openMenu(
           onArrange={onArrange}
           snap={snap}
           onSnapChange={onSnapChange}
+          onEditRoute={onEditRoute}
+          onResetRoute={onResetRoute}
+          manualRoutes={manualRoutes}
+          onResetManualRoutes={onResetManualRoutes}
         />
       </ContextMenu>
     </QueryClientProvider>,
@@ -111,6 +125,9 @@ beforeEach(() => {
   onConnectorStyle.mockReset();
   onArrange.mockReset();
   onSnapChange.mockReset();
+  onEditRoute.mockReset();
+  onResetRoute.mockReset();
+  onResetManualRoutes.mockReset();
   currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
@@ -365,6 +382,105 @@ describe('menu for a line or transformer', () => {
   });
 });
 
+describe('moving the route of a line by hand', () => {
+  const LINE: SldContextTarget = { ...BRANCH, edgeId: 'line-5', manual: false };
+
+  it('offers Move route by hand on a line, which picks its edge', async () => {
+    const menu = await openMenu(LINE);
+    await userEvent.click(within(menu).getByTestId('sld-context-edit-route'));
+    expect(onEditRoute).toHaveBeenCalledWith('line-5');
+  });
+
+  it('hands the keyboard focus to the longest run of the line as the menu closes', async () => {
+    // What the editor draws once the line is picked: the run the keys slide.
+    const run = document.createElement('button');
+    run.setAttribute(ROUTE_FOCUS_ATTR, '');
+    document.body.append(run);
+    try {
+      const menu = await openMenu(LINE);
+      await userEvent.click(within(menu).getByTestId('sld-context-edit-route'));
+      await waitFor(() => expect(run).toHaveFocus());
+    } finally {
+      run.remove();
+    }
+  });
+
+  it('leaves the focus alone after Reset route, which picks nothing', async () => {
+    const run = document.createElement('button');
+    run.setAttribute(ROUTE_FOCUS_ATTR, '');
+    document.body.append(run);
+    try {
+      const menu = await openMenu({ ...LINE, manual: true });
+      await userEvent.click(within(menu).getByTestId('sld-context-reset-route'));
+      await waitFor(() => expect(screen.queryByTestId('sld-context-menu')).toBeNull());
+      expect(run).not.toHaveFocus();
+    } finally {
+      run.remove();
+    }
+  });
+
+  it('greys Reset route out, with the reason, for a route the diagram made', async () => {
+    const menu = await openMenu(LINE);
+    const reset = within(menu).getByTestId('sld-context-reset-route');
+    expect(reset).toHaveAttribute('data-disabled');
+    expect(reset).toHaveTextContent('routed automatically');
+  });
+
+  it('resets a route that was drawn by hand', async () => {
+    const menu = await openMenu({ ...LINE, manual: true });
+    const reset = within(menu).getByTestId('sld-context-reset-route');
+    expect(reset).not.toHaveAttribute('data-disabled');
+    expect(reset).not.toHaveTextContent('routed automatically');
+    await userEvent.click(reset);
+    expect(onResetRoute).toHaveBeenCalledWith('line-5');
+  });
+
+  it('has the same two for the connector of a device, and nothing about an element', async () => {
+    const menu = await openMenu({
+      kind: 'connector',
+      edgeId: 'stub-load-PQ_1',
+      name: 'PQ_1',
+      manual: true,
+    });
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
+      'Connector of PQ_1',
+    );
+    expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+    await userEvent.click(within(menu).getByTestId('sld-context-reset-route'));
+    expect(onResetRoute).toHaveBeenCalledWith('stub-load-PQ_1');
+  });
+
+  it('greys both out, and says why, while the diagram is locked', async () => {
+    const menu = await openMenu({ ...LINE, manual: true }, { locked: true });
+    for (const id of ['sld-context-edit-route', 'sld-context-reset-route']) {
+      expect(within(menu).getByTestId(id)).toHaveAttribute('data-disabled');
+      expect(within(menu).getByTestId(id)).toHaveTextContent('diagram is locked');
+    }
+  });
+
+  it('leaves both off the menu of a branch whose edge is not known', async () => {
+    const menu = await openMenu(BRANCH);
+    expect(within(menu).queryByTestId('sld-context-edit-route')).toBeNull();
+    expect(within(menu).queryByTestId('sld-context-reset-route')).toBeNull();
+  });
+
+  it('resets every route drawn by hand from the menu of the canvas, which counts them', async () => {
+    const menu = await openMenu({ kind: 'canvas' }, { manualRoutes: 3 });
+    const item = within(menu).getByTestId('sld-context-reset-manual-routes');
+    expect(item).toHaveTextContent('Reset manual routes (3)');
+    await userEvent.click(item);
+    expect(onResetManualRoutes).toHaveBeenCalledTimes(1);
+  });
+
+  it('greys that out, with the reason, while no line is routed by hand', async () => {
+    const menu = await openMenu({ kind: 'canvas' });
+    const item = within(menu).getByTestId('sld-context-reset-manual-routes');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(item).toHaveTextContent('no line is routed by hand');
+  });
+});
+
 describe('menu for a generator, load, shunt or controller', () => {
   it('offers Inspect and Move with arrow keys, and Inspect selects that element', async () => {
     const target: SldContextTarget = {
@@ -461,8 +577,8 @@ describe('menu for the canvas', () => {
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
-    // Add element, Fit view, the two tidies, Reset, Snap to grid, Save snapshot.
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(7);
+    // Add element, Fit view, the two tidies, the two resets, Snap to grid, Save snapshot.
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(8);
   });
 
   it('offers Tidy diagram and Tidy and re-layout, which run the commands of the same name', async () => {

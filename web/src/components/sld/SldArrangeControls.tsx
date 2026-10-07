@@ -15,7 +15,9 @@
  *   buses onto the grid, the devices back beside their bus), Snap to grid,
  *   and Align and Distribute for the nodes that are picked. With fewer than
  *   two picked it says how to pick several, which nothing else on the
- *   diagram shows.
+ *   diagram shows. It also says how a line is moved by hand, how many are
+ *   routed that way (a tidy leaves those as they are), and has Reset manual
+ *   routes, which gives them all back to the automatic routing.
  * - **The selection bar** is the same Align and Distribute buttons, over the
  *   diagram while two or more nodes are picked, so they are at hand where the
  *   selection was just made.
@@ -37,7 +39,11 @@ import { GRID_STEP } from './tidy';
 /** The commands these controls post. */
 export type ArrangeCommand = Extract<
   SldCommand,
-  'tidy' | 'tidy-relayout' | `align-${AlignMode}` | `distribute-${DistributeAxis}`
+  | 'tidy'
+  | 'tidy-relayout'
+  | 'reset-manual-routes'
+  | `align-${AlignMode}`
+  | `distribute-${DistributeAxis}`
 >;
 
 /** What Tidy diagram does, for its tooltip and the menu. */
@@ -61,6 +67,10 @@ function untidyNotice(count: number): string {
 /** What Tidy and re-layout does besides. */
 export const TIDY_RELAYOUT_DESCRIPTION =
   'Also moves things: lines the buses up on the grid, puts each generator, load and shunt back beside its bus, and then tidies the lines.';
+
+/** How a line is moved by hand, which nothing on the diagram shows until a line is clicked. */
+export const MANUAL_ROUTE_HINT =
+  'Click a line, a transformer or the connector of a device to move it by hand: drag a run to slide it, drag a square to move a bend. Tidy diagram leaves a line you moved as it is.';
 
 /** How to pick several nodes, which Align and Distribute need. */
 export const PICK_SEVERAL_HINT =
@@ -186,6 +196,8 @@ export interface SldArrangeControlsProps {
   untidy?: number;
   /** How many buses and devices are picked together. */
   pickedCount: number;
+  /** How many lines, transformers and device connectors are routed by hand. */
+  manualRoutes?: number;
   snap: boolean;
   onSnapChange: (snap: boolean) => void;
   onCommand: (command: ArrangeCommand) => void;
@@ -199,6 +211,7 @@ export function SldArrangeControls({
   note = null,
   untidy = 0,
   pickedCount,
+  manualRoutes = 0,
   snap,
   onSnapChange,
   onCommand,
@@ -350,6 +363,45 @@ export function SldArrangeControls({
                   {PICK_SEVERAL_HINT}
                 </p>
               ) : null}
+            </section>
+            <section className="border-border flex flex-col gap-1.5 border-t px-2 pt-2">
+              <span className="text-foreground font-medium">
+                Lines moved by hand
+                {manualRoutes > 0 ? ` (${manualRoutes})` : ''}
+              </span>
+              <p
+                className="text-muted-foreground leading-snug"
+                data-testid="sld-arrange-route-hint"
+              >
+                {MANUAL_ROUTE_HINT}
+              </p>
+              <button
+                type="button"
+                data-testid="sld-arrange-reset-routes"
+                disabled={locked || busy || manualRoutes === 0}
+                onClick={() => run('reset-manual-routes')}
+                className={cn(
+                  'border-border hover:bg-muted/60 self-start rounded border px-2 py-1',
+                  'text-foreground font-medium',
+                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  'disabled:cursor-not-allowed disabled:opacity-50',
+                )}
+              >
+                Reset manual routes
+              </button>
+              {manualRoutes === 0 ? (
+                <p
+                  className="text-muted-foreground leading-snug"
+                  data-testid="sld-arrange-no-manual-routes"
+                >
+                  No line is routed by hand, so there is nothing to reset.
+                </p>
+              ) : (
+                <p className="text-muted-foreground leading-snug">
+                  Gives {manualRoutes === 1 ? 'it' : `all ${manualRoutes}`} back to the automatic
+                  routing, in one step that Undo takes back.
+                </p>
+              )}
             </section>
             <p className="text-muted-foreground border-border border-t px-2 pt-2 leading-snug">
               Undo (Ctrl+Z, or Cmd+Z on a Mac) takes back a move, a tidy or an alignment, and Redo

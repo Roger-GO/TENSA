@@ -334,6 +334,7 @@ function useCommandSets(): CommandSets {
   const layoutRedoLabel = redoes === 'layout' ? (layoutRedoStep?.label ?? null) : null;
   const diagramLocked = useSldStore((s) => s.diagramLocked);
   const pickedCount = useSldStore((s) => s.pickedCount);
+  const manualRouteCount = useSldStore((s) => s.manualRouteCount);
   const snapToGrid = useLayoutStore((s) => s.sldSnapToGrid);
 
   return useMemo<CommandSets>(() => {
@@ -975,6 +976,39 @@ function useCommandSets(): CommandSets {
         action: () => __requestSldCommand('tidy-relayout'),
         when: () => diagramVisible && !diagramLocked,
       },
+      // A line that was moved by hand (click it on the diagram for its
+      // handles) is left alone by a tidy. This gives all of them back to the
+      // automatic routing in one step, which Undo takes back.
+      {
+        id: 'view.reset-manual-routes',
+        label:
+          manualRouteCount > 0
+            ? `Reset manual routes (${manualRouteCount})`
+            : 'Reset manual routes',
+        description:
+          'Gives every line, transformer and device connector whose route was drawn by hand back to the automatic routing. Undo takes it back in one step. To draw a route by hand, click a line on the diagram and drag its runs and bends.',
+        group: 'view',
+        keywords: [
+          'route',
+          'manual',
+          'by hand',
+          'reset',
+          'bend',
+          'line',
+          'reroute',
+          'automatic',
+          'diagram',
+          'sld',
+        ],
+        action: () => __requestSldCommand('reset-manual-routes'),
+        when: () => diagramVisible && !diagramLocked && manualRouteCount > 0,
+        unavailableReason: () =>
+          !diagramVisible
+            ? null
+            : diagramLocked
+              ? 'The diagram is locked. Unlock it with the padlock at its bottom left.'
+              : 'No line is routed by hand. Click a line on the diagram and drag its runs and bends to draw its route.',
+      },
       {
         id: 'view.snap-to-grid',
         label: snapToGrid ? 'Snap to grid: turn off' : 'Snap to grid: turn on',
@@ -1262,6 +1296,7 @@ function useCommandSets(): CommandSets {
     layoutRedoLabel,
     diagramLocked,
     pickedCount,
+    manualRouteCount,
     snapToGrid,
   ]);
 }

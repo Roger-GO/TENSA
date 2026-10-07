@@ -149,6 +149,27 @@ describe('<ShortcutCheatsheet /> — content', () => {
     expect(screen.getByText('Help')).toBeInTheDocument();
   });
 
+  it('lists how a line of the diagram is moved by hand, which no command of the registry is', async () => {
+    render(withProviders(<ShortcutCheatsheet />));
+    act(() => {
+      useShortcutCheatsheetStore.getState().openCheatsheet();
+    });
+    await screen.findByTestId('shortcut-cheatsheet');
+    const section = screen.getByTestId('shortcut-cheatsheet-group-diagram');
+    expect(section).toHaveTextContent('Diagram: moving a line by hand');
+    // The pointer and the keys, side by side.
+    const slide = screen.getByTestId('shortcut-cheatsheet-gesture-slide');
+    expect(slide).toHaveTextContent('Slide a run of the picked line');
+    expect([...slide.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual([
+      'Drag',
+      '← → ↑ ↓',
+    ]);
+    for (const id of ['pick', 'bend', 'alone', 'add', 'pull', 'remove', 'steps', 'done']) {
+      expect(screen.getByTestId(`shortcut-cheatsheet-gesture-${id}`)).toBeInTheDocument();
+    }
+    expect(section).toHaveTextContent('Reset manual routes in the Arrange menu');
+  });
+
   it('renders kbd chips for the cheatsheet binding itself', async () => {
     render(withProviders(<ShortcutCheatsheet />));
     act(() => {
