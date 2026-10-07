@@ -40,7 +40,9 @@
  * that is on nothing: stepped from tap to tap by the connection pass, along
  * the route it had, brought along with its buses, or as one straight line
  * (at an angle, which shares no stretch with a line that runs at right
- * angles). With none of them clear it is drawn the way that is on least.
+ * angles). With none of them clear it is drawn the way that is on least,
+ * which a pass in a drag does not settle for before it has been made again
+ * as a pass at rest is (below).
  *
  * The canvas runs this on every change of the nodes, a move of a drag
  * included, so the work is bounded: in steps of the search (`LIVE_STEPS`)
@@ -48,6 +50,15 @@
  * covers only the surroundings of the branches that are routed. Where
  * those surroundings are more than one grid holds, the branches are routed
  * one at a time, each in the surroundings of its own two buses.
+ *
+ * A pass in a drag has a fraction of those bounds (`DRAG_STEPS`,
+ * `DRAG_GRID_POINTS`), which is enough for nearly every move. Where it is
+ * not, and a line would be left on a bar, a symbol or another line (a bus
+ * dragged onto a line that runs the length of a large diagram, a search
+ * that ran out of steps and took a poor way that put the next line out),
+ * the pass is made again with the bounds of a pass at rest: that move of
+ * the drag takes as long as the drop will, and nothing is drawn over
+ * anything else on the way there.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -92,8 +103,8 @@ export const LIVE_GRID_POINTS = 150_000;
 /**
  * The same two bounds for a pass that is made while a node is dragged
  * (`RoutingOptions.dragging`), which is one of many in a second: a fraction
- * of each. A branch that is not routed within them is drawn the best way
- * there is without a search until the node is dropped, and routed then.
+ * of each. Where a line is left on something within them, the pass is made
+ * again with the bounds of a pass at rest.
  */
 export const DRAG_STEPS = 12_000;
 export const DRAG_GRID_POINTS = 40_000;
@@ -134,7 +145,8 @@ export interface RoutingOptions extends ConnectionOptions {
    * `DRAG_STEPS` and `DRAG_GRID_POINTS`. On a diagram of more than
    * `FOLLOW_ABOVE` branches a route whose bus has moved follows it
    * (`followBuses`) and is searched for again only where that puts it on
-   * something.
+   * something. A pass that leaves a line on something even so is made again
+   * as a pass at rest is.
    */
   dragging?: boolean;
   /** How many steps the search may take; default `LIVE_STEPS`. */
@@ -361,6 +373,24 @@ export function routeDiagram<E extends ConnectionEdge>(
   edges: readonly E[],
   options: RoutingOptions = {},
 ): RoutedDiagram<E> {
+  const { left, ...routed } = routeOnce(nodes, edges, options);
+  if (options.dragging !== true || left === 0) return routed;
+  // A line was left on something within the bounds of a drag: once more,
+  // as the diagram is routed at rest.
+  const { left: leftAtRest, ...atRest } = routeOnce(nodes, edges, { ...options, dragging: false });
+  return leftAtRest <= left ? atRest : routed;
+}
+
+/**
+ * One pass of `routeDiagram`, within the bounds `options` gives it. `left`
+ * is how many places it leaves a line or a transformer on something: none,
+ * for a pass that found every branch a way.
+ */
+function routeOnce<E extends ConnectionEdge>(
+  nodes: readonly TidyNode[],
+  edges: readonly E[],
+  options: RoutingOptions,
+): RoutedDiagram<E> & { left: number } {
   const { obstacles, keepFree, preferFree, dragging, ...bounds } = options;
   const { steps = dragging ? DRAG_STEPS : LIVE_STEPS, ...rest } = bounds;
   const { gridPoints = dragging ? DRAG_GRID_POINTS : LIVE_GRID_POINTS, ...connectionOptions } =
@@ -501,6 +531,8 @@ export function routeDiagram<E extends ConnectionEdge>(
   const routedHere = new Set<string>();
   const unrouted = new Set<string>();
   let spent = 0;
+  // Whether the routes were last looked at and every one held.
+  let held = isBranch.size === 0;
   for (let round = 0; round < ROUNDS && isBranch.size > 0; round += 1) {
     // ---- which routes hold ----
     const symbols = symbolBoxes(symbolsOn(drawn, connections));
@@ -538,7 +570,10 @@ export function routeDiagram<E extends ConnectionEdge>(
       if (both.some((id) => isBranch.has(id) && !connections.kept.has(id))) continue;
       for (const id of both) if (isBranch.has(id)) broken.add(id);
     }
-    if (broken.size === 0) break;
+    if (broken.size === 0) {
+      held = true;
+      break;
+    }
 
     // ---- route those around the rest ----
     // The ones that stay are kept exactly as they are drawn now: with their
@@ -564,25 +599,26 @@ export function routeDiagram<E extends ConnectionEdge>(
     });
     spent += together.steps;
     for (const [id, points] of together.routes) made.set(id, points);
-    if (together.tooLarge === true && broken.size > 1) {
+    if (together.tooLarge === true) {
       // Their surroundings together are more than one grid holds (the
-      // branches of a bus with lines to the far ends of a large diagram):
-      // one at a time then, the shortest first, each in the surroundings of
-      // its own two buses and around the ones before it.
+      // branches of a bus with lines to the far ends of a large diagram, or
+      // one such line in the grid of a drag): one at a time then, the
+      // shortest first, each in the surroundings of its own two buses and
+      // around the ones before it.
       const apart = (id: string): number => {
         const edge = edgeOf.get(id)!;
         const [a, b] = [at.get(edge.source)!, at.get(edge.target)!];
         return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
       };
       const order = [...broken].sort((p, q) => apart(p) - apart(q));
-      const held = new Map(keep);
+      const others = new Map(keep);
       const heldSymbols = new Map(keptSymbols);
       order.forEach((id, i) => {
         const left = steps - spent;
         if (left <= 0) return;
         const one = tidyRoutes(nodes, drawn, {
           ...routing,
-          keep: held,
+          keep: others,
           symbols: heldSymbols,
           only: new Set([id]),
           within: around([id], connections),
@@ -595,14 +631,14 @@ export function routeDiagram<E extends ConnectionEdge>(
         const points = one.routes.get(id);
         if (points === undefined) return;
         made.set(id, points);
-        held.set(id, points);
+        others.set(id, points);
         const spot = one.spots.get(id);
         if (spot !== undefined) heldSymbols.set(id, symbolAt(spot));
       });
     }
     drawn = drawn.map((edge): E => {
-      const held = keep.get(edge.id);
-      if (held !== undefined) return along(edge, held);
+      const stays = keep.get(edge.id);
+      if (stays !== undefined) return along(edge, stays);
       if (!broken.has(edge.id)) return edge;
       const points = made.get(edge.id);
       if (points !== undefined) {
@@ -618,6 +654,8 @@ export function routeDiagram<E extends ConnectionEdge>(
     connections = layoutConnections(nodes, drawn, connectionOptions);
   }
 
+  /** How many places a line or a transformer of the diagram is still on something. */
+  let stillOn = 0;
   if (unrouted.size > 0) {
     // ---- the branches no way was found for ----
     // Stepped from tap to tap, as the connection pass has them now. The
@@ -679,6 +717,18 @@ export function routeDiagram<E extends ConnectionEdge>(
     // The others carry no route: what is drawn for them is not kept.
     drawn = drawn.map((edge) => (unrouted.has(edge.id) ? bare(edge) : edge));
   }
+  if (!held || unrouted.size > 0) {
+    // The routes were made again and not looked at since, or some branch
+    // has none: what is on something as the diagram is drawn now. Only a
+    // line or a transformer counts, which another pass could find a way
+    // for; the connector of a device runs where it runs.
+    const symbols = symbolBoxes(symbolsOn(drawn, connections));
+    stillOn += symbolsWithoutRoom(symbols, nodes, connections, options).size;
+    for (const overlap of overlapsOn(drawn, connections, symbols)) {
+      const other = overlap.b.startsWith(SYMBOL) ? overlap.b.slice(SYMBOL.length) : overlap.b;
+      if (isBranch.has(overlap.a) || isBranch.has(other)) stillOn += 1;
+    }
+  }
 
   // What is drawn along another route than the one stored for it.
   const changed: RoutedDiagram<E>['changed'] = new Map();
@@ -698,5 +748,6 @@ export function routeDiagram<E extends ConnectionEdge>(
     changed,
     unrouted: [...unrouted],
     symbols: symbolsOn(drawn, connections),
+    left: stillOn,
   };
 }

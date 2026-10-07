@@ -7,7 +7,7 @@
  * line is at `y + 3`. Each test is a small diagram built by hand; the
  * example cases are held to the same rule, whole, in `noOverlap.test.ts`.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   TAP_SPACING,
   layoutConnections,
@@ -23,6 +23,27 @@ import {
   routeDiagram,
 } from '@/components/sld/routing';
 import type { TidyNode } from '@/components/sld/tidy';
+
+/**
+ * What the search for a route is made to answer: nothing, where `none` says
+ * so of the steps it was given, as a search that runs out of them does. The
+ * router itself is held in `tidy.test.ts`; here it is what `routeDiagram`
+ * does with an answer that falls short.
+ */
+const search = vi.hoisted(() => ({ none: (_steps: number): boolean => false }));
+
+vi.mock('@/components/sld/tidy', async () => {
+  const actual =
+    await vi.importActual<typeof import('@/components/sld/tidy')>('@/components/sld/tidy');
+  const tidyRoutes: typeof actual.tidyRoutes = (nodes, edges, options) => {
+    if (!search.none(options?.steps ?? actual.TIDY_STEPS)) {
+      return actual.tidyRoutes(nodes, edges, options);
+    }
+    const branches = edges.filter((edge) => edge.type !== 'stub' && !options?.keep?.has(edge.id));
+    return { routes: new Map(), unrouted: branches.map((e) => e.id), spots: new Map(), steps: 0 };
+  };
+  return { ...actual, tidyRoutes };
+});
 
 function bus(id: string, x: number, y: number): TidyNode {
   return { id, type: 'bus', position: { x, y }, data: { name: `B${id}` } };
@@ -563,10 +584,53 @@ describe('routeDiagram: how much work it does', () => {
     expect(small.unrouted.sort()).toEqual(['l4', 'l5']);
   });
 
-  it('does not route on a grid larger than a drag allows, and draws those branches straight', () => {
-    const nodes = [bus('1', 0, 0), bus('2', 0, 160)];
-    const result = routeDiagram(nodes, [line('l', '1', '2')], { dragging: true, gridPoints: 10 });
-    expect(result.unrouted).toEqual(['l']);
-    expect(result.connections.routes.get('l')!.points).toHaveLength(2);
+  it('routes a branch alone, in a grid as large as a pass at rest has, where the grid of a drag does not hold its surroundings', () => {
+    // One branch, and a grid that holds next to nothing: it is not left
+    // without a route for being the only one.
+    const nodes = [bus('1', 0, 0), bus('2', 200, 160), device('load-x', 120, 60)];
+    const edges = [line('l', '1', '2'), stub('load-x', '2')];
+    const result = routeDiagram(nodes, edges, { dragging: true, gridPoints: 10 });
+    expect(result.unrouted).toEqual([]);
+    expect(result.changed.has('l')).toBe(true);
+    expect(findOverlaps(structure(nodes, result.edges, result.connections))).toEqual([]);
+  });
+
+  it('makes a pass of a drag again, as a pass at rest is made, where it leaves a line on something', () => {
+    // A load stands where the line would step across and where it would
+    // run straight: with no way found for it, it is drawn through the load.
+    const nodes = [bus('1', 0, 0), bus('2', 300, 200), device('load-x', 176, 83)];
+    const edges = [line('l', '1', '2')];
+    // A search that finds nothing within the steps of a drag.
+    search.none = (steps) => steps <= DRAG_STEPS;
+    try {
+      // Held to the steps of a drag, that is what is drawn.
+      const held = routeDiagram(nodes, edges, { dragging: true, steps: DRAG_STEPS });
+      expect(held.unrouted).toEqual(['l']);
+      expect(findOverlaps(structure(nodes, held.edges, held.connections))).not.toEqual([]);
+      // Left to its own bounds, the pass is made again with those of a pass
+      // at rest, which finds the way round.
+      const result = routeDiagram(nodes, edges, { dragging: true });
+      expect(result.unrouted).toEqual([]);
+      expect(result.changed.has('l')).toBe(true);
+      expect(findOverlaps(structure(nodes, result.edges, result.connections))).toEqual([]);
+    } finally {
+      search.none = () => false;
+    }
+  });
+
+  it('makes one pass in a drag where that leaves nothing on anything', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 300, 200), device('load-x', 176, 83)];
+    const calls: number[] = [];
+    search.none = (steps) => {
+      calls.push(steps);
+      return false;
+    };
+    try {
+      const result = routeDiagram(nodes, [line('l', '1', '2')], { dragging: true });
+      expect(result.unrouted).toEqual([]);
+      expect(calls.every((steps) => steps <= DRAG_STEPS)).toBe(true);
+    } finally {
+      search.none = () => false;
+    }
   });
 });
