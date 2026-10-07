@@ -1,26 +1,31 @@
 /**
- * Tests for `<ComponentLibrary />` (v3 Unit 5).
+ * Tests for `<ComponentLibrary />`, the palette of the left sidebar's
+ * Components tab.
  *
  * Concerns:
- *  - Seven tile testids render (Bus, Generator, Load, Shunt, Line,
- *    Transformer, Battery).
- *  - The Battery tile is found under "battery" and under "storage".
- *  - Each tile is `draggable` (HTML5 attribute reflected to the DOM).
- *  - Firing a `dragstart` event on a tile sets the
+ *  - Every kind the Add element form can add has a row, under the heading of
+ *    its group, with its name and the line that says what it is.
+ *  - The search box keeps the rows that hold every word typed, says how many
+ *    it kept, and says so when it kept none, with a way back to the whole list.
+ *  - Each row is `draggable` (HTML5 attribute reflected to the DOM).
+ *  - Firing a `dragstart` event on a row sets the
  *    `application/andes-component-type` MIME on the DataTransfer to
- *    the tile's kind string + sets `effectAllowed='copy'`.
- *  - A tile can also be clicked, or pressed with Enter or Space, to open the
+ *    the row's kind + sets `effectAllowed='copy'`.
+ *  - A row can also be clicked, or pressed with Enter or Space, to open the
  *    add form on its kind; with no case open it starts a blank system first.
- *  - A line under the tiles says how to add, or why nothing can be added, and a
- *    tile that cannot add is marked disabled, cannot be dragged and does nothing.
+ *  - The arrow keys move between the rows and the search box.
+ *  - A line under the search box says how to add, or why nothing can be added,
+ *    and a row that cannot add is marked disabled, cannot be dragged and does
+ *    nothing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ProblemDetailsError } from '@/api/client';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
+import { ELEMENT_KINDS, groupElementKinds } from '@/components/elements/elementKinds';
 import { COMPONENT_DND_MIME, ComponentLibrary } from '@/components/shell/ComponentLibrary';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -56,12 +61,35 @@ function topology(state: TopologySummary['state']): TopologySummary {
   };
 }
 
-/** A case is open and no run has locked it: the state in which a tile adds. */
+/** A case is open and no run has locked it: the state in which a row adds. */
 function openCase() {
   MOCK_TOPOLOGY = topology('pre-setup');
   useCaseStore.setState({
     selection: { primaryPath: parseWorkspacePath('cases/ieee14.raw'), addfiles: [] },
   });
+}
+
+const row = (kind: string) => screen.getByTestId(`component-library-item-${kind}`);
+const search = () => screen.getByTestId('component-library-search');
+/** The kinds that have a row, in the order of the rows. */
+const shownKinds = () =>
+  Array.from(document.querySelectorAll('[data-component-kind]')).map((el) =>
+    el.getAttribute('data-component-kind'),
+  );
+
+/** A DataTransfer-shaped stub whose `setData` calls can be asserted on. */
+function dataTransferStub() {
+  return {
+    setData: vi.fn(),
+    getData: vi.fn(),
+    effectAllowed: 'none' as DataTransfer['effectAllowed'],
+    dropEffect: 'none' as DataTransfer['dropEffect'],
+    types: [] as ReadonlyArray<string>,
+    files: [] as unknown as FileList,
+    items: [] as unknown as DataTransferItemList,
+    clearData: vi.fn(),
+    setDragImage: vi.fn(),
+  };
 }
 
 beforeEach(() => {
@@ -89,84 +117,173 @@ describe('<ComponentLibrary />', () => {
     expect(screen.getByTestId('component-library')).toBeInTheDocument();
   });
 
-  it('renders all seven tiles with stable testids', () => {
+  it('has a row for every kind the Add element form can add, in the same order', () => {
     render(<ComponentLibrary />);
-    const kinds = ['Bus', 'Generator', 'Load', 'Shunt', 'Line', 'Transformer', 'Battery'];
-    for (const kind of kinds) {
-      expect(screen.getByTestId(`component-library-tile-${kind}`)).toBeInTheDocument();
-    }
-    expect(screen.getAllByRole('button')).toHaveLength(kinds.length);
+    expect(shownKinds()).toEqual(ELEMENT_KINDS.map((k) => k.value));
+    // The search box is a text field: the rows are the only buttons.
+    expect(screen.getAllByRole('button')).toHaveLength(ELEMENT_KINDS.length);
   });
 
-  it('marks each tile as draggable', () => {
+  it('groups the rows under a heading for each group of the Kind picker', () => {
     render(<ComponentLibrary />);
-    const busTile = screen.getByTestId('component-library-tile-Bus');
-    expect(busTile.getAttribute('draggable')).toBe('true');
-    const genTile = screen.getByTestId('component-library-tile-Generator');
-    expect(genTile.getAttribute('draggable')).toBe('true');
+    const sections = groupElementKinds(ELEMENT_KINDS);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(
+      sections.map((s) => s.group),
+    );
+    for (const { group, kinds } of sections) {
+      // A group is a region named by its heading, with one list item per kind.
+      const region = screen.getByRole('region', { name: group });
+      expect(region).toBe(screen.getByTestId(`component-library-group-${group}`));
+      expect(within(region).getAllByRole('listitem')).toHaveLength(kinds.length);
+      for (const kind of kinds) {
+        expect(within(region).getByTestId(`component-library-item-${kind.value}`)).toBeDefined();
+      }
+    }
+  });
+
+  it('shows the name of each kind and the line that says what it is', () => {
+    render(<ComponentLibrary />);
+    for (const kind of ELEMENT_KINDS) {
+      expect(row(kind.value)).toHaveTextContent(kind.label);
+      expect(row(kind.value)).toHaveTextContent(kind.description);
+    }
+  });
+
+  it('names each row "Add <kind>" and describes it by its line', () => {
+    openCase();
+    render(<ComponentLibrary />);
+    expect(screen.getByRole('button', { name: 'Add PV generator' })).toBe(row('PV'));
+    expect(row('PV')).toHaveAccessibleDescription(
+      'Holds its active power and its bus voltage in the power flow.',
+    );
+    expect(screen.getByRole('button', { name: 'Add GENROU (synchronous)' })).toBe(row('GENROU'));
+    expect(row('GENROU').getAttribute('title')).toBe(
+      'Add GENROU (synchronous): click here, or drag it onto the diagram',
+    );
+  });
+
+  it('marks each row as draggable', () => {
+    render(<ComponentLibrary />);
+    for (const kind of ELEMENT_KINDS) {
+      expect(row(kind.value).getAttribute('draggable')).toBe('true');
+    }
   });
 
   it('dragstart writes the kind to the andes-component-type MIME + effectAllowed=copy', () => {
     render(<ComponentLibrary />);
-    const tile = screen.getByTestId('component-library-tile-Generator');
+    const dataTransfer = dataTransferStub();
+    fireEvent.dragStart(row('PV'), { dataTransfer });
 
-    // Build a minimal DataTransfer-shaped stub. jsdom's synthetic drag
-    // events expose a real DataTransfer, but we want assertion-friendly
-    // setData calls so we replace it with a spy stub.
-    const setData = vi.fn();
-    const dataTransfer = {
-      setData,
-      getData: vi.fn(),
-      effectAllowed: 'none' as DataTransfer['effectAllowed'],
-      dropEffect: 'none' as DataTransfer['dropEffect'],
-      types: [] as ReadonlyArray<string>,
-      files: [] as unknown as FileList,
-      items: [] as unknown as DataTransferItemList,
-      clearData: vi.fn(),
-      setDragImage: vi.fn(),
-    };
-    fireEvent.dragStart(tile, { dataTransfer });
-
-    expect(setData).toHaveBeenCalledWith(COMPONENT_DND_MIME, 'Generator');
+    expect(dataTransfer.setData).toHaveBeenCalledWith(COMPONENT_DND_MIME, 'PV');
     expect(dataTransfer.effectAllowed).toBe('copy');
   });
 
-  it('each tile sets its own kind on dragstart', () => {
+  it('each row sets its own kind on dragstart: the value the Kind picker knows it by', () => {
     render(<ComponentLibrary />);
-    const cases: Array<['Bus' | 'Load' | 'Shunt' | 'Line' | 'Transformer' | 'Battery', string]> = [
-      ['Bus', 'Bus'],
-      ['Load', 'Load'],
-      ['Shunt', 'Shunt'],
-      ['Line', 'Line'],
-      ['Transformer', 'Transformer'],
-      ['Battery', 'Battery'],
-    ];
-    for (const [kind, payload] of cases) {
-      const tile = screen.getByTestId(`component-library-tile-${kind}`);
-      const setData = vi.fn();
-      const dataTransfer = {
-        setData,
-        getData: vi.fn(),
-        effectAllowed: 'none' as DataTransfer['effectAllowed'],
-        dropEffect: 'none' as DataTransfer['dropEffect'],
-        types: [] as ReadonlyArray<string>,
-        files: [] as unknown as FileList,
-        items: [] as unknown as DataTransferItemList,
-        clearData: vi.fn(),
-        setDragImage: vi.fn(),
-      };
-      fireEvent.dragStart(tile, { dataTransfer });
-      expect(setData).toHaveBeenCalledWith(COMPONENT_DND_MIME, payload);
+    for (const kind of ELEMENT_KINDS) {
+      const dataTransfer = dataTransferStub();
+      fireEvent.dragStart(row(kind.value), { dataTransfer });
+      expect(dataTransfer.setData).toHaveBeenCalledWith(COMPONENT_DND_MIME, kind.value);
     }
   });
 });
 
-describe('<ComponentLibrary /> click to add', () => {
-  it('opens the add form on the kind of the tile that was clicked', async () => {
+describe('<ComponentLibrary /> search', () => {
+  it('has a search box named for what it searches', () => {
+    render(<ComponentLibrary />);
+    expect(screen.getByRole('textbox', { name: 'Search components' })).toBe(search());
+    expect(search()).toHaveAttribute('placeholder', 'Search components');
+  });
+
+  it('keeps the rows that match as the user types, with the headings of their groups only', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.type(search(), 'exciter');
+    expect(shownKinds()).toEqual(['IEEEX1', 'ESDC2A', 'EXST1', 'SEXS']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Exciters',
+    ]);
+  });
+
+  it('finds a kind by another word for it, and narrows with each word typed', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.type(search(), 'storage');
+    expect(shownKinds()).toEqual(['ESD1']);
+    await user.clear(search());
+    await user.type(search(), 'gen');
+    expect(shownKinds()).toEqual(['PV', 'Slack', 'GENROU', 'GENCLS']);
+    await user.type(search(), ' classic');
+    expect(shownKinds()).toEqual(['GENCLS']);
+  });
+
+  it('says how many it kept, in a status a screen reader hears, and nothing when not searching', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    const count = screen.getByTestId('component-library-count');
+    expect(count).toHaveAttribute('role', 'status');
+    expect(count).toHaveTextContent('');
+    await user.type(search(), 'load');
+    expect(count).toHaveTextContent(`2 of ${ELEMENT_KINDS.length} components`);
+    await user.clear(search());
+    expect(count).toHaveTextContent('');
+  });
+
+  it('says that nothing matches, names what was typed and offers the whole list back', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.type(search(), 'flux capacitor');
+    expect(shownKinds()).toEqual([]);
+    expect(screen.queryAllByRole('heading', { level: 2 })).toEqual([]);
+    const empty = screen.getByTestId('component-library-empty');
+    expect(empty).toHaveTextContent('No component matches “flux capacitor”.');
+    expect(empty).toHaveTextContent('Search by name, model or category');
+    expect(screen.getByTestId('component-library-count')).toHaveTextContent(
+      `0 of ${ELEMENT_KINDS.length} components`,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Show all components' }));
+    expect(search()).toHaveValue('');
+    expect(search()).toHaveFocus();
+    expect(shownKinds()).toEqual(ELEMENT_KINDS.map((k) => k.value));
+    expect(screen.queryByTestId('component-library-empty')).toBeNull();
+  });
+
+  it('clears on Escape, and on its clear button, which is only there while there is text', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    expect(screen.queryByRole('button', { name: 'Clear the search' })).toBeNull();
+    await user.type(search(), 'bus');
+    expect(shownKinds()).toEqual(['Bus']);
+    await user.keyboard('{Escape}');
+    expect(search()).toHaveValue('');
+    expect(shownKinds()).toHaveLength(ELEMENT_KINDS.length);
+
+    await user.type(search(), 'line');
+    await user.click(screen.getByRole('button', { name: 'Clear the search' }));
+    expect(search()).toHaveValue('');
+    expect(search()).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Clear the search' })).toBeNull();
+  });
+
+  it('adds the kind of a row that the search kept', async () => {
     openCase();
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    await user.click(screen.getByTestId('component-library-tile-Shunt'));
+    await user.type(search(), 'governor');
+    await user.click(row('IEEEG1'));
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'IEEEG1' });
+    // The search stays as it was: the next governor is one click away.
+    expect(search()).toHaveValue('governor');
+  });
+});
+
+describe('<ComponentLibrary /> click to add', () => {
+  it('opens the add form on the kind of the row that was clicked', async () => {
+    openCase();
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.click(row('Shunt'));
     expect(useCaseStore.getState()).toMatchObject({
       addPanelOpen: true,
       addPanelKind: 'Shunt',
@@ -174,62 +291,66 @@ describe('<ComponentLibrary /> click to add', () => {
     });
   });
 
-  it('answers Enter and Space on a focused tile, like the button it says it is', async () => {
+  it('opens the form on the very model of the row, not on a family the form has to guess from', async () => {
     openCase();
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    const bus = screen.getByTestId('component-library-tile-Bus');
-    bus.focus();
+    for (const kind of ['Transformer2W', 'Slack', 'GENCLS', 'ZIP', 'ESD1']) {
+      await user.click(row(kind));
+      expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: kind });
+      act(() => useCaseStore.getState().closeAddPanel());
+    }
+  });
+
+  it('answers Enter and Space on a focused row, like the button it says it is', async () => {
+    openCase();
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    row('Bus').focus();
     await user.keyboard('{Enter}');
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Bus' });
-    useCaseStore.getState().closeAddPanel();
-    const line = screen.getByTestId('component-library-tile-Line');
-    line.focus();
+    act(() => useCaseStore.getState().closeAddPanel());
+    row('Line').focus();
     await user.keyboard(' ');
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Line' });
   });
 
-  it('gives each tile the name "Add <kind>" and says it can be clicked or dragged', () => {
+  it('says that a row can be clicked or dragged', () => {
     openCase();
     render(<ComponentLibrary />);
-    expect(screen.getByRole('button', { name: 'Add Generator' })).toBe(
-      screen.getByTestId('component-library-tile-Generator'),
-    );
-    expect(screen.getByTestId('component-library-tile-Generator').getAttribute('title')).toMatch(
-      /click here, or drag it onto the diagram/,
-    );
     expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
-      'Click a tile to add that element, or drag it onto the diagram.',
+      'Click a component to add it, or drag it onto the diagram.',
     );
   });
 
-  it('has a Battery tile, named for the storage model it adds, that opens the add form', async () => {
+  it('says that a click starts a blank system while no case is open', () => {
+    render(<ComponentLibrary />);
+    expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
+      'Click a component, or drag it onto the diagram, to start a blank system with it.',
+    );
+  });
+
+  it('has the battery under Storage, found under "battery" and under "storage"', async () => {
     openCase();
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    const tile = screen.getByTestId('component-library-tile-Battery');
-    expect(tile).toHaveTextContent('Battery');
-    // Found by either word a user looks for.
-    expect(screen.getByRole('button', { name: 'Add Battery (ESD1 storage)' })).toBe(tile);
-    expect(screen.getByRole('button', { name: /storage/i })).toBe(tile);
-    expect(tile.getAttribute('title')).toBe(
-      'Add a battery (ESD1 storage): click here, or drag it onto the diagram',
+    const battery = row('ESD1');
+    expect(screen.getByRole('button', { name: 'Add ESD1 battery' })).toBe(battery);
+    expect(within(screen.getByRole('region', { name: 'Storage' })).getByRole('button')).toBe(
+      battery,
     );
-    await user.click(tile);
-    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Battery' });
-  });
-
-  it('says where the models without a tile are', () => {
-    openCase();
-    render(<ComponentLibrary />);
-    expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
-      "The form's Kind list has the other models: machines, exciters, governors.",
-    );
+    for (const word of ['battery', 'storage']) {
+      await user.clear(search());
+      await user.type(search(), word);
+      expect(shownKinds()).toEqual(['ESD1']);
+    }
+    await user.click(row('ESD1'));
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'ESD1' });
   });
 
   it('starts a blank system first when no case is open, then opens the form', () => {
     render(<ComponentLibrary />);
-    fireEvent.click(screen.getByTestId('component-library-tile-Generator'));
+    fireEvent.click(row('PV'));
     expect(blankMutate).toHaveBeenCalledTimes(1);
     expect(blankMutate.mock.calls[0]?.[0]).toBe('test-session-id');
     // Nothing opens until the server has made the system.
@@ -239,13 +360,13 @@ describe('<ComponentLibrary /> click to add', () => {
     expect(useCaseStore.getState().selection).toMatchObject({ blank: true, primaryPath: null });
     expect(useCaseStore.getState()).toMatchObject({
       addPanelOpen: true,
-      addPanelKind: 'Generator',
+      addPanelKind: 'PV',
     });
   });
 
   it('says so in a toast when the blank system cannot be started', () => {
     render(<ComponentLibrary />);
-    fireEvent.click(screen.getByTestId('component-library-tile-Bus'));
+    fireEvent.click(row('Bus'));
     const callbacks = blankMutate.mock.calls[0]?.[1] as { onError: (e: Error) => void };
     act(() => callbacks.onError(new Error('worker is gone')));
     expect(toastError).toHaveBeenCalledWith('worker is gone');
@@ -261,13 +382,67 @@ describe('<ComponentLibrary /> click to add', () => {
   });
 });
 
+describe('<ComponentLibrary /> arrow keys', () => {
+  it('goes down from the search box into the rows, along them, and back up into the box', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    search().focus();
+    await user.keyboard('{ArrowDown}');
+    expect(row('Bus')).toHaveFocus();
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    // Across the heading of the next group.
+    expect(row('Transformer2W')).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(row('Line')).toHaveFocus();
+    await user.keyboard('{ArrowUp}{ArrowUp}');
+    expect(search()).toHaveFocus();
+  });
+
+  it('goes to the last row on End and the first on Home, and stops at the last', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    row('Line').focus();
+    await user.keyboard('{End}');
+    expect(row('Shunt')).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(row('Shunt')).toHaveFocus();
+    await user.keyboard('{Home}');
+    expect(row('Bus')).toHaveFocus();
+  });
+
+  it('walks only the rows the search kept', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.type(search(), 'load');
+    await user.keyboard('{ArrowDown}');
+    expect(row('PQ')).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(row('ZIP')).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(row('ZIP')).toHaveFocus();
+  });
+
+  it('leaves the caret keys of the search box alone when there is no row to go to', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    await user.type(search(), 'nothing like this');
+    await user.keyboard('{ArrowDown}');
+    expect(search()).toHaveFocus();
+  });
+});
+
 describe('<ComponentLibrary /> when nothing can be added', () => {
   function expectBlocked(reason: RegExp) {
-    const bus = screen.getByTestId('component-library-tile-Bus');
+    const bus = row('Bus');
+    const hint = screen.getByTestId('component-library-hint');
     expect(bus).toHaveAttribute('aria-disabled', 'true');
     expect(bus).toHaveAttribute('draggable', 'false');
     expect(bus.getAttribute('title')).toMatch(reason);
-    expect(screen.getByTestId('component-library-hint').textContent).toMatch(reason);
+    expect(hint.textContent).toMatch(reason);
+    // Read out with the row: what it is, then why it cannot be added.
+    expect(bus.getAttribute('aria-describedby')?.split(' ')).toContain(hint.id);
+    expect(bus).toHaveAccessibleDescription(reason);
+    expect(bus).toHaveAccessibleDescription(/A node of the network/);
   }
 
   it('says a run has locked the system, and what unlocks it, and does nothing on a click', async () => {
@@ -278,23 +453,47 @@ describe('<ComponentLibrary /> when nothing can be added', () => {
     const user = userEvent.setup();
     render(<ComponentLibrary />);
     expectBlocked(/A run has locked the system.*Reset run in the Inspector/);
-    await user.click(screen.getByTestId('component-library-tile-Bus'));
+    await user.click(row('Bus'));
     await user.keyboard('{Enter}');
     expect(useCaseStore.getState().addPanelOpen).toBe(false);
     expect(blankMutate).not.toHaveBeenCalled();
   });
 
-  it('does not start a drag from a tile while it is blocked', () => {
+  it('blocks every row, and the search still works on them', async () => {
+    MOCK_TOPOLOGY = topology('committed');
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('cases/ieee14.raw'), addfiles: [] },
+    });
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    for (const kind of ELEMENT_KINDS) {
+      expect(row(kind.value)).toHaveAttribute('aria-disabled', 'true');
+    }
+    await user.type(search(), 'shunt');
+    expect(shownKinds()).toEqual(['Shunt']);
+    expect(row('Shunt')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('does not start a drag from a row while it is blocked', () => {
     MOCK_TOPOLOGY = topology('committed');
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('cases/ieee14.raw'), addfiles: [] },
     });
     render(<ComponentLibrary />);
     const setData = vi.fn();
-    fireEvent.dragStart(screen.getByTestId('component-library-tile-Bus'), {
+    fireEvent.dragStart(row('Bus'), {
       dataTransfer: { setData, effectAllowed: 'none' },
     });
     expect(setData).not.toHaveBeenCalled();
+  });
+
+  it('describes a row by its line alone while it can add', () => {
+    openCase();
+    render(<ComponentLibrary />);
+    expect(row('Bus')).not.toHaveAttribute('aria-disabled');
+    expect(row('Bus').getAttribute('aria-describedby')?.split(' ')).not.toContain(
+      screen.getByTestId('component-library-hint').id,
+    );
   });
 
   it('says to wait while a power flow is running', () => {

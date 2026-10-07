@@ -1,11 +1,11 @@
 /**
  * Adding a component by kind, for the controls that are not the Add element form's
- * own picker: a Component library tile (clicked, or dropped on the empty canvas).
+ * own picker: a row of the Components palette (clicked, or dropped on the empty canvas).
  *
  * `add(kind)` opens the Add element panel on that kind. With no case open it first
- * starts a blank system, which is what a tile dropped on the "No case loaded" canvas
- * has always done. `blockedReason` says why a tile can do neither right now, in a
- * sentence the library shows, so a tile that does nothing is never a mystery.
+ * starts a blank system, which is what a row dropped on the "No case loaded" canvas
+ * has always done. `blockedReason` says why a row can do neither right now, in a
+ * sentence the palette shows, so a row that does nothing is never a mystery.
  */
 import { ProblemDetailsError } from '@/api/client';
 import { useBlankSystem, useCurrentTopology } from '@/api/queries';
