@@ -38,8 +38,9 @@ describe('<SldCanvasHint />', () => {
 
   it('says that a line can be moved by hand, which nothing on the diagram shows', () => {
     render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
+    // And how to pick one without aiming at a line a pixel or two wide.
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      'Click a line to move its route by hand.',
+      'Click a line, or its row in the Lines table, to move its route by hand.',
     );
   });
 
@@ -57,12 +58,28 @@ describe('<SldCanvasHint />', () => {
     expect(screen.queryByTestId('sld-canvas-route-slot')).not.toBeInTheDocument();
   });
 
+  it('keeps the bar of a picked line on a diagram too small to read, with the zoom button beside it', () => {
+    view.zoom = 0.3;
+    render(
+      <SldCanvasHint
+        locked={false}
+        selectedName={null}
+        onZoomIn={vi.fn()}
+        routeBarSlot={vi.fn()}
+      />,
+    );
+    // The bar is where a move of the line is answered: the notice gives way.
+    expect(screen.getByTestId('sld-canvas-route-slot')).toBeInTheDocument();
+    expect(screen.queryByTestId('sld-canvas-too-small')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Zoom to 100%' })).toBeInTheDocument();
+  });
+
   it('says that the diagram is too small to read, at what zoom, and how to get closer', () => {
     view.zoom = 0.192876;
     render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
     const notice = screen.getByTestId('sld-canvas-too-small');
     expect(notice).toHaveTextContent(
-      'The diagram is zoomed out to 19%, too small to read. Press Zoom to 100%, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus or a device in a table below to zoom to it.',
+      'The diagram is zoomed out to 19%, too small to read. Press Zoom to 100%, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus, a device or a line in a table below to zoom to it.',
     );
     expect(notice).toHaveAttribute('data-zoom-percent', '19');
     // Where the line is cut, the tooltip has the whole of it.

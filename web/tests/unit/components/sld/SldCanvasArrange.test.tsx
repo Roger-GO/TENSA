@@ -148,6 +148,8 @@ const forced = vi.hoisted(() => ({
    * draw over what, on a diagram where a tidy cannot be mended.
    */
   refused: null as string[] | null,
+  /** The lines and connectors that plan would draw over something (`TidyPlan.blamed`). */
+  blamed: [] as string[],
   /**
    * The picture passes no place a node is dropped in while this is set
    * (`drawsClear`), as where the connector of a device has no way to its
@@ -188,7 +190,7 @@ vi.mock('@/components/sld/tidyPlan', async () => {
           unrouted: [...plan.tidied.unrouted, ...forced.unrouted],
           ...(forced.outOfSteps ? { outOfSteps: true as const } : {}),
         },
-        ...(forced.refused !== null ? { refused: forced.refused } : {}),
+        ...(forced.refused !== null ? { refused: forced.refused, blamed: forced.blamed } : {}),
       };
     },
   };
@@ -447,6 +449,7 @@ beforeEach(() => {
   forced.tooLarge = false;
   forced.noRouting = false;
   forced.refused = null;
+  forced.blamed = [];
   forced.noClearPlace = false;
   forced.job = null;
   vi.mocked(startTidy).mockClear();
@@ -961,6 +964,34 @@ describe('Tidy diagram that cannot route every branch', () => {
     expect(routes()).toEqual(before.routes);
     expect(labels()).toEqual([]);
     expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('names the lines that would be drawn over something', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await openUntidy();
+    forced.refused = ['line-box: stub-load-PQ_1 / generator-G1: runs through the symbol'];
+    forced.blamed = ['stub-load-PQ_1', 'line-L14'];
+
+    run('tidy-relayout');
+    expect(info).toHaveBeenCalledWith(
+      'Nothing was changed',
+      expect.objectContaining({
+        description:
+          'Laid out again, the connector of PQ PQ_1 and line Line L14 would have been drawn over something else, so the diagram keeps the arrangement it has.',
+      }),
+    );
+    // With nothing to name, it says that much.
+    forced.blamed = [];
+    info.mockClear();
+    run('tidy');
+    expect(info).toHaveBeenCalledWith(
+      'Nothing was changed',
+      expect.objectContaining({
+        description: expect.stringContaining(
+          'With the lines routed afresh, something on the diagram would have been drawn over something else',
+        ) as string,
+      }),
+    );
   });
 });
 

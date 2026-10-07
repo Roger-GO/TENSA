@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event';
 
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
-import { useSldStore } from '@/store/sld';
+import { subscribeRouteEdit, useSldStore } from '@/store/sld';
 import { parseRunId, parseWorkspacePath } from '@/api/types';
 import { lineFlow } from '../../helpers/lineFlow';
 import type { PflowResult, TopologySummary } from '@/api/types';
@@ -68,6 +68,22 @@ describe('<LinesGrid />', () => {
     await user.click(screen.getByTestId('lines-grid-row-line-L1'));
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'line', idx: 'L1' });
     expect(useSldStore.getState().selectedNodeId).toBe('line-L1');
+  });
+
+  it('row click asks the diagram to pick the line, each time the row is clicked', async () => {
+    const user = userEvent.setup();
+    const picked = vi.fn();
+    const unsubscribe = subscribeRouteEdit(picked);
+    mockTopology = TOPOLOGY;
+    render(<LinesGrid />);
+    await user.click(screen.getByTestId('lines-grid-row-line-L1'));
+    expect(picked).toHaveBeenCalledWith('L1');
+    // The row that is selected already asks again: the line may have been let go of.
+    await user.click(screen.getByTestId('lines-grid-row-line-L1'));
+    expect(picked).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    await user.click(screen.getByTestId('lines-grid-row-line-L2'));
+    expect(picked).toHaveBeenCalledTimes(2);
   });
 });
 

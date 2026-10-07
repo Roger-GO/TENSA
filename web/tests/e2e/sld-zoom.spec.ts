@@ -101,7 +101,7 @@ test('a diagram too small to read says so, and a pick in a table shows the devic
   // the diagram says so, with the zoom and a button.
   const tooSmall = page.getByTestId('sld-canvas-too-small');
   await expect(tooSmall).toContainText(/The diagram is zoomed out to \d+%, too small to read\./);
-  await expect(tooSmall).toContainText('pick a bus or a device in a table below');
+  await expect(tooSmall).toContainText('pick a bus, a device or a line in a table below');
   const fitted = await zoomOf(page);
   expect(fitted).toBeLessThan(0.4);
   const zoomIn = page.getByTestId('sld-zoom-readable');

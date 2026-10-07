@@ -121,8 +121,26 @@ vi.mock('@/components/sld/elkClient', () => ({
   })),
 }));
 
-/** What the picture is made to say of a route that is handed to the canvas. */
-const forced = vi.hoisted(() => ({ refuseRoutes: false }));
+/**
+ * What the picture is made to say of a route that is handed to the canvas,
+ * and what a tidy is made to be refused for (`TidyPlan.refused`).
+ */
+const forced = vi.hoisted(() => ({ refuseRoutes: false, refuseTidy: null as string[] | null }));
+
+vi.mock('@/components/sld/tidyPlan', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/tidyPlan')>(
+    '@/components/sld/tidyPlan',
+  );
+  return {
+    ...actual,
+    planTidy: (...args: Parameters<typeof actual.planTidy>) => {
+      const plan = actual.planTidy(...args);
+      return forced.refuseTidy === null
+        ? plan
+        : { ...plan, refused: ['line-line: refused for the test'], blamed: forced.refuseTidy };
+    },
+  };
+});
 
 vi.mock('@/components/sld/picture', async () => {
   const actual = await vi.importActual<typeof import('@/components/sld/picture')>(
@@ -141,7 +159,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
-import { __requestSldCommand, useSldStore } from '@/store/sld';
+import { __requestRouteEdit, __requestSldCommand, useSldStore } from '@/store/sld';
 import type { SldCommand } from '@/store/sld';
 import { toast } from '@/lib/toast';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -208,6 +226,9 @@ function routeOf(id: string): Points {
 }
 
 const byHand = (id: string): boolean => edgeOf(id).data?.bendManual === true;
+
+/** The connector of the machine on bus 1, which stands over the bar with room either side of its tap. */
+const G1_STUB = 'stub-generator-G1';
 
 function positionOf(id: string): { x: number; y: number } {
   return { ...drawn.nodes.find((n) => n.id === id)!.position };
@@ -314,6 +335,7 @@ beforeEach(() => {
   drawn.onEdgeClick = null;
   drawn.onInteractiveChange = null;
   forced.refuseRoutes = false;
+  forced.refuseTidy = null;
   useSessionStore.setState({ sessionId: parseSessionId('sess-routes') });
   useCaseStore.getState().clearCase();
   useSldStore.setState({
@@ -341,7 +363,7 @@ describe('picking a line', () => {
     open('square.xlsx');
     await draw();
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      'Click a line to move its route by hand.',
+      'Click a line, or its row in the Lines table, to move its route by hand.',
     );
     expect(screen.queryByTestId('sld-route-editor')).toBeNull();
 
@@ -419,6 +441,65 @@ describe('picking a line', () => {
     pick('line-L14');
     expect(screen.queryByTestId('sld-route-editor')).toBeNull();
   });
+
+  it('picks the line a row of the Lines table names, each time the row is picked', async () => {
+    open('square.xlsx');
+    await draw();
+    act(() => __requestRouteEdit('L14'));
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L14');
+    expect(screen.getByTestId('sld-route-name')).toHaveTextContent('Line Line L14');
+    // Let go of, and picked again by the same row.
+    fireEvent.click(screen.getByTestId('sld-route-done'));
+    expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+    act(() => __requestRouteEdit('L14'));
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L14');
+    // A transformer goes by its idx as well; an idx the diagram has no line for picks nothing new.
+    act(() => __requestRouteEdit('T24'));
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute(
+      'data-edge-id',
+      'transformer-T24',
+    );
+    act(() => __requestRouteEdit('nothing'));
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute(
+      'data-edge-id',
+      'transformer-T24',
+    );
+    // A locked diagram picks none, and a row may still be looked at.
+    act(() => drawn.onInteractiveChange?.(false));
+    act(() => __requestRouteEdit('L14'));
+    expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+  });
+
+  it('picks the line that has the keyboard focus on Enter or Space, and hands the focus to its longest run', async () => {
+    open('square.xlsx');
+    await draw();
+    // React Flow draws each line as a group that takes the focus; the
+    // stand-in draws none, so one is put where React Flow has them.
+    const line = document.createElement('div');
+    line.className = 'react-flow__edge';
+    line.setAttribute('data-id', 'line-L14');
+    line.tabIndex = 0;
+    screen.getByTestId('sld-canvas-surface').appendChild(line);
+    line.focus();
+
+    fireEvent.keyDown(line, { key: 'Enter' });
+    const editor = screen.getByTestId('sld-route-editor');
+    expect(editor).toHaveAttribute('data-edge-id', 'line-L14');
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'line', idx: 'L14' });
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-route-focus'));
+    // The keys then move it.
+    const before = routeOf('line-L14');
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(routeOf('line-L14')).not.toEqual(before);
+
+    fireEvent.click(screen.getByTestId('sld-route-done'));
+    fireEvent.keyDown(line, { key: ' ' });
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L14');
+    // Any other key is not a pick.
+    fireEvent.click(screen.getByTestId('sld-route-done'));
+    fireEvent.keyDown(line, { key: 'a' });
+    expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+  });
 });
 
 describe('moving a run with the arrow keys', () => {
@@ -472,6 +553,28 @@ describe('moving a run with the arrow keys', () => {
     post('redo-layout');
     await waitFor(() => expect(byHand('line-L14')).toBe(true));
     expect(routeOf('line-L14')[run]![1]).toBe(before[run]![1] + NUDGE_STEP * (1 + NUDGE_FACTOR));
+  });
+
+  it('makes a step as long as a step is with one press, and takes it out again with one', async () => {
+    open('square.xlsx');
+    await draw();
+    pick(G1_STUB);
+    const straight = routeOf(G1_STUB);
+    expect(straight).toHaveLength(2);
+    const [from, to] = [straight[0]!, straight[1]!];
+    // Five along the bar would leave a step of five: the press makes one of twelve.
+    press('sld-route-run-0', 'ArrowLeft');
+    const down = from[1] < to[1] ? 12 : -12;
+    expect(routeOf(G1_STUB)).toEqual([
+      from,
+      [from[0], from[1] + down],
+      [from[0] - 12, from[1] + down],
+      [from[0] - 12, to[1]],
+    ]);
+    expect(byHand(G1_STUB)).toBe(true);
+    // Five back would leave a step of seven: the press takes the step out.
+    press('sld-route-run-2', 'ArrowRight');
+    expect(routeOf(G1_STUB)).toEqual(straight);
   });
 
   it('says which keys slide a run when the other two are pressed', async () => {
@@ -624,6 +727,28 @@ describe('a route drawn by hand', () => {
     expect(said).toContain('Reset manual routes');
   });
 
+  it('is named by a tidy that is refused, which says that Reset manual routes lets the tidy route it', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    pick('line-L14');
+    slideDown('line-L14');
+    const drawnByHand = routeOf('line-L14');
+    forced.refuseTidy = ['line-L14'];
+
+    post('tidy');
+    expect(info).toHaveBeenCalledWith(
+      'Nothing was changed',
+      expect.objectContaining({
+        description: expect.stringMatching(
+          /^With the lines routed afresh, line Line L14 would have been drawn over something else.* 1 line is routed by hand and left as it is: Reset manual routes, in the Arrange menu, lets the tidy route it as well\.$/,
+        ) as string,
+      }),
+    );
+    expect(routeOf('line-L14')).toEqual(drawnByHand);
+    expect(byHand('line-L14')).toBe(true);
+  });
+
   it('goes back to the automatic routing with Reset route, which Undo takes back', async () => {
     const success = vi.spyOn(toast, 'success');
     open('square.xlsx');
@@ -659,10 +784,10 @@ describe('a route drawn by hand', () => {
 
     pick('line-L14');
     slideDown('line-L14');
-    // And the connector of the load, slid along the bar of its bus.
-    pick('stub-load-PQ_1');
-    press(`sld-route-run-${firstRun(routeOf('stub-load-PQ_1'), 'upright')}`, 'ArrowRight', true);
-    expect(byHand('stub-load-PQ_1')).toBe(true);
+    // And the connector of the generator, slid along the bar of its bus.
+    pick(G1_STUB);
+    press(`sld-route-run-${firstRun(routeOf(G1_STUB), 'upright')}`, 'ArrowLeft', true);
+    expect(byHand(G1_STUB)).toBe(true);
     expect(useSldStore.getState().manualRouteCount).toBe(2);
     // What a route drawn by hand is, is said once and not for every line.
     expect(
@@ -709,21 +834,21 @@ describe('a route drawn by hand', () => {
     await draw();
     pick('line-L14');
     slideDown('line-L14');
-    pick('stub-load-PQ_1');
-    const stub = routeOf('stub-load-PQ_1');
-    press(`sld-route-run-${firstRun(stub, 'upright')}`, 'ArrowRight', true);
-    const drawnByHand = { line: routeOf('line-L14'), stub: routeOf('stub-load-PQ_1') };
-    expect(byHand('stub-load-PQ_1')).toBe(true);
+    pick(G1_STUB);
+    const stub = routeOf(G1_STUB);
+    press(`sld-route-run-${firstRun(stub, 'upright')}`, 'ArrowLeft', true);
+    const drawnByHand = { line: routeOf('line-L14'), stub: routeOf(G1_STUB) };
+    expect(byHand(G1_STUB)).toBe(true);
     expect(drawnByHand.stub).not.toEqual(stub);
     // The connector still leaves its device where it did, and lands on the bar.
     expect(drawnByHand.stub[0]).toEqual(stub[0]);
     expect(drawnByHand.stub.at(-1)![1]).toBe(stub.at(-1)![1]);
 
     const layout = await written();
-    expect(layout.connections!.load!.PQ_1!.bend_points!.map(({ x, y }) => [x, y])).toEqual(
+    expect(layout.connections!.generator!.G1!.bend_points!.map(({ x, y }) => [x, y])).toEqual(
       drawnByHand.stub,
     );
-    expect(layout.connections!.load!.PQ_1!.bus).toBe('4');
+    expect(layout.connections!.generator!.G1!.bus).toBe('1');
 
     cleanup();
     drawn.nodes = [];
@@ -734,13 +859,106 @@ describe('a route drawn by hand', () => {
     open('square.xlsx');
     await draw();
     expect(routeOf('line-L14')).toEqual(drawnByHand.line);
-    expect(routeOf('stub-load-PQ_1')).toEqual(drawnByHand.stub);
+    expect(routeOf(G1_STUB)).toEqual(drawnByHand.stub);
     expect(byHand('line-L14')).toBe(true);
-    expect(byHand('stub-load-PQ_1')).toBe(true);
+    expect(byHand(G1_STUB)).toBe(true);
     expect(byHand('line-L12')).toBe(false);
     expect(useSldStore.getState().manualRouteCount).toBe(2);
     // A diagram that was only opened is not written.
     expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('is given up for a device that is moved to where its connector no longer fits, and written that way', async () => {
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    pick(G1_STUB);
+    press('sld-route-run-0', 'ArrowLeft', true);
+    expect(byHand(G1_STUB)).toBe(true);
+    await written();
+    putSidecarSpy.mockClear();
+
+    // The machine stood over its bar; dropped far under it, the connector
+    // drawn out of the face that looked at the bar leaves by the wrong one.
+    const stood = positionOf('generator-G1');
+    dragNodeTo('generator-G1', { x: stood.x + 120, y: stood.y + 200 });
+    await waitFor(() => expect(byHand(G1_STUB)).toBe(false));
+    // No route of its own any more, whatever the layout held for it.
+    expect(useCaseStore.getState().routeOverrides[G1_STUB]).toBeNull();
+    expect(useSldStore.getState().manualRouteCount).toBe(0);
+    expect(info).toHaveBeenCalledWith(
+      'The route you drew for the connector of GENROU G1 no longer fits',
+      expect.anything(),
+    );
+    // What is written is what is drawn: the device where it was dropped,
+    // and no points for a connector that is worked out again.
+    await waitFor(async () => {
+      const layout = await written();
+      expect(layout.non_bus_coordinates!.generator!.G1).toMatchObject(positionOf('generator-G1'));
+      expect(layout.connections?.generator?.G1).toBeUndefined();
+    });
+    // Undo of the move brings the route back with the device.
+    post('undo-layout');
+    await waitFor(() => expect(byHand(G1_STUB)).toBe(true));
+    expect(positionOf('generator-G1')).toEqual(stood);
+  });
+
+  it('goes along with a device that a re-layout puts back beside its bus, where it fits there', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    pick(G1_STUB);
+    press('sld-route-run-0', 'ArrowLeft', true);
+    const drawnAtHome = routeOf(G1_STUB);
+    // Moved a little to the side: the connector follows, and is the user's still.
+    const home = positionOf('generator-G1');
+    dragNodeTo('generator-G1', { x: home.x + 8, y: home.y });
+    await waitFor(() => expect(routeOf(G1_STUB)[0]![0]).toBe(drawnAtHome[0]![0] + 8));
+    expect(byHand(G1_STUB)).toBe(true);
+
+    post('tidy-relayout');
+    await waitFor(() => expect(positionOf('generator-G1')).toEqual(home));
+    expect(routeOf(G1_STUB)).toEqual(drawnAtHome);
+    expect(byHand(G1_STUB)).toBe(true);
+    expect(useCaseStore.getState().routeOverrides[G1_STUB]).toMatchObject({
+      points: drawnAtHome,
+      anchors: { source: home },
+      manual: true,
+    });
+    expect(success).toHaveBeenCalledWith('Diagram tidied and laid out again', expect.anything());
+  });
+
+  it('is given up by a re-layout that puts its device where it does not fit, which lays the diagram out all the same and says which', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    // The machine moved further up from its bar, and its connector drawn
+    // from there, with its step right under the symbol.
+    const home = positionOf('generator-G1');
+    dragNodeTo('generator-G1', { x: home.x, y: home.y - 48 });
+    await waitFor(() => expect(positionOf('generator-G1').y).toBe(home.y - 48));
+    pick(G1_STUB);
+    press('sld-route-run-0', 'ArrowLeft', true);
+    expect(byHand(G1_STUB)).toBe(true);
+    expect(routeOf(G1_STUB)).toHaveLength(4);
+
+    // Back beside its bus, the symbol stands where the step was drawn.
+    post('tidy-relayout');
+    await waitFor(() => expect(positionOf('generator-G1')).toEqual(home));
+    await waitFor(() => expect(byHand(G1_STUB)).toBe(false));
+    expect(routeOf(G1_STUB)).toHaveLength(2);
+    expect(useCaseStore.getState().routeOverrides[G1_STUB]).toBeNull();
+    expect(success).toHaveBeenCalledWith(
+      'Diagram tidied and laid out again',
+      expect.objectContaining({
+        description: expect.stringContaining(
+          'The route you drew for the connector of GENROU G1 no longer fitted where its ends now stand, and is routed automatically again.',
+        ) as string,
+      }),
+    );
+    // One step: Undo puts the machine and its connector back.
+    post('undo-layout');
+    await waitFor(() => expect(byHand(G1_STUB)).toBe(true));
   });
 
   it('is not kept where the picture of the diagram would have something on something', async () => {

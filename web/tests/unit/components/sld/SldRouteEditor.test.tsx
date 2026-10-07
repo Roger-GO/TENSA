@@ -340,6 +340,197 @@ describe('the keys', () => {
   });
 });
 
+describe('a bend that was just put into a run', () => {
+  it('moves alone with the arrow keys, which is how the line is made to turn there', () => {
+    draw();
+    fireEvent.click(screen.getByTestId('sld-route-add-bend'));
+    // In the middle of the longest run, and with the focus.
+    expect(note()).toHaveTextContent(
+      'Bend added. Drag it, or press the arrow keys, to make the line turn there',
+    );
+    const bend = screen.getByTestId('sld-route-bend-2');
+    expect(bend).toHaveFocus();
+    fireEvent.keyDown(bend, { key: 'ArrowDown' });
+    // The bend alone: the two bends beside it stay, and its runs are at an angle.
+    expect(committed()).toEqual([
+      [50, 0],
+      [50, 100],
+      [125, 105],
+      [200, 100],
+      [200, 200],
+    ]);
+    expect(onCommit.mock.calls[0]![1]).toBe('move a bend of');
+  });
+
+  it('goes along its run with the keys for that way, and the line stays as it is', () => {
+    draw();
+    fireEvent.click(screen.getByTestId('sld-route-add-bend'));
+    const before = screen.getByTestId('sld-route-bend-2');
+    expect(before).toHaveAttribute('x', String(125 - 4.5));
+    fireEvent.keyDown(before, { key: 'ArrowRight' });
+    expect(onCommit).not.toHaveBeenCalled();
+    const after = screen.getByTestId('sld-route-bend-2');
+    expect(after).toHaveAttribute('x', String(130 - 4.5));
+    expect(after).toHaveFocus();
+    // From there it is pulled out like any other.
+    fireEvent.keyDown(after, { key: 'ArrowUp', shiftKey: true });
+    expect(committed()[2]).toEqual([130, 80]);
+  });
+
+  it('moves alone when it is dragged, with no key held', () => {
+    draw();
+    fireEvent.click(screen.getByTestId('sld-route-add-bend'));
+    drag('sld-route-bend-2', [125, 100], [0, 30]);
+    expect(committed()).toEqual([
+      [50, 0],
+      [50, 100],
+      [125, 130],
+      [200, 100],
+      [200, 200],
+    ]);
+    // A bend of the route itself still takes its runs along.
+    onCommit.mockClear();
+    drag('sld-route-bend-1', [50, 100], [0, 30]);
+    expect(committed()).toEqual([
+      [50, 0],
+      [50, 130],
+      [200, 130],
+      [200, 200],
+    ]);
+  });
+
+  it('keeps the focus of the keys when the route it made comes back from the canvas', () => {
+    const { rerender, slot } = draw();
+    fireEvent.click(screen.getByTestId('sld-route-add-bend'));
+    fireEvent.keyDown(screen.getByTestId('sld-route-bend-2'), { key: 'ArrowDown' });
+    const kept = committed();
+    // The canvas hands the route back a render later: the bend is a bend of it now.
+    rerender(
+      <SldRouteEditor
+        edgeId="line-L1"
+        name="line L1"
+        points={kept}
+        manual
+        ends={ENDS}
+        makeCheck={() => (points) => shut(points)}
+        grid={null}
+        onCommit={onCommit}
+        onReset={onReset}
+        onDone={onDone}
+        barSlot={slot}
+      />,
+    );
+    const bend = screen.getByTestId('sld-route-bend-2');
+    expect(bend).toHaveFocus();
+    fireEvent.keyDown(bend, { key: 'ArrowDown' });
+    expect(committed()[2]).toEqual([125, 110]);
+  });
+});
+
+describe('a step too short to be read as one', () => {
+  /** The connector of a device over its bar: out of its south face, square onto the bar. */
+  const DROP: Point[] = [
+    [40, 0],
+    [40, 80],
+  ];
+  const DEVICE: RouteEnds = {
+    source: { kind: 'fixed' },
+    target: { kind: 'bar', y: 80, lo: 3, hi: 97 },
+  };
+  function drawConnector() {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    render(
+      <SldRouteEditor
+        edgeId="stub-load-PQ_1"
+        name="the connector of PQ_1"
+        points={DROP}
+        manual={false}
+        ends={DEVICE}
+        makeCheck={() => (points) => shut(points)}
+        grid={null}
+        onCommit={onCommit}
+        onReset={onReset}
+        onDone={onDone}
+        barSlot={slot}
+      />,
+    );
+  }
+
+  it('is not made by a drag that goes a little way: the line stays, and the bar says how far to go', () => {
+    drawConnector();
+    const run = screen.getByTestId('sld-route-run-0');
+    fireEvent.pointerDown(run, at(40, 40));
+    fireEvent.pointerMove(run, at(45, 40));
+    // Held where it was, with no place refused in red: there is nothing in the way.
+    expect(JSON.parse(screen.getByTestId('sld-route-editor').getAttribute('data-route')!)).toEqual(
+      DROP,
+    );
+    expect(screen.queryByTestId('sld-route-refused')).toBeNull();
+    expect(note()).toHaveTextContent('A step is 12 px at the least: keep dragging to make one.');
+    expect(note()).toHaveAttribute('data-tone', 'plain');
+    fireEvent.pointerUp(run, at(45, 40));
+    expect(onCommit).not.toHaveBeenCalled();
+    // Dragged far enough, it goes with the pointer.
+    drag('sld-route-run-0', [40, 40], [20, 0]);
+    expect(committed()).toEqual([
+      [40, 0],
+      [40, 12],
+      [60, 12],
+      [60, 80],
+    ]);
+  });
+
+  it('is made as long as a step is by one press of a key', () => {
+    drawConnector();
+    fireEvent.keyDown(screen.getByTestId('sld-route-run-0'), { key: 'ArrowRight' });
+    expect(committed()).toEqual([
+      [40, 0],
+      [40, 12],
+      [52, 12],
+      [52, 80],
+    ]);
+  });
+
+  it('is refused where the tip of the bar leaves room for no more, and the bar says so', () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    render(
+      <SldRouteEditor
+        edgeId="stub-load-PQ_1"
+        name="the connector of PQ_1"
+        points={DROP}
+        manual={false}
+        ends={{ ...DEVICE, target: { kind: 'bar', y: 80, lo: 3, hi: 47 } }}
+        makeCheck={() => (points) => shut(points)}
+        grid={null}
+        onCommit={onCommit}
+        onReset={onReset}
+        onDone={onDone}
+        barSlot={slot}
+      />,
+    );
+    fireEvent.keyDown(screen.getByTestId('sld-route-run-0'), { key: 'ArrowRight', shiftKey: true });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(note()).toHaveTextContent(
+      'Not moved: its end is at the tip of the bar of its bus, which leaves room only for a step of under 12 px.',
+    );
+    // A drag that way finds no place either, and says the same.
+    drag('sld-route-run-0', [40, 40], [28, 0]);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(note()).toHaveTextContent(
+      'Not there: its end is at the tip of the bar of its bus, which leaves room only for a step of under 12 px. No clear place is near.',
+    );
+    // And a short one does not say to keep dragging: that would not help.
+    drag('sld-route-run-0', [40, 40], [5, 0]);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(note()).toHaveTextContent(
+      'Not there: its end is at the tip of the bar of its bus, which leaves room only for a step of under 12 px.',
+    );
+    expect(note()).not.toHaveTextContent('keep dragging');
+  });
+});
+
 describe('double-clicks', () => {
   it('put a bend into a run where it was clicked, and take a bend out', () => {
     draw();

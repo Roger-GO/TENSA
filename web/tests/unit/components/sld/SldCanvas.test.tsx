@@ -1426,7 +1426,7 @@ describe('SldCanvas', () => {
     // too, how to pick several and take a move back, and that an arrangement
     // is kept.
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      /click it and press the arrow keys\. Click a line to move its route by hand\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
+      /click it and press the arrow keys\. Click a line, or its row in the Lines table, to move its route by hand\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
     );
   });
 

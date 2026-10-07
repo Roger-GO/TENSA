@@ -167,6 +167,16 @@ describe('<ShortcutCheatsheet /> — content', () => {
     for (const id of ['pick', 'bend', 'alone', 'add', 'pull', 'remove', 'steps', 'done']) {
       expect(screen.getByTestId(`shortcut-cheatsheet-gesture-${id}`)).toBeInTheDocument();
     }
+    // A line is a pixel or two wide: the ways to pick one that need no aim are listed too.
+    const byKeys = screen.getByTestId('shortcut-cheatsheet-gesture-pick-keys');
+    expect(byKeys).toHaveTextContent('Pick the line that has the keyboard focus');
+    expect([...byKeys.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual([
+      'Enter',
+      'Space',
+    ]);
+    expect(screen.getByTestId('shortcut-cheatsheet-gesture-pick-row')).toHaveTextContent(
+      'Pick a line by its row in the Lines table',
+    );
     expect(section).toHaveTextContent('Reset manual routes in the Arrange menu');
   });
 

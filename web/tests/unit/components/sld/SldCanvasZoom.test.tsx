@@ -180,7 +180,7 @@ describe('a diagram too small to read', () => {
     const notice = screen.getByTestId('sld-canvas-too-small');
     expect(notice).toHaveTextContent('The diagram is zoomed out to 19%, too small to read.');
     expect(notice).toHaveTextContent('Press Zoom to 100%');
-    expect(notice).toHaveTextContent('pick a bus or a device in a table below');
+    expect(notice).toHaveTextContent('pick a bus, a device or a line in a table below');
     expect(screen.getByRole('button', { name: 'Zoom to 100%' })).toBeInTheDocument();
     // The line it stands in for is about dragging, which cannot be aimed yet.
     expect(screen.queryByTestId('sld-canvas-hint')).not.toBeInTheDocument();

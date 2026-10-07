@@ -878,18 +878,33 @@ describe('captureLayout', () => {
       [240, 40],
       [240, 3],
     ];
+    // Each drawn for where its two ends stand in this diagram.
+    const between = { source: { x: 0, y: 0 }, target: { x: 200, y: 0 } };
+    const fromLoad = { source: { x: 200, y: 70 }, target: { x: 200, y: 0 } };
     const byHand: DiagramEdge[] = [
       {
         id: 'line-L1',
         ...ends,
-        data: { bucket: 'line', idx: 'L1', bendPoints: routed, bendManual: true },
+        data: {
+          bucket: 'line',
+          idx: 'L1',
+          bendPoints: routed,
+          bendAnchors: between,
+          bendManual: true,
+        },
       },
       { id: 'line-L2', ...ends, data: { bucket: 'line', idx: 'L2', bendPoints: routed } },
       {
         id: 'stub-load-PQ_1',
         source: 'load-PQ_1',
         target: '2',
-        data: { bucket: 'load', kind: 'PQ', bendPoints: drawn, bendManual: true },
+        data: {
+          bucket: 'load',
+          kind: 'PQ',
+          bendPoints: drawn,
+          bendAnchors: fromLoad,
+          bendManual: true,
+        },
       },
       // One that is worked out has nothing to keep.
       {
@@ -923,6 +938,59 @@ describe('captureLayout', () => {
       target: { x: 200, y: 0 },
     });
     expect(parseSidecar(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it('does not write a route drawn by hand that is still held for where an end stood before a move', () => {
+    const drawn: [number, number][] = [
+      [220, 70],
+      [220, 40],
+      [240, 40],
+      [240, 3],
+    ];
+    // The load stands at (200, 70) and bus 2 at (200, 0); both routes were
+    // drawn while the load and the bus stood forty to the left.
+    const before = { x: 160, y: 70 };
+    const stale: DiagramEdge[] = [
+      {
+        id: 'line-L1',
+        ...ends,
+        data: {
+          bucket: 'line',
+          idx: 'L1',
+          bendPoints: routed,
+          bendAnchors: { source: { x: 0, y: 0 }, target: { x: 160, y: 0 } },
+          bendManual: true,
+        },
+      },
+      {
+        id: 'stub-load-PQ_1',
+        source: 'load-PQ_1',
+        target: '2',
+        data: {
+          bucket: 'load',
+          kind: 'PQ',
+          bendPoints: drawn,
+          bendAnchors: { source: before, target: { x: 200, y: 0 } },
+          bendManual: true,
+        },
+      },
+    ];
+    const layout = captureLayout({ nodes, edges: stale }, topology, null);
+    // Read back, either would be taken for a route drawn for where its ends
+    // stand now: neither is written.
+    expect(layout.branches).toEqual({});
+    expect(layout.connections).toEqual({});
+    expect(storedConnectorRoutes(layout, topology).polylines.size).toBe(0);
+    // One with no place it was drawn for is not written either.
+    const loose: DiagramEdge[] = [
+      {
+        id: 'stub-load-PQ_1',
+        source: 'load-PQ_1',
+        target: '2',
+        data: { bucket: 'load', kind: 'PQ', bendPoints: drawn, bendManual: true },
+      },
+    ];
+    expect(captureLayout({ nodes, edges: loose }, topology, null).connections).toEqual({});
   });
 
   it('drops the points a layout held for a connector that is worked out again', () => {

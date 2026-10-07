@@ -16,6 +16,17 @@
  *   the bar -> drag the bus: the connector goes along whole -> Reset manual
  *   routes in the Arrange menu puts it back as it was
  *
+ *   open IEEE 14 -> slide the connector of a load along its bar -> try to
+ *   fold it back onto its own symbol: it stays as it was, with no step too
+ *   short to read and no run along the symbol -> drag the load to the other
+ *   side of its bar: the connector is worked out again -> reload: the same
+ *   connector, clear of its symbol -> Tidy and re-layout lays the diagram
+ *   out again
+ *
+ *   open WSCC 9 -> pick a line by its row in the Lines table -> Add bend,
+ *   and the arrow keys make the line turn there -> pick another line with
+ *   Enter while it has the keyboard focus: one of its runs takes the keys
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew (`sldDrawing.ts`). The
  * unit tests hold the moves and the check that goes with them; this one
@@ -145,7 +156,7 @@ test("IEEE 14: a line moved by hand is the user's, clear of everything, kept by 
 
   // ---- a click picks it ----
   await expect(page.getByTestId('sld-canvas-hint')).toContainText(
-    'Click a line to move its route by hand.',
+    'Click a line, or its row in the Lines table, to move its route by hand.',
   );
   await clickLine(page, id);
   const bar = page.getByTestId('sld-route-bar');
@@ -285,4 +296,153 @@ test('WSCC 9: the connector of a load moved by hand stays attached, goes along w
   await page.getByTestId('sld-arrange-trigger').click();
   await expect(page.getByTestId('sld-arrange-no-manual-routes')).toBeVisible();
   await expect(page.getByTestId('sld-arrange-reset-routes')).toBeDisabled();
+});
+
+/** The shortest run of `points`. */
+function shortestRun(points: Points): number {
+  return Math.min(
+    ...points.slice(1).map((p, i) => Math.hypot(p[0] - points[i]![0], p[1] - points[i]![1])),
+  );
+}
+
+test('IEEE 14: a connector moved by hand cannot be folded onto its symbol, is given up when its device moves away, and reopens as it is drawn', async ({
+  page,
+}) => {
+  const stem = `route-e2e-fold-${Date.now()}`;
+
+  await page.goto('/');
+  await openCase(page, 'ieee14_full.xlsx');
+  await settled(page);
+  await openCopy(page, stem);
+  const opened = await settled(page);
+
+  // The connector of a load that hangs square over its bar, with room to slide.
+  const id = 'stub-load-PQ_3';
+  const before = opened.edges[id]!.points;
+  expect(before).toHaveLength(2);
+  expect(before[0]![0]).toBe(before[1]![0]);
+  const box = opened.nodes['load-PQ_3']!;
+
+  await clickLine(page, id);
+  const middle: [number, number] = [before[0]![0], (before[0]![1] + before[1]![1]) / 2];
+  await Promise.all([layoutWritten(page), dragFrom(page, middle, [96, 0])]);
+  await expect(page.getByTestId('sld-route-status')).toHaveText('Routed by hand');
+  const stepped = (await settled(page)).edges[id]!.points;
+  // Out of the symbol, a step aside, and onto the bar.
+  expect(stepped).toHaveLength(4);
+  expect(stepped[0]).toEqual(before[0]);
+  expect(shortestRun(stepped)).toBeGreaterThanOrEqual(12);
+
+  // ---- it cannot be folded back onto its own symbol ----
+  // The neck dragged the other way, which would bring the line back up beside the symbol.
+  const neck: [number, number] = [stepped[0]![0], (stepped[0]![1] + stepped[1]![1]) / 2];
+  await dragFrom(page, neck, [-18, 0]);
+  await expect(page.getByTestId('sld-route-note')).toContainText('Not there');
+  expect(await editedRoute(page)).toEqual(stepped);
+  // The run across dragged up into the symbol.
+  const across: [number, number] = [(stepped[1]![0] + stepped[2]![0]) / 2, stepped[1]![1]];
+  await dragFrom(page, across, [0, -30]);
+  await expect(page.getByTestId('sld-route-note')).toContainText('its own symbol');
+  expect(await editedRoute(page)).toEqual(stepped);
+  const kept = (await settled(page)).edges[id]!.points;
+  expect(kept).toEqual(stepped);
+  // No run of it is along the symbol: all but the first keep off it.
+  const bottom = box.y + box.height;
+  for (const [, y] of kept.slice(1)) expect(y - bottom).toBeGreaterThanOrEqual(8);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+
+  // ---- the load dragged to the other side of its bar ----
+  await page.getByTestId('sld-route-done').click();
+  await dragInDiagram(page, 'load-PQ_3', 0, 2 * (before[1]![1] - (box.y + box.height / 2)));
+  // The route that was drawn does not fit there: the connector is worked out again.
+  await expect(
+    page.getByText(/The route you drew for the connector of PQ_3 no longer fits/),
+  ).toBeVisible();
+  const dropped = await settled(page);
+  expect(dropped.nodes['load-PQ_3']!.y).toBeGreaterThan(before[1]![1]);
+  expect(dropped.edges[id]!.points.length).toBeLessThanOrEqual(3);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(problems(dropped)).toEqual([]);
+  // The layout that was written for the move is the diagram as it is drawn.
+  await page.waitForTimeout(1_200);
+
+  // ---- a reload draws the same connector ----
+  await page.reload();
+  await openCase(page, `${stem}.xlsx`);
+  const reopened = await settled(page);
+  expect(reopened.nodes['load-PQ_3']).toEqual(dropped.nodes['load-PQ_3']);
+  expect(reopened.edges[id]!.points).toEqual(dropped.edges[id]!.points);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(problems(reopened)).toEqual([]);
+
+  // ---- and the diagram can be laid out again ----
+  await page.getByTestId('sld-arrange-trigger').click();
+  await Promise.all([layoutWritten(page), page.getByTestId('sld-arrange-tidy-relayout').click()]);
+  await expect(page.getByTestId('sld-tidy-note')).toContainText('Tidied');
+  const laidOut = await settled(page);
+  expect(laidOut.nodes['load-PQ_3']!.y).toBeLessThan(before[1]![1]);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+});
+
+test('WSCC 9: a line is picked by its row in the Lines table and with the keys, and a bend that was added turns the line with the arrow keys', async ({
+  page,
+}) => {
+  const stem = `route-e2e-pick-${Date.now()}`;
+
+  await page.goto('/');
+  await openCase(page, 'wscc9.xlsx');
+  await settled(page);
+  await openCopy(page, stem);
+  const opened = await settled(page);
+
+  // ---- its row in the Lines table picks a line ----
+  await page.getByRole('tab', { name: 'Lines' }).click();
+  await page.getByTestId('lines-grid-row-line-Line_8').click();
+  const editor = page.getByTestId('sld-route-editor');
+  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_8');
+  await expect(page.getByTestId('sld-route-name')).toContainText('Line_8');
+  await expect(page.getByTestId('sld-route-status')).toHaveText('Routed automatically');
+  // Let go of, the same row picks it again.
+  await page.getByTestId('sld-route-done').click();
+  await expect(editor).toHaveCount(0);
+  await page.getByTestId('lines-grid-row-line-Line_8').click();
+  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_8');
+
+  // ---- a bend that is added takes the arrow keys, and turns the line ----
+  const before = opened.edges['line-Line_8']!.points;
+  await page.getByTestId('sld-route-add-bend').click();
+  await expect(page.getByTestId('sld-route-note')).toContainText('press the arrow keys');
+  await expect(page.locator('[data-testid^="sld-route-bend-"]:focus')).toHaveCount(1);
+  await Promise.all([layoutWritten(page), page.keyboard.press('ArrowLeft')]);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.getByTestId('sld-route-status')).toHaveText('Routed by hand');
+  const turned = (await settled(page)).edges['line-Line_8']!.points;
+  expect(turned).toHaveLength(before.length + 1);
+  // Its ends are where they were, on their taps.
+  expect(turned[0]).toEqual(before[0]);
+  expect(turned.at(-1)).toEqual(before.at(-1));
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  // Tidy diagram counts it among the lines it leaves alone.
+  await page.getByTestId('sld-route-done').click();
+  await page.getByTestId('sld-tidy').click();
+  await expect(page.getByTestId('sld-tidy-note')).toContainText(/Already tidy|by hand kept/);
+  await page.getByTestId('sld-arrange-trigger').click();
+  await expect(page.getByTestId('sld-arrange-menu')).toContainText('Lines moved by hand (1)');
+  // Closed, the menu hands the focus back to its button.
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('sld-arrange-menu')).toHaveCount(0);
+  await expect(page.getByTestId('sld-arrange-trigger')).toBeFocused();
+
+  // ---- Enter picks the line that has the keyboard focus ----
+  const other = Object.keys(opened.edges).find(
+    (edge) => edge.startsWith('line-') && edge !== 'line-Line_8',
+  )!;
+  await page.locator(`.react-flow__edge[data-id="${other}"]`).focus();
+  await page.keyboard.press('Enter');
+  await expect(editor).toHaveAttribute('data-edge-id', other);
+  // One of its runs has the focus: the arrow keys move it from there.
+  await expect(page.locator('[data-testid^="sld-route-run-"]:focus')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
 });

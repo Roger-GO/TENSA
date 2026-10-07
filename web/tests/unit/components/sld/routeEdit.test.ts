@@ -7,9 +7,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Point } from '@/components/sld/connections';
 import {
+  KINK_REASON,
+  MIN_STEP,
+  TIP_REASON,
   NECK,
   SNAP_REACH,
   applyEdit,
+  leavesKink,
   moveBend,
   pointIn,
   pullBend,
@@ -273,6 +277,66 @@ describe('tidyPoints', () => {
   });
 });
 
+describe('leavesKink', () => {
+  it('finds a step too short to be read as one, which the route did not have', () => {
+    // The connector of a device, slid three along its bar: a neck and a step of three.
+    expect(
+      leavesKink(DROP, [
+        [40, 0],
+        [40, NECK],
+        [43, NECK],
+        [43, 80],
+      ]),
+    ).toBe(true);
+    // Slid as far as a step is long, it is one.
+    expect(
+      leavesKink(DROP, [
+        [40, 0],
+        [40, NECK],
+        [40 + MIN_STEP, NECK],
+        [40 + MIN_STEP, 80],
+      ]),
+    ).toBe(false);
+    // A neck out of a run too short for a whole one is a step too short as well.
+    expect(
+      leavesKink(
+        [
+          [40, 0],
+          [40, 16],
+        ],
+        [
+          [40, 0],
+          [40, 8],
+          [60, 8],
+          [60, 16],
+        ],
+      ),
+    ).toBe(true);
+  });
+
+  it('does not hold a short run the route came with against a move that leaves it alone or makes it longer', () => {
+    // A jog of six, as a tap asks for one.
+    const jogged: Point[] = [
+      [50, 0],
+      [50, 100],
+      [56, 100],
+      [56, 200],
+    ];
+    const slid = (y: number, x = 56): Point[] => [
+      [50, 0],
+      [50, y],
+      [x, y],
+      [x, 200],
+    ];
+    expect(leavesKink(jogged, slid(140))).toBe(false);
+    expect(leavesKink(jogged, slid(100, 60))).toBe(false);
+    // Shorter still, it is worse than it was.
+    expect(leavesKink(jogged, slid(100, 53))).toBe(true);
+    // And a second short run beside it is one more than there was.
+    expect(leavesKink(jogged, slid(195))).toBe(true);
+  });
+});
+
 describe('applyEdit', () => {
   it('lands the line of a run on the grid, not how far it was moved', () => {
     const { points } = applyEdit(STEPPED, { kind: 'run', index: 1 }, [0, 23], BARS, { grid: 16 });
@@ -344,6 +408,10 @@ describe('settleEdit', () => {
     };
     const none = (): null => null;
     expect(settleEdit(DROP, { kind: 'run', index: 0 }, [28, 0], short, none)).toBeNull();
+    // Asked for so little that the line stays, it says what is in the way.
+    const still = settleEdit(DROP, { kind: 'run', index: 0 }, [8, 0], short, none)!;
+    expect(still.stayed).toBe(true);
+    expect(still.refused).toBe(TIP_REASON);
     // With room for a step that can be read, the run goes as far as the tip.
     const wide: RouteEnds = { ...short, target: { kind: 'bar', y: 80, lo: 3, hi: 60 } };
     const settled = settleEdit(DROP, { kind: 'run', index: 0 }, [28, 0], wide, none)!;
@@ -362,6 +430,60 @@ describe('settleEdit', () => {
       [55, 0],
       [55, 200],
     ]);
+  });
+
+  it('leaves the line as it is for a slide too small to make a step of', () => {
+    const none = (): null => null;
+    // Three along the bar: the neck would be followed by a step of three.
+    const still = settleEdit(DROP, { kind: 'run', index: 0 }, [3, 0], DEVICE, none)!;
+    expect(still.points).toEqual(DROP);
+    expect(still.stayed).toBe(true);
+    expect(still.refused).toBe(KINK_REASON);
+    expect(still.wanted).toBeNull();
+    // As far as a step is long, the run goes with the pointer.
+    const stepped = settleEdit(DROP, { kind: 'run', index: 0 }, [MIN_STEP, 0], DEVICE, none)!;
+    expect(stepped.stayed).toBeUndefined();
+    expect(stepped.refused).toBeNull();
+    expect(stepped.points).toEqual([
+      [40, 0],
+      [40, NECK],
+      [40 + MIN_STEP, NECK],
+      [40 + MIN_STEP, 80],
+    ]);
+    // A slide that leaves no step is made however small it is.
+    expect(settleEdit(STEPPED, { kind: 'run', index: 1 }, [0, 3], BARS, none)!.points[1]).toEqual([
+      50, 103,
+    ]);
+  });
+
+  it('takes a run past where it would leave a step too short, to the nearest place that leaves none', () => {
+    // Nothing runs level along the bar the route steps down to.
+    const offBar = (points: readonly Point[]): string | null =>
+      points.some((p, i) => i > 0 && p[1] === 200 && points[i - 1]![1] === 200)
+        ? 'it would run through or along the bar of bus 2'
+        : null;
+    // The level run slid to four short of that bar: the run down to it would
+    // be four long. Twelve short of it is the nearest place that leaves a step.
+    const settled = settleEdit(STEPPED, { kind: 'run', index: 1 }, [0, 96], BARS, offBar)!;
+    expect(settled.refused).toBe(KINK_REASON);
+    expect(settled.points[1]).toEqual([50, 200 - MIN_STEP]);
+  });
+
+  it('does not take a bend that is pulled out of a run back into it, or to its other side', () => {
+    // Shut everywhere left of 60: the run stands at 50, and the bend is pulled to 30.
+    const left = (points: readonly Point[]): string | null =>
+      points.some((p) => p[0] < 60 && p[0] !== 50) ? 'it would run through the symbol of G1' : null;
+    const straight: Point[] = [
+      [50, 0],
+      [50, 200],
+    ];
+    const both: RouteEnds = {
+      source: { kind: 'bar', y: 0, lo: 3, hi: 97 },
+      target: { kind: 'bar', y: 200, lo: 3, hi: 97 },
+    };
+    expect(
+      settleEdit(straight, { kind: 'pull', index: 0, at: [63, 100] }, [-33, 0], both, left),
+    ).toBeNull();
   });
 
   it('has no place for a line with none clear within reach', () => {

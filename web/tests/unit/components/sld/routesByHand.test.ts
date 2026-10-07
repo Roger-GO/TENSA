@@ -12,9 +12,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TopologyEntry, TopologySummary } from '@/api/types';
 import {
+  OWN_SYMBOL_ROOM,
   TAP_SPACING,
   bringAlong,
   layoutConnections,
+  onOwnSymbol,
+  routeFolds,
   type ConnectionEdge,
   type ConnectionNode,
   type Point,
@@ -144,6 +147,114 @@ describe('bringAlong', () => {
       [46, 3],
       [110, 203],
     ]);
+  });
+});
+
+describe('a route that holds by itself', () => {
+  it('does not fold back on itself', () => {
+    expect(routeFolds(STEPPED)).toBe(false);
+    // A step aside and back, as wide as two lines keep apart.
+    expect(
+      routeFolds([
+        [30, 3],
+        [30, 60],
+        [42, 60],
+        [42, 100],
+        [30, 100],
+        [30, 203],
+      ]),
+    ).toBe(false);
+    // Back up beside the run it came down, six apart.
+    expect(
+      routeFolds([
+        [30, 3],
+        [30, 100],
+        [36, 100],
+        [36, 40],
+        [60, 40],
+        [60, 203],
+      ]),
+    ).toBe(true);
+    // Across its own first run.
+    expect(
+      routeFolds([
+        [30, 3],
+        [30, 100],
+        [60, 100],
+        [60, 40],
+        [0, 40],
+        [0, 203],
+      ]),
+    ).toBe(true);
+    // Back through the point it started from.
+    expect(
+      routeFolds([
+        [46, -40],
+        [46, -34],
+        [28, -34],
+        [28, -40],
+        [80, -40],
+        [80, 3],
+      ]),
+    ).toBe(true);
+    // Straight back the way it came, at an angle.
+    expect(
+      routeFolds([
+        [0, 0],
+        [40, 30],
+        [20, 15],
+      ]),
+    ).toBe(true);
+  });
+
+  it('leaves the symbol of its device, and does not come back along its edge', () => {
+    // A device whose box is from (26, -80) to (66, -40).
+    const box = { left: 26, right: 66, top: -80, bottom: -40 };
+    const out = (down: number): Point[] => [
+      [46, -40],
+      [46, -40 + down],
+      [80, -40 + down],
+      [80, 3],
+    ];
+    expect(onOwnSymbol(out(12), box)).toBeNull();
+    expect(onOwnSymbol(out(OWN_SYMBOL_ROOM), box)).toBeNull();
+    expect(onOwnSymbol(out(OWN_SYMBOL_ROOM - 2), box)).toBe('beside');
+    // Held to more room, it is beside the symbol sooner.
+    expect(onOwnSymbol(out(6), box, 8)).toBe('beside');
+    // Straight to the bar at an angle, as a connector the diagram draws.
+    expect(
+      onOwnSymbol(
+        [
+          [46, -40],
+          [80, 3],
+        ],
+        box,
+      ),
+    ).toBeNull();
+    // Out of the middle of a side and up along that side, past the corner.
+    expect(
+      onOwnSymbol(
+        [
+          [26, -60],
+          [26, -92],
+          [10, -92],
+          [10, 3],
+        ],
+        box,
+      ),
+    ).toBe('along');
+    // Back into the box.
+    expect(
+      onOwnSymbol(
+        [
+          [46, -40],
+          [46, -28],
+          [36, -28],
+          [36, -60],
+        ],
+        box,
+      ),
+    ).toBe('through');
   });
 });
 
@@ -277,6 +388,61 @@ describe('layoutConnections: the connector of a device drawn by hand', () => {
     expect(pass.byHand.has('stub-PQ')).toBe(false);
   });
 
+  it('is given up, though nothing has moved, where it runs along the edge of its own symbol', () => {
+    // A layout that holds, for the device where it stands, points that were
+    // drawn for it somewhere else: out of the middle of its left side, up
+    // along that side past the corner, across and down to the bar.
+    const along: Point[] = [
+      [26, -60],
+      [26, -92],
+      [10, -92],
+      [10, 3],
+    ];
+    const nodes = [bus('A', A.x, A.y), device('PQ', LOAD.x, LOAD.y)];
+    const pass = layoutConnections(nodes, [stub('PQ', 'A', along, FOR)]);
+    expect(pass.byHand.has('stub-PQ')).toBe(false);
+    expect(pass.routes.get('stub-PQ')!.points).toEqual([
+      [46, -40],
+      [46, 3],
+    ]);
+    // And where a run of it lies on the bottom edge of the symbol.
+    const onEdge: Point[] = [
+      [46, -40],
+      [46, -34],
+      [28, -34],
+      [28, -40],
+      [80, -40],
+      [80, 3],
+    ];
+    expect(layoutConnections(nodes, [stub('PQ', 'A', onEdge, FOR)]).byHand.size).toBe(0);
+  });
+
+  it('is given up where it folds back on itself', () => {
+    // Down, across, a little way back up, back across under itself, and down.
+    const folded: Point[] = [
+      [46, -40],
+      [46, -12],
+      [80, -12],
+      [80, -20],
+      [60, -20],
+      [60, 3],
+    ];
+    const nodes = [bus('A', A.x, A.y), device('PQ', LOAD.x, LOAD.y)];
+    const pass = layoutConnections(nodes, [stub('PQ', 'A', folded, FOR)]);
+    expect(pass.byHand.has('stub-PQ')).toBe(false);
+  });
+
+  it('is given up where its device was moved so near the run across that the neck is gone', () => {
+    // Ten down: the run across at -28 is two under the symbol.
+    const nodes = [bus('A', A.x, A.y), device('PQ', LOAD.x, LOAD.y + 10)];
+    const pass = layoutConnections(nodes, [stub('PQ', 'A', DRAWN, FOR)]);
+    expect(pass.byHand.has('stub-PQ')).toBe(false);
+    expect(pass.routes.get('stub-PQ')!.points).toEqual([
+      [46, -30],
+      [46, 3],
+    ]);
+  });
+
   it('runs level into the tip of the bar where it was drawn to', () => {
     // A load right of the bar, level with it: its box from (130, -17) to (170, 23).
     const beside = { x: 130, y: -17 };
@@ -376,6 +542,45 @@ describe('routeDiagram: a route drawn by hand', () => {
     expect(routed.unrouted).toEqual([]);
     expect(routed.changed.get('L1')!.manual).toBeUndefined();
     expect(routed.edges[0]!.data?.bendManual).toBeUndefined();
+  });
+
+  it('is given up where its bus was moved to where it folds back on itself', () => {
+    // Down from A, across to the tap at the right tip of B, and down onto it.
+    const drawn: Point[] = [
+      [30, 3],
+      [30, 150],
+      [89, 150],
+      [89, 203],
+    ];
+    // B moved up and to the left, to above the run across: brought along,
+    // the last run comes back up beside the first, ten from it.
+    const moved = [bus('A', A.x, A.y), bus('B', -69, 80)];
+    const edge = line('L1', 'A', 'B', drawn, AT);
+    const brought = layoutConnections(moved, [edge]).routes.get('L1')!.points;
+    expect(brought).toEqual([
+      [30, 3],
+      [30, 150],
+      [20, 150],
+      [20, 83],
+    ]);
+    expect(routeFolds(brought)).toBe(true);
+    // It is on nothing else: the fold is what it is given up for.
+    const bars = [
+      { id: 'A', left: 0, right: 92, y: 3 },
+      { id: 'B', left: -69, right: 23, y: 83 },
+    ];
+    expect(
+      findOverlaps({
+        lines: [{ id: 'L1', points: brought, from: 'A', to: 'B' }],
+        bars,
+        boxes: [],
+      }),
+    ).toEqual([]);
+    const routed = routeDiagram(moved, [edge]);
+    expect(routed.released).toEqual(['L1']);
+    expect(routed.edges[0]!.data?.bendManual).toBeUndefined();
+    const now = routed.connections.routes.get('L1')!.points;
+    expect(routeFolds(now)).toBe(false);
   });
 
   it('leaves a route that stands where it was drawn alone, whatever is put on it', () => {
@@ -560,5 +765,120 @@ describe('planTidy: routes drawn by hand', () => {
     expect(kept!.at(-1)).toEqual([60 + bus2.x - 5, bus2.y + 3]);
     expect(kept!.slice(0, 2)).toEqual(drawn.slice(0, 2));
     expect(plan.tidied.routes.has('line-L1')).toBe(false);
+  });
+});
+
+describe('planTidy: a re-layout and the routes drawn by hand', () => {
+  const entry = (
+    idx: number | string,
+    kind: string,
+    params: TopologyEntry['params'],
+  ): TopologyEntry => ({ idx, name: String(idx), kind, params });
+  const topology: TopologySummary = {
+    state: 'pre-setup',
+    buses: [entry(1, 'Bus', {}), entry(2, 'Bus', {})],
+    lines: [entry('L1', 'Line', { bus1: 1, bus2: 2 })],
+    transformers: [],
+    generators: [],
+    loads: [entry('PQ_1', 'PQ', { bus: 1 })],
+    shunts: [],
+  };
+  /** Both buses on the grid: a re-layout leaves them where they are. */
+  const coords = { '1': { x: 0, y: 0 }, '2': { x: 0, y: 208 } };
+  const LOAD_ID = 'load-PQ_1';
+  const STUB_ID = `stub-${LOAD_ID}`;
+  const shown = { values: false };
+  /** Where a re-layout puts the load, and how large its box is. */
+  const home = () => {
+    const plan = planTidy(buildGraph(topology, coords), topology, { relayout: true, shown });
+    const node = plan.nodes.find((n) => n.id === LOAD_ID)!;
+    return { ...node.position, width: node.initialWidth ?? 0, height: node.initialHeight ?? 0 };
+  };
+
+  it('takes the connector of a device along where the device stays, as it is drawn', () => {
+    const at = home();
+    // Out of the face that looks at the bar, a neck, a step aside, and onto the bar.
+    const [px, py] = [at.x + at.width / 2, at.y + at.height];
+    const aside = px + 24 <= 89 ? px + 24 : px - 24;
+    const drawn: Point[] = [
+      [px, py],
+      [px, py + 12],
+      [aside, py + 12],
+      [aside, 3],
+    ];
+    const graph = buildGraph(topology, coords, {
+      dragOverrides: { [LOAD_ID]: { x: at.x, y: at.y } },
+      bendPoints: new Map([[STUB_ID, drawn]]),
+      bendAnchors: new Map([[STUB_ID, { source: { x: at.x, y: at.y }, target: coords['1'] }]]),
+      bendManual: new Set([STUB_ID]),
+    });
+    const plan = planTidy(graph, topology, { relayout: true, shown });
+    expect(plan.refused).toBeUndefined();
+    expect(plan.released).toBeUndefined();
+    expect(plan.connectorsByHand?.get(STUB_ID)).toEqual(drawn);
+    expect(plan.edges.find((e) => e.id === STUB_ID)!.data!.bendManual).toBe(true);
+  });
+
+  it('gives up the connector of a device that it puts back beside its bus, and says which', () => {
+    // The load was dragged far off to the right and up, and its connector
+    // drawn from there: down, a long way across, and onto the bar.
+    const away = { x: 200, y: -150 };
+    const drawn: Point[] = [
+      [220, -110],
+      [220, -60],
+      [60, -60],
+      [60, 3],
+    ];
+    const graph = buildGraph(topology, coords, {
+      dragOverrides: { [LOAD_ID]: away },
+      bendPoints: new Map([[STUB_ID, drawn]]),
+      bendAnchors: new Map([[STUB_ID, { source: away, target: coords['1'] }]]),
+      bendManual: new Set([STUB_ID]),
+    });
+    expect(graph.edges.find((e) => e.id === STUB_ID)!.data!.bendManual).toBe(true);
+    const plan = planTidy(graph, topology, { relayout: true, shown });
+    // Laid out again all the same: the device is back beside its bus.
+    expect(plan.refused).toBeUndefined();
+    expect(plan.nodes.find((n) => n.id === LOAD_ID)!.position).toEqual({
+      x: home().x,
+      y: home().y,
+    });
+    expect(plan.released).toEqual([STUB_ID]);
+    expect(plan.connectorsByHand).toBeUndefined();
+    const data = plan.edges.find((e) => e.id === STUB_ID)!.data!;
+    expect(data.bendManual).toBeUndefined();
+    expect(data.bendPoints).toBeUndefined();
+  });
+
+  it('plans again without a line drawn by hand that the devices it puts back would stand on', () => {
+    const at = home();
+    const middle = at.y + at.height / 2;
+    // While the load stood far off, line L1 was drawn through where a
+    // re-layout puts it: out of the north face of bus 1, across at the
+    // height of the load, round and down to bus 2.
+    const through: Point[] = [
+      [16, 3],
+      [16, middle],
+      [at.x + at.width + 60, middle],
+      [at.x + at.width + 60, 120],
+      [48, 120],
+      [48, 211],
+    ];
+    const graph = buildGraph(topology, coords, {
+      dragOverrides: { [LOAD_ID]: { x: 320, y: -200 } },
+      bendPoints: new Map([['line-L1', through]]),
+      bendAnchors: new Map([['line-L1', { source: coords['1'], target: coords['2'] }]]),
+      bendManual: new Set(['line-L1']),
+    });
+    const plan = planTidy(graph, topology, { relayout: true, shown });
+    expect(plan.refused).toBeUndefined();
+    expect(plan.released).toEqual(['line-L1']);
+    expect(plan.byHand).toBeUndefined();
+    // It was routed with the rest.
+    expect(plan.tidied.routes.has('line-L1')).toBe(true);
+    // A tidy that moves nothing leaves the line the user's: the load stands off it.
+    const still = planTidy(graph, topology, { relayout: false, shown });
+    expect(still.byHand?.get('line-L1')).toEqual(through);
+    expect(still.released).toBeUndefined();
   });
 });
