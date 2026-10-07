@@ -199,6 +199,15 @@ describe('<BottomDrawer />', () => {
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('shunts');
   });
 
+  it('clicking the tab that is active already opens a collapsed drawer', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true, activeBottomDrawerTab: 'lines' });
+    render(<BottomDrawer />, { wrapper });
+    await user.click(screen.getByTestId('bottom-drawer-tab-lines'));
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('lines');
+  });
+
   it('when expanded mounts the active tab content', () => {
     useLayoutStore.setState({ activeBottomDrawerTab: 'buses' });
     render(<BottomDrawer />, { wrapper });

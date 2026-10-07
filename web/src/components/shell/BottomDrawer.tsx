@@ -17,7 +17,10 @@
  * size=0..4 and we render only the 32px tab strip. Clicking any tab in
  * the collapsed state both expands the drawer AND switches to that
  * tab; the ``setActiveBottomDrawerTab`` setter handles the tab switch
- * and ``setBottomDrawerCollapsed(false)`` handles the expand.
+ * and ``setBottomDrawerCollapsed(false)`` handles the expand. The tab
+ * that is active already opens it as well. A drawer that is dragged
+ * down to its strip counts as collapsed (``AppShell``), so the same
+ * holds for it.
  *
  * Unread-results bit: per F-DESIGN-5, opening the drawer or switching
  * tabs clears ``drawerHasUnreadResults`` (mirrors the click path on the
@@ -215,6 +218,11 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
             <TabsPrimitive.Trigger
               value={tab}
               data-testid={`bottom-drawer-tab-${tab}`}
+              // The tab that is active already changes nothing when it is
+              // clicked: on a collapsed drawer it opens it all the same.
+              onClick={() => {
+                if (collapsed) setCollapsed(false);
+              }}
               className={cn(
                 'relative inline-flex items-center px-3 text-sm font-medium whitespace-nowrap',
                 'text-muted-foreground hover:text-foreground',

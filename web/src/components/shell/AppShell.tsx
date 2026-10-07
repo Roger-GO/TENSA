@@ -204,6 +204,7 @@ export function AppShell({
   const bottomDrawerHeightPct = useLayoutStore((s) => s.bottomDrawerHeightPct);
   const rightInspectorCollapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
   const setBottomDrawerHeightPct = useLayoutStore((s) => s.setBottomDrawerHeightPct);
+  const setBottomDrawerCollapsed = useLayoutStore((s) => s.setBottomDrawerCollapsed);
   // v3.1 — full-space results view. When active we render a single
   // results region in place of the canvas/inspector/drawer chassis.
   const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
@@ -235,10 +236,13 @@ export function AppShell({
     syncPanel(leftSidebarPanelRef.current, leftSidebarCollapsed);
   }, [leftSidebarCollapsed]);
 
-  // Keep the BottomDrawer panel in sync with the store on store change.
+  // Keep the BottomDrawer panel in sync with the store on store change. A
+  // drawer that is opened shows its content: one that was dragged shut, or
+  // nearly, opens to the height it has by default.
   useEffect(() => {
     if (firstMountRef.current) return;
     syncPanel(bottomDrawerPanelRef.current, bottomDrawerCollapsed);
+    if (!bottomDrawerCollapsed) openEnough(bottomDrawerPanelRef.current);
   }, [bottomDrawerCollapsed]);
 
   // Keep the RightInspector panel in sync with the visibility predicate.
@@ -341,9 +345,17 @@ export function AppShell({
                   // size whenever the user drags. The persist middleware
                   // batches writes so this is safe per-pointer-move.
                   const drawerPct = sizes[1];
-                  if (typeof drawerPct === 'number' && !bottomDrawerCollapsed) {
-                    setBottomDrawerHeightPct(drawerPct);
-                  }
+                  if (typeof drawerPct !== 'number') return;
+                  // Collapsed is what the drawer is while it is down at its
+                  // tab strip, however it got there: dragged down (it snaps
+                  // there from under the least height it has open) as well
+                  // as toggled. Only the strip is drawn then, and a click on
+                  // a tab opens it again; dragged up from there it is open,
+                  // and shows its content. The strip is no height to come
+                  // back to, so it is not kept as one.
+                  const atStrip = drawerPct <= BOTTOM_DRAWER_COLLAPSED_PCT + 0.5;
+                  if (atStrip !== bottomDrawerCollapsed) setBottomDrawerCollapsed(atStrip);
+                  if (!atStrip) setBottomDrawerHeightPct(drawerPct);
                 }}
               >
                 <Panel
@@ -430,8 +442,10 @@ export function AppShell({
                   // will mount; KTD-7 specifies a 32px collapsed bar. As a
                   // % of the right-side vertical group, ~4 covers it on
                   // typical 800-1200px viewports without crowding.
-                  collapsedSize={4}
-                  minSize={4}
+                  collapsedSize={BOTTOM_DRAWER_COLLAPSED_PCT}
+                  // Open, it is never lower than a table needs: dragged
+                  // below that it snaps down to its tab strip.
+                  minSize={BOTTOM_DRAWER_OPEN_MIN_PCT}
                   maxSize={75}
                   className="flex min-w-0 flex-col"
                 >
@@ -529,6 +543,30 @@ function syncPanel(panel: ImperativePanelHandle | null, shouldBeCollapsed: boole
     // first paint, which already matches the persisted state via the
     // ``defaultSize`` prop derived from the layout store. Subsequent
     // store updates re-fire this effect once the panel is registered.
+  }
+}
+
+/**
+ * The height of the bottom drawer when only its tab strip shows, the least
+ * height at which it counts as open (room for the bar of a table, its
+ * heading and a row or two), and the height it opens to from less than
+ * that, each as a percentage of the column it shares with the diagram.
+ */
+const BOTTOM_DRAWER_COLLAPSED_PCT = 4;
+const BOTTOM_DRAWER_OPEN_MIN_PCT = 15;
+const BOTTOM_DRAWER_OPEN_PCT = 35;
+
+/**
+ * Give the bottom drawer its usual height where it opened to the least it
+ * can have: a drawer that was dragged down to its tab strip has no height
+ * to come back to, and opens with room for a row or two.
+ */
+function openEnough(panel: ImperativePanelHandle | null): void {
+  if (!panel) return;
+  try {
+    if (panel.getSize() <= BOTTOM_DRAWER_OPEN_MIN_PCT + 0.5) panel.resize(BOTTOM_DRAWER_OPEN_PCT);
+  } catch {
+    // Not registered yet: see `syncPanel`.
   }
 }
 
