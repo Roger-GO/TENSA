@@ -132,7 +132,9 @@ Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+param
 Reports:         GET /sessions/{id}/report
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
-                 and placed controllers, branch routes, busbars, label offsets, connection faces, figure settings
+                 and placed controllers, branch routes ("routing": "auto", "polyline" for a route the UI made, "manual"
+                 for one the user drew, which a tidy leaves alone), busbars, label offsets, connections (the faces
+                 a device connector attaches by and, where the user drew it, its "bend_points" and "bus"), figure settings
                  ("figure.connector_style": "straight" or "elbow", how the UI draws device connectors), and
                  "units": by the idx of a static generator, {"expanded": true} where the UI draws the control
                  chain of that generator (its machine, exciter, governor) out beside its symbol;
