@@ -25,11 +25,12 @@ const SIZE = { width: 1600, height: 900 };
 // ---------------------------------------------------------------------------
 
 // `at` is the canvas drop position (client px) — buses are placed by
-// dragging the Bus tile onto the canvas, so the agent lays out the diagram
-// by hand the way a human would. Positions trace the canonical WSCC 9-bus
-// one-line: generator buses 2/3 at the top corners, the 230 kV chain
-// 7-8-9 across the middle, 5/6 below, and bus 4 → bus 1 (G1) down the
-// centre. The panel sits on the right (~420px), so drops stay left of ~1130.
+// dragging the Bus row of the Components tab onto the canvas, so the agent
+// lays out the diagram by hand the way a human would. Positions trace the
+// canonical WSCC 9-bus one-line: generator buses 2/3 at the top corners, the
+// 230 kV chain 7-8-9 across the middle, 5/6 below, and bus 4 → bus 1 (G1)
+// down the centre. The panel sits on the right (~420px), so drops stay left
+// of ~1130.
 const BUSES = [
   { idx: '2', name: 'BUS2', Vn: 18, at: [440, 175] }, // G2, top-left
   { idx: '3', name: 'BUS3', Vn: 13.8, at: [1040, 175] }, // G3, top-right
@@ -143,22 +144,34 @@ async function fillField(page, name, value) {
 }
 
 /**
- * Drag a Component-Library tile onto the canvas at (clientX, clientY).
- * Dispatches the app's synthetic HTML5 DnD payload (Playwright's
- * mouse-drag fights React Flow's pane panning). The drop opens — or
- * switches — the Add Element panel to that tile's kind, seeding the bus
- * drop coordinate. Before any case exists the target is the no-case
+ * Show a tab of the left sidebar: 'project' (the case, the saved cases) or
+ * 'components' (the palette). A fresh browser opens on Project.
+ */
+async function showSidebarTab(page, tab) {
+  await page.locator(`[data-testid="left-sidebar-tab-${tab}"]`).click({ timeout: 5000 });
+}
+
+/**
+ * Drag a row of the Components tab onto the canvas at (clientX, clientY).
+ * `kind` is the row's own value, which is the Kind picker's ("Bus", "PV",
+ * "Transformer2W", ...). Dispatches the app's synthetic HTML5 DnD payload
+ * (Playwright's mouse-drag fights React Flow's pane panning). The drop
+ * opens — or switches — the Add Element panel to that kind, seeding the
+ * bus drop coordinate. Before any case exists the target is the no-case
  * drop zone; afterwards it's the live React Flow pane.
  */
-async function dragTileToCanvas(page, tile, x, y) {
+async function dragComponentToCanvas(page, kind, x, y) {
+  // The hover only shows the viewer which row is taken (the drop below does
+  // the work), so a row that is not there must not hold the recording up for
+  // the default 30s.
   await page
-    .locator(`[data-testid="component-library-tile-${tile}"]`)
-    .hover()
-    .catch(() => {});
+    .locator(`[data-testid="component-library-item-${kind}"]`)
+    .hover({ timeout: 2500 })
+    .catch(() => console.warn(`[demo] no "${kind}" row to hover in the Components tab`));
   await page.evaluate(
-    ([t, cx, cy]) => {
+    ([k, cx, cy]) => {
       const dt = new DataTransfer();
-      dt.setData('application/andes-component-type', t);
+      dt.setData('application/andes-component-type', k);
       const zone =
         document.querySelector('.react-flow__pane') ||
         document.querySelector('[data-testid="no-case-drop-zone"]');
@@ -167,7 +180,7 @@ async function dragTileToCanvas(page, tile, x, y) {
       zone.dispatchEvent(new DragEvent('dragover', opts));
       zone.dispatchEvent(new DragEvent('drop', opts));
     },
-    [tile, x, y],
+    [kind, x, y],
   );
 }
 
@@ -289,6 +302,8 @@ async function main() {
   await sleep(2800);
 
   // -- first bus: drag onto the empty canvas to start the system ------------
+  // The palette is on the Components tab of the left sidebar.
+  await showSidebarTab(page, 'components');
   await caption(
     page,
     'Dragging the first Bus onto the empty canvas',
@@ -297,7 +312,7 @@ async function main() {
   // Session creation is async on boot — the drop handler no-ops until the
   // session exists, so retry until the panel appears.
   for (let attempt = 0; attempt < 15; attempt++) {
-    await dragTileToCanvas(page, 'Bus', BUSES[0].at[0], BUSES[0].at[1]);
+    await dragComponentToCanvas(page, 'Bus', BUSES[0].at[0], BUSES[0].at[1]);
     await sleep(1000);
     if (
       await page
@@ -315,7 +330,7 @@ async function main() {
     await caption(page, `Placing ${b.name} (${b.Vn} kV) on the canvas`, `bus ${i + 1} of 9`);
     if (i > 0) {
       // Switch the open panel to a fresh Bus drop at this position.
-      await dragTileToCanvas(page, 'Bus', b.at[0], b.at[1]);
+      await dragComponentToCanvas(page, 'Bus', b.at[0], b.at[1]);
       await sleep(500);
     }
     await addElement(page, 'Bus', 'Bus', { idx: b.idx, name: b.name, Vn: b.Vn });
@@ -334,7 +349,7 @@ async function main() {
       .catch(() => {});
   // Re-frame the diagram mid-build: close the open builder so Fit View
   // sees the full canvas width, fit, then leave the panel closed (the
-  // next dragTile reopens it). This is the visible "rezoom to adjust"
+  // next drag of a row reopens it). This is the visible "rezoom to adjust"
   // the layout gets as it grows — nothing is left drifting off-screen.
   const refitView = async (caption2) => {
     await page
@@ -387,23 +402,23 @@ async function main() {
   await tap('button[aria-label="Fit View"]');
   await sleep(1100);
 
-  // -- transformers (drag the Transformer tile) -----------------------------
+  // -- transformers (drag the Transformer (2W) row) --------------------------
   for (const t of TRANSFORMERS) {
     await caption(
       page,
       `Adding step-up transformer ${t.idx}`,
       `bus ${t.bus1} → ${t.bus2} · x = ${t.x} pu (Vn bases derived from the buses)`,
     );
-    await dragTileToCanvas(page, 'Transformer', 360, 250);
+    await dragComponentToCanvas(page, 'Transformer2W', 360, 250);
     await sleep(450);
     const { tap, ...rest } = t;
     await addElement(page, 'Transformer2W', 'Line', rest, { tap });
   }
 
-  // -- lines (drag the Line tile) -------------------------------------------
+  // -- lines (drag the Line row) --------------------------------------------
   for (const l of LINES) {
     await caption(page, `Adding 230 kV line ${l.name}`, `r=${l.r} x=${l.x} b=${l.b} pu`);
-    await dragTileToCanvas(page, 'Line', 360, 250);
+    await dragComponentToCanvas(page, 'Line', 360, 250);
     await sleep(400);
     const { b, ...rest } = l;
     await addElement(page, 'Line', 'Line', rest, { b });
@@ -413,15 +428,15 @@ async function main() {
     'All buses, transformers and lines now connected — the network topology is complete',
   ]);
 
-  // -- loads (drag the Load tile) -------------------------------------------
+  // -- loads (drag the PQ load row) -----------------------------------------
   for (const d of LOADS) {
     await caption(page, `Adding load at bus ${d.bus}`, `${d.p0 * 100} MW / ${d.q0 * 100} MVAr`);
-    await dragTileToCanvas(page, 'Load', 360, 250);
+    await dragComponentToCanvas(page, 'PQ', 360, 250);
     await sleep(400);
     await addElement(page, 'PQ', 'PQ', d);
   }
 
-  // -- generators + machines + controllers (drag the Generator tile) --------
+  // -- generators + machines + controllers (each model has its own row) -----
   for (const g of MACHINES) {
     const { kind, ...rest } = g;
     await caption(
@@ -429,7 +444,7 @@ async function main() {
       `Adding ${kind === 'Slack' ? 'slack' : 'PV'} generator ${g.name} at bus ${g.bus}`,
       kind === 'Slack' ? 'V = 1.04 pu reference' : `P = ${rest.p0 * 100} MW, V = ${rest.v0} pu`,
     );
-    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await dragComponentToCanvas(page, kind, 360, 250);
     await sleep(400);
     await addElement(page, kind, kind, rest);
   }
@@ -440,7 +455,7 @@ async function main() {
       `Adding round-rotor model ${m.idx}`,
       `H = ${m.H} s, D = 2 (UI converts H → M = 2H for ANDES)`,
     );
-    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await dragComponentToCanvas(page, 'GENROU', 360, 250);
     await sleep(400);
     await addElement(page, 'GENROU', 'GENROU', rest, adv);
   }
@@ -451,13 +466,13 @@ async function main() {
   for (const e of EXCITERS) {
     const { kind, ...rest } = e;
     await caption(page, `Attaching exciter ${kind} to ${e.syn}`, 'voltage regulation');
-    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await dragComponentToCanvas(page, kind, 360, 250);
     await sleep(400);
     await addElement(page, kind, kind, rest);
   }
   for (const g of GOVERNORS) {
     await caption(page, `Attaching governor TGOV1 to ${g.syn}`, 'speed / frequency regulation');
-    await dragTileToCanvas(page, 'Generator', 360, 250);
+    await dragComponentToCanvas(page, 'TGOV1', 360, 250);
     await sleep(400);
     await addElement(page, 'TGOV1', 'TGOV1', g);
   }
@@ -489,6 +504,8 @@ async function main() {
   await sleep(3000);
 
   // -- save the case to a file, then reload it from the workspace -----------
+  // The Saved cases list is on the Project tab.
+  await showSidebarTab(page, 'project');
   await caption(
     page,
     'Saving the system to a file',
