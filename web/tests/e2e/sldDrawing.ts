@@ -67,11 +67,34 @@ export async function dragBy(page: Page, id: string, dx: number, dy: number): Pr
  * size.
  */
 export async function dragInDiagram(page: Page, id: string, dx: number, dy: number): Promise<void> {
-  const zoom = await page.evaluate(() => {
+  const zoom = await diagramZoom(page);
+  await dragBy(page, id, dx * zoom, dy * zoom);
+}
+
+/** The zoom the diagram is shown at. */
+async function diagramZoom(page: Page): Promise<number> {
+  return await page.evaluate(() => {
     const transform = document.querySelector<HTMLElement>('.react-flow__viewport')?.style.transform;
     return Number(/scale\(([\d.]+)\)/.exec(transform ?? '')?.[1] ?? 1);
   });
-  await dragBy(page, id, dx * zoom, dy * zoom);
+}
+
+/**
+ * Drag the node `id` by `dx`, `dy` in the diagram's own units and let it
+ * go, without waiting for anything to be written: for a move the diagram
+ * does not make (a node with no clear place near where it was dropped goes
+ * back where it stood, and nothing is written for that).
+ */
+export async function dropInDiagram(page: Page, id: string, dx: number, dy: number): Promise<void> {
+  const zoom = await diagramZoom(page);
+  const node = page.locator(`.react-flow__node[data-id="${id}"]`);
+  const box = (await node.boundingBox())!;
+  const press = { x: box.x + Math.min(box.width / 2, 30), y: box.y + Math.min(box.height / 2, 3) };
+  await page.mouse.move(press.x, press.y);
+  await page.mouse.down();
+  await page.mouse.move(press.x + (dx * zoom) / 2, press.y + (dy * zoom) / 2, { steps: 5 });
+  await page.mouse.move(press.x + dx * zoom, press.y + dy * zoom, { steps: 5 });
+  await page.mouse.up();
 }
 
 /** A node as the browser drew it, in the diagram's own coordinates. */
@@ -461,8 +484,10 @@ export async function labelProblems(page: Page): Promise<string[]> {
  * What is on screen, as the overlap checker reads a diagram
  * (`overlapCheck.ts`): every connector as the points of its path, every bar,
  * and every box the browser laid out, in the diagram's own coordinates: the
- * symbols, the labels of the buses, the P / Q readouts, the flow labels of
- * the lines and the symbols of the transformers.
+ * symbols, the mark a generator at a reactive limit carries on its corner
+ * (the triangle as it is drawn, which hangs out of the symbol), the labels
+ * of the buses, the P / Q readouts, the flow labels of the lines and the
+ * symbols of the transformers.
  */
 export async function drawnOnScreen(page: Page): Promise<DrawnDiagram> {
   return await page.evaluate(() => {
@@ -516,6 +541,10 @@ export async function drawnOnScreen(page: Page): Promise<DrawnDiagram> {
       if (readout !== null) {
         boxes.push({ id: `readout:${id}`, kind: 'readout', box: inDiagram(readout), of: [id] });
       }
+      const marker = el.querySelector('[data-testid^="generator-q-marker-"] polygon');
+      if (marker !== null) {
+        boxes.push({ id: `marker:${id}`, kind: 'symbol', box: inDiagram(marker), of: [id] });
+      }
     }
     const lines: { id: string; points: [number, number][]; from: string; to: string }[] = [];
     for (const el of document.querySelectorAll<HTMLElement>('.react-flow__edge')) {
@@ -556,6 +585,32 @@ export async function drawnOnScreen(page: Page): Promise<DrawnDiagram> {
  */
 export async function overlapsOnScreen(page: Page): Promise<string[]> {
   return describeOverlaps(findOverlaps(await drawnOnScreen(page), { slack: 2 }));
+}
+
+/**
+ * Every flow label on screen that stands nearer than `room` to the symbol
+ * of a generator, load or shunt, or to the mark on the corner of a
+ * generator, as text. A label keeps a little way off a symbol
+ * (`LABEL_ROOM` in `connections.ts`): flush against one, it reads as part
+ * of it. `room` is less than that by what the browser rounds a box by.
+ */
+export async function flowLabelsBySymbols(page: Page, room = 1.5): Promise<string[]> {
+  const { boxes } = await drawnOnScreen(page);
+  const flows = boxes.filter((box) => box.id.startsWith('flow:'));
+  const symbols = boxes.filter((box) => box.kind === 'symbol' && !box.id.startsWith('symbol:'));
+  const found: string[] = [];
+  for (const { id, box } of flows) {
+    for (const symbol of symbols) {
+      const gap = Math.max(
+        symbol.box.left - box.right,
+        box.left - symbol.box.right,
+        symbol.box.top - box.bottom,
+        box.top - symbol.box.bottom,
+      );
+      if (gap < room) found.push(`${id} stands ${gap.toFixed(1)} from ${symbol.id}`);
+    }
+  }
+  return found;
 }
 
 /** The diagram once it has nodes, every node is measured, and it has stopped changing. */

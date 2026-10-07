@@ -16,6 +16,13 @@
  *   nearest free place, a notice says so, and the rule still holds -> Tidy
  *   and re-layout -> it holds, and every bus is on the grid
  *
+ *   in a copy of Kundur: drop a generator on another -> it is put beside
+ *   it -> Tidy diagram -> nothing is drawn over anything else, the marks
+ *   on the corners of the generators at a reactive limit included, and no
+ *   flow label stands flush against a symbol -> drop a generator far
+ *   beyond the bar of another bus, where its connector has no way back ->
+ *   it goes back where it stood, a notice says so, and nothing is written
+ *
  * What is on screen is read off the page (`drawnOnScreen` in
  * `sldDrawing.ts`) and handed to the checker the diagram itself routes by
  * (`findOverlaps` in `overlapCheck.ts`), so the boxes are the ones the
@@ -32,6 +39,8 @@ import {
   branchesIntoDevices,
   dragInDiagram,
   drawing,
+  dropInDiagram,
+  flowLabelsBySymbols,
   labelProblems,
   layoutWritten,
   openCase,
@@ -206,3 +215,52 @@ for (const { file, moves } of EXAMPLES) {
     expect(await labelProblems(page)).toEqual([]);
   });
 }
+
+test('kundur_full.xlsx: a tidy keeps the labels off the marks of the generators, and a generator with no clear place goes back', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await openCase(page, 'kundur_full.xlsx');
+  await settled(page);
+  await openCopy(page, `no-overlap-kundur-marks-${Date.now()}`);
+  await settled(page);
+  await runPowerFlow(page);
+  await settled(page);
+  // The generators at a reactive limit carry a mark on their corner.
+  await expect(page.locator('[data-testid^="generator-q-marker-"]').first()).toBeVisible();
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(await flowLabelsBySymbols(page)).toEqual([]);
+
+  // ---- One generator dropped on another, and tidied ---------------------------
+  const opened = await drawing(page);
+  const [g3, g4] = [opened.nodes['generator-3']!, opened.nodes['generator-4']!];
+  await dragInDiagram(page, 'generator-3', g4.x + 12 - g3.x, g4.y + 8 - g3.y);
+  await expect(page.getByText('Moved to the nearest free place').last()).toBeVisible();
+  await settled(page);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(await flowLabelsBySymbols(page)).toEqual([]);
+  await page.getByTestId('sld-tidy').click();
+  await expect(page.getByTestId('sld-tidy-note')).toBeVisible();
+  await settled(page);
+  expect(await overlapsOnScreen(page), 'after the tidy').toEqual([]);
+  expect(await flowLabelsBySymbols(page), 'after the tidy').toEqual([]);
+  expect(await labelProblems(page), 'after the tidy').toEqual([]);
+
+  // ---- A generator dropped where its connector has no way back -----------------
+  // Far east of its bus and below it, beyond the bars of the buses between:
+  // no place near there can be drawn, so the move is not made.
+  const written: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().includes('/api/workspace/layout')) {
+      written.push(request.url());
+    }
+  });
+  const stood = (await settled(page)).nodes['generator-3']!;
+  await dropInDiagram(page, 'generator-3', 320, 70);
+  await expect(page.getByText('Put back where it was').last()).toBeVisible();
+  const back = (await settled(page)).nodes['generator-3']!;
+  expect({ x: back.x, y: back.y }).toEqual({ x: stood.x, y: stood.y });
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(written).toEqual([]);
+});

@@ -10,12 +10,21 @@
  * - after any bus was dragged, by any of a spread of moves, and dropped,
  *   and after a tidy of that, and while it is dragged (wherever the move
  *   does not put it on something);
- * - after any device was dragged and dropped: beside its bus, across it,
- *   behind another device of its bus, and on another symbol or on a bar,
- *   which the canvas puts in the nearest free place (`clearDrop`);
+ * - after any device was dragged and dropped, and after a tidy of that:
+ *   beside its bus, across it, behind another device of its bus, far from
+ *   its bus, and on another symbol or on a bar, which the canvas puts in
+ *   the nearest free place, or back where it stood (`clearDrop`);
+ * - at every move of a drag on the case of a hundred buses, each drawn from
+ *   the routes the move before it made, as the canvas draws them;
  * - with the control chains of the generating units drawn out;
  * - on a layout that places the buses alone (the one shipped for IEEE 14),
  *   where every route is made as the diagram is drawn.
+ *
+ * The sweeps over every bus and every device of an example case take the
+ * longest, and run in a test file of their own for each case, side by side
+ * (`noOverlapMoves*.test.ts`, over `holdMoves` in
+ * `tests/unit/helpers/overlapSweeps.ts`); the single moves that stand for
+ * them, and everything else, are here.
  *
  * Each state is made as the canvas makes it (`diagramStates.ts`), drawn by
  * `pictureOf`, and read by `findOverlaps`, whose rules `overlapCheck.test.ts`
@@ -29,22 +38,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
-import type { ConnectionEdge } from '@/components/sld/connections';
 import { curatedLayoutFor } from '@/components/sld/curated';
 import { buildGraph, defaultBarLengths } from '@/components/sld/graph';
-import { countCrossings, describeOverlaps, findOverlaps } from '@/components/sld/overlapCheck';
-import { drawnDiagram, pictureOf } from '@/components/sld/picture';
+import { countCrossings } from '@/components/sld/overlapCheck';
+import { drawnDiagram } from '@/components/sld/picture';
 import { CASE118 } from '../../helpers/case118';
 import {
+  alongDrag,
+  bothWays,
   dragged,
   draggedWith,
   dropShift,
   drawn,
   moved,
   opened,
-  overlapsOf,
   settled,
   tidied,
+  typicalWidths,
+  whileDragged,
   type Diagram,
 } from '../../helpers/diagramStates';
 import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
@@ -59,78 +70,6 @@ const EXAMPLES: readonly [string, TopologySummary][] = [
   ['IEEE 14', IEEE14],
   ['Kundur', KUNDUR],
   ['WSCC 9', WSCC9],
-];
-
-/**
- * The widths the values of a solved case have on screen: a readout of two
- * lines such as `-21.6 MVAr`, a flow such as `-25.97 MW` after its arrow.
- */
-function typicalWidths(diagram: Diagram) {
-  return {
-    readouts: new Map(diagram.nodes.map((n) => [n.id, 62])),
-    flows: new Map(diagram.edges.map((e) => [e.id, 78])),
-  };
-}
-
-/** Both ways a state is looked at: as it is, and with the values of a power flow on it. */
-function bothWays(diagram: Diagram): string[] {
-  return [
-    ...overlapsOf(diagram, { values: false }).map((found) => `plain: ${found}`),
-    ...overlapsOf(diagram, { values: true }).map((found) => `values: ${found}`),
-    ...overlapsOf(diagram, { values: true, labelWidths: typicalWidths(diagram) }).map(
-      (found) => `values as wide as they are: ${found}`,
-    ),
-  ];
-}
-
-/**
- * Every place where two things are on each other while the nodes `ids` of
- * `diagram` are dragged to where they stand: the picture of a move, made
- * from the routes the diagram had before it.
- */
-function whileDragged(diagram: Diagram, before: Diagram, values: boolean): string[] {
-  const picture = pictureOf(diagram.nodes, before.edges as ConnectionEdge[], {
-    barLengths: diagram.barLengths,
-    values,
-    dragging: true,
-  });
-  return [
-    ...picture.unrouted.map((id) => `no route for ${id}`),
-    ...describeOverlaps(findOverlaps(drawnDiagram(diagram.nodes, picture, { values }))),
-  ];
-}
-
-/**
- * The moves every bus of an example case is dragged by: along its row and
- * off it, a little way and a long way, among them the ones that once left a
- * line through the symbol of a transformer, the label of a bus on one, and
- * a symbol on a bar.
- */
-const BUS_MOVES: readonly (readonly [number, number])[] = [
-  [48, 0],
-  [-64, 16],
-  [16, -16],
-  [-120, -120],
-  [-120, 40],
-  [0, -96],
-  [0, -80],
-  [16, -96],
-  [120, 80],
-  [120, 120],
-  [160, -40],
-  [-80, 80],
-];
-
-/** The moves every generator, load and shunt is dragged by. */
-const DEVICE_MOVES: readonly (readonly [number, number])[] = [
-  [-80, 0],
-  [80, 0],
-  [0, -60],
-  [0, 60],
-  [40, 40],
-  [-120, 80],
-  [100, -100],
-  [-40, 140],
 ];
 
 describe('nothing overlaps on the example cases', () => {
@@ -166,59 +105,6 @@ describe('nothing overlaps on the example cases', () => {
         first.nodes.map((n) => n.position),
       );
     });
-
-    it(`${name}: after any bus is dragged and dropped, after a tidy of that, and while it is dragged`, async () => {
-      const first = await opened(topology);
-      const found: string[] = [];
-      let clear = 0;
-      for (const bus of first.nodes.filter((n) => n.type === 'bus')) {
-        for (const [dx, dy] of BUS_MOVES) {
-          const what = `bus ${bus.id} by ${dx}, ${dy}`;
-          const ids = draggedWith(first, bus.id);
-          const there = moved(first, ids, dx, dy);
-          // While it is dragged: wherever the move does not put the bus or
-          // one of its devices on something, which a drag passes through
-          // and a drop does not stay on.
-          if (dropShift(there, ids, first) === null) {
-            clear += 1;
-            found.push(
-              ...whileDragged(there, first, true).map((text) => `${what}, dragged: ${text}`),
-            );
-          }
-          const dropped = dragged(first, bus.id, dx, dy);
-          found.push(...drawn(dropped).unrouted.map((id) => `${what}: no route for ${id}`));
-          found.push(...bothWays(dropped).map((text) => `${what}: ${text}`));
-          found.push(...bothWays(tidied(dropped, false)).map((text) => `${what}, tidied: ${text}`));
-        }
-      }
-      expect(found).toEqual([]);
-      // Most of the moves are clear ones: the drag itself is held to the rule.
-      expect(clear).toBeGreaterThan(BUS_MOVES.length);
-    }, 240_000);
-
-    it(`${name}: after any device is dragged and dropped, and while it is dragged`, async () => {
-      const first = await opened(topology);
-      const found: string[] = [];
-      const devices = first.nodes.filter(
-        (n) => n.type === 'generator' || n.type === 'load' || n.type === 'shunt',
-      );
-      for (const device of devices) {
-        for (const [dx, dy] of DEVICE_MOVES) {
-          const what = `${device.id} by ${dx}, ${dy}`;
-          const ids = draggedWith(first, device.id);
-          const there = moved(first, ids, dx, dy);
-          if (dropShift(there, ids, first) === null) {
-            found.push(
-              ...whileDragged(there, first, true).map((text) => `${what}, dragged: ${text}`),
-            );
-          }
-          const dropped = dragged(first, device.id, dx, dy);
-          found.push(...drawn(dropped).unrouted.map((id) => `${what}: no route for ${id}`));
-          found.push(...bothWays(dropped).map((text) => `${what}: ${text}`));
-        }
-      }
-      expect(found).toEqual([]);
-    }, 240_000);
 
     it(`${name}: after a device is dragged beside its bus, and across it`, async () => {
       const first = await opened(topology);
@@ -345,6 +231,10 @@ describe('nothing overlaps on the example cases', () => {
     );
     expect(apart(boxOf(stacked, 'generator-3'), boxOf(stacked, 'generator-4'))).toBe(true);
     expect(bothWays(stacked)).toEqual([]);
+    // Tidied with the values shown, no flow label comes to stand on the
+    // mark a generator carries on its corner at a reactive limit.
+    const shown = { values: true, labelWidths: typicalWidths(stacked) };
+    expect(bothWays(tidied(stacked, false, shown))).toEqual([]);
   });
 
   it('keeps the crossings of the example cases as few as they open with', async () => {
@@ -419,4 +309,46 @@ describe('nothing overlaps on a case of a hundred buses', () => {
     }
     expect(found).toEqual([]);
   }, 120_000);
+
+  it('IEEE 118: at every move of a drag, each drawn from the routes of the move before', async () => {
+    // A bus dragged onto a line that runs the length of the diagram (the
+    // line from bus 17 to bus 113, under bus 25), and a bus whose lines put
+    // the next ones out as they follow it (bus 29): a pass with the bounds
+    // of a drag falls short there, and is made again with those of a pass
+    // at rest.
+    const first = await opened(CASE118);
+    const found: string[] = [];
+    for (const [id, dx, dy] of [
+      ['25', -48, 0],
+      ['25', 0, -48],
+      ['25', 48, 0],
+      ['29', 120, -60],
+      ['17', 48, 0],
+      ['27', -48, 0],
+      ['18', -96, 40],
+    ] as const) {
+      found.push(...alongDrag(first, id, dx, dy, 4));
+    }
+    expect(found).toEqual([]);
+  }, 240_000);
+
+  it('IEEE 118: wherever a bus is dragged to in one move from where it stood', async () => {
+    const first = await opened(CASE118);
+    const found: string[] = [];
+    for (const [id, dx, dy] of [
+      ['25', -48, 0],
+      ['25', 0, -48],
+      ['29', 120, -60],
+    ] as const) {
+      const ids = draggedWith(first, id);
+      const moves = Math.max(Math.abs(dx), Math.abs(dy)) / 4;
+      for (let k = 1; k <= moves; k += 1) {
+        const there = moved(first, ids, (dx * k) / moves, (dy * k) / moves);
+        const here = whileDragged(there, first, false);
+        if (here.length === 0 || dropShift(there, ids, first) !== null) continue;
+        found.push(...here.map((text) => `bus ${id} by ${dx}, ${dy}, move ${k}: ${text}`));
+      }
+    }
+    expect(found).toEqual([]);
+  }, 240_000);
 });
