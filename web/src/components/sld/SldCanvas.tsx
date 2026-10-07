@@ -83,7 +83,8 @@ import {
   type ArrangeBox,
   type DistributeAxis,
 } from './arrange';
-import { GRID_STEP, alignToGrid, tidyRoutes } from './tidy';
+import { GRID_STEP } from './tidy';
+import { branchesThroughSymbols, planTidy } from './tidyPlan';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -124,7 +125,6 @@ import {
   DEFAULT_CONNECTOR_STYLE,
   layoutConnections,
   routesThrough,
-  type ConnectionEdge,
   type ConnectorRoute,
   type ConnectorStyle,
   type LabelPlace,
@@ -182,11 +182,13 @@ const DRAG_SLOP_PX = 2;
 const SNAP_GRID: [number, number] = [GRID_STEP, GRID_STEP];
 
 /**
- * The most branches Tidy diagram routes within the press that asked for it.
- * With more it first lets the button say that it is at work (`TIDY_PAINT_MS`
- * later, a frame or two), since routing them takes long enough to notice.
+ * The most branches Tidy diagram routes within the press that asked for it,
+ * which takes a few hundredths of a second. With more it first lets the
+ * button say that it is at work (`TIDY_PAINT_MS` later, a frame or two):
+ * routing them takes long enough to notice, up to about a second on a large
+ * diagram, where the work stops (`TIDY_STEPS` in `tidy.ts`).
  */
-const TIDY_AT_ONCE = 60;
+const TIDY_AT_ONCE = 30;
 const TIDY_PAINT_MS = 30;
 
 /** What the Undo of a toast says when its change is no longer the newest one. */
@@ -669,6 +671,14 @@ function SldCanvasInner({
   const connections = useMemo(
     () => layoutConnections(nodes, edges, { sizes, connectorStyle, barLengths }),
     [nodes, edges, sizes, connectorStyle, barLengths],
+  );
+  // The lines and transformers that are drawn through a symbol or a bar:
+  // the Tidy diagram button counts them. Not while a node is being dragged,
+  // when a line passes through things on its way to where the node is
+  // dropped.
+  const untidyCount = useMemo(
+    () => branchesThroughSymbols(nodes, edges, connections, sizes).length,
+    [nodes, edges, connections, sizes],
   );
   // How many connectors pass through a box, for the chains that are drawn out.
   const connectorsThrough = useMemo(() => routesThrough(connections.routes), [connections]);
@@ -1447,83 +1457,51 @@ function SldCanvasInner({
     (relayout: boolean) => {
       const graph = baseGraphRef.current;
       if (graph === null) return;
-      let placedNodes: Node[] = nodesRef.current;
-      let placedEdges: Edge[] = graph.edges;
-      const tidyOptions = { sizes, connectorStyle, barLengths };
-      /** The routes `tidyRoutes` found, as routes chosen for the buses where `nodes` has them. */
-      const chosenFor = (
-        nodes: readonly Node[],
-        edges: readonly Edge[],
-        routes: ReadonlyMap<string, [number, number][]>,
-      ): RouteOverrides => {
-        const at = new Map(nodes.map((n) => [n.id, n.position]));
-        const out: RouteOverrides = {};
-        for (const edge of edges) {
-          if (edge.type === 'stub') continue;
-          const points = routes.get(edge.id);
-          const source = at.get(edge.source);
-          const target = at.get(edge.target);
-          out[edge.id] =
-            points === undefined || source === undefined || target === undefined
-              ? null
-              : {
-                  points: points.map(([x, y]): [number, number] => [x, y]),
-                  anchors: { source: { ...source }, target: { ...target } },
-                };
-        }
-        return out;
-      };
-      if (relayout) {
-        // The buses onto the grid; then the branches between the buses alone,
-        // which gives each the way it would have with nothing else about;
-        // then every device beside its bus, clear of those, where the diagram
-        // places one that was never moved. The branches are routed once more
-        // below, around the devices as they now stand.
-        const buses: Record<string, { x: number; y: number }> = {};
-        for (const n of placedNodes) {
-          if (n.type === 'bus') buses[n.id] = { x: n.position.x, y: n.position.y };
-        }
-        const aligned = alignToGrid(buses);
-        const bare = buildGraph(
-          { ...topology, generators: [], loads: [], shunts: [], controllers: [] },
-          aligned,
-          { barLengths },
-        );
-        const first = chosenFor(
-          bare.nodes,
-          bare.edges,
-          tidyRoutes(bare.nodes, bare.edges as ConnectionEdge[], { barLengths }).routes,
-        );
-        const bendPoints = new Map<string, [number, number][]>();
-        const bendAnchors = new Map<string, NonNullable<RouteOverrides[string]>['anchors']>();
-        for (const [id, route] of Object.entries(first)) {
-          if (route === null) continue;
-          bendPoints.set(id, route.points);
-          bendAnchors.set(id, route.anchors);
-        }
-        const placed = buildGraph(topology, aligned, {
-          bendPoints,
-          bendAnchors,
-          barLengths,
-          controllerCoords,
-          unitStates,
-        });
-        placedNodes = placed.nodes;
-        placedEdges = placed.edges;
-      }
+      const {
+        nodes: placedNodes,
+        edges: placedEdges,
+        tidied,
+      } = planTidy({ nodes: nodesRef.current, edges: graph.edges }, topology, {
+        relayout,
+        sizes,
+        connectorStyle,
+        barLengths,
+        controllerCoords,
+        unitStates,
+        drawn: drawnNodesRef.current,
+      });
       const branches = placedEdges.filter((e) => e.type !== 'stub');
       if (branches.length === 0 && !relayout) {
         toast.info('Nothing to tidy: the diagram has no lines or transformers.');
         return;
       }
-      const { routes, unrouted } = tidyRoutes(placedNodes, placedEdges as ConnectionEdge[], {
-        ...tidyOptions,
-        // The chains that are drawn out, where they stand or will stand.
-        obstacles: chainBoxes(relayout ? placedNodes : drawnNodesRef.current, sizes),
-      });
-      const chosen = chosenFor(placedNodes, placedEdges, routes);
-      const positions = positionsOf(placedNodes);
+      if (tidied.tooLarge) {
+        toast.info('This diagram is too large to tidy', {
+          description:
+            'It spreads over more room than Tidy diagram routes lines across. Nothing was changed.',
+        });
+        return;
+      }
+      const { routes, unrouted } = tidied;
       const before = arrangementOf(nodesRef.current, graph.edges);
+      // The routes as routes chosen for the buses where they now stand. A
+      // branch that got none keeps the one it had, while its buses stand
+      // where they stood: a re-layout draws it from bar to bar.
+      const at = new Map(placedNodes.map((n) => [n.id, n.position]));
+      const chosen: RouteOverrides = {};
+      for (const edge of branches) {
+        const points = routes.get(edge.id);
+        const source = at.get(edge.source);
+        const target = at.get(edge.target);
+        chosen[edge.id] =
+          points === undefined || source === undefined || target === undefined
+            ? ((relayout ? null : before.routes[edge.id]) ?? null)
+            : {
+                points: points.map(([x, y]): [number, number] => [x, y]),
+                anchors: { source: { ...source }, target: { ...target } },
+              };
+      }
+      const positions = positionsOf(placedNodes);
       if (sameArrangement(before, { positions, routes: chosen })) {
         toast.info('The diagram is already tidy.', {
           description: relayout
@@ -1535,10 +1513,16 @@ function SldCanvasInner({
       const step = arrange(relayout ? 'tidy and re-layout' : 'tidy diagram', positions, chosen);
       const rerouted = branches.length - unrouted.length;
       const lines = `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed`;
-      const left =
-        unrouted.length === 0
-          ? ''
-          : ` No way was found for ${unrouted.length}, which ${unrouted.length === 1 ? 'is' : 'are'} drawn as before.`;
+      const one = unrouted.length === 1;
+      const why = tidied.outOfSteps
+        ? `${unrouted.length} could not be routed in the time a tidy takes`
+        : `No way was found for ${unrouted.length}`;
+      const then = relayout
+        ? `${one ? 'it is' : 'they are'} drawn straight from bar to bar`
+        : one
+          ? 'it keeps the route it had'
+          : 'they keep the routes they had';
+      const left = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
       toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
         description: relayout
           ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${left} Saved with the layout.`
@@ -1550,8 +1534,8 @@ function SldCanvasInner({
     [topology, barLengths, controllerCoords, unitStates, sizes, connectorStyle, arrange, undoStep],
   );
   // A diagram of a few dozen branches is tidied before the next frame. A
-  // large one takes a second or more, in which the page cannot answer, so
-  // the button says what is going on before the work begins.
+  // large one takes up to about a second, in which the page cannot answer,
+  // so the button says what is going on before the work begins.
   const [tidying, setTidying] = useState(false);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -1813,6 +1797,7 @@ function SldCanvasInner({
         <SldArrangeControls
           locked={locked}
           busy={tidying}
+          untidy={draggedIds.length > 0 ? 0 : untidyCount}
           pickedCount={pickedCount}
           snap={snapToGrid}
           onSnapChange={changeSnap}
@@ -2191,26 +2176,6 @@ function arrangeBoxOf(node: Node, sizes: ReadonlyMap<string, NodeSize>): Arrange
     width: size?.width ?? node.initialWidth ?? 0,
     height: size?.height ?? node.initialHeight ?? 0,
   };
-}
-
-/** Where the control chains that are drawn out stand, for a route to keep clear of. */
-function chainBoxes(nodes: readonly Node[], sizes: ReadonlyMap<string, NodeSize>): Rect[] {
-  const boxes: Rect[] = [];
-  for (const n of nodes) {
-    const unit = (n.data as { unit?: UnitNodeData }).unit;
-    if (n.type !== 'generator' || unit?.expanded !== true) continue;
-    const size = sizes.get(n.id);
-    const places = unitChainPlaces(
-      {
-        ...n.position,
-        width: size?.width ?? n.initialWidth ?? 0,
-        height: size?.height ?? n.initialHeight ?? 0,
-      },
-      unitChainSize(unit.members),
-    );
-    boxes.push(places[unit.side ?? 'above']);
-  }
-  return boxes;
 }
 
 /**

@@ -5,7 +5,8 @@
  * - **Tidy diagram** routes every line and transformer afresh and moves
  *   nothing (`tidy.ts`). It is a button of its own, beside the diagram's
  *   other buttons, because it is the one command a diagram arranged by hand
- *   wants again and again.
+ *   wants again and again. While lines are drawn through a symbol or a bar
+ *   it counts them, which is how a diagram says that it wants a tidy.
  * - **Arrange** is a menu: Tidy and re-layout, which also moves things (the
  *   buses onto the grid, the devices back beside their bus), Snap to grid,
  *   and Align and Distribute for the nodes that are picked. With fewer than
@@ -38,6 +39,19 @@ export type ArrangeCommand = Extract<
 /** What Tidy diagram does, for its tooltip and the menu. */
 export const TIDY_DESCRIPTION =
   'Routes every line and transformer afresh: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. Nothing is moved.';
+
+/**
+ * What the Tidy diagram button says while lines are drawn through a symbol or
+ * through the bar of a bus they are not connected to. A bus that is moved
+ * takes its lines along from tap to tap, through whatever stands in between,
+ * and a device can be dropped on a line: until the diagram is tidied again
+ * nothing else on screen tells that the routes are out of date.
+ */
+function untidyNotice(count: number): string {
+  return count === 1
+    ? '1 line runs through a symbol or a bar.'
+    : `${count} lines run through a symbol or a bar.`;
+}
 
 /** What Tidy and re-layout does besides. */
 export const TIDY_RELAYOUT_DESCRIPTION =
@@ -152,6 +166,12 @@ export interface SldArrangeControlsProps {
   locked: boolean;
   /** A tidy of a large diagram is being worked out. */
   busy?: boolean;
+  /**
+   * How many lines and transformers are drawn through a symbol or a bar
+   * (`branchesThroughSymbols`): the button counts them and says what it
+   * would do about them.
+   */
+  untidy?: number;
   /** How many buses and devices are picked together. */
   pickedCount: number;
   snap: boolean;
@@ -163,6 +183,7 @@ export interface SldArrangeControlsProps {
 export function SldArrangeControls({
   locked,
   busy = false,
+  untidy = 0,
   pickedCount,
   snap,
   onSnapChange,
@@ -183,11 +204,27 @@ export function SldArrangeControls({
         data-testid="sld-tidy"
         data-busy={busy}
         disabled={locked || busy}
-        title={locked ? lockedNote : TIDY_DESCRIPTION}
+        title={
+          locked
+            ? lockedNote
+            : untidy > 0
+              ? `${untidyNotice(untidy)} ${TIDY_DESCRIPTION}`
+              : TIDY_DESCRIPTION
+        }
+        aria-label={untidy > 0 && !busy ? `Tidy diagram: ${untidyNotice(untidy)}` : undefined}
         onClick={() => onCommand('tidy')}
-        className="h-7 shrink-0 px-2"
+        className="h-7 shrink-0 gap-1.5 px-2"
       >
         {busy ? 'Tidying…' : 'Tidy diagram'}
+        {untidy > 0 && !busy ? (
+          <span
+            aria-hidden="true"
+            data-testid="sld-tidy-count"
+            className="bg-warning text-warning-foreground rounded-full px-1.5 font-mono text-[10px] leading-4 font-semibold"
+          >
+            {untidy}
+          </span>
+        ) : null}
       </Button>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>

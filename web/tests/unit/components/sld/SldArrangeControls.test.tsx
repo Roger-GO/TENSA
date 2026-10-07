@@ -90,6 +90,31 @@ describe('<SldArrangeControls />', () => {
     expect(onCommand).toHaveBeenCalledWith('align-centre');
   });
 
+  it('counts the lines that run through a symbol or a bar on the Tidy diagram button', () => {
+    controls({ untidy: 3 });
+    const button = screen.getByTestId('sld-tidy');
+    expect(screen.getByTestId('sld-tidy-count')).toHaveTextContent('3');
+    // The tooltip says what the count is of, and what the button does about it.
+    expect(button.getAttribute('title')).toBe(
+      `3 lines run through a symbol or a bar. ${TIDY_DESCRIPTION}`,
+    );
+    expect(button).toHaveAccessibleName('Tidy diagram: 3 lines run through a symbol or a bar.');
+    cleanup();
+
+    controls({ untidy: 1 });
+    expect(screen.getByTestId('sld-tidy')).toHaveAccessibleName(
+      'Tidy diagram: 1 line runs through a symbol or a bar.',
+    );
+    cleanup();
+    // With none the button is as it always was, and so it is while a tidy runs.
+    controls({ untidy: 0 });
+    expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sld-tidy')).toHaveAttribute('title', TIDY_DESCRIPTION);
+    cleanup();
+    controls({ untidy: 2, busy: true });
+    expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
+  });
+
   it('says that a tidy is being worked out, and takes no second one meanwhile', async () => {
     const { onCommand } = controls({ busy: true });
     const tidy = screen.getByTestId('sld-tidy');

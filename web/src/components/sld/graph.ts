@@ -220,6 +220,14 @@ export interface BuildGraphOptions {
    * to assert on the raw kind-default offsets pass `false` to skip it.
    */
   applyPushOut?: boolean;
+  /**
+   * How far past the outermost tap of its bar a device may be put to keep
+   * it clear of the branches that pass through its row. Default:
+   * `DEVICE_DETOUR_LIMIT`. Tidy and re-layout passes 0: there every device
+   * stands over or under its bar, so that its connector drops square, and
+   * the branches are routed again around it.
+   */
+  deviceDetour?: number;
 }
 
 /**
@@ -1307,7 +1315,7 @@ export function buildGraph(
     let x = preferred;
     for (const inTheWay of [[...passing.upright, ...passing.level], passing.upright, []]) {
       x = freeColumn(preferred, half, [...taken, ...inTheWay], lo, hi, middle, across);
-      if (Math.max(lo - x, x - hi) <= DEVICE_DETOUR_LIMIT) break;
+      if (Math.max(lo - x, x - hi) <= (opts.deviceDetour ?? DEVICE_DETOUR_LIMIT)) break;
     }
     taken.push({ x, half });
     device.face = face;

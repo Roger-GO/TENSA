@@ -145,6 +145,47 @@ vi.mock('@/components/sld/elkClient', () => ({
   ),
 }));
 
+/**
+ * What the next tidy is made to answer on top of what it worked out: the
+ * branches it found no way for, whether the steps ran out, and whether the
+ * diagram was too large to route at all. A diagram that does any of these is
+ * a large or a walled-in one; here the answer is changed and the canvas is
+ * what is under test.
+ */
+const forced = vi.hoisted(() => ({
+  unrouted: [] as string[],
+  outOfSteps: false,
+  tooLarge: false,
+}));
+
+vi.mock('@/components/sld/tidyPlan', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/tidyPlan')>(
+    '@/components/sld/tidyPlan',
+  );
+  return {
+    ...actual,
+    planTidy: (...args: Parameters<typeof actual.planTidy>) => {
+      const plan = actual.planTidy(...args);
+      const branches = plan.edges.filter((edge) => edge.type !== 'stub').map((edge) => edge.id);
+      if (forced.tooLarge) {
+        return {
+          ...plan,
+          tidied: { routes: new Map(), unrouted: branches, steps: 0, tooLarge: true as const },
+        };
+      }
+      for (const id of forced.unrouted) plan.tidied.routes.delete(id);
+      return {
+        ...plan,
+        tidied: {
+          ...plan.tidied,
+          unrouted: [...plan.tidied.unrouted, ...forced.unrouted],
+          ...(forced.outOfSteps ? { outOfSteps: true as const } : {}),
+        },
+      };
+    },
+  };
+});
+
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { GRID_STEP } from '@/components/sld/tidy';
 import { __clearAllPendingForTests, parseSidecar } from '@/components/sld/sidecar';
@@ -322,6 +363,9 @@ beforeEach(() => {
     pickedCount: 0,
     diagramLocked: false,
   });
+  forced.unrouted = [];
+  forced.outOfSteps = false;
+  forced.tooLarge = false;
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePflowStore.setState({ lastRun: null });
   history().clear();
@@ -489,6 +533,153 @@ describe('Tidy diagram', () => {
   });
 });
 
+describe('Tidy diagram that cannot route every branch', () => {
+  it('leaves a branch it finds no way for on the route it had, and says so', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    const before = { picture: picture() };
+    expect(before.picture.stored['line-L13']).not.toBeNull();
+    forced.unrouted = ['line-L13'];
+
+    run('tidy');
+
+    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
+    // The other three are routed afresh; this one keeps the route it had
+    // (its ends land where the taps of the others now leave room).
+    expect(picture().stored['line-L13']).toEqual(before.picture.stored['line-L13']);
+    expect(squareCornered(routes()['line-L13']!)).toBe(true);
+    expect(picture().stored['line-L12']).not.toEqual(before.picture.stored['line-L12']);
+    expect(success).toHaveBeenCalledWith(
+      'Diagram tidied',
+      expect.objectContaining({
+        description:
+          '3 lines and transformers re-routed. Nothing was moved. No way was found for 1: it keeps the route it had. Saved with the layout.',
+      }),
+    );
+    // And the file holds the route it kept.
+    const layout = await written();
+    expect(layout.branches?.line?.L13?.bend_points).toEqual(
+      before.picture.stored['line-L13']!.map(([x, y]) => ({ x, y })),
+    );
+  });
+
+  it('keeps the routes of several, and of a branch that was tidied before', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    run('tidy');
+    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
+    const tidied = picture();
+    // The load is put on the way of the line from bus 1 to bus 4.
+    dragTo('load-PQ_1', { x: 200, y: 100 });
+    await waitFor(() => expect(positionOf('load-PQ_1')).toEqual({ x: 200, y: 100 }));
+    forced.unrouted = ['line-L13', 'transformer-T24'];
+    success.mockClear();
+
+    run('tidy');
+
+    await waitFor(() => expect(labels()).toHaveLength(3));
+    expect(picture().stored['line-L13']).toEqual(tidied.stored['line-L13']);
+    expect(picture().stored['transformer-T24']).toEqual(tidied.stored['transformer-T24']);
+    expect(success).toHaveBeenCalledWith(
+      'Diagram tidied',
+      expect.objectContaining({
+        description: expect.stringContaining(
+          'No way was found for 2: they keep the routes they had.',
+        ),
+      }),
+    );
+  });
+
+  it('says that the work ran out, when that is why a branch has no route', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    forced.unrouted = ['line-L13'];
+    forced.outOfSteps = true;
+    run('tidy');
+    await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
+    expect(success).toHaveBeenCalledWith(
+      'Diagram tidied',
+      expect.objectContaining({
+        description: expect.stringContaining(
+          '1 could not be routed in the time a tidy takes: it keeps the route it had.',
+        ),
+      }),
+    );
+  });
+
+  it('draws a branch a re-layout finds no way for from bar to bar, and says that', async () => {
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    forced.unrouted = ['line-L13'];
+
+    run('tidy-relayout');
+
+    await waitFor(() => expect(labels()).toEqual(['tidy and re-layout']));
+    // The buses moved onto the grid: the route it had is for where they stood.
+    expect(picture().stored['line-L13']).toBeNull();
+    expect(squareCornered(routes()['line-L13']!)).toBe(true);
+    expect(success).toHaveBeenCalledWith(
+      'Diagram tidied and laid out again',
+      expect.objectContaining({
+        description: expect.stringContaining(
+          'No way was found for 1: it is drawn straight from bar to bar.',
+        ),
+      }),
+    );
+  });
+
+  it('changes nothing on a diagram that is too large to route, and says so', async () => {
+    const info = vi.spyOn(toast, 'info');
+    const success = vi.spyOn(toast, 'success');
+    open('square.xlsx');
+    await draw();
+    const before = { picture: picture(), routes: routes() };
+    forced.tooLarge = true;
+
+    for (const command of ['tidy', 'tidy-relayout'] as const) {
+      info.mockClear();
+      run(command);
+      expect(info, command).toHaveBeenCalledWith(
+        'This diagram is too large to tidy',
+        expect.objectContaining({ description: expect.stringContaining('Nothing was changed.') }),
+      );
+    }
+    expect(success).not.toHaveBeenCalled();
+    expect(picture()).toEqual(before.picture);
+    expect(routes()).toEqual(before.routes);
+    expect(labels()).toEqual([]);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('lines that are drawn through a symbol or a bar', () => {
+  it('are counted on the Tidy diagram button until a tidy routes them clear', async () => {
+    open('square.xlsx');
+    await draw();
+    // As the case opens no line runs through anything.
+    expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sld-tidy')).toHaveAccessibleName('Tidy diagram');
+
+    // The generator is dropped on the lines that leave bus 1 downwards.
+    dragTo('generator-G1', { x: 20, y: 60 });
+    const count = await screen.findByTestId('sld-tidy-count');
+    expect(Number(count.textContent)).toBeGreaterThan(0);
+    const button = screen.getByTestId('sld-tidy');
+    expect(button.getAttribute('title')).toMatch(
+      /^\d+ lines? runs? through a symbol or a bar\. Routes every line and transformer afresh/,
+    );
+    expect(button).toHaveAccessibleName(/^Tidy diagram.*runs? through a symbol or a bar\.$/);
+
+    run('tidy');
+    await waitFor(() => expect(screen.queryByTestId('sld-tidy-count')).not.toBeInTheDocument());
+    expect(screen.getByTestId('sld-tidy')).toHaveAccessibleName('Tidy diagram');
+  });
+});
+
 describe('Tidy diagram on a large diagram', () => {
   it('says that it is at work before it starts, and takes no second press meanwhile', async () => {
     // A chain of 62 buses: more branches than are routed within the press.
@@ -546,6 +737,12 @@ describe('Tidy and re-layout', () => {
     expect(Math.abs(load.x - bus.x)).toBeLessThanOrEqual(92);
     expect(Math.abs(load.y - bus.y)).toBeLessThanOrEqual(92);
     for (const points of Object.values(routes())) expect(squareCornered(points)).toBe(true);
+    // Every device stands over or under its bar: its connector drops square.
+    for (const edge of drawn.edges.filter((e) => e.type === 'stub')) {
+      const points = (edge.data?.route as { points: Points }).points;
+      expect(points, edge.id).toHaveLength(2);
+      expect(points[0]![0], edge.id).toBe(points[1]![0]);
+    }
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied and laid out again',
       expect.objectContaining({
