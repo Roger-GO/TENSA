@@ -606,16 +606,76 @@ describe('layoutConnections: device connectors', () => {
     expect(bars.get('1')!.taps).toEqual([{ x: 89, side: 'east' }]);
   });
 
-  it('gives two devices over the same spot a tap each, a spacing apart', () => {
+  it('steps the connector of a device that stands behind another of its bus round that one', () => {
+    // B stands over A, which stands over the bar: straight down, the
+    // connector of B would run through A.
     const { routes, bars } = layoutConnections(
       [bus('1', 0, 100), device('load-A', 46, 50), device('load-B', 46, 0)],
       [stub('load-A', '1'), stub('load-B', '1')],
     );
-    const taps = bars.get('1')!.taps.map((tap) => tap.x);
-    expect(taps).toEqual([46, 60]);
-    // The one further from the bar drops square; the nearer lands beside it.
-    expect(routes.get('stub-load-B')!.points[1]).toEqual([46, 103]);
-    expect(routes.get('stub-load-A')!.points[1]).toEqual([60, 103]);
+    // The nearer one drops square. The other leaves by its side, and comes
+    // down beside the first, a clearance from it, at a tap of its own.
+    expect(routes.get('stub-load-A')!.points).toEqual([
+      [46, 70],
+      [46, 103],
+    ]);
+    expect(routes.get('stub-load-B')).toEqual({
+      points: [
+        [26, 0],
+        [18, 0],
+        [18, 103],
+      ],
+      sourceSide: 'west',
+      targetSide: 'north',
+    });
+    expect(bars.get('1')!.taps.map((tap) => tap.x)).toEqual([18, 46]);
+  });
+
+  it('steps across under its face where the device is too near the way round for a turn at its side', () => {
+    // The device over the bar is wide: beside the one in its way is still
+    // under its own box, so it leaves by the face that looks at the bar,
+    // steps across between the two, and comes down beside the other.
+    const wide: ConnectionNode = {
+      id: 'generator-G',
+      type: 'generator',
+      position: { x: 4, y: -40 },
+      initialWidth: 84,
+      initialHeight: 40,
+    };
+    const { routes } = layoutConnections(
+      [bus('1', 0, 100), device('load-A', 46, 60), wide],
+      [stub('load-A', '1'), stub('generator-G', '1')],
+    );
+    expect(routes.get('stub-generator-G')).toEqual({
+      points: [
+        [46, 0],
+        [46, 20],
+        [18, 20],
+        [18, 103],
+      ],
+      sourceSide: 'south',
+      targetSide: 'north',
+    });
+  });
+
+  it('lands a connector that steps round something clear of the tap of a device that drops square', () => {
+    // C drops square at 4, where the way round A on its left would land
+    // (18 is nearer to it than a spacing): B goes round on the right.
+    const { routes, bars } = layoutConnections(
+      [
+        bus('1', 0, 100),
+        device('load-A', 46, 50),
+        device('load-B', 46, 0),
+        device('load-C', 8, 50),
+      ],
+      [stub('load-A', '1'), stub('load-B', '1'), stub('load-C', '1')],
+    );
+    expect(routes.get('stub-load-B')!.points).toEqual([
+      [66, 0],
+      [74, 0],
+      [74, 103],
+    ]);
+    expect(bars.get('1')!.taps.map((tap) => tap.x)).toEqual([8, 46, 74]);
   });
 
   it('gives a device above the bar and one below it at the same spot a tap each', () => {
@@ -766,10 +826,12 @@ describe('layoutConnections: device connectors', () => {
   });
 
   it('grows the bar, about its middle, when a face has more taps than fit', () => {
-    const devices = Array.from({ length: 9 }, (_, i) => device(`load-${i}`, 46, 50 - 50 * i));
+    // Nine buses under bus 1, each with a line to it: all nine ends ask for
+    // the middle of the bar.
+    const below = Array.from({ length: 9 }, (_, i) => bus(`b${i}`, 0, 200 + 60 * i));
     const { bars } = layoutConnections(
-      [bus('1', 0, 100), ...devices],
-      devices.map((d) => stub(d.id, '1')),
+      [bus('1', 0, 100), ...below],
+      below.map((b) => line(`line-${b.id}`, '1', b.id)),
     );
     const bar = bars.get('1')!;
     expect(bar.end - bar.start).toBe(barLengthFor(9));
@@ -917,14 +979,14 @@ describe('layoutConnections: device connectors', () => {
     });
 
     it('is drawn straight where neither turn has room', () => {
-      // Over the bar, its tap a spacing aside for a second device over the same spot.
+      // Under the bar, its tap a spacing aside for a device over the same spot.
       const { routes } = layoutConnections(
-        [bus('1', 0, 100), device('load-A', 46, 50), device('load-B', 46, 0)],
-        [stub('load-A', '1'), stub('load-B', '1')],
+        [bus('1', 0, 100), device('generator-G', 46, 50, 'generator'), device('load-L', 46, 180)],
+        [stub('generator-G', '1'), stub('load-L', '1')],
         elbow,
       );
-      expect(routes.get('stub-load-A')!.points).toEqual([
-        [46, 70],
+      expect(routes.get('stub-load-L')!.points).toEqual([
+        [46, 160],
         [46 + TAP_SPACING, 103],
       ]);
     });
@@ -2913,12 +2975,65 @@ describe('layoutConnections: a device connector and the bars of other buses', ()
     ]);
   });
 
-  it('keeps its straight line where that runs through the bar of another bus and no other way is clear', () => {
-    // Bus 2 lies across every way from the load to the tip of bus 1.
+  it('steps round the bar of another bus that lies across its straight line', () => {
+    // Bus 2 (150 to 242) lies across the line from the load to the tip of
+    // bus 1. The connector leaves by the side of the load, runs across over
+    // bus 2 and comes down a clearance past its tip, onto the bar of bus 1,
+    // which is drawn out to it.
     const nodes = [bus('1', 0, 200), bus('2', 150, 120), device('load-x', 300, 40)];
-    const route = layoutConnections(nodes, [stub('load-x', '1')]).routes.get('stub-load-x')!;
+    const { routes, bars } = layoutConnections(nodes, [stub('load-x', '1')]);
+    expect(routes.get('stub-load-x')).toEqual({
+      points: [
+        [280, 40],
+        [142, 40],
+        [142, 203],
+      ],
+      sourceSide: 'west',
+      targetSide: 'north',
+    });
+    expect(bars.get('1')).toMatchObject({ start: 0, end: 142 + TAP_INSET });
+  });
+
+  it('keeps its straight line where no way round is near', () => {
+    // The bar of bus 2 stands right over the bar of bus 1 and reaches far
+    // past it on both sides: the way round its tips lands further out than
+    // a bar is drawn out, and there is no room to step across under it.
+    const nodes = [bus('1', 0, 200), bus('2', 0, 180), device('load-x', 300, 40)];
+    const route = layoutConnections(nodes, [stub('load-x', '1')], {
+      barLengths: new Map([['2', 400]]),
+    }).routes.get('stub-load-x')!;
     expect(route.points).toHaveLength(2);
     expect(route.points[1]).toEqual([89, 203]);
+  });
+
+  it('keeps a tap inside the tip of a bar that has no room to be drawn out', () => {
+    // Bus 2 stands level with bus 1, 12 past its tip. The line from bus 3
+    // ends on that tip, and the load past it would land a spacing further
+    // out, which takes the bar of bus 1 into the bar of bus 2: it lands a
+    // spacing inside the end of the line instead.
+    const nodes = [
+      bus('1', 0, 200),
+      bus('2', 104, 200),
+      bus('3', 43, 0),
+      device('load-x', 150, 100),
+    ];
+    const routed = line('line-L', '3', '1', {
+      bendPoints: [
+        [89, 3],
+        [89, 203],
+      ],
+      bendAnchors: { source: { x: 43, y: 0 }, target: { x: 0, y: 200 } },
+    });
+    const { bars, routes } = layoutConnections(nodes, [routed, stub('load-x', '1')]);
+    expect(bars.get('1')).toMatchObject({ start: 0, end: 92 });
+    expect(routes.get('stub-load-x')!.points[1]).toEqual([89 - TAP_SPACING, 203]);
+    // With no bar beside it, the bar is drawn out to hold the tap past its tip.
+    const alone = layoutConnections(
+      nodes.filter((n) => n.id !== '2'),
+      [routed, stub('load-x', '1')],
+    );
+    expect(alone.routes.get('stub-load-x')!.points[1]).toEqual([89 + TAP_SPACING, 203]);
+    expect(alone.bars.get('1')!.end).toBe(89 + TAP_SPACING + TAP_INSET);
   });
 
   it('says which branches are drawn along the route stored for them', () => {

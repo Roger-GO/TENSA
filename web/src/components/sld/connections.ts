@@ -51,8 +51,12 @@
  *   when the device does not sit square to its tap, or one horizontal and
  *   one vertical run with a right angle between them (`elbow`). Neither
  *   runs through another device, a controller badge or the bar of another
- *   bus where there is a way round: the connector then leaves by the face
- *   that looks at the bar.
+ *   bus, nor along such a bar: where the way it would take does, it steps
+ *   round what is in the way (`detourFor`), out of a side of the device or
+ *   out of the face that looks at the bar, and lands square on the bar
+ *   beside it, at a tap of its own. A device that was dropped under
+ *   another device of its bus is still connected by a line that is on
+ *   nothing.
  * - A branch is drawn with right angles. One with a stored route (the
  *   router's, or a saved layout's) keeps its bends, and its two ends are
  *   brought onto the bars. A branch without a route, or whose bus has moved
@@ -98,6 +102,13 @@ export const MIN_BAR_LENGTH = 2 * TAP_INSET + TAP_SPACING;
 /** The box a device is taken to have when it carries no size hint. */
 const DEVICE_SIZE: NodeSize = { width: 40, height: 41 };
 
+/**
+ * The side of the square the symbol of a transformer takes on its line
+ * (`TransformerEdge`). The router keeps as much of the line free for it
+ * (`tidy.ts`).
+ */
+export const TRANSFORMER_SYMBOL_SIZE = 30;
+
 /** How a device connector is drawn. */
 export type ConnectorStyle = 'straight' | 'elbow';
 
@@ -109,6 +120,22 @@ export const DEFAULT_CONNECTOR_STYLE: ConnectorStyle = 'straight';
  * the connector is drawn straight.
  */
 const ELBOW_MIN_RUN = 6;
+
+/** How far aside of what is in its way a device connector steps (`DEVICE_CLEARANCE` of the router). */
+const DETOUR_CLEARANCE = 8;
+
+/** How far past a tip of its bar a connector that steps round something may land; the bar is drawn out to it. */
+const DETOUR_REACH = 64;
+
+/**
+ * How near a device connector may come to another symbol, to the bar of
+ * another bus on any side, and past a tip of such a bar when it runs level
+ * with it, before it counts as running through it: what the overlap checker
+ * holds a line to (`overlapCheck.ts`), and a hair more.
+ */
+const NEAR_SYMBOL = 1;
+const NEAR_BAR = 7;
+const NEAR_TIP = 16.5;
 
 /** How far a branch that leaves two buses by the same face runs clear of them. */
 const BRIDGE_CLEARANCE: Record<Side, number> = { north: 24, south: 44, east: 24, west: 24 };
@@ -126,6 +153,13 @@ export const RUN_CLEARANCE = 16;
  * that bar, or run through it.
  */
 export const SLIDE_CLEARANCE = 8;
+
+/**
+ * The room past a tip of its bar that a tap which is moved there takes: the
+ * spacing to the tap beside it, the rounded tip, and what a bar keeps from
+ * the one beside it.
+ */
+const GROW_ROOM = TAP_SPACING + 2 * TAP_INSET + SLIDE_CLEARANCE;
 
 /** Two coordinates closer than this are the same place. */
 const EPS = 0.5;
@@ -228,8 +262,11 @@ export interface ConnectionPass extends ConnectionLayout {
  *   drops square onto the bar at this place and at no other.
  * - `straight`: an end of a stored route that runs straight from one bar to
  *   the next. Moved, it would have to step across.
+ * - `round`: the connector of a device that steps round something that
+ *   stands between it and the bar. It lands beside that, and a tap further
+ *   along would take it through what it goes round.
  */
-export const TAP_HOLD = { free: 0, route: 1, square: 2, straight: 3 } as const;
+export const TAP_HOLD = { free: 0, route: 1, square: 2, straight: 3, round: 4 } as const;
 
 /** Where one connection would like to land on a face. */
 export interface TapWish {
@@ -444,6 +481,36 @@ export function simplifyRoute(points: readonly Point[]): Point[] {
     if ((sameX(a, b) && sameX(b, c)) || (sameY(a, b) && sameY(b, c))) out.splice(i, 1);
   }
   return out;
+}
+
+/** The room two lines side by side keep between them (`LINE_GAP` of the overlap checker). */
+const RUN_GAP = 12;
+
+/**
+ * Whether the run from `a` to `b` and the run from `c` to `d`, of two
+ * different lines, are on each other: side by side nearer than `RUN_GAP`,
+ * or one ending or turning on the other. Two that cross, each in the middle
+ * of its run, are not.
+ */
+function runsMeet(a: Point, b: Point, c: Point, d: Point): boolean {
+  const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+  const [vx, vy] = [d[0] - c[0], d[1] - c[1]];
+  const lu = Math.hypot(ux, uy);
+  const lv = Math.hypot(vx, vy);
+  if (lu < 1e-6 || lv < 1e-6) return false;
+  const cross = ux * vy - uy * vx;
+  if (Math.abs(cross) <= 0.035 * lu * lv) {
+    const along = (p: Point): number => ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) / lu;
+    const off = (p: Point): number => ((p[0] - a[0]) * uy - (p[1] - a[1]) * ux) / lu;
+    const [from, to] = [Math.min(along(c), along(d)), Math.max(along(c), along(d))];
+    if (Math.min(lu, to) - Math.max(0, from) <= 1) return false;
+    return Math.min(Math.abs(off(c)), Math.abs(off(d))) < RUN_GAP;
+  }
+  const [wx, wy] = [c[0] - a[0], c[1] - a[1]];
+  const onFirst = ((wx * vy - wy * vx) / cross) * lu;
+  const onSecond = ((wx * uy - wy * ux) / cross) * lv;
+  if (onFirst < -1 || onFirst > lu + 1 || onSecond < -1 || onSecond > lv + 1) return false;
+  return !(onFirst > 1 && onFirst < lu - 1 && onSecond > 1 && onSecond < lv - 1);
 }
 
 /** `p` moved `distance` out of the side it leaves by. */
@@ -833,6 +900,27 @@ export function layoutConnections(
   edges: readonly ConnectionEdge[],
   options: ConnectionOptions = {},
 ): ConnectionPass {
+  const first = layoutPass(nodes, edges, options);
+  if (!first.blocked) return first.pass;
+  // A device connector runs through something as the diagram is drawn: the
+  // way of each is chosen before the bars have their taps, and a bar that
+  // is drawn out to hold one may reach into a connector that passed its
+  // tip. Once more, then, with the bars as long as they came to be.
+  return layoutPass(nodes, edges, options, first.pass.bars).pass;
+}
+
+/**
+ * One pass of `layoutConnections`. `drawnBars` is how long the bars came
+ * to be in a pass before, which is what the way of a device connector is
+ * then chosen by; `blocked` says whether a device connector was left
+ * running through something.
+ */
+function layoutPass(
+  nodes: readonly ConnectionNode[],
+  edges: readonly ConnectionEdge[],
+  options: ConnectionOptions,
+  drawnBars?: ReadonlyMap<string, BarGeometry>,
+): { pass: ConnectionPass; blocked: boolean } {
   const style = options.connectorStyle ?? DEFAULT_CONNECTOR_STYLE;
   const bars = new Map<string, Bar>();
   const boxes = new Map<string, Box>();
@@ -1030,21 +1118,305 @@ export function layoutConnections(
     });
   }
 
+  // ---- what a device connector keeps out of ----
+  // Every device and controller badge but its own, and the bar of every bus
+  // but its own, which it would otherwise seem to land on. They are kept in
+  // the order of their middles, so that a connector is held against the
+  // ones along its way and not against every box of the diagram.
+  interface Obstacle {
+    of: Box | Bar;
+    /** The room it takes for a run at any angle, and for a level one. */
+    body: Box;
+    level: Box;
+  }
+  /** The tips of `bar`, as it is now or, with `early`, as it came to be drawn in the pass before. */
+  const tipsOf = (bar: Bar, early: boolean): { start: number; end: number } => {
+    const drawn = early ? drawnBars?.get(bar.id) : undefined;
+    return drawn === undefined
+      ? { start: bar.start, end: bar.end }
+      : {
+          start: Math.min(bar.start, bar.x + drawn.start),
+          end: Math.max(bar.end, bar.x + drawn.end),
+        };
+  };
+  const obstaclesNow = (
+    early: boolean,
+  ): ((own: Box, ownBar: Bar) => (points: Point[], ownBarToo?: boolean) => boolean) => {
+    const list: Obstacle[] = [];
+    for (const box of boxes.values()) {
+      const body = { ...box, hw: box.hw + NEAR_SYMBOL, hh: box.hh + NEAR_SYMBOL };
+      list.push({ of: box, body, level: body });
+    }
+    for (const bar of bars.values()) {
+      const { start, end } = tipsOf(bar, early);
+      const cx = (start + end) / 2;
+      const hw = (end - start) / 2;
+      const hh = BAR_THICKNESS / 2 + NEAR_BAR;
+      list.push({
+        of: bar,
+        body: { cx, cy: bar.cy, hw: hw + NEAR_BAR, hh },
+        level: { cx, cy: bar.cy, hw: hw + NEAR_TIP, hh },
+      });
+    }
+    list.sort((a, b) => a.body.cx - b.body.cx);
+    const widest = list.reduce((most, { level }) => Math.max(most, level.hw), 0);
+    /**
+     * Whether a connector through `points` runs through something. With
+     * `ownBarToo`, its own bar counts as well for every run but the last,
+     * which lands on it.
+     */
+    return (own, ownBar) =>
+      (points, ownBarToo = false) => {
+        const xs = points.map((p) => p[0]);
+        const ys = points.map((p) => p[1]);
+        const [left, right] = [Math.min(...xs), Math.max(...xs)];
+        const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
+        // The first that reaches as far right as where the connector starts.
+        let first = 0;
+        for (let last = list.length; first < last; ) {
+          const middle = (first + last) >> 1;
+          if (list[middle]!.body.cx < left - widest) first = middle + 1;
+          else last = middle;
+        }
+        for (let i = first; i < list.length && list[i]!.body.cx <= right + widest; i += 1) {
+          const { of, body, level } = list[i]!;
+          if (of === own || (of === ownBar && !ownBarToo)) continue;
+          const apart =
+            level.cx + level.hw <= left ||
+            level.cx - level.hw >= right ||
+            level.cy + level.hh <= top ||
+            level.cy - level.hh >= bottom;
+          if (apart) continue;
+          const runs = of === ownBar ? points.length - 1 : points.length;
+          for (let k = 1; k < runs; k += 1) {
+            const [a, b] = [points[k - 1]!, points[k]!];
+            if (runsThrough(a, b, sameY(a, b) ? level : body)) return true;
+          }
+        }
+        return false;
+      };
+  };
+  // As the bars are before their taps are handed out, which is what the
+  // way of a connector is chosen by; the routes are held to the bars as
+  // they are drawn, below.
+  const blockedEarly = obstaclesNow(true);
+  // The way every device connector takes with nothing about, from its
+  // device to the bar: one that steps round something keeps off these as
+  // one line keeps off another.
+  const direct = stubs.map(({ box, bar }) => {
+    const side = deviceSide(box, bar, style);
+    if (!isVertical(side)) {
+      const tip: Point = [side === 'east' ? bar.end - TAP_INSET : bar.start + TAP_INSET, bar.cy];
+      return { box, a: port(box, side === 'east' ? 'west' : 'east'), b: tip };
+    }
+    const over = box.cx + box.hw >= bar.start && box.cx - box.hw <= bar.end;
+    const x = over ? box.cx : clamp(box.cx, bar.start + TAP_INSET, bar.end - TAP_INSET);
+    return { box, a: port(box, side === 'north' ? 'south' : 'north'), b: [x, bar.cy] as Point };
+  });
+  /** Whether a connector of the device at `own` through `points` is on the connector of another device. */
+  const onAnother = (own: Box, points: readonly Point[]): boolean =>
+    direct.some(
+      ({ box, a, b }) =>
+        box !== own && points.some((p, k) => k > 0 && runsMeet(points[k - 1]!, p, a, b)),
+    );
+  /**
+   * The way round for the connector of the device at `box`, which comes to
+   * a face of `bar`, where the way it would take runs through something:
+   * out of a side of the device and square onto the bar (`side`), or out of
+   * the face that looks at the bar, across and onto the bar (`step`, at the
+   * height `across`), in both cases at a tap beside what is in the way
+   * (`x`). The nearest such tap that leaves the whole connector clear is
+   * taken; `null` when the connector is clear as it is, or has no such way.
+   */
+  interface Detour {
+    x: number;
+    how: 'side' | 'step';
+    across: number;
+  }
+  const detourPoints = (box: Box, bar: Bar, detour: Detour, x: number): Point[] => {
+    const towardsBar: Side = box.cy <= bar.cy ? 'south' : 'north';
+    if (detour.how === 'side') {
+      const from = port(box, x > box.cx ? 'east' : 'west');
+      return [from, [x, from[1]], [x, bar.cy]];
+    }
+    const from = port(box, towardsBar);
+    return [from, [from[0], detour.across], [x, detour.across], [x, bar.cy]];
+  };
+  const detourFor = (box: Box, bar: Bar): Detour | null => {
+    const blocked = blockedEarly(box, bar);
+    const towardsBar: Side = box.cy <= bar.cy ? 'south' : 'north';
+    const over = box.cx + box.hw >= bar.start && box.cx - box.hw <= bar.end;
+    const foot: Point = [
+      over ? box.cx : clamp(box.cx, bar.start + TAP_INSET, bar.end - TAP_INSET),
+      bar.cy,
+    ];
+    // The ways it has with a tap there (`deviceRoute`): while one of them
+    // is clear, that one is taken.
+    const usual = deviceRoute(
+      box,
+      bar,
+      box.cy <= bar.cy ? 'north' : 'south',
+      foot,
+      style,
+      true,
+      blocked,
+    );
+    if (!blocked(usual.points)) return null;
+    // Beside each thing that stands between the device and the bar, or
+    // beside the device: the nearest first.
+    const facing = port(box, towardsBar);
+    const reach: Rect = {
+      left: Math.min(box.cx - box.hw, foot[0]) - 2 * DETOUR_CLEARANCE,
+      right: Math.max(box.cx + box.hw, foot[0]) + 2 * DETOUR_CLEARANCE,
+      top: Math.min(facing[1], bar.cy),
+      bottom: Math.max(facing[1], bar.cy),
+    };
+    // Over the place it lands in with nothing about as well: out of its
+    // side and square onto the bar there, clear over what stands between.
+    const besides: number[] = [foot[0]];
+    // Where it can step across: clear past each thing on the side of the bar.
+    const sign = towardsBar === 'north' ? -1 : 1;
+    const steps: number[] = [];
+    // How far out of its face the connector can run before it meets something.
+    let room = Math.abs(bar.cy - facing[1]) - RUN_CLEARANCE;
+    for (const other of [...boxes.values(), ...bars.values()]) {
+      if (other === box || other === bar) continue;
+      const tips = 'hw' in other ? null : tipsOf(other, true);
+      const [cx, hw, hh] =
+        tips === null
+          ? [(other as Box).cx, (other as Box).hw, (other as Box).hh]
+          : [(tips.start + tips.end) / 2, (tips.end - tips.start) / 2, BAR_THICKNESS / 2];
+      const apart =
+        cx + hw <= reach.left ||
+        cx - hw >= reach.right ||
+        other.cy + hh <= reach.top ||
+        other.cy - hh >= reach.bottom;
+      if (apart) continue;
+      besides.push(cx - hw - DETOUR_CLEARANCE, cx + hw + DETOUR_CLEARANCE);
+      steps.push(other.cy + sign * (hh + DETOUR_CLEARANCE));
+      if (cx + hw > box.cx - box.hw && cx - hw < box.cx + box.hw) {
+        const near =
+          towardsBar === 'north' ? facing[1] - (other.cy + hh) : other.cy - hh - facing[1];
+        if (near >= 0) room = Math.min(room, near);
+      }
+    }
+    // The tap of a device that drops square onto this bar, or steps round
+    // something itself, is not moved for this one: the place beside it is
+    // tried as well, and none nearer to it than a spacing. (The end of a
+    // line gives way: where the connectors land does not depend on how the
+    // lines are routed, which are routed round the connectors.)
+    const held = requests
+      .filter((r) => r.bar === bar && isVertical(r.side))
+      .map((r) => r.wish(bar))
+      .filter((wish) => wish.hold === TAP_HOLD.square || wish.hold === TAP_HOLD.round)
+      .map((wish) => wish.desired);
+    for (const x of held) besides.push(x - TAP_SPACING, x + TAP_SPACING);
+    const lowest = bar.start + TAP_INSET - DETOUR_REACH;
+    const highest = bar.end - TAP_INSET + DETOUR_REACH;
+    // Half way to the first thing it faces, or past one of the things in
+    // reach, short of the bar: the nearest to the device first.
+    const far = Math.abs(bar.cy - facing[1]) - RUN_CLEARANCE;
+    const acrosses = [
+      ...(room >= DETOUR_CLEARANCE ? [facing[1] + sign * (room / 2)] : []),
+      ...steps
+        .filter((y) => (y - facing[1]) * sign >= ELBOW_MIN_RUN && (y - facing[1]) * sign <= far)
+        .sort((p, q) => (p - q) * sign),
+    ];
+    const tried = besides
+      .filter((x) => x >= lowest && x <= highest)
+      .filter((x) => held.every((taken) => Math.abs(taken - x) >= TAP_SPACING - EPS))
+      .sort((p, q) => Math.abs(p - box.cx) - Math.abs(q - box.cx) || p - q);
+    for (const x of tried) {
+      const ways: Detour[] = [];
+      if (Math.abs(x - box.cx) >= box.hw + ELBOW_MIN_RUN) ways.push({ x, how: 'side', across: 0 });
+      for (const across of acrosses) ways.push({ x, how: 'step', across });
+      const way = ways.find((detour) => {
+        const points = detourPoints(box, bar, detour, x);
+        return !blocked(points, true) && !onAnother(box, points);
+      });
+      if (way !== undefined) return way;
+    }
+    return null;
+  };
+
+  /**
+   * How far `bar` may be drawn out past its east tip, or its west: up to
+   * `SLIDE_CLEARANCE` short of the bar of another bus that stands level
+   * with it there, or of a symbol that does. A tap does not take the bar
+   * further than that.
+   */
+  const limits = new Map<string, number>();
+  const growLimit = (bar: Bar, east: boolean): number => {
+    const key = `${bar.id}|${east ? 'east' : 'west'}`;
+    const known = limits.get(key);
+    if (known !== undefined) return known;
+    let limit = east ? Infinity : -Infinity;
+    // Never short of where the bar ends as it is.
+    const tip = east ? bar.cx + bar.half : bar.cx - bar.half;
+    const meet = (start: number, end: number): void => {
+      if (east && start >= bar.cx) limit = Math.max(tip, Math.min(limit, start - SLIDE_CLEARANCE));
+      if (!east && end <= bar.cx) limit = Math.min(tip, Math.max(limit, end + SLIDE_CLEARANCE));
+    };
+    for (const other of bars.values()) {
+      if (other === bar || Math.abs(other.cy - bar.cy) >= LEVEL_BARS) continue;
+      const tips = tipsOf(other, true);
+      meet(tips.start, tips.end);
+    }
+    for (const box of boxes.values()) {
+      const level = Math.abs(box.cy - bar.cy) < box.hh + BAR_THICKNESS / 2 + SLIDE_CLEARANCE;
+      if (level) meet(box.cx - box.hw, box.cx + box.hw);
+    }
+    limits.set(key, limit);
+    return limit;
+  };
+
   // ---- device connectors ----
-  const connectors: { edge: ConnectionEdge; box: Box; request: Request }[] = [];
+  const connectors: {
+    edge: ConnectionEdge;
+    box: Box;
+    request: Request;
+    detour?: Detour;
+  }[] = [];
   // A device that sits level with a bar runs into its end, and an end takes
   // one connection: the nearest to level, unless a branch already has it.
   const wantsEnd = new Map<string, { box: Box; bar: Bar; edge: ConnectionEdge }[]>();
   const onFace = (edge: ConnectionEdge, box: Box, bar: Bar): void => {
     const left = box.cx < bar.cx;
     const off = Math.abs(box.cy - bar.cy);
+    // Round what stands in its way: square onto the bar beside it, at a
+    // place it holds as a device over the bar holds its own.
+    const detour = detourFor(box, bar);
+    if (detour !== null) {
+      connectors.push({
+        edge,
+        box,
+        detour,
+        request: ask(
+          bar,
+          box.cy <= bar.cy ? 'north' : 'south',
+          detour.x,
+          () => ({ desired: detour.x, hold: TAP_HOLD.round }),
+          { rank: left ? off : -off },
+        ),
+      });
+      return;
+    }
+    // A device past a tip of the bar lands on that tip, and where a line
+    // has its end there already, a spacing past it: the bar is drawn out.
+    // Where the bar has no room for that (the bar of the next bus begins
+    // there), it lands inside the tip instead, before that end.
+    const east = box.cx > bar.cx;
+    const past = east ? box.cx - box.hw > bar.end : box.cx + box.hw < bar.start;
+    const limit = growLimit(bar, east);
+    const inside = past && (east ? bar.end + GROW_ROOM > limit : bar.start - GROW_ROOM < limit);
+    const tip = east ? limit - TAP_INSET - TAP_SPACING : limit + TAP_INSET + TAP_SPACING;
     connectors.push({
       edge,
       box,
       request: ask(
         bar,
         box.cy <= bar.cy ? 'north' : 'south',
-        box.cx,
+        inside ? tip : box.cx,
         // Over the bar, or with its box over a tip of it, it drops square
         // onto the bar; further out it lands on the tip. The bar is as long
         // as the routes that end on it draw it: under a device that stands
@@ -1053,13 +1425,16 @@ export function layoutConnections(
         (b) => {
           const start = Math.min(b.cx - b.half, b.drawnOut?.start ?? Infinity);
           const end = Math.max(b.cx + b.half, b.drawnOut?.end ?? -Infinity);
-          return box.cx + box.hw >= start && box.cx - box.hw <= end
+          // Not past where the bar has room to be drawn out to.
+          const within =
+            box.cx - TAP_INSET >= growLimit(b, false) && box.cx + TAP_INSET <= growLimit(b, true);
+          return within && box.cx + box.hw >= start && box.cx - box.hw <= end
             ? { desired: box.cx, hold: TAP_HOLD.square }
             : {
                 desired: clamp(
                   box.cx,
-                  Math.min(lo(b), start + TAP_INSET),
-                  Math.max(hi(b), end - TAP_INSET),
+                  Math.max(Math.min(lo(b), start + TAP_INSET), growLimit(b, false) + TAP_INSET),
+                  Math.min(Math.max(hi(b), end - TAP_INSET), growLimit(b, true) - TAP_INSET),
                 ),
               };
         },
@@ -1312,51 +1687,10 @@ export function layoutConnections(
     }
     routes.set(edge.id, { points, sourceSide: source.side, targetSide: target.side });
   }
-  // What a device connector keeps out of: every device and controller badge
-  // but its own, and the bar of every bus but its own, which it would
-  // otherwise seem to land on. They are kept in the order of their middles,
-  // so that a connector is held against the ones along its way and not
-  // against every box of the diagram.
-  const barBoxes = new Map<Bar, Box>();
-  for (const bar of bars.values()) {
-    barBoxes.set(bar, {
-      cx: (bar.start + bar.end) / 2,
-      cy: bar.cy,
-      hw: (bar.end - bar.start) / 2,
-      hh: BAR_THICKNESS / 2,
-    });
-  }
-  const inTheWay = [...boxes.values(), ...barBoxes.values()].sort((a, b) => a.cx - b.cx);
-  const widest = inTheWay.reduce((most, box) => Math.max(most, box.hw), 0);
-  const blockedFor =
-    (own: Box, ownBar: Bar) =>
-    (points: Point[]): boolean => {
-      const ownBarBox = barBoxes.get(ownBar);
-      const xs = points.map((p) => p[0]);
-      const ys = points.map((p) => p[1]);
-      const [left, right] = [Math.min(...xs), Math.max(...xs)];
-      const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
-      // The first box that reaches as far right as where the connector starts.
-      let first = 0;
-      for (let last = inTheWay.length; first < last; ) {
-        const middle = (first + last) >> 1;
-        if (inTheWay[middle]!.cx < left - widest) first = middle + 1;
-        else last = middle;
-      }
-      for (let i = first; i < inTheWay.length && inTheWay[i]!.cx <= right + widest; i += 1) {
-        const box = inTheWay[i]!;
-        const apart =
-          box === own ||
-          box === ownBarBox ||
-          box.cx + box.hw <= left ||
-          box.cx - box.hw >= right ||
-          box.cy + box.hh <= top ||
-          box.cy - box.hh >= bottom;
-        if (apart) continue;
-        if (points.some((p, k) => k > 0 && runsThrough(points[k - 1]!, p, box))) return true;
-      }
-      return false;
-    };
+  // The connectors are held to the bars as they are drawn now.
+  const blockedFor = obstaclesNow(false);
+  /** Whether a device connector was left running through something. */
+  let blockedStub = false;
   // The outermost taps of each bar: a connector may run along the line of
   // the bar into a tip only to the tap that is first there.
   const outermost = new Map<Bar, { first: number; last: number }>();
@@ -1368,9 +1702,27 @@ export function layoutConnections(
       held.last = Math.max(held.last, r.tap[0]);
     }
   }
-  for (const { edge, box, request: asked } of connectors) {
+  for (const { edge, box, request: asked, detour } of connectors) {
     const { first, last } = outermost.get(asked.bar)!;
     const atTip = box.cx < asked.bar.cx ? asked.tap[0] <= first + EPS : asked.tap[0] >= last - EPS;
+    if (detour !== undefined) {
+      // Round what is in the way, as it was found to be clear; where the
+      // tap had to move and it no longer is, the usual ways are tried.
+      const stepped = detourPoints(box, asked.bar, detour, asked.tap[0]);
+      if (!blockedFor(box, asked.bar)(stepped, true)) {
+        const face: Side =
+          detour.how === 'step'
+            ? asked.side === 'north'
+              ? 'south'
+              : 'north'
+            : asked.tap[0] > box.cx
+              ? 'east'
+              : 'west';
+        routes.set(edge.id, { points: stepped, sourceSide: face, targetSide: asked.side });
+        continue;
+      }
+    }
+    const blocked = blockedFor(box, asked.bar);
     const { points, face } = deviceRoute(
       box,
       asked.bar,
@@ -1378,8 +1730,9 @@ export function layoutConnections(
       asked.tap,
       style,
       atTip,
-      blockedFor(box, asked.bar),
+      blocked,
     );
+    if (blocked(points)) blockedStub = true;
     routes.set(edge.id, { points, sourceSide: face, targetSide: asked.side });
   }
 
@@ -1399,7 +1752,10 @@ export function layoutConnections(
       taps: (taps.get(bar.id) ?? []).sort((a, b) => a.x - b.x),
     });
   }
-  return { bars: out, routes, kept: new Set(routed.map(({ edge }) => edge.id)) };
+  return {
+    pass: { bars: out, routes, kept: new Set(routed.map(({ edge }) => edge.id)) },
+    blocked: blockedStub,
+  };
 }
 
 /**
@@ -1734,9 +2090,13 @@ const LABEL_CELL = 96;
  * and for each label of another branch it reaches into. A label on a bend
  * of its own line is poor; one that is drawn over another line, on a
  * symbol or through the values of a device overlaps it, which is worse
- * than anything else, and text on text is worst.
+ * than anything else, and text on text is worst. The symbol of a
+ * transformer, which is always drawn, tells a line that runs through it
+ * from one that only passes close by (`LABEL_NEAR_LINE`): the second is on
+ * nothing, and better than a place on a bend.
  */
 const LABEL_ON_BEND = 400;
+const LABEL_NEAR_LINE = 200;
 const LABEL_OVER_LINE = 3000;
 const LABEL_OVER_BOX = 6000;
 const LABEL_OVER_LABEL = 10000;
@@ -1786,6 +2146,10 @@ const LABEL_TURNED = 2;
  * symbol of a transformer) and has no place where it is drawn on nothing
  * else is marked `hidden`, and takes up no room.
  *
+ * The symbol of a transformer (`symbol`) is part of its line and is always
+ * drawn, so every place of its route is tried before it is put where it
+ * would be on something, however long the route is and in a drag as well.
+ *
  * `labels` lists the branches in the order they are placed, each with the
  * box its label takes; `boxes` is what stands on the diagram. A label that
  * is placed takes its room from the ones after it, so where one is left
@@ -1831,6 +2195,11 @@ export interface BranchLabel {
   mayTurn?: boolean;
   /** Whether it is left off where it has no place clear of everything else. */
   mayHide?: boolean;
+  /**
+   * Whether it is the symbol of a transformer: always drawn, so a place
+   * where it is on nothing is looked for along the whole route.
+   */
+  symbol?: boolean;
 }
 
 /** How many more times the labels are placed, with the ones left without a place first. */
@@ -1909,7 +2278,7 @@ function placeInOrder(
     );
 
   const out = new Map<string, LabelPlace>();
-  for (const { id, width, height, beside, mayTurn, mayHide } of labels) {
+  for (const { id, width, height, beside, mayTurn, mayHide, symbol } of labels) {
     const points = routes.get(id)?.points;
     if (points === undefined || points.length < 2) continue;
     // The runs of the route, with how far along it each starts.
@@ -1937,6 +2306,17 @@ function placeInOrder(
       }
     };
     const settled = (): boolean => best.at !== null && best.at.cost <= 0;
+    /**
+     * What the routes that are not its own cost a label in `box`. A symbol
+     * tells the ones that run through it from the ones that pass within
+     * `LABEL_LINE_MARGIN` of it.
+     */
+    const overLines = (box: Rect): number => {
+      const near = through(box, id);
+      if (symbol !== true) return LABEL_OVER_LINE * near;
+      const on = routesIn(box, id);
+      return LABEL_OVER_LINE * on + LABEL_NEAR_LINE * Math.max(0, near - on);
+    };
     /** Whether a place beside the line, clear of everything, has been found: one that will do. */
     const willDo = (): boolean => best.at !== null && best.at.cost <= LABEL_BESIDE;
     const weigh = (along: number): void => {
@@ -1960,11 +2340,7 @@ function placeInOrder(
         (run !== runs[runs.length - 1] && run.from + run.length - along < reach);
       const angleDeg = (Math.atan2(run.b[1] - run.a[1], run.b[0] - run.a[0]) * 180) / Math.PI;
       const on = boxAt(x, y);
-      offer(
-        { x, y, angleDeg },
-        on,
-        covered(on) + (onBend ? LABEL_ON_BEND : 0) + LABEL_OVER_LINE * through(on, id),
-      );
+      offer({ x, y, angleDeg }, on, covered(on) + (onBend ? LABEL_ON_BEND : 0) + overLines(on));
       if (beside !== true || settled()) return;
       // Beside the line: its own route counts among the ones that may run
       // through the label there, where it turns close by.
@@ -2025,15 +2401,15 @@ function placeInOrder(
     // On a short route the room for a label can be a pixel or two long: a
     // place that would have it drawn on something is given up only after
     // every place has been tried.
-    if (
-      !quick &&
-      best.at !== null &&
-      best.at.cost >= LABEL_OVERLAPS &&
-      total <= LABEL_EVERY_PLACE
-    ) {
-      for (let d = 0; d <= total / 2 && !willDo(); d += 1) {
+    // A symbol is always drawn: every place of its route is tried, and the
+    // first where it is on nothing will do.
+    const everyPlace = symbol === true || (!quick && total <= LABEL_EVERY_PLACE);
+    const found = (): boolean =>
+      symbol === true ? best.at !== null && best.at.cost < LABEL_OVERLAPS : willDo();
+    if (everyPlace && best.at !== null && best.at.cost >= LABEL_OVERLAPS) {
+      for (let d = 0; d <= total / 2 && !found(); d += 1) {
         weigh(total / 2 + d);
-        if (d > 0 && !willDo()) weigh(total / 2 - d);
+        if (d > 0 && !found()) weigh(total / 2 - d);
       }
     }
     if (best.at === null) continue;
