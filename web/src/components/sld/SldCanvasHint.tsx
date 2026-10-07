@@ -8,7 +8,7 @@ import { useTooSmallZoomPercent } from './zoom';
  * the right-click menu, and that an arrangement is kept.
  */
 const INTERACTION_HINT =
-  'Drag a bus or device to move it, or click it and press the arrow keys. Click a line to move its route by hand. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
+  'Drag a bus or device to move it, or click it and press the arrow keys. Click a line, or its row in the Lines table, to move its route by hand. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 export interface SldCanvasHintProps {
   /** The lock button of the controls is on: nothing can be dragged or selected. */
@@ -44,7 +44,9 @@ export interface SldCanvasHintProps {
  * lock notice is shown. While a line is picked to be moved by hand, the
  * place of the line is the bar of that line's (`routeBarSlot`): as high as
  * the two lines it takes the place of, so that the diagram does not move
- * when a line is picked.
+ * when a line is picked. The bar comes before the notice of a diagram that
+ * is too small to read: it is where a move of the line is answered, and the
+ * zoom button stays beside it.
  */
 export const SldCanvasHint = memo(function SldCanvasHint({
   locked,
@@ -56,7 +58,7 @@ export const SldCanvasHint = memo(function SldCanvasHint({
   const zoomLabel = selectedName !== null ? `Zoom to ${selectedName}` : 'Zoom to 100%';
   // Short enough for the two lines beside the longest button the row gets.
   const tooSmall = `The diagram is zoomed out to ${tooSmallPercent ?? 0}%, too small to read.`;
-  const wayCloser = `Press ${zoomLabel}, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus or a device in a table below to zoom to it.`;
+  const wayCloser = `Press ${zoomLabel}, zoom in by steps with the + button at the bottom left or the mouse wheel, or pick a bus, a device or a line in a table below to zoom to it.`;
   return (
     <>
       {/* Two lines at most, which is the height the buttons beside it give
@@ -70,6 +72,8 @@ export const SldCanvasHint = memo(function SldCanvasHint({
           <span className="font-semibold">The diagram is locked.</span> Nothing can be dragged or
           selected until you press the padlock button at the bottom left of the diagram again.
         </p>
+      ) : routeBarSlot !== null ? (
+        <div ref={routeBarSlot} data-testid="sld-canvas-route-slot" className="min-w-0 flex-1" />
       ) : tooSmallPercent !== null ? (
         <p
           data-testid="sld-canvas-too-small"
@@ -79,8 +83,6 @@ export const SldCanvasHint = memo(function SldCanvasHint({
         >
           <span className="font-semibold">{tooSmall}</span> {wayCloser}
         </p>
-      ) : routeBarSlot !== null ? (
-        <div ref={routeBarSlot} data-testid="sld-canvas-route-slot" className="min-w-0 flex-1" />
       ) : (
         <p
           data-testid="sld-canvas-hint"

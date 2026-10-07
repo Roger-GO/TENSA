@@ -39,6 +39,7 @@ import { useUiStore } from '@/store/ui';
 import {
   useSldStore,
   __requestOpenSldSearch,
+  subscribeRouteEdit,
   subscribeSldCommand,
   subscribeUnitExpanded,
 } from '@/store/sld';
@@ -88,7 +89,7 @@ import { branchesThroughSymbols, type TidyPlan } from './tidyPlan';
 import { startTidy, type TidyJob } from './tidyClient';
 import { drawsClear, pictureOf, routesDrawClear, type PictureOptions } from './picture';
 import { routeChecker } from './routeCheck';
-import { routeEndsOf } from './routeEdit';
+import { ROUTE_FOCUS_ATTR, routeEndsOf } from './routeEdit';
 import { SldRouteEditor } from './SldRouteEditor';
 import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
 import { flowLabelWidth, readoutWidth } from './labels';
@@ -129,6 +130,7 @@ import {
   BAR_LENGTH,
   BAR_THICKNESS,
   DEFAULT_CONNECTOR_STYLE,
+  routeMidpoint,
   type ConnectionEdge,
   type ConnectorRoute,
   type ConnectorStyle,
@@ -219,9 +221,15 @@ const LOCKED_NOTICE =
  */
 const ARIA_LABELS_UNLOCKED = {
   'controls.interactive.ariaLabel': 'Lock the diagram (stops dragging and selecting)',
+  // What a line that has the keyboard focus is described by: React Flow's own
+  // words offer to delete it, which the diagram does not do.
+  'edge.a11yDescription.default':
+    'Press Enter or Space to move the route of this line by hand: its runs and bends then take the arrow keys, and Escape lets go of it.',
 };
 const ARIA_LABELS_LOCKED = {
   'controls.interactive.ariaLabel': 'Unlock the diagram (dragging and selecting are off)',
+  'edge.a11yDescription.default':
+    'The diagram is locked: the route of this line cannot be moved until it is unlocked.',
 };
 
 /**
@@ -1231,8 +1239,8 @@ function SldCanvasInner({
     [setSelectedElement, setSelectedNodeId],
   );
 
-  const onEdgeClick: EdgeMouseHandler = useCallback(
-    (_e, edge) => {
+  const pickEdge = useCallback(
+    (edge: Edge) => {
       const edgeType = edge.type ?? 'topology';
       // A click picks the line to move its route by hand, the connector of
       // a device included. Not while nothing can be moved.
@@ -1250,7 +1258,33 @@ function SldCanvasInner({
     },
     [setSelectedElement, locked, tidying],
   );
+  const onEdgeClick: EdgeMouseHandler = useCallback((_e, edge) => pickEdge(edge), [pickEdge]);
   const onPaneClick = useCallback(() => setRouteEditId(null), []);
+  // Set where the line that is picked next takes the keyboard focus on its
+  // longest run: one that was picked with the keys is moved with the keys.
+  const focusRouteRef = useRef(false);
+  // Enter or Space on a line that has the keyboard focus picks it, as a
+  // click on it does. React Flow only marks it selected for those keys.
+  const onSurfaceKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (!(e.target instanceof Element) || !e.target.classList.contains('react-flow__edge')) {
+        return;
+      }
+      const id = e.target.getAttribute('data-id');
+      const edge = baseGraphRef.current?.edges.find((held) => held.id === id);
+      if (edge === undefined) return;
+      // Space would scroll the page.
+      e.preventDefault();
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      focusRouteRef.current = true;
+      pickEdge(edge);
+    },
+    [pickEdge, locked],
+  );
 
   // Connectivity / island-detection overlay (Unit 17). Subscribes to
   // the connectivity slice; when a result is present we flag every
@@ -1923,6 +1957,34 @@ function SldCanvasInner({
     },
     [locked],
   );
+  // A line picked away from the diagram (its row in the Lines table): its
+  // handles show as after a click on it, and the view goes to it, at a size
+  // the handles can be used at. A locked diagram picks none, and says
+  // nothing: the row was picked to look at the line.
+  const pickRouteOf = useCallback(
+    (branchIdx: string) => {
+      if (locked || tidying) return;
+      const edge = baseGraphRef.current?.edges.find(
+        (held) =>
+          held.type !== 'stub' && String((held.data as { idx?: unknown }).idx) === branchIdx,
+      );
+      if (edge === undefined) return;
+      setRouteEditId(edge.id);
+      const points = pictureRef.current.connections.routes.get(edge.id)?.points;
+      if (points === undefined || points.length < 2) return;
+      const middle = routeMidpoint(points);
+      void rf.setCenter(middle.x, middle.y, { zoom: locateZoom(rf.getZoom()), duration: 250 });
+    },
+    [locked, tidying, rf],
+  );
+  useEffect(() => subscribeRouteEdit(pickRouteOf), [pickRouteOf]);
+  // The line that was picked with the keys takes the focus on its longest
+  // run, once its handles are drawn.
+  useEffect(() => {
+    if (!focusRouteRef.current || routeEditId === null || editedRoute === null) return;
+    focusRouteRef.current = false;
+    canvasRef.current?.querySelector<SVGElement>(`[${ROUTE_FOCUS_ATTR}]`)?.focus();
+  }, [routeEditId, editedRoute]);
 
   // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
   // `relayout` the buses are first lined up on the grid and every generator,
@@ -2451,6 +2513,7 @@ function SldCanvasInner({
             onDragEnd={onDragEnd}
             onContextMenuCapture={onSurfaceContextMenuCapture}
             onPointerDownCapture={onSurfacePointerDownCapture}
+            onKeyDown={onSurfaceKeyDown}
           >
             <ReactFlow
               nodes={nodesWithSelection}

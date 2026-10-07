@@ -29,7 +29,7 @@ import { formatParamValue } from './gridCells';
 import { useGridEditing, type GridEditTarget } from './useGridEditing';
 import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
-import { useSldStore } from '@/store/sld';
+import { __requestRouteEdit, useSldStore } from '@/store/sld';
 import { useCaseStore } from '@/store/case';
 import { loadingCheckText } from '@/components/sld/loading';
 import type { TopologyEntry } from '@/api/types';
@@ -202,6 +202,9 @@ export function LinesGrid({ className }: LinesGridProps) {
     setSelectedNodeId(id);
     const idx = id.replace(/^line-/, '');
     setSelectedElement({ kind: 'line', idx });
+    // The diagram picks the line as a click on it does: it comes into view
+    // with the handles its route is moved by.
+    __requestRouteEdit(idx);
   };
 
   return (

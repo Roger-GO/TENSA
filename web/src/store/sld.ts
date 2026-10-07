@@ -244,3 +244,32 @@ export function subscribeUnitExpanded(listener: UnitListener): () => void {
     unitListeners.delete(listener);
   };
 }
+
+// ---------------------------------------------------------------------------
+// Line-route bridge.
+//
+// A line of the diagram is picked to have its route moved by hand with a click
+// on it. A line is a pixel or two wide, which not every pointer can be aimed
+// at, and a row of the Lines table names the same line: picking the row posts
+// the intent here, and the canvas shows the handles of that line and brings it
+// into view, as a click on the line does.
+// ---------------------------------------------------------------------------
+
+type RouteListener = (branchIdx: string) => void;
+const routeListeners: Set<RouteListener> = new Set();
+
+/** Ask the mounted canvas to pick the line or transformer `branchIdx`, so that its route can be moved by hand. */
+export function __requestRouteEdit(branchIdx: string): void {
+  for (const l of routeListeners) l(branchIdx);
+}
+
+/**
+ * Subscribe to requests to pick a line. Returns an unsubscribe function.
+ * `SldCanvas` subscribes once on mount.
+ */
+export function subscribeRouteEdit(listener: RouteListener): () => void {
+  routeListeners.add(listener);
+  return () => {
+    routeListeners.delete(listener);
+  };
+}

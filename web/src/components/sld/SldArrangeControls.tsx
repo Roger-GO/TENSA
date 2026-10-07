@@ -70,7 +70,7 @@ export const TIDY_RELAYOUT_DESCRIPTION =
 
 /** How a line is moved by hand, which nothing on the diagram shows until a line is clicked. */
 export const MANUAL_ROUTE_HINT =
-  'Click a line, a transformer or the connector of a device to move it by hand: drag a run to slide it, drag a square to move a bend. Tidy diagram leaves a line you moved as it is.';
+  'Click a line, a transformer or the connector of a device to move it by hand: drag a run to slide it, drag a square to move a bend. A line is also picked by its row in the Lines table, or with Tab and Enter. Tidy diagram leaves a line you moved as it is.';
 
 /** How to pick several nodes, which Align and Distribute need. */
 export const PICK_SEVERAL_HINT =

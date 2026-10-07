@@ -53,6 +53,16 @@ const DIAGRAM_GESTURES: readonly { id: string; label: string; keys: readonly str
     label: 'Pick a line, a transformer or a device connector, to move its route by hand',
     keys: ['Click'],
   },
+  {
+    id: 'pick-keys',
+    label: 'Pick the line that has the keyboard focus (Tab goes from line to line)',
+    keys: ['Enter', 'or', 'Space'],
+  },
+  {
+    id: 'pick-row',
+    label: 'Pick a line by its row in the Lines table',
+    keys: ['Click'],
+  },
   { id: 'slide', label: 'Slide a run of the picked line', keys: ['Drag', 'or', '← → ↑ ↓'] },
   {
     id: 'bend',
@@ -61,7 +71,7 @@ const DIAGRAM_GESTURES: readonly { id: string; label: string; keys: readonly str
   },
   {
     id: 'alone',
-    label: 'Move a bend alone, leaving its runs at an angle',
+    label: 'Move a bend alone, leaving its runs at an angle (a bend just added moves alone)',
     keys: ['Alt', 'or', 'Shift', 'Drag'],
   },
   {
