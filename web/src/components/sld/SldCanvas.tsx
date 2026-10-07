@@ -197,6 +197,9 @@ const TRANSFORMER_LABEL_BOX = { width: 30, height: 30 };
 const TIDY_AT_ONCE = 60;
 const TIDY_PAINT_MS = 30;
 
+/** What the Undo of a toast says when its change is no longer the newest one. */
+const CHANGED_SINCE_NOTICE = 'The diagram was changed since. Use Undo in the Edit menu to go back.';
+
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
   'The diagram is locked. Unlock it with the padlock at its bottom left to change its layout.';
@@ -1304,11 +1307,20 @@ function SldCanvasInner({
       // Taken back here, so there is no step left for Undo to take back.
       if (step !== null) useLayoutHistoryStore.getState().discard(step);
     };
+    // The Undo of the toast takes the reset back while it is still the
+    // newest change. After a move or a tidy made since, putting the old
+    // arrangement back would overwrite that and leave the history telling
+    // of steps that no longer match the diagram, so it says where to go.
     const reported = () =>
       toast.success('Layout reset to auto-layout', {
         action: {
           label: 'Undo',
           onClick: () => {
+            const past = useLayoutHistoryStore.getState().past;
+            if (step !== null && past[past.length - 1]?.id !== step) {
+              toast.info(CHANGED_SINCE_NOTICE);
+              return;
+            }
             putBack();
             if (previousSaved !== null) putSidecar(previousSaved);
           },
@@ -1400,7 +1412,7 @@ function SldCanvasInner({
     (step: number | null) => {
       const past = useLayoutHistoryStore.getState().past;
       if (step !== null && past[past.length - 1]?.id === step) stepThroughHistory('undo');
-      else toast.info('The diagram was changed since. Use Undo in the Edit menu to go back.');
+      else toast.info(CHANGED_SINCE_NOTICE);
     },
     [stepThroughHistory],
   );

@@ -906,6 +906,43 @@ describe('Reset to auto-layout', () => {
     expect(picture()).toEqual(tidied.picture);
   });
 
+  it('does not put the old arrangement back from its toast over a change made since', async () => {
+    const success = vi.spyOn(toast, 'success');
+    const info = vi.spyOn(toast, 'info');
+    open('square.xlsx');
+    await draw();
+    const start = positionOf('2');
+    dragTo('2', { x: start.x + 50, y: start.y });
+    await waitFor(() => expect(positionOf('2').x).toBe(start.x + 50));
+    success.mockClear();
+    run('reset-layout');
+    await waitFor(() => expect(positionOf('2')).toEqual(start));
+    const options = success.mock.calls[0]![1] as { action: { onClick: () => void } };
+
+    // Something else is moved while the toast is still up.
+    const three = positionOf('3');
+    dragTo('3', { x: three.x + 80, y: three.y });
+    await waitFor(() => expect(positionOf('3').x).toBe(three.x + 80));
+    const after = picture();
+    putSidecarSpy.mockClear();
+    info.mockClear();
+
+    act(() => options.action.onClick());
+
+    expect(info).toHaveBeenCalledWith(
+      'The diagram was changed since. Use Undo in the Edit menu to go back.',
+    );
+    // Nothing was put back, and the history still matches what is drawn.
+    expect(picture()).toEqual(after);
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    expect(labels()).toEqual(['move bus Bus 2', 'reset to auto-layout', 'move bus Bus 3']);
+    // Undo from the Edit menu still goes back a step at a time.
+    run('undo-layout');
+    await waitFor(() => expect(positionOf('3')).toEqual(three));
+    run('undo-layout');
+    await waitFor(() => expect(positionOf('2').x).toBe(start.x + 50));
+  });
+
   it('leaves no step behind when it is taken back from its own toast', async () => {
     const success = vi.spyOn(toast, 'success');
     open('square.xlsx');
