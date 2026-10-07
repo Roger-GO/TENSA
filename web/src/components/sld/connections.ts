@@ -81,7 +81,11 @@
  *   where it was. The connector of a device that was moved is drawn that way
  *   only while it runs through nothing and still leaves by a face that does
  *   not look away from the bar; otherwise it is worked out afresh
- *   (`ConnectionPass.byHand` says which were kept).
+ *   (`ConnectionPass.byHand` says which were kept). So is one that does not
+ *   hold as a connector by itself, moved or not, wherever it came from (a
+ *   layout that was written for a device somewhere else): one that folds
+ *   back on itself (`routeFolds`), or that runs into, along or right beside
+ *   the symbol it leaves (`onOwnSymbol`).
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -660,6 +664,110 @@ export function bringAlong(
   if (final === 'upright') out[last - 1]![0] += byTarget[0];
   else if (final === 'level') out[last - 1]![1] += byTarget[1];
   return out;
+}
+
+/** The part of the run from `a` to `b` that is inside `rect`, as a length; 0 when it stays outside. */
+export function lengthInside(
+  a: readonly [number, number],
+  b: readonly [number, number],
+  rect: Rect,
+): number {
+  let from = 0;
+  let to = 1;
+  const clip = (delta: number, near: number, far: number): boolean => {
+    if (Math.abs(delta) < 1e-9) return near < 0 && far > 0;
+    from = Math.max(from, Math.min(near / delta, far / delta));
+    to = Math.min(to, Math.max(near / delta, far / delta));
+    return from < to;
+  };
+  const inside =
+    clip(b[0] - a[0], rect.left - a[0], rect.right - a[0]) &&
+    clip(b[1] - a[1], rect.top - a[1], rect.bottom - a[1]);
+  return inside ? (to - from) * Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
+}
+
+/**
+ * Whether a route folds back on itself: a run of it turns straight back
+ * along the one before, or two runs that are not neighbours cross, touch,
+ * or run side by side nearer than two different lines may (`RUN_GAP`). Such
+ * a route reads as two lines, or as a loop hanging off one. No route the
+ * diagram makes does; one drawn by hand is held to it, and so is one that
+ * was brought along with an end that moved.
+ */
+export function routeFolds(points: readonly (readonly [number, number])[]): boolean {
+  for (let i = 1; i < points.length; i += 1) {
+    const [a, b] = [points[i - 1]!, points[i]!];
+    const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+    const lu = Math.hypot(ux, uy);
+    if (lu < 1e-6) continue;
+    for (let k = i + 1; k < points.length; k += 1) {
+      const [c, d] = [points[k - 1]!, points[k]!];
+      const [vx, vy] = [d[0] - c[0], d[1] - c[1]];
+      const lv = Math.hypot(vx, vy);
+      if (lv < 1e-6) continue;
+      const cross = ux * vy - uy * vx;
+      const inLine = Math.abs(cross) <= 0.035 * lu * lv;
+      if (k === i + 1) {
+        // The run after it: straight back the way it came.
+        if (inLine && ux * vx + uy * vy < 0) return true;
+        continue;
+      }
+      if (inLine) {
+        const along = (p: readonly [number, number]): number =>
+          ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) / lu;
+        const off = (p: readonly [number, number]): number =>
+          ((p[0] - a[0]) * uy - (p[1] - a[1]) * ux) / lu;
+        const [from, to] = [Math.min(along(c), along(d)), Math.max(along(c), along(d))];
+        if (Math.min(lu, to) - Math.max(0, from) <= 1) continue;
+        if (Math.min(Math.abs(off(c)), Math.abs(off(d))) < RUN_GAP - EPS) return true;
+        continue;
+      }
+      const [wx, wy] = [c[0] - a[0], c[1] - a[1]];
+      const onFirst = ((wx * vy - wy * vx) / cross) * lu;
+      const onSecond = ((wx * uy - wy * ux) / cross) * lv;
+      if (onFirst >= -1 && onFirst <= lu + 1 && onSecond >= -1 && onSecond <= lv + 1) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The least room the runs of a device connector keep to the symbol of their
+ * own device, all but the first, which leaves it: the connector that steps
+ * round something (`detourFor`) turns no nearer to it than this.
+ */
+export const OWN_SYMBOL_ROOM = 4;
+
+/** How far a connector may run inside the edge of the symbol it leaves and still count as leaving it. */
+const ALONG_EDGE = 2;
+
+/**
+ * How the connector of a device, drawn through `points` from the middle of
+ * a face of `box`, is on the symbol it leaves; `null` when it leaves it
+ * cleanly. `through`: a run of it passes through the symbol. `along`: its
+ * first run stays on the edge of the symbol and does not leave it. `beside`:
+ * a later run comes nearer than `room` to the symbol, where it reads as
+ * drawn along its edge or as hanging off a corner of it.
+ */
+export function onOwnSymbol(
+  points: readonly (readonly [number, number])[],
+  box: Rect,
+  room: number = OWN_SYMBOL_ROOM,
+): 'through' | 'along' | 'beside' | null {
+  const grown = (by: number): Rect => ({
+    left: box.left - by,
+    right: box.right + by,
+    top: box.top - by,
+    bottom: box.bottom + by,
+  });
+  for (let k = 1; k < points.length; k += 1) {
+    const [a, b] = [points[k - 1]!, points[k]!];
+    if (lengthInside(a, b, grown(-EPS)) > 0) return 'through';
+    if (k === 1) {
+      if (lengthInside(a, b, grown(EPS)) > ALONG_EDGE) return 'along';
+    } else if (lengthInside(a, b, grown(room - EPS)) > 0) return 'beside';
+  }
+  return null;
 }
 
 // ---- the pass ---------------------------------------------------------------
@@ -1321,7 +1429,8 @@ function layoutPass(
   // it leaves by. One whose device or bus has moved since is brought along,
   // and kept only while that leaves it through nothing and out of a face
   // that does not look away from the bar: otherwise the connector is worked
-  // out like any other.
+  // out like any other. So is one that folds back on itself or does not
+  // leave its own symbol, whether anything has moved or not.
   const handDrawn = new Map<string, { points: Point[]; face: Side }>();
   for (const { edge, box, bar } of stubs) {
     if (edge.data?.bendManual !== true) continue;
@@ -1341,6 +1450,15 @@ function layoutPass(
     if (!sameX(from, points[0]!) || !sameY(from, points[0]!)) {
       points = bringAlong(points, [from[0] - points[0]![0], from[1] - points[0]![1]], [0, 0]);
     }
+    // Whatever it was drawn for, it holds as a connector by itself: it does
+    // not fold back on itself, and it leaves its own symbol.
+    const own: Rect = {
+      left: box.cx - box.hw,
+      right: box.cx + box.hw,
+      top: box.cy - box.hh,
+      bottom: box.cy + box.hh,
+    };
+    if (routeFolds(points) || onOwnSymbol(points, own) !== null) continue;
     if (loose) {
       const lands = points[points.length - 1]!;
       const away =
@@ -1348,12 +1466,11 @@ function layoutPass(
         (face === 'south' && bar.cy < box.cy - box.hh) ||
         (face === 'east' && lands[0] < box.cx - box.hw) ||
         (face === 'west' && lands[0] > box.cx + box.hw);
-      const throughOwn = points.some((q, k) => k > 0 && runsThrough(points[k - 1]!, q, box));
       const offBar =
         Math.abs(lands[1] - bar.cy) > EPS ||
         lands[0] < bar.start - DETOUR_REACH ||
         lands[0] > bar.end + DETOUR_REACH;
-      if (away || throughOwn || offBar || blockedEarly(box, bar)(points, true)) continue;
+      if (away || offBar || blockedEarly(box, bar)(points, true)) continue;
     }
     handDrawn.set(edge.id, { points, face });
   }

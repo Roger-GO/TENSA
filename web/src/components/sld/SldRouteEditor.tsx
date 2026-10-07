@@ -8,7 +8,9 @@
  * - the line itself, picked out in the accent colour;
  * - a square on each bend, which is dragged to move the bend (the two runs
  *   that meet there stay level or upright; with Alt or Shift held the
- *   bend moves alone) and double-clicked to take it out;
+ *   bend moves alone, and so does one that was just put into a straight
+ *   run, which is how the line is made to turn there) and double-clicked to
+ *   take it out;
  * - a round handle with a plus beside the middle of each run, which is
  *   dragged to pull a new bend out of the run and clicked to put one in
  *   (beside the run and not on it, so that the run can be grabbed anywhere);
@@ -49,6 +51,10 @@ import { routePath, runKind, type Point, type RunKind } from './connections';
 import type { RouteCheck } from './routeCheck';
 import {
   applyEdit,
+  KINK_REASON,
+  kinkReason,
+  leavesKink,
+  MIN_STEP,
   nearestOnRun,
   pointIn,
   removeBend,
@@ -56,6 +62,7 @@ import {
   runIn,
   sameRoute,
   settleEdit,
+  SPLIT_ROOM,
   tidyPoints,
   type EditPart,
   type EditedRoute,
@@ -84,6 +91,13 @@ const ADD_OFFSET_PX = 13;
 /** What the bar says when a part that is moved along a bar can go no further. */
 const END_ON_BAR_NOTE =
   'The end of a line stays on the bar of its bus: it is at the tip, and goes no further that way.';
+
+/** What the bar says when a part was moved too little way to make a step of. */
+const SHORT_STEP_NOTE = `A step is ${MIN_STEP} px at the least: keep dragging to make one.`;
+
+/** What the bar says once a bend was put into a run. */
+const BEND_ADDED_NOTE =
+  'Bend added. Drag it, or press the arrow keys, to make the line turn there; drag the run on either side of it for a square step.';
 
 /**
  * How the handles are used, as the bar says it while it has nothing else to
@@ -213,6 +227,8 @@ export function SldRouteEditor({
   const [note, setNote] = useState<Note | null>(null);
   const [shown, setShown] = useState<{ points: Point[]; wanted: Point[] | null } | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  // The part that takes the focus of the keys once its handle is drawn (below).
+  const focusNext = useRef<Picked | null>(null);
   // Another line: nothing of the one before carries over.
   useEffect(() => {
     setSplits([]);
@@ -220,6 +236,7 @@ export function SldRouteEditor({
     setNote(null);
     setShown(null);
     dragRef.current = null;
+    focusNext.current = null;
   }, [edgeId]);
 
   // The route with the bends that were put in, each on the run it is in.
@@ -237,6 +254,14 @@ export function SldRouteEditor({
     return out;
   }, [points, splits]);
 
+  /** Whether the bend at `index` is one that was put into a run and not moved yet. */
+  const inLine = (index: number): boolean => {
+    const p = working[index];
+    return (
+      p !== undefined && splits.some((split) => Math.hypot(split[0] - p[0], split[1] - p[1]) <= 0.5)
+    );
+  };
+
   const handles = useRef(new Map<string, SVGElement>());
   const keyOf = (part: Picked): string => `${part.kind}-${part.index}`;
   const holdRef =
@@ -246,13 +271,16 @@ export function SldRouteEditor({
       else handles.current.set(keyOf(part), element);
     };
   // After a move by the keys the part that was moved keeps the focus, under
-  // the index it has in the route as it is now.
-  const focusNext = useRef<Picked | null>(null);
+  // the index it has in the route as it is now. The route that was kept
+  // comes back from the canvas a render or two later, and a bend that was
+  // put in has no handle until it does: the focus waits for the handle.
   useEffect(() => {
     const next = focusNext.current;
     if (next === null) return;
+    const handle = handles.current.get(keyOf(next));
+    if (handle === undefined) return;
     focusNext.current = null;
-    handles.current.get(keyOf(next))?.focus();
+    handle.focus();
   });
 
   /** Where on the diagram the pointer of `event` is. */
@@ -300,6 +328,8 @@ export function SldRouteEditor({
   const begin = (event: React.PointerEvent<SVGElement>, part: EditPart): void => {
     if (event.button !== 0) return;
     event.stopPropagation();
+    // The pointer has the line now: no handle waits for the focus of the keys.
+    focusNext.current = null;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
       part,
@@ -325,7 +355,10 @@ export function SldRouteEditor({
     held.moved = true;
     held.check ??= makeCheck();
     // Alt, or Shift: a drag with Alt held moves the window on some desktops.
-    const free = event.altKey || event.shiftKey;
+    // A bend that was put into a straight run and not moved yet moves alone
+    // as well: moved with its runs kept square it would only slide the run.
+    const free =
+      event.altKey || event.shiftKey || (held.part.kind === 'bend' && inLine(held.part.index));
     const settled = settleEdit(held.base, held.part, by, ends, held.check, {
       free,
       grid: grid ?? undefined,
@@ -334,8 +367,10 @@ export function SldRouteEditor({
     if (settled === null) {
       // No clear place near: the line stays where it last was, and the
       // route that was asked for shows why.
-      const asked = tidyPoints(applyEdit(held.base, held.part, by, ends, { free }).points);
-      const why = held.check(asked) ?? 'there is no room for it';
+      const edited = applyEdit(held.base, held.part, by, ends, { free });
+      const asked = tidyPoints(edited.points);
+      const why =
+        kinkReason(held.base, edited, asked) ?? held.check(asked) ?? 'there is no room for it';
       setShown({ points: held.last?.points ?? tidyPoints(held.base), wanted: asked });
       setNote({ text: `Not there: ${why}. No clear place is near.`, tone: 'refused' });
       return;
@@ -343,15 +378,20 @@ export function SldRouteEditor({
     held.last = { points: settled.points, edited: settled.edited, refused: settled.refused };
     setShown({ points: settled.points, wanted: settled.wanted });
     setNote(
-      settled.refused !== null
-        ? {
-            text: `Not there: ${settled.refused}. Shown at the nearest clear place.`,
-            tone: 'refused',
-          }
-        : // An end that reached the tip of its bar went less far than the pointer.
-          settled.edited.stopped === true
-          ? { text: END_ON_BAR_NOTE, tone: 'plain' }
-          : null,
+      settled.stayed === true
+        ? // Dragging on makes a step, unless the tip of the bar leaves no room for one.
+          settled.refused !== KINK_REASON
+          ? { text: `Not there: ${settled.refused}.`, tone: 'refused' }
+          : { text: SHORT_STEP_NOTE, tone: 'plain' }
+        : settled.refused !== null
+          ? {
+              text: `Not there: ${settled.refused}. Shown at the nearest clear place.`,
+              tone: 'refused',
+            }
+          : // An end that reached the tip of its bar went less far than the pointer.
+            settled.edited.stopped === true
+            ? { text: END_ON_BAR_NOTE, tone: 'plain' }
+            : null,
     );
   };
   const drop = (event: React.PointerEvent<SVGElement>): void => {
@@ -389,8 +429,38 @@ export function SldRouteEditor({
   // ---- the keys, and the buttons that do the same ----
   /** Move `part` by `by`, as the arrow keys do: there, or not at all. */
   const nudge = (part: Picked, by: [number, number]): void => {
-    const edited = applyEdit(working, part, by, ends, { grid: grid ?? undefined });
-    const route = tidyPoints(edited.points);
+    // A bend that was put into a straight run and not moved yet moves alone.
+    const fresh = part.kind === 'bend' && inLine(part.index);
+    const options = { grid: grid ?? undefined, free: fresh };
+    let edited = applyEdit(working, part, by, ends, options);
+    let route = tidyPoints(edited.points);
+    if (fresh && sameRoute(route, tidyPoints(working))) {
+      // Along its run: the bend goes there, and the line is as it was.
+      const [a, to, b] = [
+        working[part.index - 1],
+        edited.points[part.index],
+        working[part.index + 1],
+      ];
+      const room = (q: Point | undefined): boolean =>
+        to !== undefined && q !== undefined && Math.hypot(to[0] - q[0], to[1] - q[1]) >= SPLIT_ROOM;
+      const from = working[part.index];
+      if (to === undefined || from === undefined || !room(a) || !room(b)) {
+        setNote({ text: 'The bend is at the end of its run: it goes no further.', tone: 'plain' });
+        return;
+      }
+      setSplits((held) =>
+        held.map((p) => (Math.hypot(p[0] - from[0], p[1] - from[1]) <= 0.5 ? to : p)),
+      );
+      focusNext.current = part;
+      setNote(null);
+      return;
+    }
+    if (leavesKink(working, route) && Math.hypot(by[0], by[1]) < MIN_STEP) {
+      // A step that small is no step: the shortest one that is, the same way.
+      const scale = MIN_STEP / Math.hypot(by[0], by[1]);
+      edited = applyEdit(working, part, [by[0] * scale, by[1] * scale], ends, options);
+      route = tidyPoints(edited.points);
+    }
     if (sameRoute(route, tidyPoints(working))) {
       const a = working[part.index];
       const b = working[part.index + 1];
@@ -410,7 +480,7 @@ export function SldRouteEditor({
       });
       return;
     }
-    const why = makeCheck()(route);
+    const why = kinkReason(working, edited, route) ?? makeCheck()(route);
     if (why !== null) {
       setNote({ text: `Not moved: ${why}.`, tone: 'refused' });
       return;
@@ -439,10 +509,7 @@ export function SldRouteEditor({
     const next: Picked = { kind: 'bend', index: run + 1 };
     setPicked(next);
     focusNext.current = next;
-    setNote({
-      text: 'Bend added. Drag the run on either side of it, or the bend itself, to make a step.',
-      tone: 'plain',
-    });
+    setNote({ text: BEND_ADDED_NOTE, tone: 'plain' });
   };
   /** Take the bend at `bend` out. */
   const remove = (bend: number): void => {

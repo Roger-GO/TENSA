@@ -31,6 +31,11 @@
  * that was put in and not moved); `tidyPoints` takes those out, which is
  * the form a route is kept in.
  *
+ * A move leaves no step too short to be read as one (`leavesKink`,
+ * `MIN_STEP`): `settleEdit`, which is what a drag asks at every move, takes
+ * the part to the nearest place that leaves none, and leaves the line as it
+ * is for a move too small to make a step of.
+ *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
@@ -89,8 +94,14 @@ export function routeEndsOf(
   return { source: { kind: 'fixed' }, target: intoTip ? { kind: 'fixed' } : onBar(edge.target) };
 }
 
+/**
+ * The shortest run a move leaves in a route: shorter, a step reads as a
+ * kink in the line (`MIN_RUN` of the router).
+ */
+export const MIN_STEP = 12;
+
 /** How far out of a fixed end a run goes before it steps aside, where it is long enough. */
-export const NECK = 12;
+export const NECK = MIN_STEP;
 
 /** Two coordinates closer than this are the same place (as in `connections.ts`). */
 const EPS = 0.5;
@@ -314,6 +325,45 @@ export function tidyPoints(points: readonly Point[]): Point[] {
   return simplifyRoute(points.map(([x, y]): Point => [x, y]));
 }
 
+/**
+ * Whether the route `points`, which a move made of `base`, has a step too
+ * short to be read as one that `base` did not have: more runs under
+ * `MIN_STEP` than it had, or one shorter than its shortest were. A run the
+ * diagram itself made that short (the jog a tap asks for) is not held
+ * against a move that leaves it alone or makes it longer.
+ */
+export function leavesKink(base: readonly Point[], points: readonly Point[]): boolean {
+  const short = (route: readonly Point[]): number[] =>
+    route
+      .slice(1)
+      .map((b, k) => Math.hypot(b[0] - route[k]![0], b[1] - route[k]![1]))
+      .filter((length) => length < MIN_STEP - EPS)
+      .sort((p, q) => p - q);
+  const now = short(points);
+  if (now.length === 0) return false;
+  const was = short(tidyPoints(base));
+  return now.length > was.length || now.some((length, k) => length < was[k]! - EPS);
+}
+
+/** What a move that would leave such a step is refused for. */
+export const KINK_REASON = `it would leave a step of under ${MIN_STEP} px, too short to read as one`;
+
+/** The same, where the step is that short because the end of the line is at the tip of its bar. */
+export const TIP_REASON = `its end is at the tip of the bar of its bus, which leaves room only for a step of under ${MIN_STEP} px`;
+
+/**
+ * What the route `points`, which the move `edited` made of `base`, is
+ * refused for by the step it leaves; `null` where it leaves none too short.
+ */
+export function kinkReason(
+  base: readonly Point[],
+  edited: EditedRoute,
+  points: readonly Point[],
+): string | null {
+  if (!leavesKink(base, points)) return null;
+  return edited.stopped === true ? TIP_REASON : KINK_REASON;
+}
+
 /** Whether two routes run through the same points. */
 export function sameRoute(a: readonly Point[], b: readonly Point[]): boolean {
   return (
@@ -443,7 +493,7 @@ export const SNAP_STEP = 2;
  * its end is at the tip of its bar. A place nearer than this to where the
  * part came from would leave a step too short to be read as one: a kink.
  */
-export const SNAP_LEAST = 12;
+export const SNAP_LEAST = MIN_STEP;
 
 export interface SettledEdit {
   /** The route to draw: tidied, and clear of everything else. */
@@ -457,15 +507,23 @@ export interface SettledEdit {
   refused: string | null;
   /** The route it would have had where it was put, for one that was refused. */
   wanted: Point[] | null;
+  /**
+   * Set where the line is left as it was: the part was moved so little way
+   * that the step it would make is too short to be read as one.
+   */
+  stayed?: true;
 }
 
 /**
  * Move `part` of the route `base` by `by`, and where that puts the line on
- * something (`clear` says what, or `null`), to the nearest place where it
- * is on nothing: a run along the way it slides, a bend in any direction, up
- * to `SNAP_REACH` from where it was put, no nearer than `SNAP_LEAST` to
- * where it came from, and not on the other side of that. `null` with no
- * clear place that near; the caller then leaves the line where it last was.
+ * something (`clear` says what, or `null`) or leaves a step too short to be
+ * read as one (`leavesKink`), to the nearest place where it does neither:
+ * a run along the way it slides, a bend in any direction, up to
+ * `SNAP_REACH` from where it was put, no nearer than `SNAP_LEAST` to where
+ * it came from, and not on the other side of that. A run or a bend that
+ * was moved less than `SNAP_LEAST` and would leave such a step stays where
+ * it is (`stayed`). `null` with no clear place that near; the caller then
+ * leaves the line where it last was.
  */
 export function settleEdit(
   base: readonly Point[],
@@ -483,14 +541,33 @@ export function settleEdit(
   /** Whether a move went so little way that the step it leaves is a kink. */
   const short = (edited: EditedRoute): boolean =>
     part.kind !== 'pull' && Math.hypot(edited.by[0], edited.by[1]) < SNAP_LEAST;
-  // An end at the tip of its bar goes no further: where that leaves a step
-  // put in for it too short to read, the move is not made.
-  const kinked =
-    asked.edited.stopped === true &&
-    short(asked.edited) &&
-    asked.points.length > tidyPoints(base).length;
-  const refused = kinked ? 'its end is at the tip of the bar of its bus' : clear(asked.points);
+  // A step too short to read is not made. Where it is that short because an
+  // end at the tip of its bar goes no further, that is what is said
+  // (`kinkReason`).
+  const kink = kinkReason(base, asked.edited, asked.points);
+  const kinked = kink !== null;
+  const refused = kink ?? clear(asked.points);
   if (refused === null) return { ...asked, refused: null, wanted: null };
+  // Moved too little way to make a step of: the line stays as it is, and
+  // goes with the pointer once that has gone far enough. Where going on
+  // makes no step either (the tip of the bar stops the end first), that is
+  // what it is refused for.
+  const gone = Math.hypot(by[0], by[1]);
+  if (kinked && part.kind !== 'pull' && gone < SNAP_LEAST) {
+    const still: EditedRoute = {
+      points: base.map(([x, y]): Point => [x, y]),
+      picked: part.index,
+      by: [0, 0],
+    };
+    const on = gone > 0 ? at([(by[0] / gone) * SNAP_LEAST, (by[1] / gone) * SNAP_LEAST]) : asked;
+    return {
+      edited: still,
+      points: tidyPoints(base),
+      refused: kinkReason(base, on.edited, on.points) ?? refused,
+      wanted: null,
+      stayed: true,
+    };
+  }
   // The ways it can give: a level or an upright run only across itself.
   const run = part.kind === 'run' ? base[part.index] : undefined;
   const next = part.kind === 'run' ? base[part.index + 1] : undefined;
@@ -518,6 +595,18 @@ export function settleEdit(
           ];
   const step = Math.max(SNAP_STEP, options.grid ?? 0);
   const seen = new Set<string>();
+  // The route as it is counts as no place to take the part to: a bend that
+  // is pulled back into its run, or a part that is put back where it was.
+  const asItIs = tidyPoints(base);
+  seen.add(asItIs.map(([x, y]) => `${x},${y}`).join(' '));
+  // A bend that is pulled out of a run stays on the side of the run it was
+  // pulled to.
+  const pulledTo = (edited: EditedRoute): number => {
+    const [a, p, b] = [base[part.index], edited.points[edited.picked], base[part.index + 1]];
+    if (part.kind !== 'pull' || a === undefined || p === undefined || b === undefined) return 0;
+    return Math.sign((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]));
+  };
+  const side = pulledTo(asked.edited);
   for (let off = step; off <= SNAP_REACH; off += step) {
     for (const [wx, wy] of ways) {
       const tried = at([by[0] + wx * off, by[1] + wy * off]);
@@ -528,6 +617,8 @@ export function settleEdit(
       // Not back past where it came from: that is not where it was taken.
       const back = tried.edited.by[0] * by[0] + tried.edited.by[1] * by[1] <= 0;
       if (short(tried.edited) || (part.kind !== 'pull' && back)) continue;
+      if (side !== 0 && pulledTo(tried.edited) !== side) continue;
+      if (leavesKink(base, tried.points)) continue;
       if (clear(tried.points) === null) return { ...tried, refused, wanted: asked.points };
     }
   }

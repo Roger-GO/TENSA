@@ -15,8 +15,14 @@
  *   would leave its bar;
  * - a symbol, a control chain that is drawn out, the label of a bus, the
  *   values of a device or the flow label of another line it would run
- *   through;
- * - for the connector of a device, its own symbol;
+ *   through, or pass nearer than a line the diagram routes itself does
+ *   (`HAND_CLEARANCE` from a symbol, a chain and a bar that is not its own,
+ *   `HAND_LABEL_CLEARANCE` from a label and a readout), so that a line put
+ *   at the nearest clear place does not touch what it was moved off;
+ * - for the connector of a device, its own symbol: it leaves by the middle
+ *   of a face, square out of it or at an angle, and no later run of it comes
+ *   back along the edge of the symbol (`onOwnSymbol`);
+ * - itself: a route does not fold back on itself (`routeFolds`);
  * - for a transformer, a route with no straight stretch where its symbol
  *   has room.
  *
@@ -24,7 +30,9 @@
  * diagram places it again once the line is where it was put: its own flow
  * label, the symbol of the transformer, and the values of the device a
  * connector belongs to. What the line was on already before it was touched
- * (a layout that was saved that way) is not held against it either.
+ * (a layout that was saved that way) is not held against it either, and
+ * where it already passes something nearer than the room it would keep, it
+ * may stay that near, and come no nearer.
  *
  * It looks only at what is near the line, so it can be asked at every move
  * of the pointer, and several times over to find the nearest place that is
@@ -35,8 +43,12 @@
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
+  BAR_THICKNESS,
+  OWN_SYMBOL_ROOM,
   TRANSFORMER_SYMBOL_SIZE,
   labelBoxAt,
+  onOwnSymbol,
+  routeFolds,
   type ConnectionEdge,
   type NodeSize,
   type Point,
@@ -67,6 +79,73 @@ export interface RouteCheckOptions {
 
 /** How far around a route the check looks: more than any rule of the checker reaches. */
 const REACH = 32;
+
+/**
+ * The room a route that is moved by hand keeps to a symbol, to a control
+ * chain that is drawn out and to a bar it does not end on: what the router
+ * keeps to a device (`DEVICE_CLEARANCE` in `tidy.ts`). The overlap checker
+ * itself asks for less (a line may not run through a box, and passes a bar
+ * `BAR_CLEAR` off), which is the least a diagram may be drawn with and too
+ * near for the place a line is taken to when it is refused another.
+ */
+export const HAND_CLEARANCE = 8;
+
+/**
+ * The same room to the label of a bus, to the values of a device and to the
+ * flow label of another line. Those are placed again around the lines once
+ * the route is kept, so less does: as much as the values keep to the symbol
+ * they stand beside.
+ */
+export const HAND_LABEL_CLEARANCE = 4;
+
+/** Two distances closer than this are the same. */
+const EPS = 0.5;
+
+/** `rect` with `by` more room on every side. */
+function grown(rect: Rect, by: number): Rect {
+  return {
+    left: rect.left - by,
+    right: rect.right + by,
+    top: rect.top - by,
+    bottom: rect.bottom + by,
+  };
+}
+
+/** Whether a run of `points`, from the run `first` to the run `last`, comes within `room` of `rect`. */
+function comesNear(
+  points: readonly Point[],
+  rect: Rect,
+  room: number,
+  first = 1,
+  last = points.length - 1,
+): boolean {
+  const reach = grown(rect, room - EPS);
+  for (let k = first; k <= last; k += 1) {
+    if (lengthInside(points[k - 1]!, points[k]!, reach) > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * The room the route `points` keeps to `rect` as it is, up to `most`: the
+ * most room it could be asked to keep without being refused where it is.
+ */
+function roomKept(
+  points: readonly Point[],
+  rect: Rect,
+  most: number,
+  first = 1,
+  last = points.length - 1,
+): number {
+  if (!comesNear(points, rect, most, first, last)) return most;
+  let [low, high] = [0, most];
+  for (let step = 0; step < 6; step += 1) {
+    const middle = (low + high) / 2;
+    if (comesNear(points, rect, middle, first, last)) high = middle;
+    else low = middle;
+  }
+  return low;
+}
 
 function boxOf(points: readonly Point[], by: number): Rect {
   const box: Rect = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
@@ -161,6 +240,13 @@ function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): 
   }
 }
 
+/** What the connector of a device is refused for by its own symbol (`onOwnSymbol`). */
+const OWN_SYMBOL: Record<NonNullable<ReturnType<typeof onOwnSymbol>>, string> = {
+  through: 'it would run through its own symbol',
+  along: 'it would run along the edge of its own symbol and not leave it',
+  beside: 'it would run right beside its own symbol',
+};
+
 /**
  * A check of the routes the line `edge` could be given, on the diagram
  * whose nodes are `nodes` and whose picture is `picture`.
@@ -247,20 +333,81 @@ export function routeChecker<E extends ConnectionEdge>(
   const now = drawn.lines.find((line) => line.id === id)?.points;
   const known = new Set((now === undefined ? [] : overlapsOf(now)).map(keyOf));
 
+  // ---- the room it keeps ----
+  // To every box that is not its own and to every bar it does not end on;
+  // where it is nearer than that as it is drawn now, as near as it is.
+  const roomOf = ({ kind }: DrawnBox): number =>
+    kind === 'symbol' || kind === 'block' ? HAND_CLEARANCE : HAND_LABEL_CLEARANCE;
+  // Not to what a line may run through by the rule itself (what it is drawn
+  // from and to, and what is drawn on it), and not to the label of a bus it
+  // ends on, which is placed again around the ends on its bar.
+  const apart = boxes.filter(
+    (box) =>
+      box.id !== edge.source &&
+      box.id !== edge.target &&
+      box.of?.includes(id) !== true &&
+      box.id !== `label:${edge.source}` &&
+      box.id !== `label:${edge.target}`,
+  );
+  const boxRoom = new Map<string, number>();
+  const barRoom = new Map<string, number>();
+  const bodyOf = (bar: DrawnBar): Rect => ({
+    left: bar.left,
+    right: bar.right,
+    top: bar.y - BAR_THICKNESS / 2,
+    bottom: bar.y + BAR_THICKNESS / 2,
+  });
+  /** The runs of a route through `points` that do not land on `bar`: the first, and the last. */
+  const passing = (bar: DrawnBar, points: readonly Point[]): [number, number] => [
+    edge.source === bar.id ? 2 : 1,
+    points.length - 1 - (edge.target === bar.id ? 1 : 0),
+  ];
+  if (now !== undefined) {
+    const around = boxOf(now, REACH);
+    for (const box of apart) {
+      if (meet(box.box, around)) boxRoom.set(box.id, roomKept(now, box.box, roomOf(box)));
+    }
+    for (const { bar, box } of bars) {
+      if (!meet(box, around)) continue;
+      barRoom.set(bar.id, roomKept(now, bodyOf(bar), HAND_CLEARANCE, ...passing(bar, now)));
+    }
+  }
+  /** What the line through `points` would pass too near, in words; `null` when it keeps its room. */
+  const tooNear = (points: readonly Point[]): string | null => {
+    const around = boxOf(points, REACH);
+    for (const box of apart) {
+      if (!meet(box.box, around)) continue;
+      const room = boxRoom.get(box.id) ?? roomOf(box);
+      if (room > EPS && comesNear(points, box.box, room)) {
+        return `it would pass too close to ${nameOf(box.id)}`;
+      }
+    }
+    for (const { bar, box } of bars) {
+      if (!meet(box, around)) continue;
+      const room = barRoom.get(bar.id) ?? HAND_CLEARANCE;
+      if (room > EPS && comesNear(points, bodyOf(bar), room, ...passing(bar, points))) {
+        return `it would pass too close to ${nameOf(bar.id)}`;
+      }
+    }
+    return null;
+  };
+  // The connector of a device: how near its own symbol the runs after the
+  // first may come. As near as the diagram itself draws one, for a
+  // connector that is that near now.
+  const ownRoom =
+    own !== undefined && now !== undefined && onOwnSymbol(now, own, HAND_CLEARANCE) === 'beside'
+      ? OWN_SYMBOL_ROOM
+      : HAND_CLEARANCE;
+
   return (points) => {
     if (points.length < 2) return 'a line runs through two points at the least';
     if (own !== undefined) {
-      const inner: Rect = {
-        left: own.left + 0.5,
-        right: own.right - 0.5,
-        top: own.top + 0.5,
-        bottom: own.bottom - 0.5,
-      };
-      const through = points.some((q, k) => k > 0 && lengthInside(points[k - 1]!, q, inner) > 0);
-      if (through) return 'it would run through its own symbol';
+      const how = onOwnSymbol(points, own, ownRoom);
+      if (how !== null) return OWN_SYMBOL[how];
     }
+    if (routeFolds(points)) return 'it would fold back on itself';
     const found = overlapsOf(points).find((overlap) => !known.has(keyOf(overlap)));
-    if (found === undefined) return null;
+    if (found === undefined) return tooNear(points);
     if (found.a === ownSymbol || found.b === ownSymbol) {
       return 'the symbol of the transformer would have no room on it';
     }

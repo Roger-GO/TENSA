@@ -29,7 +29,16 @@
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
-import { BAR_THICKNESS, TAP_INSET, TAP_SPACING, type Point, type Rect } from './connections';
+import {
+  BAR_THICKNESS,
+  TAP_INSET,
+  TAP_SPACING,
+  lengthInside,
+  type Point,
+  type Rect,
+} from './connections';
+
+export { lengthInside };
 
 /** The least room two lines keep between them where they run side by side. */
 export const LINE_GAP = 12;
@@ -135,22 +144,6 @@ interface Run {
   /** Whether it is the first run of its line, and the last. */
   first: boolean;
   last: boolean;
-}
-
-/** The part of the run from `a` to `b` that is inside `rect`, as a length; 0 when it stays outside. */
-export function lengthInside(a: Point, b: Point, rect: Rect): number {
-  let from = 0;
-  let to = 1;
-  const clip = (delta: number, near: number, far: number): boolean => {
-    if (Math.abs(delta) < 1e-9) return near < 0 && far > 0;
-    from = Math.max(from, Math.min(near / delta, far / delta));
-    to = Math.min(to, Math.max(near / delta, far / delta));
-    return from < to;
-  };
-  const inside =
-    clip(b[0] - a[0], rect.left - a[0], rect.right - a[0]) &&
-    clip(b[1] - a[1], rect.top - a[1], rect.bottom - a[1]);
-  return inside ? (to - from) * Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
 }
 
 /** How two runs of different lines are on each other, in words; `null` when they are apart or cross. */

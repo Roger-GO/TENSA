@@ -57,10 +57,11 @@
  * dropped on it) stays on it for the canvas to refuse. The one exception is
  * a route whose own bus has moved since it was drawn. It is brought along
  * with the bus (`bringAlong`, in the connection pass), and where that leaves
- * it on something it is routed afresh like any other and is the user's no
- * longer (`RoutedDiagram.released`). The connector of a device that was
- * drawn by hand goes the same way: the connection pass says which of them
- * it could keep.
+ * it on something, or folded back on itself (`routeFolds`), it is routed
+ * afresh like any other and is the user's no longer
+ * (`RoutedDiagram.released`). The connector of a device that was drawn by
+ * hand goes the same way: the connection pass says which of them it could
+ * keep.
  *
  * A pass in a drag has a fraction of those bounds (`DRAG_STEPS`,
  * `DRAG_GRID_POINTS`), which is enough for nearly every move. Where it is
@@ -79,6 +80,7 @@ import {
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
   layoutConnections,
+  routeFolds,
   simplifyRoute,
   stepRoute,
   type ConnectionEdge,
@@ -497,10 +499,11 @@ function routeOnce<E extends ConnectionEdge>(
     : [...edges];
   let connections = layoutConnections(nodes, drawn, connectionOptions);
   // A route drawn by hand whose bus has moved, as it is brought along: what
-  // is left for it where no other way is found.
+  // is left for it where no other way is found. Not one that is folded back
+  // on itself there, which is no route to draw.
   for (const id of loose) {
     const brought = connections.routes.get(id)?.points;
-    if (brought !== undefined) followed.set(id, brought);
+    if (brought !== undefined && !routeFolds(brought)) followed.set(id, brought);
   }
   const isBranch = new Set(
     edges
@@ -606,6 +609,12 @@ function routeOnce<E extends ConnectionEdge>(
     // A route whose end has moved the tap of a device aside is routed
     // again, to a tap that leaves the connector of the device where it was.
     for (const id of crowdingTaps(drawn, connections)) if (mayGo(id)) broken.add(id);
+    // A route drawn by hand that was brought along with its bus to where it
+    // folds back on itself reads as two lines: it is routed again.
+    for (const id of loose) {
+      const brought = connections.routes.get(id)?.points;
+      if (mayGo(id) && brought !== undefined && routeFolds(brought)) broken.add(id);
+    }
     for (const overlap of overlapsOn(drawn, connections, symbols)) {
       if (overlap.kind === 'line-box' && overlap.b.startsWith(SYMBOL)) {
         // A line through the symbol of a transformer goes round it. The
