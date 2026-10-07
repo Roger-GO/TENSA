@@ -292,6 +292,7 @@ describe('tidyRoutes: one branch', () => {
     expect(tidyRoutes(nodes, [stub('load-x', '1')])).toEqual({
       routes: new Map(),
       unrouted: [],
+      spots: new Map(),
       steps: 0,
     });
     expect(tidyRoutes(nodes, [line('loop', '1', '1')]).routes.size).toBe(0);
@@ -518,7 +519,124 @@ describe('tidyRoutes: the routes that stay as they are', () => {
   });
 });
 
+describe('tidyRoutes: room for the symbol of a transformer', () => {
+  const transformer = (id: string, from: string, to: string): ConnectionEdge => ({
+    ...line(id, from, to),
+    type: 'transformer',
+  });
+  /** The box the symbol takes about `spot`. */
+  const symbolAt = ([x, y]: Point): Rect => ({
+    left: x - 15,
+    right: x + 15,
+    top: y - 15,
+    bottom: y + 15,
+  });
+  /** Whether a route runs through `box`, and not just along its edge. */
+  const through = (points: readonly Point[], box: Rect): boolean =>
+    runsOf(points).some(
+      ([a, b]) =>
+        Math.max(a[0], b[0]) > box.left &&
+        Math.min(a[0], b[0]) < box.right &&
+        Math.max(a[1], b[1]) > box.top &&
+        Math.min(a[1], b[1]) < box.bottom,
+    );
+
+  it('says where the route of a transformer has room for its symbol, and of a line nothing', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 0, 208)];
+    const { routes, spots } = tidyRoutes(nodes, [transformer('t', '1', '2'), line('l', '1', '2')]);
+    expect(routes.get('t')).toEqual([
+      [48, 3],
+      [48, 211],
+    ]);
+    // Half way along, where nothing stands.
+    expect([...spots]).toEqual([['t', [48, 107]]]);
+    // The line beside it passes the symbol, on the next line of the grid.
+    expect(through(routes.get('l')!, symbolAt(spots.get('t')!))).toBe(false);
+  });
+
+  it('runs a transformer straight between two bars that leave its symbol room', () => {
+    // 48 apart: 42 clear between the two bars, for a symbol of 30.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 48)];
+    const { routes, spots } = tidyRoutes(nodes, [transformer('t', '1', '2')]);
+    expect(routes.get('t')).toEqual([
+      [48, 3],
+      [48, 51],
+    ]);
+    expect(spots.get('t')).toEqual([48, 27]);
+  });
+
+  it('takes a transformer round where the straight way between two bars has no room for its symbol', () => {
+    // 36 apart: a line runs straight from one bar to the other, and the
+    // symbol of a transformer would be on both bars there.
+    const nodes = [bus('1', 0, 0), bus('2', 0, 36)];
+    expect(tidyRoutes(nodes, [line('l', '1', '2')]).routes.get('l')).toEqual([
+      [48, 3],
+      [48, 39],
+    ]);
+    const edges = [transformer('t', '1', '2')];
+    const { routes, spots, unrouted } = tidyRoutes(nodes, edges);
+    expect(unrouted).toEqual([]);
+    const route = routes.get('t')!;
+    expect(route.length).toBeGreaterThan(2);
+    // On a straight stretch as long as the symbol, clear of both bars as
+    // they are drawn with the route.
+    const spot = spots.get('t')!;
+    const run = runsOf(route).find(
+      ([a, b]) =>
+        (a[0] === b[0] && a[0] === spot[0] && Math.abs(a[1] - b[1]) >= 30) ||
+        (a[1] === b[1] && a[1] === spot[1] && Math.abs(a[0] - b[0]) >= 30),
+    );
+    expect(run).toBeDefined();
+    const { bars } = layoutConnections(nodes, tidied(nodes, edges, routes));
+    for (const node of nodes) {
+      const bar = bars.get(node.id)!;
+      const box = symbolAt(spot);
+      const onBar =
+        box.left < node.position.x + bar.end &&
+        box.right > node.position.x + bar.start &&
+        box.top < node.position.y + 6 &&
+        box.bottom > node.position.y;
+      expect(onBar, `bar ${node.id}`).toBe(false);
+    }
+  });
+
+  it('keeps a route out of the symbol of a transformer that stays as it is', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 0, 208)];
+    const edges = [transformer('t', '1', '2'), line('l', '1', '2')];
+    const keep = new Map<string, Point[]>([
+      [
+        't',
+        [
+          [48, 3],
+          [48, 211],
+        ],
+      ],
+    ]);
+    // A symbol wider than it is drawn, so that the next line of the grid
+    // runs through it.
+    const symbol: Rect = { left: 20, right: 76, top: 92, bottom: 122 };
+    const beside = tidyRoutes(nodes, edges, { keep }).routes.get('l')!;
+    expect(through(beside, symbol)).toBe(true);
+    const clear = tidyRoutes(nodes, edges, { keep, symbols: new Map([['t', symbol]]) });
+    expect(clear.unrouted).toEqual([]);
+    expect(through(clear.routes.get('l')!, symbol)).toBe(false);
+  });
+});
+
 describe('tidyRoutes: a part of the diagram', () => {
+  it('routes only the branches it is asked for, as if the others were not there', () => {
+    const nodes = [bus('1', 0, 0), bus('2', 0, 208)];
+    const edges = [line('a', '1', '2'), line('b', '1', '2')];
+    const { routes, unrouted } = tidyRoutes(nodes, edges, { only: new Set(['b']) });
+    expect([...routes.keys()]).toEqual(['b']);
+    expect(unrouted).toEqual([]);
+    // In the middle of the bar, where the first of two would stand.
+    expect(routes.get('b')).toEqual([
+      [48, 3],
+      [48, 211],
+    ]);
+  });
+
   it('reads only what stands in the box it is given, and routes only the branches in it', () => {
     // Two pairs of buses far apart, a line in each.
     const nodes = [bus('1', 0, 0), bus('2', 0, 160), bus('3', 4000, 0), bus('4', 4000, 160)];

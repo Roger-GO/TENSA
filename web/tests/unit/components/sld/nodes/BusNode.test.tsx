@@ -741,6 +741,33 @@ describe('BusNode, the bar and its taps', () => {
     expect(label.className).toContain('-translate-x-1/2');
   });
 
+  it('shows the name alone where the canvas found room for no more, with the values in its tooltip', () => {
+    usePflowStore.setState({
+      lastRun: makePflow({ bus_voltages: { '1': 1.016 }, bus_angles: { '1': -0.1 } }),
+      isRunning: false,
+      error: null,
+    });
+    const bare = withBar({ start: 0, end: 92, taps: [] });
+    const full = render(<BusNode {...bare} />);
+    expect(full.getByTestId('bus-voltage-1')).toHaveTextContent('1.016 pu');
+    expect(full.getByTestId('bus-label-1')).not.toHaveAttribute('data-label-compact');
+    full.unmount();
+
+    const { getByTestId, queryByTestId } = render(
+      <BusNode
+        {...bare}
+        data={{ ...bare.data, labelAt: { offset: 46, side: 'above', compact: true } }}
+      />,
+    );
+    const label = getByTestId('bus-label-1');
+    expect(label).toHaveAttribute('data-label-compact', 'true');
+    expect(label).toHaveTextContent(/^BUS1$/);
+    expect(queryByTestId('bus-voltage-1')).not.toBeInTheDocument();
+    expect(queryByTestId('bus-angle-1')).not.toBeInTheDocument();
+    // What it leaves off is said where the pointer rests on it.
+    expect(label.getAttribute('title')).toMatch(/^BUS1: 1\.016 pu, .*; voltage limits /);
+  });
+
   it('draws a dot for every tap: no two connections land at one place', () => {
     const { getAllByTestId } = render(
       <BusNode

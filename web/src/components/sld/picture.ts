@@ -9,13 +9,13 @@
  * 2. where the control chains that are drawn out stand: beside their unit,
  *    on a side where no symbol, bar or connector is in the way;
  * 3. the route of every line and transformer, clear of all of that and of
- *    each other (`routeDiagram`), and with it the bars and the taps as they
- *    are drawn;
+ *    each other (`routeDiagram`), with it the bars and the taps as they are
+ *    drawn, and the symbol of every transformer on its route, which the
+ *    routes are held to as they are to the symbol of a device;
  * 4. the label of every bus, clear of the lines and the symbols;
  * 5. the P / Q readout of every generator and load, clear of the lines, the
  *    symbols and the labels of the buses;
- * 6. the flow label of every line and the symbol of every transformer,
- *    clear of all of those and of each other.
+ * 6. the flow label of every line, clear of all of those and of each other.
  *
  * `drawnDiagram` turns a picture into what the overlap checker reads
  * (`findOverlaps`): the tests hold the example cases to it in every state,
@@ -52,6 +52,7 @@ import {
   placeBusLabels,
   placeReadouts,
   readoutReserve,
+  symbolBoxes,
   type BusLabel,
   type LabelNode,
   type ReadoutPlace,
@@ -120,8 +121,11 @@ export function pictureOf<E extends ConnectionEdge>(
     preferFree: busLabelReserve(nodes, stubs, sizes, { chains: chainBoxes }),
   });
   const { connections } = routed;
+  // The symbols of the transformers stand where the routing has them: every
+  // label keeps off them.
+  const symbols = symbolBoxes(routed.symbols);
 
-  const busLabels = placeBusLabels(nodes, connections, sizes, values, chainBoxes);
+  const busLabels = placeBusLabels(nodes, connections, sizes, values, chainBoxes, symbols);
   // The readouts show with the values, and stand clear of the labels of the
   // buses as those are then.
   const labelBoxes = new Map([...busLabels].map(([id, { box }]) => [id, box]));
@@ -129,6 +133,7 @@ export function pictureOf<E extends ConnectionEdge>(
     ? placeReadouts(nodes, connections, sizes, {
         chains: chainBoxes,
         busLabels: labelBoxes,
+        symbols,
         widths: labelWidths?.readouts,
       })
     : new Map();
@@ -136,6 +141,7 @@ export function pictureOf<E extends ConnectionEdge>(
     busLabels: labelBoxes,
     readouts: [...readouts.values()].map(({ box }) => box),
     chains: chainBoxes,
+    symbols: routed.symbols,
     values,
     widths: labelWidths?.flows,
     quick: routing.dragging === true,

@@ -35,8 +35,10 @@ import {
   placeBranchLabels,
   placeBusLabels,
   placeReadouts,
+  placeTransformerSymbols,
   readoutReserve,
   readoutWidth,
+  symbolBoxes,
   type LabelNode,
 } from '@/components/sld/labels';
 
@@ -627,6 +629,36 @@ describe('placeBranchLabels', () => {
     expect(place.x).toBe(46);
   });
 
+  it('takes the symbols of the transformers where it is told they stand, and keeps a flow label off them', () => {
+    // A transformer and a line side by side, 40 apart; the symbol stands
+    // where the label of the line would stand beside its line.
+    const beside = route([
+      [86, 3],
+      [86, 303],
+    ]);
+    const drawn = layout({ '1': bar(), '2': bar() }, { 'transformer-t': down, 'line-l': beside });
+    const edges = [line('transformer-t', 'transformer'), line('line-l')];
+    const symbols = new Map<string, LabelPlace>([
+      ['transformer-t', { x: 46, y: 153, angleDeg: 90 }],
+    ]);
+    const places = placeBranchLabels(nodes, edges, drawn, NO_SIZES, {
+      busLabels: new Map(),
+      readouts: [],
+      symbols,
+    });
+    expect(places.get('transformer-t')).toBe(symbols.get('transformer-t'));
+    const symbol: Rect = { left: 31, right: 61, top: 138, bottom: 168 };
+    expect(overlaps(boxOf(places.get('line-l')!), symbol)).toBe(false);
+    // Without the values of a power flow, the symbols are all there is.
+    const plain = placeBranchLabels(nodes, edges, drawn, NO_SIZES, {
+      busLabels: new Map(),
+      readouts: [],
+      symbols,
+      values: false,
+    });
+    expect([...plain.keys()]).toEqual(['transformer-t']);
+  });
+
   it('places no label for a device connector', () => {
     const load = device('load-PQ', 0, 70);
     const drawn = layout(
@@ -652,6 +684,116 @@ describe('placeBranchLabels', () => {
       readouts: [],
     });
     expect(places.size).toBe(0);
+  });
+});
+
+describe('placeTransformerSymbols', () => {
+  const transformer: ConnectionEdge = {
+    id: 'transformer-t',
+    type: 'transformer',
+    source: '1',
+    target: '2',
+  };
+  const nodes = [bus('1', 0, 0), bus('2', 0, 300)];
+  const down = route([
+    [46, 3],
+    [46, 303],
+  ]);
+  const place = (
+    routes: Record<string, ConnectorRoute>,
+    standing: LabelNode[] = [],
+    edges: ConnectionEdge[] = [transformer],
+  ) => {
+    const drawn = layout({ '1': bar(), '2': bar() }, routes);
+    return placeTransformerSymbols([...nodes, ...standing], edges, drawn, NO_SIZES);
+  };
+
+  it('stands the symbol half way along its line where nothing is in the way, and places nothing for a line', () => {
+    const line: ConnectionEdge = { id: 'line-l', type: 'topology', source: '1', target: '2' };
+    const beside = route([
+      [78, 3],
+      [78, 303],
+    ]);
+    const places = place({ 'transformer-t': down, 'line-l': beside }, [], [transformer, line]);
+    expect([...places.keys()]).toEqual(['transformer-t']);
+    expect(places.get('transformer-t')).toEqual({ x: 46, y: 153, angleDeg: 90 });
+    expect(symbolBoxes(places).get('transformer-t')).toEqual({
+      left: 31,
+      right: 61,
+      top: 138,
+      bottom: 168,
+    });
+  });
+
+  it('moves along its line, clear of a line that crosses it and of a symbol beside it', () => {
+    // A line across the middle of the transformer, and a load beside it
+    // from there down.
+    const across = route([
+      [-100, 153],
+      [200, 153],
+    ]);
+    const load = { ...device('load-PQ', 50, 140), initialHeight: 120 };
+    const at = place({ 'transformer-t': down, 'line-x': across }, [load]).get('transformer-t')!;
+    const box = symbolBoxes(new Map([['transformer-t', at]])).get('transformer-t')!;
+    expect(at.x).toBe(46);
+    expect(at.label).toBeUndefined();
+    expect(crosses(across.points, box)).toBe(false);
+    expect(box.bottom).toBeLessThanOrEqual(140);
+  });
+
+  it('stands beside a line that passes close by, and on no line', () => {
+    // A line 16 from the transformer all the way: on the next line of the
+    // grid, which the symbol does not reach.
+    const close = route([
+      [62, 3],
+      [62, 303],
+    ]);
+    const at = place({ 'transformer-t': down, 'line-x': close }).get('transformer-t')!;
+    expect(at).toMatchObject({ x: 46, y: 153 });
+    // One that runs 12 from it all the way is through the symbol wherever
+    // it stands: with a stretch of the route that it leaves, the symbol
+    // stands there.
+    const through = route([
+      [58, 3],
+      [58, 200],
+      [120, 200],
+      [120, 303],
+    ]);
+    const moved = place({ 'transformer-t': down, 'line-x': through }).get('transformer-t')!;
+    const box = symbolBoxes(new Map([['transformer-t', moved]])).get('transformer-t')!;
+    expect(crosses(through.points, box)).toBe(false);
+    expect(moved.y).toBeGreaterThan(200);
+  });
+
+  it('is tried in every place of a long route before it is put on something', () => {
+    // A route of over a thousand, with lines right beside it all the way
+    // but for a stretch of 40 near one end.
+    const far = [bus('1', 0, 0), bus('2', 0, 1200)];
+    const long = route([
+      [46, 3],
+      [46, 1203],
+    ]);
+    const left = route([
+      [36, 3],
+      [36, 1100],
+      [-60, 1100],
+      [-60, 1203],
+    ]);
+    const right = route([
+      [56, 3],
+      [56, 1100],
+      [160, 1100],
+      [160, 1203],
+    ]);
+    const drawn = layout(
+      { '1': bar(), '2': bar() },
+      { 'transformer-t': long, 'line-a': left, 'line-b': right },
+    );
+    const at = placeTransformerSymbols(far, [transformer], drawn, NO_SIZES).get('transformer-t')!;
+    const box = symbolBoxes(new Map([['transformer-t', at]])).get('transformer-t')!;
+    expect(crosses(left.points, box)).toBe(false);
+    expect(crosses(right.points, box)).toBe(false);
+    expect(box.bottom).toBeLessThanOrEqual(1200);
   });
 });
 
@@ -734,6 +876,67 @@ describe('placeBusLabels', () => {
     for (const { points } of drawn.routes.values()) expect(crosses(points, label.box)).toBe(false);
     // Its middle is what the node is told.
     expect(label.offset).toBe((label.box.left + label.box.right) / 2 - 100);
+  });
+
+  it('keeps the label off the symbol of a transformer that stands under the bar', () => {
+    const symbol: Rect = { left: 131, right: 161, top: 210, bottom: 240 };
+    const alone = placeBusLabels([node], layout({ BUS1: bar() }), NO_SIZES, true).get('BUS1')!;
+    expect(overlaps(alone.box, symbol)).toBe(true);
+    const label = placeBusLabels(
+      [node],
+      layout({ BUS1: bar() }),
+      NO_SIZES,
+      true,
+      new Map(),
+      new Map([['transformer-t', symbol]]),
+    ).get('BUS1')!;
+    expect(overlaps(label.box, symbol)).toBe(false);
+    // Still under its bar, beside the symbol.
+    expect(label.side).toBe('below');
+  });
+
+  it('shows the name alone next to the bar where the name with the values has no place there', () => {
+    // Connectors 50 apart through both strips, along the bar and past its
+    // tips: the label with a voltage in it is 62 wide, the name 44.
+    const drawn = layout({ BUS1: bar() }, fence(-155, 495, 50));
+    const withValues = placeBusLabels([node], drawn, NO_SIZES, true).get('BUS1')!;
+    expect(withValues.compact).toBe(true);
+    expect(withValues.box.right - withValues.box.left).toBe(busLabelWidth('BUS1', false));
+    expect(withValues.box.bottom - withValues.box.top).toBe(18);
+    // Next to the bar: under it, over it or beside a tip.
+    const gapX = Math.max(0, withValues.box.left - 192, 100 - withValues.box.right);
+    const gapY = Math.max(0, withValues.box.top - 206, 200 - withValues.box.bottom);
+    expect(Math.hypot(gapX, gapY)).toBeLessThanOrEqual(16);
+    for (const { points } of drawn.routes.values()) {
+      expect(crosses(points, withValues.box)).toBe(false);
+    }
+    // The name alone is what a diagram without values shows anyway.
+    const plain = placeBusLabels([node], drawn, NO_SIZES, false).get('BUS1')!;
+    expect(plain.compact).toBeUndefined();
+    expect(plain.box).toEqual(withValues.box);
+  });
+
+  it('stays next to the bar: no further past a tip than a label still reads as that of its bus', () => {
+    // Symbols under the bar and over it, from far left of it to 30 past
+    // its east tip, and one beside each tip.
+    const under = device('load-PQ', -300, 210, {}, 522);
+    const over = device('generator-G', -300, 150, {}, 522);
+    const east = device('shunt-E', 198, 183);
+    const west = device('shunt-W', 54, 183);
+    const drawn = layout({ BUS1: bar() });
+    const label = placeBusLabels([node, under, over, east, west], drawn, NO_SIZES, false).get(
+      'BUS1',
+    )!;
+    // The first clear place in the rows by the bar is 30 past the tip:
+    // further than next to the bar. The label goes a row further off
+    // instead of far along the bar, as the last place there is.
+    expect(label.side).toBe('away');
+    const nextToBar = label.box.left <= 100 + 92 + 16 && label.box.right >= 100 - 16;
+    const rowByBar = label.box.top === 210 || label.box.bottom === 196;
+    expect(nextToBar && rowByBar).toBe(false);
+    for (const other of [under, over, east, west]) {
+      expect(overlaps(label.box, boxOnDiagram(other, NO_SIZES, drawn.bars))).toBe(false);
+    }
   });
 
   it('keeps the label of a bus clear of the label placed before it, and of a chain that is drawn out', () => {

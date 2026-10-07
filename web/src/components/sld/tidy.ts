@@ -52,6 +52,12 @@
  *   beside the connector of its device, on one side or the other, or on
  *   the far side of the device, and a route that would run through the last
  *   of those places goes a long way round first (`LAST_PLACE_COST`).
+ * - The route of a transformer has room for its symbol: a place on a
+ *   straight run of it where a square of `TRANSFORMER_SYMBOL_SIZE` is on no
+ *   device, no bar and no other line. The search for a transformer takes
+ *   no way that has none, the place is kept for the symbol from then on,
+ *   and no other route runs through it. The symbols of the transformers
+ *   that stay as they are (`TidyOptions.symbols`) are kept out of as well.
  *
  * The branches are routed one after the other, the shortest first, each
  * around the ones before it (A* over the grid, with the direction of travel
@@ -81,8 +87,10 @@ import {
   SLIDE_CLEARANCE,
   TAP_INSET,
   TAP_SPACING,
+  TRANSFORMER_SYMBOL_SIZE,
   faceSpan,
   layoutConnections,
+  runsIn,
   simplifyRoute,
   type ConnectionEdge,
   type ConnectionNode,
@@ -152,6 +160,19 @@ export const PREFER_FREE_COST = BEND_COST;
 
 /** The gap a route keeps to a controller badge and to a control chain that is drawn out. */
 const BADGE_CLEARANCE = 4;
+
+/**
+ * The room the symbol of a transformer keeps to everything that is not its
+ * own line: a line on the next line of the grid passes it, and nothing
+ * nearer does.
+ */
+const SYMBOL_GAP = 1;
+
+/** How far apart the places are that are tried for the symbol of a transformer, along its route. */
+const SYMBOL_STEP = 2;
+
+/** The side of the squares the boxes and the routes are sorted into, to find what is near a symbol. */
+const SYMBOL_CELL = 64;
 
 /** How far under the origin of a bus node its label reaches, with a voltage and an angle in it. */
 const LABEL_BOTTOM = 48;
@@ -288,6 +309,17 @@ export interface TidyOptions extends ConnectionOptions {
    * large diagram, whose two buses must both stand in it.
    */
   within?: Rect;
+  /**
+   * The branches to route, by edge id, where that is not every branch
+   * that has no route to keep: the others are left out, neither routed nor
+   * in the way.
+   */
+  only?: ReadonlySet<string>;
+  /**
+   * Where the symbols of the transformers among `keep` stand, by edge id.
+   * No route runs through one, and no other symbol is put on it.
+   */
+  symbols?: ReadonlyMap<string, Rect>;
   /** How many steps the search may take; default `TIDY_STEPS`. */
   steps?: number;
   /** The most points the grid may have; default `GRID_POINTS`. */
@@ -307,6 +339,13 @@ export interface TidyResult {
    * to the connection pass.
    */
   unrouted: string[];
+  /**
+   * Where the route of each transformer has room for its symbol, by edge
+   * id: the place that was kept for it while the others were routed. The
+   * diagram places the symbol itself (`placeTransformerSymbols`), there or
+   * nearer the middle of the route.
+   */
+  spots: Map<string, Point>;
   /** How many steps the search took (`TIDY_STEPS`). */
   steps: number;
   /** Set when some branch was not routed because the steps ran out. */
@@ -418,6 +457,12 @@ interface Terminal {
   cost: number;
   /** How far past the tip of the bar the tap stands; 0 for one on the bar. */
   over: number;
+  /**
+   * The grid points the bar comes to take when it is drawn out to a tap
+   * past its tip: the route that lands there runs through none of them
+   * itself.
+   */
+  grows?: number[];
 }
 
 /** A route that was found. */
@@ -428,13 +473,23 @@ interface Found {
   source: Terminal;
   target: Terminal;
   points: Point[];
+  /**
+   * Where the symbol of a transformer stands on it: looked for when the
+   * route is first taken up, and `null` when it has no room for one.
+   */
+  spot?: Point | null;
 }
 
 interface Branch {
   edge: ConnectionEdge;
+  index: number;
   a: Bus;
   b: Bus;
+  /** Whether it is a transformer, whose route needs room for its symbol. */
+  transformer: boolean;
   found: Found | null;
+  /** The grid points kept for its symbol while its route is taken up. */
+  zone: number[];
 }
 
 /** The estimated cost of a state to a sixteenth, which is what two states are told apart by. */
@@ -586,6 +641,36 @@ function runsCross(a: Point, b: Point, p: Point, q: Point): boolean {
   return side(p, q, a) * side(p, q, b) < 0 && side(a, b, p) * side(a, b, q) < 0;
 }
 
+/** Whether the run from `a` to `b` passes through `rect`, and not just along its edge. */
+function runCrosses(a: Point, b: Point, rect: Rect): boolean {
+  let from = 0;
+  let to = 1;
+  const within = (delta: number, near: number, far: number): boolean => {
+    if (Math.abs(delta) < 1e-9) return near < 0 && far > 0;
+    from = Math.max(from, Math.min(near / delta, far / delta));
+    to = Math.min(to, Math.max(near / delta, far / delta));
+    return from < to;
+  };
+  return (
+    within(b[0] - a[0], rect.left + EPS - a[0], rect.right - EPS - a[0]) &&
+    within(b[1] - a[1], rect.top + EPS - a[1], rect.bottom - EPS - a[1])
+  );
+}
+
+/** Whether two boxes share any room. */
+function boxesMeet(a: Rect, b: Rect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** The squares of side `SYMBOL_CELL` that `rect` reaches into. */
+function cellsOf(rect: Rect): number[] {
+  const keys: number[] = [];
+  const [c0, c1] = [Math.floor(rect.left / SYMBOL_CELL), Math.floor(rect.right / SYMBOL_CELL)];
+  const [r0, r1] = [Math.floor(rect.top / SYMBOL_CELL), Math.floor(rect.bottom / SYMBOL_CELL)];
+  for (let c = c0; c <= c1; c += 1) for (let r = r0; r <= r1; r += 1) keys.push(c * 65_536 + r);
+  return keys;
+}
+
 /** `rect` with `by` more room on every side. */
 function grown(rect: Rect, by: number): Rect {
   return {
@@ -667,7 +752,27 @@ export function tidyRoutes(
 ): TidyResult {
   const { nodes, edges } = standingIn(allNodes, allEdges, options);
   const stubs = edges.filter((edge) => edge.type === 'stub');
-  const base = layoutConnections(nodes, stubs, options);
+  // The device connectors, with the routes that stay as they are: an end
+  // of one of those holds its place on the bar, and the tap of a device
+  // that would stand too near it is moved aside, which may draw the bar
+  // out. What is routed here keeps clear of the bars and the connectors as
+  // they are drawn with those.
+  const whereNow = new Map(nodes.map((node) => [node.id, node.position]));
+  const staying: ConnectionEdge[] = [];
+  for (const edge of edges) {
+    const held = edge.type === 'stub' ? undefined : options.keep?.get(edge.id);
+    const [source, target] = [whereNow.get(edge.source), whereNow.get(edge.target)];
+    if (held === undefined || held.length < 2 || !source || !target) continue;
+    staying.push({
+      ...edge,
+      data: {
+        ...edge.data,
+        bendPoints: held.map(([x, y]) => [x, y]),
+        bendAnchors: { source: { ...source }, target: { ...target } },
+      },
+    });
+  }
+  const base = layoutConnections(nodes, [...stubs, ...staying], options);
 
   // ---- the buses, and what stands on the diagram ----
   const buses: Bus[] = [];
@@ -752,9 +857,20 @@ export function tidyRoutes(
       heldRoutes.push({ points: held, ends });
       continue;
     }
-    if (routable.has(edge) && a && b && a !== b) branches.push({ edge, a, b, found: null });
+    if (options.only !== undefined && !options.only.has(edge.id)) continue;
+    if (routable.has(edge) && a && b && a !== b) {
+      branches.push({
+        edge,
+        index: branches.length,
+        a,
+        b,
+        transformer: edge.type === 'transformer',
+        found: null,
+        zone: [],
+      });
+    }
   }
-  const result: TidyResult = { routes: new Map(), unrouted: [], steps: 0 };
+  const result: TidyResult = { routes: new Map(), unrouted: [], spots: new Map(), steps: 0 };
   if (branches.length === 0) return result;
 
   // ---- the grid ----
@@ -1043,6 +1159,126 @@ export function tidyRoutes(
     for (let i = 1; i < points.length; i += 1) wire(points[i - 1]!, points[i]!);
   }
 
+  // ---- room for the symbols of the transformers ----
+  /** Kept for the symbol of this branch (`-1`: of none, `-2`: of a transformer that stays as it is). */
+  const symbolZone = new Int32Array(size).fill(-1);
+  /** The room each symbol takes, its gap counted in: of the transformers that stay, and of the routes taken up. */
+  const heldSymbols: Rect[] = [];
+  const takenSymbols = new Map<Branch, Rect>();
+  for (const box of options.symbols?.values() ?? []) {
+    const room = grown(box, SYMBOL_GAP);
+    heldSymbols.push(room);
+    inside(room, (n) => {
+      symbolZone[n] = -2;
+    });
+  }
+  /** The devices, the badges and the chains by the squares they reach into, and the buses by the squares of their rows. */
+  const boxesBySquare = new Map<number, Rect[]>();
+  for (const { box } of boxes) {
+    for (const key of cellsOf(box)) {
+      const list = boxesBySquare.get(key);
+      if (list) list.push(box);
+      else boxesBySquare.set(key, [box]);
+    }
+  }
+  const busesByBand = new Map<number, Bus[]>();
+  for (const bus of buses) {
+    const band = Math.floor(bus.cy / SYMBOL_CELL);
+    const list = busesByBand.get(band);
+    if (list) list.push(bus);
+    else busesByBand.set(band, [bus]);
+  }
+  /** The runs of the device connectors and of the routes that stay, which a symbol is not put on. */
+  const fixedRuns = runsIn(
+    new Map<string, { points: readonly Point[] }>([
+      ...stubs.map((stub): [string, { points: readonly Point[] }] => [
+        stub.id,
+        { points: base.routes.get(stub.id)?.points ?? [] },
+      ]),
+      ...heldRoutes.map(({ points }, i): [string, { points: readonly Point[] }] => [
+        `held:${i}`,
+        { points },
+      ]),
+    ]),
+  );
+  /** The branches whose route is taken up, by the squares it runs through. */
+  const takenBySquare = new Map<number, Set<Branch>>();
+  const squaresAlong = (points: readonly Point[]): Set<number> => {
+    const keys = new Set<number>();
+    for (let i = 1; i < points.length; i += 1) {
+      const [p, q] = [points[i - 1]!, points[i]!];
+      const run: Rect = {
+        left: Math.min(p[0], q[0]),
+        right: Math.max(p[0], q[0]),
+        top: Math.min(p[1], q[1]),
+        bottom: Math.max(p[1], q[1]),
+      };
+      for (const key of cellsOf(run)) keys.add(key);
+    }
+    return keys;
+  };
+  /** The room the symbol of a transformer takes about `x`, `y`, its gap counted in. */
+  const symbolRoom = (x: number, y: number): Rect => {
+    const half = TRANSFORMER_SYMBOL_SIZE / 2 + SYMBOL_GAP;
+    return { left: x - half, right: x + half, top: y - half, bottom: y + half };
+  };
+  /**
+   * Whether the symbol of the transformer `self` has room about `x`, `y`,
+   * a point of its route: on no device, badge or chain, on no bar (its own
+   * two included), on no device connector, on no other route as they are
+   * drawn now, and on no other symbol.
+   */
+  const roomAt = (x: number, y: number, self: Branch): boolean => {
+    const room = symbolRoom(x, y);
+    for (const held of heldSymbols) if (boxesMeet(held, room)) return false;
+    for (const [owner, taken] of takenSymbols) {
+      if (owner !== self && boxesMeet(taken, room)) return false;
+    }
+    const keys = cellsOf(room);
+    for (const key of keys) {
+      for (const box of boxesBySquare.get(key) ?? []) if (boxesMeet(box, room)) return false;
+    }
+    const half = BAR_THICKNESS / 2;
+    const lastBand = Math.floor((room.bottom + half) / SYMBOL_CELL);
+    for (let band = Math.floor((room.top - half) / SYMBOL_CELL); band <= lastBand; band += 1) {
+      for (const bus of busesByBand.get(band) ?? []) {
+        const bar = { left: bus.start, right: bus.end, top: bus.cy - half, bottom: bus.cy + half };
+        if (boxesMeet(bar, room)) return false;
+      }
+    }
+    if (fixedRuns(room).length > 0) return false;
+    for (const key of keys) {
+      for (const other of takenBySquare.get(key) ?? []) {
+        if (other === self) continue;
+        const points = other.found!.points;
+        for (let i = 1; i < points.length; i += 1) {
+          if (runCrosses(points[i - 1]!, points[i]!, room)) return false;
+        }
+      }
+    }
+    return true;
+  };
+  /** Whether a grid point is kept for the symbol of another transformer than `self`. */
+  const forAnother = (n: number, self: Branch): boolean =>
+    symbolZone[n] !== -1 && symbolZone[n] !== self.index;
+  /**
+   * Whether the run between two grid points next to each other passes
+   * through the room of a symbol that is not `self`'s. The grid points
+   * inside that room are shut already; this is for a grid whose lines are
+   * further apart than a symbol is wide.
+   */
+  const throughSymbol = (from: number, to: number, self: Branch): boolean => {
+    if (heldSymbols.length === 0 && takenSymbols.size === 0) return false;
+    const p: Point = [xs[from % nC]!, ys[(from / nC) | 0]!];
+    const q: Point = [xs[to % nC]!, ys[(to / nC) | 0]!];
+    if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) <= GRID_STEP + EPS) return false;
+    for (const held of heldSymbols) if (runCrosses(p, q, held)) return true;
+    for (const [owner, taken] of takenSymbols) {
+      if (owner !== self && runCrosses(p, q, taken)) return true;
+    }
+    return false;
+  };
+
   // ---- what the routes made so far take up ----
   /** How many routes run along the row through a point, along the column, and turn on it. */
   const occH = new Uint16Array(size);
@@ -1089,12 +1325,21 @@ export function tidyRoutes(
         ? { ...barRect(bus), left: bus.end, right: x + TAP_INSET + SLIDE_CLEARANCE }
         : { ...barRect(bus), left: x - TAP_INSET - SLIDE_CLEARANCE, right: bus.start };
     const taken: number[] = [];
-    let clear = true;
+    // No device connector and no route that stays runs where the bar would
+    // come to be, or right beside it.
+    const body: Rect = {
+      left: rect.left,
+      right: rect.right,
+      top: bus.cy - BAR_THICKNESS / 2 - SLIDE_CLEARANCE,
+      bottom: bus.cy + BAR_THICKNESS / 2 + SLIDE_CLEARANCE,
+    };
+    let clear = fixedRuns(body).length === 0;
     inside(rect, (n) => {
       if (barZone[n] === bus.index) return;
       const free =
         hard[n] === 0 &&
         barZone[n] === -1 &&
+        symbolZone[n] === -1 &&
         (labelZone[n] === -1 || labelZone[n] === bus.index) &&
         wireNode[n] === 0 &&
         untouched(n);
@@ -1104,8 +1349,8 @@ export function tidyRoutes(
     return clear ? taken : null;
   };
 
-  /** The ways a route can leave `bus`. */
-  const terminalsOf = (bus: Bus): Terminal[] => {
+  /** The ways the route of `self` can leave `bus`. */
+  const terminalsOf = (bus: Bus, self: Branch): Terminal[] => {
     const out: Terminal[] = [];
     const westFree = !bus.endDevice.west;
     const eastFree = !bus.endDevice.east;
@@ -1131,6 +1376,7 @@ export function tidyRoutes(
             hard[n] === 0 &&
             own(barZone) &&
             own(labelZone) &&
+            !forAnother(n, self) &&
             wireNode[n] === 0 &&
             wireBesideV[n] === 0 &&
             occV[n] === 0 &&
@@ -1140,7 +1386,9 @@ export function tidyRoutes(
         }
         const node = row * nC + c;
         if (!clear || barZone[node] !== -1 || !besideClearV(c, row)) continue;
-        if (avoided === Infinity || (over > 0 && growth(bus, x) === null)) continue;
+        if (throughSymbol(bus.row * nC + c, node, self)) continue;
+        const grows = over > 0 ? growth(bus, x) : [];
+        if (avoided === Infinity || grows === null) continue;
         out.push({
           node,
           dir: V,
@@ -1153,6 +1401,7 @@ export function tidyRoutes(
             CROSS_COST * occH[node]! +
             avoided,
           over,
+          ...(grows.length > 0 ? { grows } : {}),
         });
       }
     }
@@ -1162,10 +1411,21 @@ export function tidyRoutes(
   // ---- the search ----
   /** The step from one grid point to the next away from a bar, by the face a route leaves it by. */
   const AHEAD: Record<'north' | 'south', number> = { north: -nC, south: nC };
-  const best = new Float64Array(2 * size);
-  const seen = new Uint32Array(2 * size);
+  /**
+   * A state is a grid point and the direction it was reached in, and for a
+   * transformer also whether the way so far has room for its symbol: the
+   * states that have are a second layer over the ones that have not, which
+   * is there only when a transformer is routed.
+   */
+  const LAYER = 2 * size;
+  const layers = branches.some((branch) => branch.transformer) ? 2 : 1;
+  const best = new Float64Array(layers * LAYER);
+  const seen = new Uint32Array(layers * LAYER);
   /** The state a state was reached from; `-1 - i` for the `i`th way out of the source. */
-  const cameFrom = new Int32Array(2 * size);
+  const cameFrom = new Int32Array(layers * LAYER);
+  /** The grid point of a state. */
+  const nodeOf = (state: number): number => (state >= LAYER ? state - LAYER : state) >> 1;
+
   const frontier = new Frontier();
   let search = 0;
   /**
@@ -1198,8 +1458,14 @@ export function tidyRoutes(
     return simplifyRoute(points);
   };
 
-  /** The route from `a` to `b` that costs least around everything that is there now. */
-  const routeBetween = (a: Bus, b: Bus, window: number | null): Found | null => {
+  /**
+   * The route of `self` that costs least around everything that is there
+   * now. With `roomy`, the one that costs least of those that have room
+   * for the symbol of a transformer: a straight stretch through a place
+   * where the symbol is on nothing (`roomAt`).
+   */
+  const routeBetween = (self: Branch, window: number | null, roomy: boolean): Found | null => {
+    const { a, b } = self;
     const own = (zone: Int32Array, n: number): boolean =>
       zone[n] === -1 || zone[n] === a.index || zone[n] === b.index;
     const least: { route: Found | null } = { route: null };
@@ -1224,6 +1490,16 @@ export function tidyRoutes(
       for (let c = colFrom(Math.max(a.lo, b.lo) - EPS); c <= c1; c += 1) {
         const x = xs[c]!;
         if (!tapFree(upper, x) || !tapFree(lower, x)) continue;
+        if (roomy) {
+          // Somewhere between the two bars, the symbol on the run and clear of both.
+          const middle = (upper.cy + lower.cy) / 2;
+          const reach = (lower.cy - upper.cy) / 2;
+          let room = false;
+          for (let off = 0; off < reach && !room; off += SYMBOL_STEP) {
+            room = roomAt(x, middle + off, self) || (off > 0 && roomAt(x, middle - off, self));
+          }
+          if (!room) continue;
+        }
         const path: number[] = [];
         let cost =
           (lower.cy - upper.cy) * cols.cost[c]! +
@@ -1235,6 +1511,7 @@ export function tidyRoutes(
             hard[n] === 0 &&
             own(barZone, n) &&
             own(labelZone, n) &&
+            !forAnother(n, self) &&
             wireNode[n] === 0 &&
             wireBesideV[n] === 0 &&
             occV[n] === 0 &&
@@ -1244,6 +1521,7 @@ export function tidyRoutes(
           path.push(n);
         }
         if (!clear || cost === Infinity) continue;
+        if (throughSymbol(upper.row * nC + c, lower.row * nC + c, self)) continue;
         const down = upper === a;
         if (!down) path.reverse();
         const source = direct(down ? 'south' : 'north', [x, a.cy]);
@@ -1260,15 +1538,15 @@ export function tidyRoutes(
       (from: Bus, to: Bus) =>
       (terminal: Terminal): boolean =>
         !level || terminal.over === 0 || terminal.tap[0] < from.cx !== to.cx < from.cx;
-    const sources = terminalsOf(a).filter(notTowards(a, b));
-    const targets = terminalsOf(b).filter(notTowards(b, a));
+    const sources = terminalsOf(a, self).filter(notTowards(a, b));
+    const targets = terminalsOf(b, self).filter(notTowards(b, a));
     if (sources.length === 0 || targets.length === 0) {
       ranOut = false;
       noWay = least.route === null;
       return least.route;
     }
     const passable = (n: number): boolean =>
-      hard[n] === 0 && barZone[n] === -1 && own(labelZone, n);
+      hard[n] === 0 && barZone[n] === -1 && own(labelZone, n) && !forAnother(n, self);
     // A label a route may pass is that of one of its own two buses, and it
     // passes it straight down, on its way out of the south face.
     const onLabel = (n: number): boolean => labelZone[n] !== -1;
@@ -1338,7 +1616,7 @@ export function tidyRoutes(
       }
     }
     const aheadOf = (state: number): number => {
-      const n = state >> 1;
+      const n = nodeOf(state);
       const along = state & 1;
       const c = n % nC;
       const r = (n / nC) | 0;
@@ -1355,6 +1633,38 @@ export function tidyRoutes(
 
     search += 1;
     frontier.clear();
+    /**
+     * Whether the way that goes on from `state` to the grid point `to`, in
+     * the direction `md`, has room for the symbol on the stretch it ends
+     * with: straight for the length of the symbol at the least, with the
+     * symbol on nothing in the middle of that (`roomAt`).
+     */
+    const roomBehind = (state: number, to: number, md: number): boolean => {
+      const [x, y] = [xs[to % nC]!, ys[(to / nC) | 0]!];
+      const n = nodeOf(state);
+      const [fromX, fromY] = [xs[n % nC]!, ys[(n / nC) | 0]!];
+      // How long the run is that ends at `to`.
+      let run = Math.abs(x - fromX) + Math.abs(y - fromY);
+      for (let at = state; run < TRANSFORMER_SYMBOL_SIZE && (at & 1) === md; ) {
+        const from = cameFrom[at]!;
+        const here = nodeOf(at);
+        if (from < 0) {
+          // Out of the bar: the run began on its tap.
+          run += Math.abs(ys[(here / nC) | 0]! - sources[-1 - from]!.tap[1]);
+          break;
+        }
+        const back = nodeOf(from);
+        run +=
+          Math.abs(xs[here % nC]! - xs[back % nC]!) +
+          Math.abs(ys[(here / nC) | 0]! - ys[(back / nC) | 0]!);
+        at = from;
+      }
+      if (run < TRANSFORMER_SYMBOL_SIZE) return false;
+      const half = TRANSFORMER_SYMBOL_SIZE / 2;
+      return md === H
+        ? roomAt(x - Math.sign(x - fromX) * half, y, self)
+        : roomAt(x, y - Math.sign(y - fromY) * half, self);
+    };
     const reachState = (state: number, cost: number, from: number): void => {
       if (seen[state] === search && best[state]! <= cost) return;
       seen[state] = search;
@@ -1374,7 +1684,7 @@ export function tidyRoutes(
         const from = cameFrom[at]!;
         // The run out of the bar is long enough by itself.
         if (from < 0) return false;
-        const [n, m] = [at >> 1, from >> 1];
+        const [n, m] = [nodeOf(at), nodeOf(from)];
         run +=
           d === H
             ? Math.abs(xs[n % nC]! - xs[m % nC]!)
@@ -1383,6 +1693,45 @@ export function tidyRoutes(
         at = from;
       }
       return false;
+    };
+    /**
+     * Whether the way that ends at `state` and lands by `target` runs where
+     * one of its own two bars comes to be: a bar is drawn out to a tap past
+     * its tip, and the route to that tap went round the tip before.
+     */
+    const underOwnBar = (state: number, target: Terminal): boolean => {
+      let at = state;
+      while (cameFrom[at]! >= 0) at = cameFrom[at]!;
+      const source = sources[-1 - cameFrom[at]!]!;
+      if (source.grows === undefined && target.grows === undefined) return false;
+      const taken = new Set([...(source.grows ?? []), ...(target.grows ?? [])]);
+      for (at = state; at >= 0; at = cameFrom[at]!) if (taken.has(nodeOf(at))) return true;
+      return false;
+    };
+    /**
+     * Whether the way that ends at `state` and lands by `target` has room
+     * for the symbol, with its own two bars as long as they come to be
+     * with the taps it lands on: a bar that is drawn out past its tip may
+     * come to lie under the very stretch the symbol had its room on.
+     */
+    const roomOnWay = (state: number, target: Terminal): boolean => {
+      const path: number[] = [];
+      let at = state;
+      for (; at >= 0; at = cameFrom[at]!) path.push(nodeOf(at));
+      path.reverse();
+      const source = sources[-1 - at]!;
+      const drawnOut = (bus: Bus, tap: Point): Rect => ({
+        left: Math.min(bus.start, tap[0] - TAP_INSET),
+        right: Math.max(bus.end, tap[0] + TAP_INSET),
+        top: bus.cy - BAR_THICKNESS / 2,
+        bottom: bus.cy + BAR_THICKNESS / 2,
+      });
+      return (
+        spotOn(pointsOf(source, path, target), self, [
+          drawnOut(a, source.tap),
+          drawnOut(b, target.tap),
+        ]) !== null
+      );
     };
     let goal: { cost: number; state: number; target: Terminal } | null = null;
     let stopAt = steps + allowed;
@@ -1408,24 +1757,29 @@ export function tidyRoutes(
       // Reached again since, by a way that costs less: that one is taken up.
       if (frontier.cost > best[state]!) continue;
       steps += 1;
-      const n = state >> 1;
+      const roomed = state >= LAYER;
+      const n = nodeOf(state);
       const d = state & 1;
       const cost = best[state]!;
+      const from = cameFrom[state]!;
       for (const target of targetsAt.get(n) ?? []) {
         const turns = target.dir !== d;
         if (turns && (!mayBend(n) || kinks(state))) continue;
         // Not from the side of the bar: the route would turn back on itself
         // to land.
-        if (!turns && cameFrom[state]! >> 1 === n - AHEAD[target.side]) continue;
+        if (!turns && from >= 0 && nodeOf(from) === n - AHEAD[target.side]) continue;
         const total = cost + target.cost + (turns ? BEND_COST : 0);
-        if (goal === null || total < goal.cost) goal = { cost: total, state, target };
+        if (goal !== null && total >= goal.cost) continue;
+        if (underOwnBar(state, target)) continue;
+        // A transformer lands only by a way that has room for its symbol.
+        if (roomy && !roomOnWay(state, target)) continue;
+        goal = { cost: total, state, target };
       }
       const c = n % nC;
       const r = (n / nC) | 0;
       // Where it came from: a route does not turn back on itself, nor back
       // into the bar it has just left.
-      const from = cameFrom[state]!;
-      const back = from >= 0 ? from >> 1 : n - AHEAD[sources[-1 - from]!.side];
+      const back = from >= 0 ? nodeOf(from) : n - AHEAD[sources[-1 - from]!.side];
       for (let k = 0; k < 4; k += 1) {
         const md = k < 2 ? H : V;
         const sign = k % 2 === 0 ? -1 : 1;
@@ -1433,7 +1787,7 @@ export function tidyRoutes(
         const r2 = md === V ? r + sign : r;
         if (c2 < wc0 || c2 > wc1 || r2 < wr0 || r2 > wr1) continue;
         const n2 = r2 * nC + c2;
-        if (n2 === back || !passable(n2)) continue;
+        if (n2 === back || !passable(n2) || throughSymbol(n, n2, self)) continue;
         const edge = sign > 0 ? n : n2;
         let step: number;
         if (md === H) {
@@ -1463,7 +1817,13 @@ export function tidyRoutes(
           step += BEND_COST;
         }
         step += into(n, n2);
-        if (step !== Infinity) reachState(2 * n2 + md, cost + step, state);
+        if (step === Infinity) continue;
+        // A way that has room for the symbol on a stretch behind it keeps
+        // it: such a state is another than the one that has none yet, so
+        // that a way round to where there is room is not given up for a
+        // shorter one that has none.
+        const room = roomy && (roomed || roomBehind(state, n2, md));
+        reachState(2 * n2 + md + (room ? LAYER : 0), cost + step, state);
       }
     }
     noWay = goal === null && least.route === null && !ranOut;
@@ -1471,7 +1831,7 @@ export function tidyRoutes(
       const path: number[] = [];
       let state = goal.state;
       while (state >= 0) {
-        path.push(state >> 1);
+        path.push(nodeOf(state));
         state = cameFrom[state]!;
       }
       path.reverse();
@@ -1532,16 +1892,93 @@ export function tidyRoutes(
       bus.grownOver.push(n);
     });
   };
+  /**
+   * Where on `points`, the route of the transformer `self`, its symbol
+   * stands: the place nearest the middle where it has room (`roomAt`) on a
+   * straight stretch, half its length from the nearest bend at the least,
+   * and off the places kept for the values of the devices and the labels
+   * of the buses where there is such a place. `ownBars` is its own two bars
+   * as long as they come to be with the taps of this route, which the
+   * symbol keeps off as well. `null` when the route has no such place.
+   */
+  const spotOn = (
+    points: readonly Point[],
+    self: Branch,
+    ownBars: readonly Rect[] = [],
+  ): Point | null => {
+    const runs: { a: Point; b: Point; from: number; length: number }[] = [];
+    let total = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const [p, q] = [points[i - 1]!, points[i]!];
+      const length = Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]);
+      if (length > 0) runs.push({ a: p, b: q, from: total, length });
+      total += length;
+    }
+    const half = TRANSFORMER_SYMBOL_SIZE / 2;
+    /** The best place so far: one off the places that are kept is better. */
+    let best: { at: Point; kept: boolean } | null = null;
+    const weigh = (along: number): boolean => {
+      const run = runs.find((r) => along <= r.from + r.length) ?? runs[runs.length - 1];
+      if (run === undefined) return false;
+      const onBend =
+        (run !== runs[0] && along - run.from < half) ||
+        (run !== runs[runs.length - 1] && run.from + run.length - along < half);
+      if (onBend) return false;
+      const t = (along - run.from) / run.length;
+      const at: Point = [
+        run.a[0] + t * (run.b[0] - run.a[0]),
+        run.a[1] + t * (run.b[1] - run.a[1]),
+      ];
+      if (!roomAt(at[0], at[1], self)) return false;
+      const room = symbolRoom(at[0], at[1]);
+      if (ownBars.some((bar) => boxesMeet(bar, room))) return false;
+      let onKept = false;
+      inside(room, (n) => {
+        if (kept[n] !== 0) onKept = true;
+      });
+      if (best === null || (best.kept && !onKept)) best = { at, kept: onKept };
+      return !onKept;
+    };
+    for (let off = 0; off <= total / 2; off += SYMBOL_STEP) {
+      if (weigh(total / 2 + off) || (off > 0 && weigh(total / 2 - off))) break;
+    }
+    return (best as { at: Point } | null)?.at ?? null;
+  };
+  /** Keep the place of the symbol of a transformer whose route is taken up, and let go of it again. */
+  const reserve = (branch: Branch, route: Found): void => {
+    if (route.spot === undefined) route.spot = spotOn(route.points, branch);
+    if (route.spot === null) return;
+    const room = symbolRoom(route.spot[0], route.spot[1]);
+    takenSymbols.set(branch, room);
+    inside(room, (n) => {
+      if (symbolZone[n] !== -1) return;
+      symbolZone[n] = branch.index;
+      branch.zone.push(n);
+    });
+  };
+  const release = (branch: Branch): void => {
+    for (const n of branch.zone) symbolZone[n] = -1;
+    branch.zone = [];
+    takenSymbols.delete(branch);
+  };
   const take = (branch: Branch, route: Found): void => {
     // The taps first: a bar is drawn out over grid points that are still free.
     land(branch.a, route.source.side, route.source.tap[0], true);
     land(branch.b, route.target.side, route.target.tap[0], true);
     mark(route, 1);
     branch.found = route;
+    for (const key of squaresAlong(route.points)) {
+      const set = takenBySquare.get(key);
+      if (set) set.add(branch);
+      else takenBySquare.set(key, new Set([branch]));
+    }
+    if (branch.transformer) reserve(branch, route);
   };
   const drop = (branch: Branch): Found | null => {
     const route = branch.found;
     if (route === null) return null;
+    if (branch.transformer) release(branch);
+    for (const key of squaresAlong(route.points)) takenBySquare.get(key)?.delete(branch);
     mark(route, -1);
     land(branch.a, route.source.side, route.source.tap[0], false);
     land(branch.b, route.target.side, route.target.tap[0], false);
@@ -1594,8 +2031,14 @@ export function tidyRoutes(
    * a wider look takes more).
    */
   const routeOf = (branch: Branch): Found | null => {
-    const near = routeBetween(branch.a, branch.b, SEARCH_WINDOW);
-    return near !== null || !noWay ? near : routeBetween(branch.a, branch.b, null);
+    // A transformer by a way that has room for its symbol; with no such
+    // way, by any way there is, which is still better than none.
+    for (const roomy of branch.transformer ? [true, false] : [false]) {
+      const near = routeBetween(branch, SEARCH_WINDOW, roomy);
+      const found = near !== null || !noWay ? near : routeBetween(branch, null, roomy);
+      if (found !== null || !noWay) return found;
+    }
+    return null;
   };
 
   // The shortest first: a line between two buses side by side has one good
@@ -1628,7 +2071,10 @@ export function tidyRoutes(
   // out of steps here may have found a way no better than the one the branch
   // had, so that one stays.
   anyWay = false;
-  for (let pass = 0; pass < REFINE_PASSES; pass += 1) {
+  // One branch alone has nothing to give way to: routed again it would take
+  // the way it has, unless its search ran out of steps.
+  const refine = order.length > 1 || ranOut;
+  for (let pass = 0; refine && pass < REFINE_PASSES; pass += 1) {
     for (let i = 0; i < order.length && steps < budget; i += 1) {
       const branch = order[i]!;
       allowed = Math.max(SEARCH_STEPS, (budget - steps) / (order.length - i));
@@ -1651,8 +2097,10 @@ export function tidyRoutes(
     if (branch.found !== null || steps >= lastChance) continue;
     allowed = Math.min(SEARCH_STEPS, lastChance - steps);
     hurryFor = Math.min(LAST_CHANCE_STEPS, lastChance - steps);
-    const route =
-      routeBetween(branch.a, branch.b, SEARCH_WINDOW) ?? routeBetween(branch.a, branch.b, null);
+    let route: Found | null = null;
+    for (const roomy of branch.transformer ? [true, false] : [false]) {
+      route ??= routeBetween(branch, SEARCH_WINDOW, roomy) ?? routeBetween(branch, null, roomy);
+    }
     if (route !== null) take(branch, route);
   }
   anyWay = false;
@@ -1807,7 +2255,11 @@ export function tidyRoutes(
 
   for (const branch of branches) {
     if (branch.found === null) result.unrouted.push(branch.edge.id);
-    else result.routes.set(branch.edge.id, branch.found.points);
+    else {
+      result.routes.set(branch.edge.id, branch.found.points);
+      const spot = branch.found.spot;
+      if (spot !== undefined && spot !== null) result.spots.set(branch.edge.id, spot);
+    }
   }
   result.steps = steps;
   return result;

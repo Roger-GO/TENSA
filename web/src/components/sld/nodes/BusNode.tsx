@@ -84,10 +84,12 @@ export interface SldNodeData extends Record<string, unknown> {
    * over it, with the x of its middle as an offset from the origin of the
    * node, beside the east or the west tip of the bar, level with it, or
    * `away` from the bar, with `top` the offset of its top edge as well.
-   * Absent: under the bar, clear of the connectors that land there. Stamped
-   * by `SldCanvas`.
+   * `compact` where it has room next to its bar for the name alone: the
+   * voltage and the angle of a power flow are left off it, and are in its
+   * tooltip. Absent: under the bar, clear of the connectors that land there.
+   * Stamped by `SldCanvas`.
    */
-  labelAt?: { offset: number; side: BusLabelSide; top?: number };
+  labelAt?: { offset: number; side: BusLabelSide; top?: number; compact?: boolean };
   /**
    * Generator / load / shunt nodes: the face the connector to the bus
    * leaves by. The P / Q readout moves aside when it hangs off that face.
@@ -229,6 +231,12 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
     side: 'below' as const,
   };
   const labelShift = labelAt.offset - BAR_LENGTH / 2;
+  // Where the label has room for the name alone, the values a power flow
+  // gave are left off it and said in its tooltip.
+  const compact = labelAt.compact === true;
+  const leftOff = compact
+    ? [pflowOverlay.voltage_label, pflowOverlay.angle_label].filter((text) => text !== null)
+    : [];
   // `effectiveColorClass` (border-success/...) is retained on the node so
   // existing band-colour assertions keep working AND assistive tooling can
   // read the band off the wrapper; it's visually inert (no border drawn).
@@ -310,7 +318,8 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
       <div
         data-testid={`bus-label-${d.idx}`}
         data-label-side={labelAt.side === 'below' ? undefined : labelAt.side}
-        title={`${d.name || d.idx}: voltage limits ${formatVoltageLimits(d.voltageLimits ?? DEFAULT_VOLTAGE_LIMITS)}`}
+        data-label-compact={compact ? 'true' : undefined}
+        title={`${d.name || d.idx}: ${leftOff.length > 0 ? `${leftOff.join(', ')}; ` : ''}voltage limits ${formatVoltageLimits(d.voltageLimits ?? DEFAULT_VOLTAGE_LIMITS)}`}
         className={cn(
           'bg-background/70 flex flex-col gap-0 rounded px-1 leading-tight whitespace-nowrap',
           labelAt.side === 'below'
@@ -347,7 +356,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
             data-testid={`bus-limit-marker-${d.idx}`}
           />
         </span>
-        {pflowOverlay.voltage_label !== null ? (
+        {pflowOverlay.voltage_label !== null && !compact ? (
           <span
             data-testid={`bus-voltage-${d.idx}`}
             className="text-foreground font-mono text-[10px] leading-tight"
@@ -355,7 +364,7 @@ export const BusNode = memo(function BusNode({ data, selected }: NodeProps) {
             {pflowOverlay.voltage_label}
           </span>
         ) : null}
-        {pflowOverlay.angle_label !== null ? (
+        {pflowOverlay.angle_label !== null && !compact ? (
           <span
             data-testid={`bus-angle-${d.idx}`}
             className="text-muted-foreground font-mono text-[9px] leading-tight"
