@@ -268,6 +268,8 @@ export interface SldContextMenuBodyProps {
   /** How many routes of the diagram are drawn by hand, and the way to reset them all. */
   manualRoutes?: number;
   onResetManualRoutes?: () => void;
+  /** Open the figure of the diagram, to save it as SVG, PDF or PNG. */
+  onFigure?: () => void;
 }
 
 /**
@@ -337,6 +339,7 @@ export function SldContextMenuBody({
   onResetRoute,
   manualRoutes = 0,
   onResetManualRoutes,
+  onFigure,
 }: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
@@ -587,6 +590,10 @@ export function SldContextMenuBody({
               onSelect={() => useSnapshotStore.getState().openSaveDialog()}
             >
               Save snapshot…
+            </ContextMenuItem>
+            <ContextMenuItem data-testid="sld-context-figure" onSelect={() => onFigure?.()}>
+              <span>Figure…</span>
+              <span className="text-muted-foreground ml-auto pl-3 text-xs">SVG, PDF or PNG</span>
             </ContextMenuItem>
           </>
         ) : null}

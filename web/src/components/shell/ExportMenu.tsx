@@ -7,7 +7,8 @@
  * Both the menu and the ⌘K palette read the same registry.
  *
  * Export bundle and Save snapshot open their dialogs; Export HTML report
- * saves a file straight away (`lib/saveHtmlReport.ts`). Reports, which opens
+ * saves a file straight away (`lib/saveHtmlReport.ts`); Figure of the diagram
+ * opens the figure dialog of the canvas (`SldFigureDialog`). Reports, which opens
  * the dialog with ANDES's plain-text reports, is a Workspace command and is
  * listed here as well, under the HTML report: a report is something to take
  * out of the app, and this is the menu a first-time user opens to find one.
@@ -24,6 +25,7 @@ const TESTID_BY_ID: Record<string, string> = {
   'export.bundle': 'topbar-menu-export-bundle',
   'export.snapshot': 'topbar-menu-export-snapshot',
   'export.html-report': 'topbar-menu-export-html-report',
+  'export.figure': 'topbar-menu-export-figure',
   'workspace.report': 'topbar-menu-export-reports',
 };
 

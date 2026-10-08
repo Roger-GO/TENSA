@@ -36,6 +36,7 @@ import { useSessionStore } from '@/store/session';
 import { useConnectivityStore } from '@/store/connectivity';
 import { usePflowStore } from '@/store/pflow';
 import { useUiStore } from '@/store/ui';
+import { useUnitsStore } from '@/store/units';
 import {
   useSldStore,
   __requestOpenSldSearch,
@@ -47,6 +48,8 @@ import type { SldCommand } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from '@/lib/toast';
+import { lazyNamed } from '@/lib/lazyNamed';
+import { LazyMount } from '@/components/ui/Lazy';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SldNodeSearch } from './SldNodeSearch';
 import { SldContextMenuBody } from './SldContextMenu';
@@ -92,8 +95,14 @@ import { routeChecker } from './routeCheck';
 import { ROUTE_FOCUS_ATTR, routeEndsOf } from './routeEdit';
 import { SldRouteEditor } from './SldRouteEditor';
 import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
-import { flowLabelWidth, readoutWidth } from './labels';
-import { getDeviceOverlayState, getLineOverlayState } from './overlay';
+import { valueLabelWidths } from './valueWidths';
+import type { FigureSource } from './figure/drawFigure';
+import {
+  figureSettingsEntries,
+  figureSettingsOf,
+  normalizeFigureSettings,
+  type FigureSettings,
+} from './figure/figureSettings';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -140,6 +149,10 @@ import {
 } from './connections';
 import { FULL_ZOOM, fitPadding, isTooSmallToRead, locateZoom, withinPane } from './zoom';
 import { cn } from '@/lib/cn';
+
+// The figure of the diagram is fetched when it is first asked for: its
+// writers (SVG, PDF, PNG) are of no use to someone who never makes one.
+const SldFigureDialog = lazyNamed(() => import('./SldFigureDialog'), 'SldFigureDialog', 'overlay');
 
 const NODE_TYPES: NodeTypes = {
   bus: BusNode,
@@ -723,6 +736,17 @@ function SldCanvasInner({
   const chosenConnectorStyle = useCaseStore((s) => s.connectorStyle);
   const connectorStyle: ConnectorStyle =
     chosenConnectorStyle ?? connectorStyleOf(savedLayout) ?? DEFAULT_CONNECTOR_STYLE;
+  // What a figure of the diagram is drawn with, the same way: what was
+  // chosen in this visit, over what the saved layout says, over the defaults.
+  const chosenFigureSettings = useCaseStore((s) => s.figureSettings);
+  const figureSettings = useMemo(
+    () =>
+      normalizeFigureSettings({
+        ...figureSettingsOf(savedLayout),
+        ...(chosenFigureSettings ?? {}),
+      }),
+    [savedLayout, chosenFigureSettings],
+  );
 
   // The nodes under the pointer in a drag, from the press to the drop, and
   // whether a drag is moving nodes right now: React Flow reports the press
@@ -747,25 +771,13 @@ function SldCanvasInner({
   // flow gave: a label is looked for a place as large as it is drawn, not as
   // large as the longest value there could be.
   const pflowResult = usePflowStore((s) => s.lastRun);
-  const labelWidths = useMemo(() => {
-    if (!valuesShown || baseGraph === null) return undefined;
-    const readouts = new Map<string, number>();
-    for (const n of baseGraph.nodes) {
-      if (n.type !== 'generator' && n.type !== 'load') continue;
-      const data = n.data as { idx?: string; pflowIdx?: string | null };
-      const key = data.pflowIdx === undefined ? (data.idx ?? null) : data.pflowIdx;
-      const { p_label, q_label } = getDeviceOverlayState(n.type, key, pflowResult);
-      readouts.set(n.id, readoutWidth(p_label, q_label));
-    }
-    const flows = new Map<string, number>();
-    for (const e of baseGraph.edges) {
-      const data = e.data as { idx?: string; bucket?: string } | undefined;
-      if (data?.bucket !== 'line' || data.idx === undefined) continue;
-      const { p_label, loading_label } = getLineOverlayState(data.idx, pflowResult);
-      flows.set(e.id, flowLabelWidth(p_label, loading_label));
-    }
-    return { readouts, flows };
-  }, [baseGraph, pflowResult, valuesShown]);
+  const labelWidths = useMemo(
+    () =>
+      !valuesShown || baseGraph === null
+        ? undefined
+        : valueLabelWidths(baseGraph.nodes, baseGraph.edges as ConnectionEdge[], pflowResult),
+    [baseGraph, pflowResult, valuesShown],
+  );
   // The routes the picture made in the moves of the drag in hand, by edge
   // id. The next move is drawn from them: on a large diagram a route follows
   // its bus from one move to the next (`routing.ts`), and a search that
@@ -1063,6 +1075,7 @@ function SldCanvasInner({
     if (!baseGraph || !coordsAreCurrent) return;
     const layout = captureLayout(baseGraph, topology, savedLayout, {
       connectorStyle: chosenConnectorStyle,
+      figure: chosenFigureSettings,
     });
     setDiagramLayout(layout);
     if (!persistRequestedRef.current) return;
@@ -1078,6 +1091,7 @@ function SldCanvasInner({
     topology,
     savedLayout,
     chosenConnectorStyle,
+    chosenFigureSettings,
     primaryPath,
     putSidecar,
     setDiagramLayout,
@@ -1710,12 +1724,14 @@ function SldCanvasInner({
       reported();
       return;
     }
-    // The connector style is a figure setting too; one chosen in this visit
-    // may not have reached the file yet.
+    // The connector style is a figure setting too, and so are the choices a
+    // figure is drawn with; one chosen in this visit may not have reached
+    // the file yet.
     const chosen = useCaseStore.getState().connectorStyle;
     const figure = {
       ...(previousSaved.figure ?? {}),
       ...(chosen !== null ? { [CONNECTOR_STYLE_SETTING]: chosen } : {}),
+      ...figureSettingsEntries(useCaseStore.getState().figureSettings ?? {}),
     };
     putSidecar(buildSidecarLayout({}, { sections: { figure } }), {
       onSuccess: reported,
@@ -2361,6 +2377,50 @@ function SldCanvasInner({
     [connectorStyle, setConnectorStyle],
   );
 
+  // ---- The figure of the diagram --------------------------------------------
+  //
+  // A drawing of the diagram as it stands, in the style of a figure for a
+  // paper, saved as SVG, PDF or PNG (`SldFigureDialog`). It is made from what
+  // the picture is made from: the nodes where they are and the edges with the
+  // routes kept for them. While the dialog is closed nothing is put together
+  // for it.
+  const [figureOpen, setFigureOpen] = useState(false);
+  const openFigure = useCallback(() => setFigureOpen(true), []);
+  const unitMode = useUnitsStore((s) => s.mode);
+  // The way to it over the diagram is the export menu there, which also saves
+  // a PNG of the pane as it is shown. The row has no room for a button of its
+  // own: with the note of a tidy in it, it is full in a window 1280 px wide.
+  const figureAction = useMemo(
+    () => [{ id: 'figure', label: 'Figure for a paper (SVG, PDF, PNG)…', onSelect: openFigure }],
+    [openFigure],
+  );
+  const figureSource = useMemo<FigureSource | null>(
+    () =>
+      figureOpen
+        ? {
+            nodes,
+            edges: edges as ConnectionEdge[],
+            sizes,
+            connectorStyle,
+            barLengths,
+            pflow: pflowResult,
+            unitMode,
+          }
+        : null,
+    [figureOpen, nodes, edges, sizes, connectorStyle, barLengths, pflowResult, unitMode],
+  );
+  // The choices are settings of the diagram and are kept like the connector
+  // style: in the store for this visit, in the layout every save sends, and
+  // in the file beside the case.
+  const setFigureSettings = useCaseStore((s) => s.setFigureSettings);
+  const changeFigureSettings = useCallback(
+    (next: FigureSettings) => {
+      setFigureSettings(next);
+      persistRequestedRef.current = true;
+    },
+    [setFigureSettings],
+  );
+
   const runCommand = useCallback(
     (command: SldCommand) => {
       switch (command) {
@@ -2391,6 +2451,9 @@ function SldCanvasInner({
         case 'reset-manual-routes':
           resetRoutes(null);
           break;
+        case 'figure':
+          openFigure();
+          break;
         default:
           arrangePicked(command);
       }
@@ -2402,6 +2465,7 @@ function SldCanvasInner({
       tidy,
       stepThroughHistory,
       resetRoutes,
+      openFigure,
       arrangePicked,
     ],
   );
@@ -2529,8 +2593,26 @@ function SldCanvasInner({
           onCommand={runArrangeCommand}
         />
         <ConnectivityRecomputeButton />
-        <ExportMenu formats={['png']} panel="sld" caseName={caseName} onExportPng={onExportPng} />
+        <ExportMenu
+          formats={['png']}
+          panel="sld"
+          caseName={caseName}
+          onExportPng={onExportPng}
+          extraActions={figureAction}
+          description="a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view"
+        />
       </div>
+      <LazyMount when={figureOpen} onLoadFailed={() => setFigureOpen(false)}>
+        <SldFigureDialog
+          open={figureOpen}
+          onOpenChange={setFigureOpen}
+          source={figureSource}
+          picked={pickedSet}
+          settings={figureSettings}
+          onSettingsChange={changeFigureSettings}
+          caseName={caseName}
+        />
+      </LazyMount>
       {showLargeBanner ? (
         <CanvasBanner
           testId="sld-large-banner"
@@ -2668,6 +2750,7 @@ function SldCanvasInner({
           onResetRoute={resetRoutes}
           manualRoutes={manualRoutes}
           onResetManualRoutes={resetAllRoutes}
+          onFigure={openFigure}
         />
       </ContextMenu>
     </div>

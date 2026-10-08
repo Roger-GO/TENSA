@@ -58,6 +58,7 @@ import type {
   TopologySummary,
 } from '@/api/types';
 import type { ConnectorStyle } from './connections';
+import { figureSettingsEntries, type FigureSettings } from './figure/figureSettings';
 
 /** Current sidecar schema version. Bumped on incompatible shape changes. */
 export const SIDECAR_SCHEMA_VERSION = '2';
@@ -751,13 +752,17 @@ export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> 
  * minus the entries of elements `topology` no longer has, so a drag never
  * loses what another editor of the layout wrote. `chosen` is what was
  * chosen for the diagram since: a connector style goes into the figure
- * settings (`CONNECTOR_STYLE_SETTING`), over the one `base` has.
+ * settings (`CONNECTOR_STYLE_SETTING`), over the one `base` has, and so do
+ * the choices a figure of the diagram is drawn with (`figureSettingsEntries`).
  */
 export function captureLayout(
   diagram: { nodes: ReadonlyArray<DiagramNode>; edges: ReadonlyArray<DiagramEdge> },
   topology: TopologySummary,
   base: SidecarLayout | null,
-  chosen: { connectorStyle?: ConnectorStyle | null } = {},
+  chosen: {
+    connectorStyle?: ConnectorStyle | null;
+    figure?: Partial<FigureSettings> | null;
+  } = {},
 ): FullSidecarLayout {
   const coordinates: CoordsByIdx = {};
   const nonBus: NonBusOverride[] = [];
@@ -885,6 +890,7 @@ export function captureLayout(
       figure: {
         ...(base?.figure ?? {}),
         ...(chosen.connectorStyle ? { [CONNECTOR_STYLE_SETTING]: chosen.connectorStyle } : {}),
+        ...figureSettingsEntries(chosen.figure ?? {}),
       },
     },
   });

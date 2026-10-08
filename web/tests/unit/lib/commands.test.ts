@@ -1107,6 +1107,67 @@ describe('useCommandRegistry: Fit view and Reset to auto-layout', () => {
   });
 });
 
+describe('useCommandRegistry: Figure of the diagram', () => {
+  it('is an export, offered while a diagram is on screen, and opens the figure of the canvas', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      const figure = find(result.current, 'export.figure');
+      expect(figure?.group).toBe('export');
+      expect(figure?.label).toBe('Figure of the diagram…');
+      // Found by what it saves as well as by what it is called.
+      expect(figure?.keywords).toEqual(expect.arrayContaining(['svg', 'pdf', 'png', 'paper']));
+      expect(figure?.description).toMatch(/SVG, PDF or PNG/);
+      act(() => figure?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['figure']);
+  });
+
+  it('is kept in the menu with the reason while there is nothing to draw, and left out of the palette', () => {
+    // A case with no bus on it.
+    const palette = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(palette.result.current, 'export.figure')).toBeUndefined();
+    palette.unmount();
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    expect(menu.result.current.find((c) => c.id === 'export.figure')?.unavailable).toBe(
+      'The diagram has no buses yet, so there is nothing to draw.',
+    );
+    menu.unmount();
+
+    // The full-space results view covers the diagram.
+    MOCK_TOPOLOGY = oneBusTopology();
+    useLayoutStore.setState({ resultsViewActive: true });
+    const covered = renderHook(() => useMenuCommands(), { wrapper });
+    expect(covered.result.current.find((c) => c.id === 'export.figure')?.unavailable).toBe(
+      'The diagram is hidden by the results view. Show the diagram first.',
+    );
+    covered.unmount();
+
+    // With no case open it is not listed at all: there is nothing to say to do first.
+    useCaseStore.setState({ selection: null });
+    const closed = renderHook(() => useMenuCommands(), { wrapper });
+    expect(closed.result.current.find((c) => c.id === 'export.figure')).toBeUndefined();
+  });
+});
+
+describe('useMenuCommands: the reason the figure cannot be made follows what is in the way', () => {
+  it('names the results view while that covers the diagram, and the empty diagram otherwise', () => {
+    // One menu, kept up while the view changes. No buses, so there is no
+    // diagram on screen before or after: only the reason differs.
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    const reason = () => result.current.find((c) => c.id === 'export.figure')?.unavailable;
+    expect(reason()).toBe('The diagram has no buses yet, so there is nothing to draw.');
+    act(() => useLayoutStore.setState({ resultsViewActive: true }));
+    expect(reason()).toBe('The diagram is hidden by the results view. Show the diagram first.');
+    act(() => useLayoutStore.setState({ resultsViewActive: false }));
+    expect(reason()).toBe('The diagram has no buses yet, so there is nothing to draw.');
+  });
+});
+
 describe('useCommandRegistry: how device connectors are drawn', () => {
   it('offers both styles while a diagram is on screen, and neither without one', () => {
     const empty = renderHook(() => useCommandRegistry(), { wrapper });

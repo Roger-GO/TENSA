@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import type { TopologyEntry, TopologySummary, SidecarLayout, WorkspacePath } from '@/api/types';
 import type { ControllerSubKind } from '@/lib/controllers';
 import type { ConnectorStyle } from '@/components/sld/connections';
+import type { FigureSettings } from '@/components/sld/figure/figureSettings';
 
 export interface CaseSelection {
   /**
@@ -188,6 +189,14 @@ export interface CaseState {
    */
   connectorStyle: ConnectorStyle | null;
   /**
+   * The choices a figure of the diagram is drawn with, as made in this
+   * visit: the ones that were changed, each over what the saved layout holds
+   * (in its `figure` section) and over the default without one. `null`
+   * until one is changed. Kept here like the connector style, and for the
+   * same reasons.
+   */
+  figureSettings: Partial<FigureSettings> | null;
+  /**
    * The generating units whose control chain was drawn out or folded away in
    * this visit, by the idx of the unit: `true` drawn out, `false` folded. A
    * unit absent from it is drawn as the saved layout says (its `units`
@@ -241,6 +250,7 @@ export interface CaseState {
     unitExpansion?: Record<string, boolean>;
   }) => void;
   setConnectorStyle: (style: ConnectorStyle | null) => void;
+  setFigureSettings: (settings: Partial<FigureSettings> | null) => void;
   setUnitExpansion: (next: Record<string, boolean>) => void;
   setTopology: (topology: TopologySummary | null) => void;
   setLayoutSidecar: (sidecar: SidecarLayout | null) => void;
@@ -300,6 +310,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   dragOverrides: {},
   routeOverrides: {},
   connectorStyle: null,
+  figureSettings: null,
   unitExpansion: {},
   pendingDependents: [],
   editMode: 'run',
@@ -324,6 +335,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       dragOverrides: {},
       routeOverrides: {},
       connectorStyle: null,
+      figureSettings: null,
       unitExpansion: {},
       pendingDependents: [],
       editMode: 'run',
@@ -342,6 +354,8 @@ export const useCaseStore = create<CaseState>((set) => ({
       ...(next.unitExpansion === undefined ? {} : { unitExpansion: next.unitExpansion }),
     }),
   setConnectorStyle: (style: ConnectorStyle | null) => set({ connectorStyle: style }),
+  setFigureSettings: (settings: Partial<FigureSettings> | null) =>
+    set({ figureSettings: settings }),
   setUnitExpansion: (next: Record<string, boolean>) => set({ unitExpansion: next }),
   setTopology: (topology: TopologySummary | null) => set({ topology }),
   setLayoutSidecar: (sidecar: SidecarLayout | null) => set({ layoutSidecar: sidecar }),
@@ -400,6 +414,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       dragOverrides: {},
       routeOverrides: {},
       connectorStyle: null,
+      figureSettings: null,
       unitExpansion: {},
       pendingDependents: [],
       editMode: 'run',

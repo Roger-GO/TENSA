@@ -782,6 +782,42 @@ function useCommandSets(): CommandSets {
             ? null
             : 'Nothing to report yet. Run a power flow or a time-domain simulation first.',
       },
+      // The diagram drawn for a paper. The canvas holds what it is drawn from
+      // (the arrangement, the routes, the measured symbols), so the command
+      // goes through the bridge in `store/sld.ts`; the same dialog opens from
+      // the Figure button over the diagram and from its right-click menu.
+      {
+        id: 'export.figure',
+        label: 'Figure of the diagram…',
+        description:
+          'The single-line diagram drawn for a paper: black and white or in colour, with the labels you choose, saved as SVG, PDF or PNG.',
+        group: 'export',
+        keywords: [
+          'figure',
+          'diagram',
+          'sld',
+          'single-line',
+          'one-line',
+          'svg',
+          'pdf',
+          'png',
+          'image',
+          'picture',
+          'paper',
+          'publication',
+          'vector',
+          'dpi',
+          'monochrome',
+        ],
+        action: () => __requestSldCommand('figure'),
+        when: () => diagramVisible,
+        unavailableReason: () =>
+          sessionScopeDisabled
+            ? null
+            : resultsViewActive
+              ? 'The diagram is hidden by the results view. Show the diagram first.'
+              : 'The diagram has no buses yet, so there is nothing to draw.',
+      },
 
       // ---- view ----------------------------------------------------------
       // v3 Unit 2 — IDE-style pane toggles. Each command mirrors a
@@ -1292,6 +1328,9 @@ function useCommandSets(): CommandSets {
     abortableRun,
     abortMutation,
     diagramVisible,
+    // Not only through `diagramVisible`: the figure says which of the two
+    // reasons it has for not being there to draw.
+    resultsViewActive,
     layoutUndoLabel,
     layoutRedoLabel,
     diagramLocked,

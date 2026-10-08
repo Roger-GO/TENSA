@@ -40,6 +40,11 @@ import {
   type FullSidecarLayout,
   type NonBusOverride,
 } from '@/components/sld/sidecar';
+import {
+  DEFAULT_FIGURE_SETTINGS,
+  figureSettingsOf,
+  normalizeFigureSettings,
+} from '@/components/sld/figure/figureSettings';
 import type { SidecarLayout, TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string, name = `b${idx}`): TopologyEntry {
@@ -1168,6 +1173,57 @@ describe('captureLayout', () => {
     expect(
       captureLayout({ nodes, edges }, topology, null, { connectorStyle: 'elbow' }).figure,
     ).toEqual({ [CONNECTOR_STYLE_SETTING]: 'elbow' });
+  });
+
+  it('writes the choices of a figure among the figure settings, each under its own name', () => {
+    const base: SidecarLayout = {
+      ...fullLayout(),
+      figure: { [CONNECTOR_STYLE_SETTING]: 'elbow', font: 'serif', dpi: 150 },
+    };
+    const chosen = captureLayout({ nodes, edges }, topology, base, {
+      figure: { monochrome: false, font: 'mono', lineWidth: 2 },
+    });
+    // What was chosen goes over what the layout had; what was not stays; and
+    // the connector style, which shares the section, is left where it is.
+    expect(chosen.figure).toEqual({
+      [CONNECTOR_STYLE_SETTING]: 'elbow',
+      font: 'mono',
+      dpi: 150,
+      monochrome: false,
+      line_width: 2,
+    });
+    expect(normalizeFigureSettings(figureSettingsOf(chosen))).toEqual({
+      ...DEFAULT_FIGURE_SETTINGS,
+      monochrome: false,
+      font: 'mono',
+      lineWidth: 2,
+      dpi: 150,
+    });
+    // Both kinds of choice in one write, and with nothing drawn from before.
+    expect(
+      captureLayout({ nodes, edges }, topology, null, {
+        connectorStyle: 'straight',
+        figure: { flows: false },
+      }).figure,
+    ).toEqual({ [CONNECTOR_STYLE_SETTING]: 'straight', flows: false });
+    // None chosen: the section is what it was.
+    expect(captureLayout({ nodes, edges }, topology, base, { figure: null }).figure).toEqual(
+      base.figure,
+    );
+    expect(captureLayout({ nodes, edges }, topology, base, { figure: {} }).figure).toEqual(
+      base.figure,
+    );
+  });
+
+  it('writes a layout with the choices of a figure that the validation of a layout takes', () => {
+    const chosen = captureLayout({ nodes, edges }, topology, fullLayout(), {
+      figure: { ...DEFAULT_FIGURE_SETTINGS, fontSize: 8 },
+    });
+    const read = parseSidecar(JSON.parse(JSON.stringify(chosen)));
+    expect(normalizeFigureSettings(figureSettingsOf(read))).toEqual({
+      ...DEFAULT_FIGURE_SETTINGS,
+      fontSize: 8,
+    });
   });
 
   it('keeps the connector style the layout already had while none is chosen', () => {

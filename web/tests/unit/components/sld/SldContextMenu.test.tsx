@@ -58,6 +58,7 @@ const onSnapChange = vi.fn();
 const onEditRoute = vi.fn();
 const onResetRoute = vi.fn();
 const onResetManualRoutes = vi.fn();
+const onFigure = vi.fn();
 
 /**
  * Opens the menu for `target`. The surface holds a stand-in for the node React
@@ -108,6 +109,7 @@ function openMenu(
           onResetRoute={onResetRoute}
           manualRoutes={manualRoutes}
           onResetManualRoutes={onResetManualRoutes}
+          onFigure={onFigure}
         />
       </ContextMenu>
     </QueryClientProvider>,
@@ -128,6 +130,7 @@ beforeEach(() => {
   onEditRoute.mockReset();
   onResetRoute.mockReset();
   onResetManualRoutes.mockReset();
+  onFigure.mockReset();
   currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
@@ -577,8 +580,23 @@ describe('menu for the canvas', () => {
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fault')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
-    // Add element, Fit view, the two tidies, the two resets, Snap to grid, Save snapshot.
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(8);
+    // Add element, Fit view, the two tidies, the two resets, Snap to grid,
+    // Save snapshot, Figure.
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(9);
+  });
+
+  it('offers Figure, which says what it saves and opens the figure of the diagram', async () => {
+    const menu = await openMenu({ kind: 'canvas' });
+    const item = within(menu).getByTestId('sld-context-figure');
+    expect(item).toHaveTextContent('Figure…');
+    expect(item).toHaveTextContent('SVG, PDF or PNG');
+    await userEvent.click(item);
+    expect(onFigure).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no figure on a single element, which a figure is not of', async () => {
+    const menu = await openMenu(BUS);
+    expect(within(menu).queryByTestId('sld-context-figure')).toBeNull();
   });
 
   it('offers Tidy diagram and Tidy and re-layout, which run the commands of the same name', async () => {

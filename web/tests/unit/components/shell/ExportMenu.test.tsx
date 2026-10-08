@@ -27,6 +27,8 @@ import { useCaseStore } from '@/store/case';
 import { useBundleStore } from '@/store/bundle';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useReportDialogStore } from '@/store/reportDialog';
+import { useLayoutStore } from '@/store/layout';
+import { subscribeSldCommand, type SldCommand } from '@/store/sld';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
 function withProviders(ui: ReactNode) {
@@ -66,6 +68,7 @@ beforeEach(() => {
   usePflowHistoryStore.getState().clear();
   useRunsStore.setState({ runs: {}, activeRunId: null });
   useAnalyzeStore.setState({ eigResult: null });
+  useLayoutStore.setState({ resultsViewActive: false });
 });
 
 afterEach(() => {
@@ -136,6 +139,7 @@ describe('<ExportMenu />', () => {
       'topbar-menu-export-bundle',
       'topbar-menu-export-snapshot',
       'topbar-menu-export-html-report',
+      'topbar-menu-export-figure',
       'topbar-menu-export-reports',
     ]);
     const reports = screen.getByTestId('topbar-menu-export-reports');
@@ -190,6 +194,32 @@ describe('<ExportMenu />', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('topbar-menu-export-content')).not.toBeInTheDocument();
     });
+  });
+
+  it('keeps the figure in view, greyed out with the reason, while there is no diagram to draw', async () => {
+    const asked: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((command) => asked.push(command));
+    const user = userEvent.setup();
+    // A case with no bus on it yet. (That the command reaches the canvas once
+    // there is a diagram is held in `commands.test.ts`, which has a topology
+    // to hand the registry.)
+    render(withProviders(<ExportMenu />));
+    await user.click(screen.getByTestId('topbar-menu-export-trigger'));
+    const item = await screen.findByTestId('topbar-menu-export-figure');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent('The diagram has no buses yet, so there is nothing to draw.');
+    await user.click(item);
+    expect(asked).toEqual([]);
+    cleanup();
+
+    // The results view has the diagram hidden.
+    useLayoutStore.setState({ resultsViewActive: true });
+    render(withProviders(<ExportMenu />));
+    await user.click(screen.getByTestId('topbar-menu-export-trigger'));
+    expect(await screen.findByTestId('topbar-menu-export-figure')).toHaveTextContent(
+      'The diagram is hidden by the results view. Show the diagram first.',
+    );
+    unsubscribe();
   });
 
   it('Escape closes the menu', async () => {

@@ -181,7 +181,8 @@ export function subscribeOpenSldSearch(listener: Listener): () => void {
 //
 // Fit view, Reset to auto-layout, the choice of how device connectors are
 // drawn, Tidy diagram, resetting the routes drawn by hand, undoing a change to
-// the arrangement and aligning what is picked are commands in the registry
+// the arrangement, aligning what is picked and making a figure of the diagram
+// are commands in the registry
 // (palette, shortcuts) but act on
 // state only the mounted canvas holds: React Flow's viewport, and the diagram
 // as it is drawn. Same shape as the search bridge above: the registry posts an
@@ -203,6 +204,8 @@ export type SldCommand =
   | 'redo-layout'
   /** Give every line that was routed by hand back to the automatic routing. */
   | 'reset-manual-routes'
+  /** Open the figure of the diagram, to save it as SVG, PDF or PNG. */
+  | 'figure'
   | 'align-left'
   | 'align-centre'
   | 'align-right'

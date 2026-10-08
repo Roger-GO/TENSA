@@ -10,6 +10,8 @@
  * - The dropdown body is a Radix Popover. The format buttons are
  *   gated by the `formats` prop (CSV / PNG / MAT / COMTRADE) so a panel
  *   that has no PNG path (e.g., ScrubControl) doesn't show the option.
+ *   A panel with another way out than a file made here lists it under
+ *   them (`extraActions`: the diagram's figure for a paper).
  * - When the user picks a format, the menu calls one of the supplied
  *   handler props (`onExportCsv`, `onExportPng`, `onExportMat`,
  *   `onExportComtrade`). Each
@@ -123,12 +125,34 @@ export interface ExportMenuProps {
   /** Optional class on the trigger button. */
   className?: string;
   /**
+   * Other ways this panel leaves the app, listed under the formats: each
+   * opens something of the panel's own (the diagram's figure dialog) and
+   * saves nothing here. The menu closes when one is picked.
+   */
+  extraActions?: readonly ExportExtraAction[];
+  /**
    * What the trigger says and is called. Defaults to "Export"; a panel that
    * shares a screen with another menu names what it exports ("Export plot",
    * "Export run data"), since two buttons both called "Export" cannot be told
    * apart by someone who has to pick one.
    */
   label?: string;
+  /**
+   * What the menu holds, in a few words, for a panel whose menu has more in
+   * it than its label says (the diagram's: a figure, or a picture of the
+   * view). It is the trigger's tooltip, and follows the label in its
+   * accessible name, so someone reading the page for "figure" or "PDF"
+   * finds the button without opening it.
+   */
+  description?: string;
+}
+
+/** An entry of the menu that is not a file format (`ExportMenuProps.extraActions`). */
+export interface ExportExtraAction {
+  /** Kebab-case; the entry's test id is `export-menu-${id}`. */
+  id: string;
+  label: string;
+  onSelect: () => void;
 }
 
 const FORMAT_LABEL: Record<ExportFormat, string> = {
@@ -159,8 +183,10 @@ export function ExportMenu({
   onExportPng,
   onExportMat,
   onExportComtrade,
+  extraActions = [],
   className,
   label = 'Export',
+  description,
 }: ExportMenuProps) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -243,7 +269,8 @@ export function ExportMenu({
       // trigger is left out of the picture (see `elementToPng`).
       data-export-ignore=""
       className={cn('gap-1', className)}
-      aria-label={label}
+      aria-label={description === undefined ? label : `${label}: ${description}`}
+      title={description === undefined ? undefined : `${label}: ${description}`}
     >
       {/* Inline glyph keeps the dependency footprint flat. */}
       <span aria-hidden="true" className="font-mono text-xs">
@@ -351,6 +378,27 @@ export function ExportMenu({
               </Tooltip>
             </TooltipProvider>
           )}
+          {extraActions.length > 0 ? (
+            <div className="border-border mt-1 flex flex-col gap-1 border-t pt-1">
+              {extraActions.map((action) => (
+                <Button
+                  key={action.id}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setOpen(false);
+                    action.onSelect();
+                  }}
+                  disabled={busy}
+                  className="h-auto min-h-8 justify-start py-1 text-left whitespace-normal"
+                  data-testid={`export-menu-${action.id}`}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
           {/* Errors no longer surface inline here — Unit 3 of the v2.0
               polish plan routes export failures to the global toast
               surface (see `@/lib/toast`). The popover stays focused on

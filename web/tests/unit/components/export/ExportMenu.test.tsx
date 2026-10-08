@@ -78,6 +78,65 @@ describe('<ExportMenu />', () => {
     expect(screen.getByRole('button', { name: 'Export plot' })).toHaveTextContent('Export plot');
   });
 
+  it('says what is in it, after its name and on hover, where its label alone does not', () => {
+    const { rerender } = render(
+      <ExportMenu
+        formats={['png']}
+        panel="sld"
+        description="a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view"
+      />,
+    );
+    // The word that is shown stays first in what it is called.
+    const trigger = screen.getByRole('button', {
+      name: 'Export: a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view',
+    });
+    expect(trigger).toHaveTextContent(/^↓\s*Export$/);
+    expect(trigger).toHaveAttribute(
+      'title',
+      'Export: a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view',
+    );
+    // Without one it is called by its label alone, and has no tooltip of its own.
+    rerender(<ExportMenu formats={['png']} panel="sld" />);
+    expect(screen.getByRole('button', { name: 'Export' })).not.toHaveAttribute('title');
+  });
+
+  it('lists the other ways out a panel gives it under the formats, and closes when one is picked', async () => {
+    const user = userEvent.setup();
+    const onFigure = vi.fn();
+    const onExportPng = vi.fn(() => new Blob(['x'], { type: 'image/png' }));
+    render(
+      <ExportMenu
+        formats={['png']}
+        panel="sld"
+        onExportPng={onExportPng}
+        extraActions={[
+          { id: 'figure', label: 'Figure for a paper (SVG, PDF, PNG)…', onSelect: onFigure },
+        ]}
+      />,
+    );
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    const menu = await screen.findByTestId('export-menu');
+    const buttons = [...menu.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).toEqual(['PNG', 'Figure for a paper (SVG, PDF, PNG)…']);
+
+    await user.click(screen.getByTestId('export-menu-figure'));
+
+    expect(onFigure).toHaveBeenCalledTimes(1);
+    // It saves nothing itself: no file, and no notice of one.
+    expect(onExportPng).not.toHaveBeenCalled();
+    expect(createObjectUrlMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId('export-menu')).not.toBeInTheDocument());
+  });
+
+  it('lists nothing more than its formats for a panel that gives it no other way out', async () => {
+    const user = userEvent.setup();
+    render(<ExportMenu formats={['csv', 'png']} panel="time-series" onExportCsv={() => null} />);
+    await user.click(screen.getByTestId('export-menu-trigger'));
+    const menu = await screen.findByTestId('export-menu');
+    expect([...menu.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['CSV', 'PNG']);
+  });
+
   it('names the disabled trigger too', () => {
     render(<ExportMenu formats={['csv']} disabled panel="scrub" label="Export run data" />);
     expect(screen.getByRole('button', { name: 'Export run data' })).toBeDisabled();
