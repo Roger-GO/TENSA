@@ -14,17 +14,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import {
+  TAP_SPACING,
   layoutConnections,
   type ConnectionEdge,
   type ConnectionNode,
 } from '@/components/sld/connections';
 import {
   CONNECTOR_REACH,
+  DRAFT_REACH,
   connectedPlace,
+  draftDrop,
   draftPlace,
   settledPlaces,
 } from '@/components/sld/draftPlace';
+import { DROP_CLEARANCE, DROP_REACH } from '@/components/sld/dropPlace';
 import { DRAFT_NODE_SIZE, DRAFT_NODE_TYPE } from '@/components/sld/drafts';
+import { symbolBoxes } from '@/components/sld/labels';
+import { connectorDrawn } from '@/components/sld/picture';
 import { GRID_STEP } from '@/components/sld/tidy';
 import { IEEE14 } from '../../helpers/exampleCases';
 import { drawn, opened, overlapsOf, settled, type Diagram } from '../../helpers/diagramStates';
@@ -142,6 +148,150 @@ describe('a draft that is dropped on a line', () => {
     expect(drawn(there).changed.size).toBe(0);
     expect(overlapsOf(there)).toEqual([]);
   });
+
+  it('stands on free ground in the middle of a diagram, where the lines run close together', async () => {
+    const first = settled(await opened(IEEE14));
+    const picture = drawn(first);
+    const five = first.nodes.find((n) => n.id === '5')!.position;
+    // Over the bar of bus 5, where the lines from buses 1, 2 and 4 come
+    // down to it side by side: no room for a draft between two of them.
+    for (const centre of [
+      { x: five.x + 54, y: five.y - 80 },
+      { x: five.x + 74, y: five.y - 60 },
+    ]) {
+      for (const step of [undefined, GRID_STEP]) {
+        const place = draftPlace(
+          first.nodes,
+          first.edges as ConnectionEdge[],
+          centre,
+          picture.connections,
+          {
+            atRest: picture.connections,
+            step,
+            picture: { barLengths: first.barLengths, values: false },
+            symbols: [...symbolBoxes(picture.symbols).values()],
+          },
+        );
+        expect(place.shift).toMatchObject({ onto: 'line' });
+        const { x, y } = place.position;
+        // Off every line of the diagram, by the room a symbol keeps.
+        for (const edge of first.edges) {
+          if (edge.type === 'stub') continue;
+          const points = picture.connections.routes.get(edge.id)!.points;
+          for (let i = 1; i < points.length; i += 1) {
+            const [a, b] = [points[i - 1]!, points[i]!];
+            const off =
+              x >= Math.max(a[0], b[0]) + DROP_CLEARANCE ||
+              x + W <= Math.min(a[0], b[0]) - DROP_CLEARANCE ||
+              y >= Math.max(a[1], b[1]) + DROP_CLEARANCE ||
+              y + H <= Math.min(a[1], b[1]) - DROP_CLEARANCE;
+            expect(off).toBe(true);
+          }
+        }
+        const there = withDrafts(first, [
+          { id: 'draft-1', kind: 'PQ', position: place.position, values: {} },
+        ]);
+        // No line gives way to it, and nothing is drawn over anything.
+        expect(drawn(there).changed.size).toBe(0);
+        expect(overlapsOf(there)).toEqual([]);
+      }
+    }
+  });
+
+  it('is looked for free ground farther away than a device that is dragged is', () => {
+    // Lines side by side over more ground than a drop looks across, too
+    // close together for a draft to stand between two of them.
+    const nodes = [bus('a', -3000, -3000), bus('b', 3000, 3000)];
+    const edges: ConnectionEdge[] = [];
+    const routes = new Map<string, { points: [number, number][] }>();
+    for (let at = 0; at <= 720; at += 60) {
+      edges.push({ id: `line-${at}`, source: 'a', target: 'b' });
+      routes.set(`line-${at}`, {
+        points: [
+          [at, -500],
+          [at, 500],
+        ],
+      });
+    }
+    const drawnAs = { bars: new Map(), routes } as unknown as Parameters<typeof draftPlace>[3];
+    const place = draftPlace(nodes, edges, { x: 360, y: 0 }, drawnAs);
+    expect(place.shift).toMatchObject({ onto: 'line' });
+    const far = Math.hypot(place.shift!.dx, place.shift!.dy);
+    expect(far).toBeGreaterThan(DROP_REACH);
+    expect(far).toBeLessThanOrEqual(Math.SQRT2 * DRAFT_REACH);
+    // Beside the lines, to the left of the first or the right of the last.
+    const { x } = place.position;
+    expect(x + W <= -DROP_CLEARANCE || x >= 720 + DROP_CLEARANCE).toBe(true);
+  });
+});
+
+describe('a draft that is dragged and let go', () => {
+  /** IEEE 14 with a load draft beside it, and the same with the draft dragged to `to`. */
+  async function draggedTo(to: (first: Diagram) => { x: number; y: number }) {
+    const first = settled(await opened(IEEE14));
+    const xs = first.nodes.map((n) => n.position.x);
+    const stood = { x: Math.min(...xs) - 300, y: 200 };
+    const draft = { id: 'draft-1', kind: 'PQ', values: {} };
+    const before = withDrafts(first, [{ ...draft, position: stood }]);
+    const at = to(first);
+    const there = withDrafts(first, [{ ...draft, position: at }]);
+    const drop = (pictures?: number) =>
+      draftDrop(
+        there.nodes,
+        there.edges as ConnectionEdge[],
+        new Set(['draft-1']),
+        drawn(there, { values: false, dragging: true }).connections,
+        {
+          atRest: drawn(before).connections,
+          picture: { barLengths: first.barLengths, values: false },
+          before: before.nodes,
+          back: { dx: stood.x - at.x, dy: stood.y - at.y },
+          pictures,
+        },
+      );
+    return { first, there, at, drop };
+  }
+
+  const onLines = (first: Diagram) => {
+    const three = first.nodes.find((n) => n.id === '3')!.position;
+    return { x: three.x - 128, y: three.y - 90 };
+  };
+
+  it('stays where it was let go, on free ground', async () => {
+    const { there, drop } = await draggedTo((first) => {
+      const ys = first.nodes.map((n) => n.position.y);
+      return { x: Math.min(...first.nodes.map((n) => n.position.x)) - 200, y: Math.max(...ys) };
+    });
+    expect(drop()).toBeNull();
+    expect(drawn(there).changed.size).toBe(0);
+  });
+
+  it('stands beside the lines it was let go on, where free ground is a little way off', async () => {
+    // On the lines that run down from buses 1 and 2 to bus 5, left of bus 3.
+    const { first, there, at, drop } = await draggedTo(onLines);
+    // Let go there, lines would have to go round it.
+    expect(drawn(there).changed.size).toBeGreaterThan(0);
+    const shift = drop()!;
+    expect(shift).toMatchObject({ onto: 'line' });
+    expect(shift.back).toBeUndefined();
+    const moved = withDrafts(first, [
+      {
+        id: 'draft-1',
+        kind: 'PQ',
+        position: { x: at.x + shift.dx, y: at.y + shift.dy },
+        values: {},
+      },
+    ]);
+    expect(drawn(moved).changed.size).toBe(0);
+    expect(overlapsOf(moved)).toEqual([]);
+  });
+
+  it('is dropped as a device is, the lines round it, where no such place is asked about', async () => {
+    const { there, drop } = await draggedTo(onLines);
+    // One place only: the one it was let go in, which the diagram can be drawn with.
+    expect(drop(1)).toBeNull();
+    expect(overlapsOf(there)).toEqual([]);
+  });
 });
 
 describe('where a draft goes when something comes to stand on it', () => {
@@ -194,16 +344,36 @@ describe('where a draft goes when it is given a bus in its form', () => {
     const there = withDrafts(first, [
       { id: 'draft-1', kind: 'PQ', position, values: { bus: busId } },
     ]);
-    const { connections } = drawn(there);
+    const { connections, symbols } = drawn(there);
     const ask = (justGiven: boolean) =>
       connectedPlace(there.nodes, there.edges as ConnectionEdge[], 'draft-1', connections, {
         atRest: connections,
         picture: { barLengths: first.barLengths, values: false },
         given: justGiven,
+        symbols: [...symbolBoxes(symbols).values()],
       });
     return { there, ask };
   }
   const busAt = (diagram: Diagram, id: string) => diagram.nodes.find((n) => n.id === id)!.position;
+  /** IEEE 14 with the load draft at `position`, connected to `busId`. */
+  const wired = (first: Diagram, position: { x: number; y: number }, busId: string) =>
+    withDrafts(first, [{ id: 'draft-1', kind: 'PQ', position, values: { bus: busId } }]);
+  /** By how much the line of `diagram` that is drawn the longest way round is longer than in `first`. */
+  function farthestRound(first: Diagram, diagram: Diagram): number {
+    const [was, is] = [drawn(first), drawn(diagram)].map((picture) => picture.connections.routes);
+    const long = (points: readonly (readonly [number, number])[]) =>
+      points.reduce(
+        (sum, p, i) =>
+          i === 0 ? 0 : sum + Math.hypot(p[0] - points[i - 1]![0], p[1] - points[i - 1]![1]),
+        0,
+      );
+    return Math.max(
+      0,
+      ...first.edges
+        .filter((edge) => edge.type !== 'stub')
+        .map((edge) => long(is!.get(edge.id)!.points) - long(was!.get(edge.id)!.points)),
+    );
+  }
 
   it('stays where it was dropped when its connector runs clear from there, and crosses nothing', async () => {
     const first = settled(await opened(IEEE14));
@@ -248,6 +418,105 @@ describe('where a draft goes when it is given a bus in its form', () => {
     expect(overlapsOf(settled(there))).toEqual([]);
     expect(ask(false)).toBeNull();
     expect(ask(true)).not.toBeNull();
+  });
+
+  it('is held off the lines as they run without it, not as they run round its connector', async () => {
+    const first = settled(await opened(IEEE14));
+    const xs = first.nodes.map((n) => n.position.x);
+    // Far to the right of the diagram, and bus 12 at its left edge: the
+    // connector reaches across, and the lines on its way are routed round it.
+    const far = { x: Math.max(...xs) + 250, y: busAt(first, '2').y - 80 };
+    const { there, ask } = given(first, far, '12');
+    expect(drawn(there).changed.size).toBeGreaterThan(0);
+    const place = ask(true)!;
+    expect(place).not.toBeNull();
+    expect(place.beside).toBe(true);
+    // Beside bus 12, with every line of the system where it ran.
+    const moved = wired(first, place.position, '12');
+    const twelve = busAt(first, '12');
+    expect(Math.abs(place.position.x + W / 2 - (twelve.x + 46))).toBeLessThan(CONNECTOR_REACH);
+    expect(farthestRound(first, moved)).toBeLessThanOrEqual(2 * TAP_SPACING);
+    expect(overlapsOf(moved)).toEqual([]);
+  });
+
+  it('sends no line a long way round where the lines of its bus leave no room in its rows', async () => {
+    const first = settled(await opened(IEEE14));
+    const xs = first.nodes.map((n) => n.position.x);
+    // Bus 5: lines come down to its bar side by side, and a load hangs under it.
+    const far = { x: Math.min(...xs) - 250, y: busAt(first, '5').y - 100 };
+    const { ask } = given(first, far, '5');
+    const place = ask(true)!;
+    expect(place).not.toBeNull();
+    expect(place.beside).toBe(true);
+    const moved = wired(first, place.position, '5');
+    expect(overlapsOf(moved)).toEqual([]);
+    // In the row of its bus, at the place where the lines step aside the
+    // least: none of them goes round the buses beside it.
+    expect(farthestRound(first, moved)).toBeLessThan(W + H);
+    const connector = drawn(moved).connections.routes.get('stub-draft-1')!.points;
+    expect(connector).toHaveLength(2);
+    expect(connector[0]![0]).toBeCloseTo(connector[1]![0], 1);
+  });
+
+  it('goes to free ground beside its bus, its connector at an angle, before a line is made to go round it', async () => {
+    const first = settled(await opened(IEEE14));
+    const xs = first.nodes.map((n) => n.position.x);
+    // Bus 13: its rows are taken by its lines and its load.
+    const far = { x: Math.min(...xs) - 250, y: busAt(first, '4').y };
+    const { ask } = given(first, far, '13');
+    const place = ask(true)!;
+    expect(place).toMatchObject({ beside: true, square: false });
+    const moved = wired(first, place.position, '13');
+    const picture = drawn(moved);
+    // No line is routed again for it, and nothing is drawn over anything.
+    expect(picture.changed.size).toBe(0);
+    expect(overlapsOf(moved)).toEqual([]);
+    // Its connector reaches the bar within reach, and crosses no line.
+    const as = connectorDrawn(
+      moved.nodes,
+      moved.edges as ConnectionEdge[],
+      { barLengths: first.barLengths, values: false },
+      'draft-1',
+      'stub-draft-1',
+    );
+    expect(as).toMatchObject({ over: false, crossings: 0 });
+    expect(as.length).toBeLessThanOrEqual(CONNECTOR_REACH);
+  });
+
+  it('is not held against a line that goes round another draft', async () => {
+    const first = settled(await opened(IEEE14));
+    // Another draft stands on the lines that come down to bus 5.
+    const five = busAt(first, '5');
+    const other = {
+      id: 'draft-2',
+      kind: 'PV',
+      position: { x: five.x + 6, y: five.y - 112 },
+      values: {},
+    };
+    const twelve = busAt(first, '12');
+    const at = { x: twelve.x - 180, y: twelve.y - H / 2 };
+    const there = withDrafts(first, [
+      other,
+      { id: 'draft-1', kind: 'PQ', position: at, values: { bus: '12' } },
+    ]);
+    const picture = drawn(there);
+    // Lines go round the other draft in every picture of this diagram.
+    expect(picture.changed.size).toBeGreaterThan(0);
+    const place = connectedPlace(
+      there.nodes,
+      there.edges as ConnectionEdge[],
+      'draft-1',
+      picture.connections,
+      {
+        atRest: picture.connections,
+        picture: { barLengths: first.barLengths, values: false },
+        given: true,
+        symbols: [...symbolBoxes(picture.symbols).values()],
+      },
+    );
+    // Left of bus 12 and level with it, its connector runs clear: it stays,
+    // as it does with no other draft on the diagram.
+    expect(place).toBeNull();
   });
 
   it('goes into the row of its bus when its connector would have to step round a symbol', () => {

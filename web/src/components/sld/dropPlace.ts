@@ -44,6 +44,11 @@
  * they stood before the move (`DropOptions.back`), where the diagram was
  * drawn with nothing on anything else.
  *
+ * What is placed where nothing was dragged (a draft from the palette) is
+ * held to more: it stands off every line as well (`DropOptions.offLines`),
+ * so that none has to be routed round it, and a place for it is looked for
+ * farther away (`DropOptions.reach`).
+ *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
@@ -98,9 +103,14 @@ const CONNECTOR_BAR_CLEARANCE = 8;
 /** How far the straight way from a device to its bus keeps from the bar of another bus. */
 const BETWEEN_CLEARANCE = 16;
 
-/** How far from where it was dropped a place is looked for, and how far apart the places tried are. */
+/**
+ * How far from where it was dropped a place is looked for, and how far apart
+ * the places tried are: up to `DROP_REACH`, and past it (`DropOptions.reach`)
+ * no closer together than `FAR_STEP`.
+ */
 export const DROP_REACH = 256;
 const DROP_STEP = 4;
+const FAR_STEP = GRID_STEP;
 
 /**
  * How many places the picture of the diagram is asked about, the one the
@@ -146,14 +156,29 @@ export interface DropOptions<N extends ConnectionNode = ConnectionNode> {
    * round what is in its way.
    */
   boxesOnly?: boolean;
+  /**
+   * Hold the nodes off every line and transformer as well, as it was drawn
+   * at rest, by `DROP_CLEARANCE`: for something that is placed where nothing
+   * was dragged, which leaves the lines as they run and stands beside them.
+   * A line that ends on a node that was moved does not count.
+   */
+  offLines?: boolean;
+  /**
+   * What else the nodes keep `DROP_CLEARANCE` from, and is no node: the
+   * symbols of the transformers, where the picture has them on their lines.
+   */
+  keepOff?: readonly Rect[];
+  /** How far from where the nodes were dropped a place is looked for; default `DROP_REACH`. */
+  reach?: number;
 }
 
 /**
  * What a node was dropped on: a symbol on or right beside another symbol, a
  * symbol and a bar on each other, two bars too close to each other, a
  * symbol or a bar on a connector, a device beyond the bar of another bus
- * from its own, or a place where a connector or a line would have no way
- * that is clear of everything else (`no-way`).
+ * from its own, a line or the symbol of a transformer (for what stands off
+ * the lines: `DropOptions.offLines`), or a place where a connector or a line
+ * would have no way that is clear of everything else (`no-way`).
  */
 export type DropObstacle =
   | 'symbol-symbol'
@@ -161,6 +186,7 @@ export type DropObstacle =
   | 'bar-bar'
   | 'connector'
   | 'bar-between'
+  | 'line'
   | 'no-way';
 
 /** Where what was dropped comes to stand, as a shift from where it was dropped. */
@@ -225,6 +251,12 @@ function near(a: Rect, b: Rect, across: number, down: number = across): boolean 
   );
 }
 
+/** What of `DropOptions` the rules about the boxes read. */
+export type RuleOptions<N extends ConnectionNode> = Pick<
+  DropOptions<N>,
+  'sizes' | 'atRest' | 'boxesOnly' | 'offLines' | 'keepOff' | 'reach'
+>;
+
 /**
  * What the nodes `movedIds` of `nodes` are on where they stand, by the
  * rules about the boxes alone (the picture is not asked): `null` where the
@@ -235,7 +267,7 @@ export function inTheWay<N extends ConnectionNode>(
   edges: readonly ConnectionEdge[],
   movedIds: ReadonlySet<string>,
   connections: ConnectionLayout,
-  options: Pick<DropOptions<N>, 'sizes' | 'atRest' | 'boxesOnly'> = {},
+  options: RuleOptions<N> = {},
 ): DropObstacle | null {
   return dropRules(nodes, edges, movedIds, connections, options)?.(0, 0) ?? null;
 }
@@ -243,14 +275,16 @@ export function inTheWay<N extends ConnectionNode>(
 /**
  * The rules about the boxes, for the nodes `movedIds` of `nodes` where
  * they stand: what they are on when shifted by `dx`, `dy`, or `null` there.
- * `null` itself when there is nothing to hold them against.
+ * `null` itself when there is nothing to hold them against. For asking
+ * about many places of the same nodes; only what stands within reach of
+ * where they are counts (`DropOptions.reach`).
  */
-function dropRules<N extends ConnectionNode>(
+export function dropRules<N extends ConnectionNode>(
   nodes: readonly N[],
   edges: readonly ConnectionEdge[],
   movedIds: ReadonlySet<string>,
   connections: ConnectionLayout,
-  options: Pick<DropOptions<N>, 'sizes' | 'atRest' | 'boxesOnly'>,
+  options: RuleOptions<N> = {},
 ): ((dx: number, dy: number) => DropObstacle | null) | null {
   if (movedIds.size === 0) return null;
   const devicesOf = new Map<string, Set<string>>();
@@ -306,7 +340,7 @@ function dropRules<N extends ConnectionNode>(
       }),
       { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity },
     ),
-    DROP_REACH + DROP_ROW,
+    (options.reach ?? DROP_REACH) + DROP_ROW,
   );
   const standing = others.filter(({ box }) => near(box, around, 0));
   // The connectors that stay as they are drawn: of a device that was not
@@ -330,6 +364,20 @@ function dropRules<N extends ConnectionNode>(
     const points = (options.atRest ?? connections).routes.get(edge.id)?.points ?? [];
     for (let i = 1; i < points.length; i += 1) fixed.push([points[i - 1]!, points[i]!]);
   }
+  // The lines and transformers that stay as they are drawn, for what
+  // stands off them: the runs of each that pass within reach.
+  const lines: [Point, Point][] = [];
+  if (options.offLines === true) {
+    for (const edge of edges) {
+      if (edge.type === 'stub' || movedIds.has(edge.source) || movedIds.has(edge.target)) continue;
+      const points = (options.atRest ?? connections).routes.get(edge.id)?.points ?? [];
+      for (let i = 1; i < points.length; i += 1) {
+        const run: [Point, Point] = [points[i - 1]!, points[i]!];
+        if (crosses(run[0], run[1], around)) lines.push(run);
+      }
+    }
+  }
+  const keepOff = (options.keepOff ?? []).filter((box) => near(box, around, 0));
   /**
    * The straight way from a device to its bar: from the face of the device
    * that looks at the bar to the nearest place on it.
@@ -366,6 +414,11 @@ function dropRules<N extends ConnectionNode>(
       }
       const room = roomFor({ bar: own.bar, box });
       for (const [a, b] of fixed) if (crosses(a, b, room)) return 'connector';
+      for (const other of keepOff) if (near(box, other, DROP_CLEARANCE)) return 'line';
+      if (lines.length > 0) {
+        const off = grown(box, DROP_CLEARANCE);
+        for (const [a, b] of lines) if (crosses(a, b, off)) return 'line';
+      }
     }
     if (options.boxesOnly === true) return null;
     for (const { device, bus } of carried) {
@@ -434,6 +487,17 @@ export function clearDrop<N extends ConnectionNode>(
     for (let k = -reach; k <= reach; k += 1) {
       if (i === 0 && k === 0) continue;
       tried.push({ dx: i * step, dy: k * step, far: Math.hypot(i, k) });
+    }
+  }
+  // And past that, for what is looked for a place farther away: the places
+  // around the ones above, farther apart.
+  const farStep = Math.ceil(FAR_STEP / step) * step;
+  const farReach = Math.floor((options.reach ?? DROP_REACH) / farStep);
+  for (let i = -farReach; i <= farReach; i += 1) {
+    for (let k = -farReach; k <= farReach; k += 1) {
+      const [dx, dy] = [i * farStep, k * farStep];
+      if (Math.max(Math.abs(dx), Math.abs(dy)) <= reach * step) continue;
+      tried.push({ dx, dy, far: Math.hypot(dx, dy) / step });
     }
   }
   tried.sort(

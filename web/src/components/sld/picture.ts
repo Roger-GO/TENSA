@@ -27,7 +27,13 @@
  * `routesDrawClear` asks it of a route that was drawn by hand, before the
  * diagram keeps it, and `connectorDrawn` of something that came to be drawn
  * without a move: the connector of a draft that was just given its bus.
- * `drawsUndisturbed` asks besides that no line had to give way.
+ * `drawsUndisturbed` asks besides that no line had to give way, and
+ * `drawnWith` says how far round each line goes that did.
+ *
+ * `routesOf` is the third part alone, for what asks only how the lines of a
+ * diagram run: which of them the diagram routes afresh without its drafts
+ * (`draftRoutes.ts`), and where they run without one of them
+ * (`connectedPlace`).
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -108,18 +114,15 @@ export interface Picture<E extends ConnectionEdge> extends RoutedDiagram<E> {
 const NO_SIZES: ReadonlyMap<string, NodeSize> = new Map();
 
 /**
- * The first four parts of a picture (the connectors of the devices, the
- * chains, the routes with the symbols of the transformers, and the labels
- * of the buses): everything on it that is drawn whatever is in the way.
- * The readouts and the flow labels come after, and are left off where they
- * have no place.
+ * The first three parts of a picture: the connectors of the devices, the
+ * chains, and the routes with the symbols of the transformers.
  */
-function drawnAlways<E extends ConnectionEdge>(
+function routedAlways<E extends ConnectionEdge>(
   nodes: readonly LabelNode[],
   edges: readonly E[],
   options: PictureOptions,
 ) {
-  const { values, labelWidths: _labelWidths, ...routing } = options;
+  const { values: _values, labelWidths: _labelWidths, ...routing } = options;
   const sizes = routing.sizes ?? NO_SIZES;
   const {
     steps: _steps,
@@ -143,11 +146,46 @@ function drawnAlways<E extends ConnectionEdge>(
     keepFree: readoutReserve(nodes, stubs, sizes, { chains: chainBoxes }),
     preferFree: busLabelReserve(nodes, stubs, sizes, { chains: chainBoxes }),
   });
+  return { routed, chains, chainBoxes, sizes };
+}
+
+/**
+ * The first four parts of a picture (those three, and the labels of the
+ * buses): everything on it that is drawn whatever is in the way. The
+ * readouts and the flow labels come after, and are left off where they
+ * have no place.
+ */
+function drawnAlways<E extends ConnectionEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+) {
+  const { routed, chains, chainBoxes, sizes } = routedAlways(nodes, edges, options);
   // The symbols of the transformers stand where the routing has them: every
   // label keeps off them.
   const symbols = symbolBoxes(routed.symbols);
-  const busLabels = placeBusLabels(nodes, routed.connections, sizes, values, chainBoxes, symbols);
+  const busLabels = placeBusLabels(
+    nodes,
+    routed.connections,
+    sizes,
+    options.values,
+    chainBoxes,
+    symbols,
+  );
   return { routed, chains, chainBoxes, symbols, busLabels, sizes };
+}
+
+/**
+ * How the lines and transformers of `nodes` and `edges` run in the picture
+ * of them (`pictureOf`), without the labels a picture places after: the
+ * routes, and which of them were made afresh.
+ */
+export function routesOf<E extends ConnectionEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): RoutedDiagram<E> {
+  return routedAlways(nodes, edges, options).routed;
 }
 
 /** The picture of the diagram whose nodes are `nodes` and whose edges are `edges`. */
@@ -397,6 +435,42 @@ export interface ConnectorDrawn {
   length: number;
   /** How many lines and transformers had to be routed afresh for the picture. */
   rerouted: number;
+  /**
+   * By how much each of those is longer than the route kept for it, by edge
+   * id (`longerThanKept`): next to nothing for one whose end only moved along
+   * its bar to make room for a tap, and the length of the way round for one
+   * that had to go round something.
+   */
+  longer: ReadonlyMap<string, number>;
+}
+
+/** How long the route through `points` is. */
+function lengthOf(points: readonly (readonly [number, number])[]): number {
+  let length = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    length += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  return length;
+}
+
+/**
+ * By how much each route among `changed`, the routes a picture of `edges`
+ * made afresh (`RoutedDiagram.changed`), is longer than the one kept for its
+ * line or transformer, by edge id. A line that keeps no route has none to
+ * be longer than, and is left out.
+ */
+export function longerThanKept<E extends ConnectionEdge>(
+  edges: readonly E[],
+  changed: RoutedDiagram<E>['changed'],
+): Map<string, number> {
+  const longer = new Map<string, number>();
+  for (const edge of edges) {
+    const made = changed.get(edge.id);
+    const kept = edge.data?.bendPoints;
+    if (made === undefined || edge.type === 'stub' || !Array.isArray(kept)) continue;
+    longer.set(edge.id, lengthOf(made.points) - lengthOf(kept as [number, number][]));
+  }
+  return longer;
 }
 
 /**
@@ -406,7 +480,8 @@ export interface ConnectorDrawn {
  * bends it has and how far its runs slant (no bend and no slant when it runs
  * straight up or down to its bar), how long it is, and how many lines
  * the picture had to route afresh (none when every route kept for the
- * diagram still holds with the device there). Asked of something that came
+ * diagram still holds with the device there), each with how much longer
+ * that made it. Asked of something that came
  * to be drawn without a move, which `drawsClear` has no diagram before to
  * hold it against: a draft that was just given its bus.
  */
@@ -417,7 +492,7 @@ export function connectorDrawn<E extends DrawnEdge>(
   nodeId: string,
   edgeId: string,
 ): ConnectorDrawn {
-  const { diagram, rerouted } = diagramDrawn(nodes, edges, options);
+  const { diagram, rerouted, longer } = diagramDrawn(nodes, edges, options);
   const its = (id: string) => id === nodeId || id === edgeId;
   const connector = diagram.lines.find((line) => line.id === edgeId);
   let crossings = 0;
@@ -427,11 +502,9 @@ export function connectorDrawn<E extends DrawnEdge>(
     }
   }
   const points = connector?.points ?? [];
-  let length = 0;
   let slant = 0;
   for (let i = 1; i < points.length; i += 1) {
     const [across, down] = [points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]];
-    length += Math.hypot(across, down);
     slant = Math.max(slant, Math.min(Math.abs(across), Math.abs(down)));
   }
   return {
@@ -439,8 +512,9 @@ export function connectorDrawn<E extends DrawnEdge>(
     crossings,
     bends: Math.max(0, points.length - 2),
     slant,
-    length,
+    length: lengthOf(points),
     rerouted,
+    longer,
   };
 }
 
@@ -454,7 +528,7 @@ function diagramDrawn<E extends DrawnEdge>(
   nodes: readonly LabelNode[],
   edges: readonly E[],
   options: PictureOptions,
-): { diagram: DrawnDiagram; rerouted: number } {
+): { diagram: DrawnDiagram; rerouted: number; longer: Map<string, number> } {
   const { routed, chains, busLabels } = drawnAlways(nodes, edges, options);
   const picture = {
     ...routed,
@@ -466,6 +540,26 @@ function diagramDrawn<E extends DrawnEdge>(
   return {
     diagram: drawnDiagram(nodes, picture, { sizes: options.sizes, values: false }),
     rerouted: routed.changed.size,
+    longer: longerThanKept(edges, routed.changed),
+  };
+}
+
+/**
+ * What the picture of `nodes` and `edges` has on what, each as one name,
+ * and by how much each line it routes afresh is longer than the route kept
+ * for it (`longerThanKept`): for holding a place to more than `drawsClear`
+ * does, as the place of a draft is, which leaves the lines as they run
+ * where it can (`draftDrop`).
+ */
+export function drawnWith<E extends DrawnEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): { overlaps: string[]; longer: ReadonlyMap<string, number> } {
+  const { diagram, longer } = diagramDrawn(nodes, edges, options);
+  return {
+    overlaps: findOverlaps(diagram).map(({ kind, a, b }) => `${kind}|${a}|${b}`),
+    longer,
   };
 }
 

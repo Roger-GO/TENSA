@@ -377,6 +377,83 @@ describe('a node that was not dragged, held to its box alone', () => {
   });
 });
 
+describe('a node that is placed where nothing was dragged, held off the lines', () => {
+  // Bus 1 over bus 2, a line straight down from the one to the other, and a
+  // symbol that is connected to nothing.
+  const line: ConnectionEdge = { id: 'line-1', source: '1', target: '2' };
+  const nodes = [bus('1', 0, 0), bus('2', 0, 300), device('free', 400, 130)];
+  const edges = [line];
+  const moved = new Set(['free']);
+  const connections = layoutConnections(nodes, edges);
+  const run = connections.routes.get('line-1')!.points;
+  const x = run[0]![0];
+
+  it('stands beside a line it was dropped on, by the room a symbol keeps, where a dragged one stays', () => {
+    expect(run.every((point) => point[0] === x)).toBe(true);
+    const there = nodes.map((n) =>
+      n.id === 'free' ? { ...n, position: { x: x - 20, y: 130 } } : n,
+    );
+    // A device that is dragged onto a line has the line routed round it.
+    expect(clearDrop(there, edges, moved, connections)).toBeNull();
+    const shift = clearDrop(there, edges, moved, connections, { offLines: true });
+    expect(shift).toMatchObject({ onto: 'line', dy: 0 });
+    const left = x - 20 + shift!.dx;
+    expect(left + 40 === x - DROP_CLEARANCE || left === x + DROP_CLEARANCE).toBe(true);
+    expect(inTheWay(there, edges, moved, connections, { offLines: true })).toBe('line');
+    expect(inTheWay(there, edges, moved, connections)).toBeNull();
+  });
+
+  it('is not held off a line of a bus that was moved with it', () => {
+    // Bus 2 itself, dropped a little lower: its own line ends on it.
+    const there = nodes.map((n) => (n.id === '2' ? { ...n, position: { x: 0, y: 320 } } : n));
+    expect(
+      clearDrop(there, edges, new Set(['2']), connections, { offLines: true, atRest: connections }),
+    ).toBeNull();
+  });
+
+  it('keeps off what else it is told to: the symbol of a transformer on its line', () => {
+    const symbol = { left: 500, right: 530, top: 135, bottom: 165 };
+    const there = nodes.map((n) => (n.id === 'free' ? { ...n, position: { x: 480, y: 130 } } : n));
+    expect(clearDrop(there, edges, moved, connections)).toBeNull();
+    const shift = clearDrop(there, edges, moved, connections, { keepOff: [symbol] });
+    expect(shift).toMatchObject({ onto: 'line' });
+    const at = { x: 480 + shift!.dx, y: 130 + shift!.dy };
+    const apart =
+      at.x >= symbol.right + DROP_CLEARANCE ||
+      at.x + 40 <= symbol.left - DROP_CLEARANCE ||
+      at.y >= symbol.bottom + DROP_CLEARANCE ||
+      at.y + 40 <= symbol.top - DROP_CLEARANCE;
+    expect(apart).toBe(true);
+  });
+
+  it('is looked for a place farther away when it is given the reach, on a wider grid out there', () => {
+    // Lines side by side, too close together for the symbol to stand
+    // between two of them, over more ground than a drop looks across.
+    const far = [bus('a', -3000, -3000), bus('b', 3000, 3000), device('free', 320, -20)];
+    const wall: ConnectionEdge[] = [];
+    const routes = new Map<string, { points: [number, number][] }>();
+    for (let at = 0; at <= 680; at += 40) {
+      wall.push({ id: `line-${at}`, source: 'a', target: 'b' });
+      routes.set(`line-${at}`, {
+        points: [
+          [at, -400],
+          [at, 400],
+        ],
+      });
+    }
+    const drawnAs = { bars: new Map(), routes } as unknown as Parameters<typeof clearDrop>[3];
+    // Within the reach of a drop no place is off the lines: it stays.
+    expect(clearDrop(far, wall, moved, drawnAs, { offLines: true })).toBeNull();
+    const shift = clearDrop(far, wall, moved, drawnAs, { offLines: true, reach: 2 * DROP_REACH });
+    // Left of the first line, the nearest way out, level with the drop.
+    expect(shift).toMatchObject({ onto: 'line', dy: 0 });
+    expect(shift!.dx).toBeLessThan(-DROP_REACH);
+    expect(320 + shift!.dx + 40).toBeLessThanOrEqual(-DROP_CLEARANCE);
+    expect(320 + shift!.dx + 40).toBeGreaterThan(-DROP_CLEARANCE - 16);
+    expect(Math.abs(shift!.dx) % 16).toBe(0);
+  });
+});
+
 describe('inTheWay', () => {
   const nodes = [bus('1', 0, 100), device('load-A', 26, 30), device('load-B', 326, 30)];
   const edges = [stub('load-A', '1')];

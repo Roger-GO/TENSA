@@ -137,6 +137,7 @@ vi.mock('@xyflow/react', async () => {
       fitView: vi.fn(),
       // The screen is the diagram, one to one.
       screenToFlowPosition: (p: { x: number; y: number }) => p,
+      flowToScreenPosition: (p: { x: number; y: number }) => p,
     }),
   };
 });
@@ -574,6 +575,129 @@ describe('a draft on the diagram', () => {
     // Inspect in a right-click menu selects an element and leaves the node.
     act(() => useCaseStore.getState().setSelectedElement({ kind: 'line', idx: 'L12' }));
     await waitFor(() => expect(node('draft-1')!.selected).toBe(false));
+  });
+});
+
+describe('a line that a draft stands on', () => {
+  const routeOf = (id: string) => (edge(id)!.data!.route as { points: [number, number][] }).points;
+  /**
+   * Where a draft stands on the longest run of the route `points`: across
+   * it, and clear of the bars the route ends on.
+   */
+  function onLongestRun(points: [number, number][]): { x: number; y: number } {
+    let best: { x: number; y: number; long: number } | null = null;
+    for (let i = 1; i < points.length; i += 1) {
+      const [a, b] = [points[i - 1]!, points[i]!];
+      const long = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (best === null || long > best.long) {
+        best = { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2, long };
+      }
+    }
+    return { x: best!.x - W / 2, y: best!.y - H + 8 };
+  }
+  /** Put a draft where no drop or drag would: it came with the case, on a line. */
+  function hold(position: { x: number; y: number }): string {
+    let id = '';
+    act(() => {
+      id = useDraftsStore.getState().add(CASE, 'PQ', position)!.id;
+    });
+    return id;
+  }
+
+  it('goes round it while it stands there, and runs as before once the draft is moved off or deleted', async () => {
+    await draw();
+    await waitFor(() => expect(edge('line-L12')?.data?.route).toBeDefined());
+    const before = routeOf('line-L12');
+    const kept = useCaseStore.getState().routeOverrides;
+    // The routes in the layout a save of the system takes along.
+    const saved = () => JSON.stringify(useCaseStore.getState().diagramLayout?.branches);
+    const layout = saved();
+    expect(layout).toContain('bend_points');
+    const onLine = onLongestRun(before);
+    const first = hold(onLine);
+    await waitFor(() => expect(node(first)).toBeDefined());
+    await waitFor(() => expect(routeOf('line-L12')).not.toEqual(before));
+    expect(node(first)!.position).toEqual(onLine);
+    // Round the draft on the diagram, and nowhere else: the route the
+    // diagram keeps, and the layout a save takes along, are as they were.
+    expect(useCaseStore.getState().routeOverrides).toEqual(kept);
+    expect(saved()).toBe(layout);
+    // Moved off the line: it runs as before.
+    dragTo(first, { x: 700, y: 500 });
+    await waitFor(() => expect(routeOf('line-L12')).toEqual(before));
+    // Another on the line, then deleted.
+    const second = hold(onLine);
+    await waitFor(() => expect(routeOf('line-L12')).not.toEqual(before));
+    fireEvent.keyDown(screen.getByTestId(`rf-node-${second}`), { key: 'Delete' });
+    await waitFor(() => expect(node(second)).toBeUndefined());
+    await waitFor(() => expect(routeOf('line-L12')).toEqual(before));
+    expect(useCaseStore.getState().routeOverrides).toEqual(kept);
+    expect(saved()).toBe(layout);
+  });
+
+  it('is left as it runs by a draft that is dropped on it, or dragged onto it: the draft stands beside it', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await draw();
+    await waitFor(() => expect(edge('line-L12')?.data?.route).toBeDefined());
+    const before = routeOf('line-L12');
+    const onLine = onLongestRun(before);
+    /** Whether a draft at `at` is off every run of the line, by the room a symbol keeps. */
+    const beside = (at: { x: number; y: number }): boolean =>
+      before.every((b, i) => {
+        if (i === 0) return true;
+        const a = before[i - 1]!;
+        return (
+          at.x >= Math.max(a[0], b[0]) + 8 ||
+          at.x + W <= Math.min(a[0], b[0]) - 8 ||
+          at.y >= Math.max(a[1], b[1]) + 8 ||
+          at.y + H <= Math.min(a[1], b[1]) - 8
+        );
+      });
+    expect(beside(onLine)).toBe(false);
+    drop('PQ', onLine.x + W / 2, onLine.y + H / 2);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(beside(node('draft-1')!.position)).toBe(true);
+    expect(routeOf('line-L12')).toEqual(before);
+    expect(info).toHaveBeenCalledWith(
+      'Draft placed in the nearest free place',
+      expect.objectContaining({ description: expect.stringContaining('Drag it to move it.') }),
+    );
+    // Dragged onto the line by hand, with free ground right beside it: there.
+    info.mockClear();
+    dragTo('draft-1', onLine);
+    await waitFor(() => expect(drafts()[0]!.position).toEqual(node('draft-1')!.position));
+    expect(node('draft-1')!.position).not.toEqual(onLine);
+    expect(routeOf('line-L12')).toEqual(before);
+    expect(info).toHaveBeenCalledWith(
+      'Moved to the nearest free place',
+      expect.objectContaining({ description: expect.stringContaining('dropped on a line') }),
+    );
+  });
+
+  it('goes round it afresh from the route it keeps when a bus of the line is moved', async () => {
+    await draw();
+    await waitFor(() => expect(edge('line-L12')?.data?.route).toBeDefined());
+    const before = routeOf('line-L12');
+    const id = hold(onLongestRun(before));
+    await waitFor(() => expect(routeOf('line-L12')).not.toEqual(before));
+    // Bus 2 goes down a row: the line is the diagram's to route again, and
+    // what it keeps for it is a route for the buses where they stand now.
+    const two = node('2')!.position;
+    dragTo('2', { x: two.x, y: two.y + 96 });
+    await waitFor(() =>
+      expect(useCaseStore.getState().routeOverrides['line-L12']?.anchors.target).toEqual({
+        x: two.x,
+        y: two.y + 96,
+      }),
+    );
+    // With the draft deleted the line is drawn along that route.
+    fireEvent.keyDown(screen.getByTestId(`rf-node-${id}`), { key: 'Delete' });
+    await waitFor(() => expect(node(id)).toBeUndefined());
+    await waitFor(() =>
+      expect(routeOf('line-L12')).toEqual(
+        useCaseStore.getState().routeOverrides['line-L12']!.points,
+      ),
+    );
   });
 });
 

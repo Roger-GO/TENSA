@@ -87,8 +87,22 @@ import { StubEdge } from './edges/StubEdge';
 import { SldCanvasHint } from './SldCanvasHint';
 import { SldDraftsIndicator } from './SldDraftsIndicator';
 import { deleteAllDrafts, deleteDraft, selectDraft } from './draftActions';
-import { connectedPlace, draftPlace, settledPlaces } from './draftPlace';
-import { DRAFT_NODE_TYPE, draftBranchEdgeId, draftGraph, draftIdOf, draftRows } from './drafts';
+import { connectedPlace, draftDrop, draftPlace, settledPlaces } from './draftPlace';
+import {
+  NO_DRAFT_ROUTES,
+  draftsStand,
+  settleDraftRoutes,
+  withDraftRoutes,
+  type DraftRoutes,
+} from './draftRoutes';
+import {
+  DRAFT_NODE_SIZE,
+  DRAFT_NODE_TYPE,
+  draftBranchEdgeId,
+  draftGraph,
+  draftIdOf,
+  draftRows,
+} from './drafts';
 import { SldArrangeControls, SldSelectionBar, type ArrangeCommand } from './SldArrangeControls';
 import {
   ALIGN_LABEL,
@@ -161,6 +175,7 @@ import {
   type Point,
 } from './connections';
 import { FULL_ZOOM, fitPadding, isTooSmallToRead, locateZoom, withinPane } from './zoom';
+import { symbolBoxes } from './labels';
 import { cn } from '@/lib/cn';
 
 // The figure of the diagram is fetched when it is first asked for: its
@@ -223,6 +238,7 @@ const DROPPED_ON: Record<DropObstacle, string> = {
   'bar-bar': 'Two bars were too close to each other for a label or a line to fit between them.',
   connector: 'It was dropped on the connector of a device.',
   'bar-between': 'The bar of another bus stood between the device and its own bus.',
+  line: 'It was dropped on a line, and a draft leaves the lines as they run.',
   'no-way':
     'Where it was dropped, its connector or a line beside it had no way that is clear of the symbols and the bars.',
 };
@@ -869,7 +885,19 @@ function SldCanvasInner({
   // let go of when the drag ends: the diagram at rest is routed from the
   // routes it keeps.
   const dragRoutesRef = useRef<Map<string, NonNullable<RouteOverrides[string]>>>(new Map());
-  const picture = useMemo(() => {
+  // The routes the lines take round the drafts (`draftRoutes.ts`). A draft
+  // is a placeholder, so a line that gives way to one does so only for as
+  // long as the draft stands there: the way round it is held here, put on
+  // the edges a picture is made from, and kept nowhere else. The diagram
+  // keeps the route the line had (`routeOverrides`), which is what is
+  // drawn again once the draft is moved, deleted or added, and what the
+  // layout beside the case, an Undo and a figure are made from.
+  const [draftRoutes, setDraftRoutes] = useState<DraftRoutes>(NO_DRAFT_ROUTES);
+  const {
+    picture,
+    given: givenEdges,
+    settled,
+  } = useMemo(() => {
     const carried = dragRoutesRef.current;
     const at = new Map(nodes.map((n) => [n.id, n.position]));
     const sits = (id: string, then: { x: number; y: number } | undefined): boolean => {
@@ -881,9 +909,17 @@ function SldCanvasInner({
         Math.abs(now.y - then.y) < 0.01
       );
     };
+    // With the ways round the drafts in place while the drafts stand where
+    // those were made for; with one of them moved, from the routes the
+    // diagram keeps.
+    const given = withDraftRoutes(
+      edges as ConnectionEdge[],
+      draftRoutes,
+      draftsStand(nodes, edges as ConnectionEdge[]),
+    );
     const drawn =
       dragging && carried.size > 0
-        ? (edges as ConnectionEdge[]).map((edge) => {
+        ? given.map((edge) => {
             const route = carried.get(edge.id);
             // Back where the route it keeps was made for, a branch is drawn
             // along that one again.
@@ -905,19 +941,28 @@ function SldCanvasInner({
               data: { ...edge.data, bendPoints: route.points, bendAnchors: route.anchors },
             };
           })
-        : (edges as ConnectionEdge[]);
-    const made = pictureOf(nodes, drawn, {
-      sizes,
-      connectorStyle,
-      barLengths,
-      values: valuesShown,
-      labelWidths,
-      dragging,
-    });
+        : given;
+    const options = { sizes, connectorStyle, barLengths, values: valuesShown, labelWidths };
+    const made = pictureOf(nodes, drawn, { ...options, dragging });
     if (dragging) for (const [id, route] of made.changed) carried.set(id, route);
     else carried.clear();
-    return made;
-  }, [nodes, edges, sizes, connectorStyle, barLengths, valuesShown, labelWidths, dragging]);
+    // What of it is kept once the diagram is at rest: the routes that are
+    // the diagram's own, and the ways round the drafts.
+    const settled = dragging
+      ? null
+      : settleDraftRoutes(nodes, edges as ConnectionEdge[], made, draftRoutes, options);
+    return { picture: made, given, settled };
+  }, [
+    nodes,
+    edges,
+    sizes,
+    connectorStyle,
+    barLengths,
+    valuesShown,
+    labelWidths,
+    dragging,
+    draftRoutes,
+  ]);
   const connections = picture.connections;
   // The picture as it was last made, for a handler that asks it about a route.
   const pictureRef = useRef(picture);
@@ -932,7 +977,14 @@ function SldCanvasInner({
     atRest: typeof connections;
     /** What the picture is made with, for asking it about a place. */
     options: PictureOptions;
-  }>({ connections, sizes, atRest: connections, options: { values: false } });
+    /**
+     * The edges the picture was made from: as the diagram keeps them, with
+     * the ways round the drafts in place. What a picture is asked about
+     * with for a change that moves no draft; one that does is asked about
+     * with the edges of the graph, as the picture after it is made from.
+     */
+    edges: readonly ConnectionEdge[];
+  }>({ connections, sizes, atRest: connections, options: { values: false }, edges: givenEdges });
   useEffect(() => {
     drawnRef.current = {
       connections,
@@ -940,8 +992,18 @@ function SldCanvasInner({
       // As it stood before the drag in hand, while there is one.
       atRest: dragging ? drawnRef.current.atRest : connections,
       options: { sizes, connectorStyle, barLengths, values: valuesShown, labelWidths },
+      edges: givenEdges,
     };
-  }, [connections, sizes, dragging, connectorStyle, barLengths, valuesShown, labelWidths]);
+  }, [
+    connections,
+    sizes,
+    dragging,
+    connectorStyle,
+    barLengths,
+    valuesShown,
+    labelWidths,
+    givenEdges,
+  ]);
   // The lines and transformers that are drawn through a symbol or a bar:
   // the Tidy diagram button counts them. Not while a node is being dragged,
   // when a line passes through things on its way to where the node is
@@ -1085,18 +1147,38 @@ function SldCanvasInner({
         const standing = next.filter(stands);
         const stood = new Map(start.nodes.map((n) => [n.id, n.position]));
         const from = letGo[0] === undefined ? undefined : stood.get(letGo[0].id);
-        const graphEdges = baseGraphRef.current.edges as ConnectionEdge[];
-        const shift = clearDrop(standing, graphEdges, dropped, drawnRef.current.connections, {
+        // The lines go round the drafts as they do now, unless a draft is
+        // among what was moved: then they are drawn from the routes the
+        // diagram keeps, and round the drafts afresh.
+        const graphEdges = (
+          letGo.some((n) => n.type === DRAFT_NODE_TYPE)
+            ? baseGraphRef.current.edges
+            : drawnRef.current.edges
+        ) as ConnectionEdge[];
+        const held = {
           sizes: drawnRef.current.sizes,
           step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
           atRest: drawnRef.current.atRest,
-          clear: drawsClear(start.nodes.filter(stands), graphEdges, drawnRef.current.options),
           pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
           back:
             from === undefined
               ? undefined
               : { dx: from.x - letGo[0]!.position.x, dy: from.y - letGo[0]!.position.y },
-        });
+        };
+        const before = start.nodes.filter(stands);
+        // A draft that was dragged alone leaves the lines as they run where
+        // it can (`draftDrop`); anything else has them routed round it.
+        const shift =
+          letGo.length > 0 && letGo.every((n) => n.type === DRAFT_NODE_TYPE)
+            ? draftDrop(standing, graphEdges, dropped, drawnRef.current.connections, {
+                ...held,
+                picture: drawnRef.current.options,
+                before,
+              })
+            : clearDrop(standing, graphEdges, dropped, drawnRef.current.connections, {
+                ...held,
+                clear: drawsClear(before, graphEdges, drawnRef.current.options),
+              });
         if (shift?.back === true) {
           // Each to where it stood: the nodes of one move need not all have
           // gone the same way (a grid they snap to).
@@ -1203,10 +1285,16 @@ function SldCanvasInner({
   // every move. The next picture then finds them in place and routes
   // nothing, they are part of the arrangement an Undo puts back, and they
   // are written beside the case with the positions that led to them.
+  // A route that was made only for a line to go round a draft is not one of
+  // them (`settled`, from `settleDraftRoutes`): the diagram keeps the route
+  // the line had, and the way round the draft is held for as long as the
+  // draft stands there (`draftRoutes`).
   // How many times in a row routes were kept with nothing else changing in
   // between. Each time should leave the next picture with nothing to route;
-  // should two routes ever keep unsettling each other, this ends it.
+  // should two routes ever keep unsettling each other, this ends it. And the
+  // same count for the ways round the drafts.
   const settlingRef = useRef(0);
+  const draftRoutesRoundsRef = useRef(0);
   // Not from a graph whose positions are a render behind its layout (a
   // snapshot that was just restored, a layout that was just reset and whose
   // automatic arrangement is still on its way), and not from the edges of
@@ -1215,8 +1303,13 @@ function SldCanvasInner({
   // diagram yet, and routes kept from it would stand in for the ones the
   // layout brings.
   useEffect(() => {
-    if (dragging || !coordsAreCurrent) return;
+    if (dragging || !coordsAreCurrent || settled === null) return;
     if (baseGraph === null || edges !== baseGraph.edges) return;
+    if (settled.routes === draftRoutes) draftRoutesRoundsRef.current = 0;
+    else if (draftRoutesRoundsRef.current < SETTLING_ROUNDS) {
+      draftRoutesRoundsRef.current += 1;
+      setDraftRoutes(settled.routes);
+    }
     // The routes that were drawn by hand and are no longer: what they are
     // attached to was moved to where they do not fit.
     const drawnByHand = new Set(
@@ -1226,8 +1319,8 @@ function SldCanvasInner({
     // (the connector of a device, a line no way was found for) has none to
     // keep: `null` says so over whatever the saved layout holds, so that the
     // diagram that is written is the one that is drawn.
-    const letGo = picture.released.filter((id) => drawnByHand.has(id) && !picture.changed.has(id));
-    if (picture.changed.size === 0 && letGo.length === 0) {
+    const letGo = settled.released.filter((id) => drawnByHand.has(id) && !settled.changed.has(id));
+    if (settled.changed.size === 0 && letGo.length === 0) {
       settlingRef.current = 0;
       routesToFollowRef.current = false;
       return;
@@ -1237,7 +1330,7 @@ function SldCanvasInner({
     const next: RouteOverrides = { ...held };
     let changed = false;
     const givenUp: string[] = [];
-    for (const [id, route] of picture.changed) {
+    for (const [id, route] of settled.changed) {
       if (
         JSON.stringify(held[id]?.points ?? null) === JSON.stringify(route.points) &&
         (held[id]?.manual === true) === (route.manual === true)
@@ -1279,7 +1372,7 @@ function SldCanvasInner({
     // case that was open, and what is drawn for that moment is the new
     // system under the name of the old one.
     if (routesToFollowRef.current) persistRequestedRef.current = true;
-  }, [picture, dragging, coordsAreCurrent, baseGraph, edges]);
+  }, [settled, draftRoutes, dragging, coordsAreCurrent, baseGraph, edges]);
 
   // ---- Drafts: where they stand --------------------------------------------
   //
@@ -1379,17 +1472,22 @@ function SldCanvasInner({
           atRest: connections,
           picture: drawnRef.current.options,
           pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+          symbols: [...symbolBoxes(pictureRef.current.symbols).values()],
           given,
         });
         if (place === null) continue;
         moves.set(n.id, place.position);
         // What is asked next is asked of the place it was brought to.
         asked.set(n.id, { bus, where: placeOf(busAt, place.position) });
+        const there =
+          place.square === false
+            ? 'From there its connector reaches the bar across no line, and no line has to go round the draft.'
+            : 'From there its connector drops square onto the bar.';
         toast.info(
           place.beside ? `Draft moved next to bus ${bus}` : 'Draft moved to the nearest free place',
           {
             description: given
-              ? `From there its connector drops square onto the bar. From where it stood it would have been long or slanted, crossed other lines or stepped round something. Drag it to move it.`
+              ? `${there} From where it stood it would have been long or slanted, crossed other lines, stepped round something or had a line go round it. Drag it to move it.`
               : `From where it stood, its connector to bus ${bus} would have run over something else. Drag it to move it.`,
             duration: 8_000,
           },
@@ -1825,9 +1923,10 @@ function SldCanvasInner({
   // a drop of one by its MIME type. What is dropped is on the diagram at
   // once, as a draft (`store/drafts.ts`): it stands with its middle where the
   // pointer was let go, or at the nearest place to that where it is on
-  // nothing (`draftPlace`, which asks the picture as the drop of a device
-  // does), and it is picked, so the Inspector opens on its form. Nothing is sent to
-  // the server until the draft is added to the system from there.
+  // nothing and no line has to go round it (`draftPlace`, which asks the
+  // picture as the drop of a device does), and it is picked, so the
+  // Inspector opens on its form. Nothing is sent to the server until the
+  // draft is added to the system from there.
   const placeDraft = useCallback(
     (kind: string, centre: { x: number; y: number }): DraftElement | null => {
       if (caseKey === null) return null;
@@ -1843,6 +1942,7 @@ function SldCanvasInner({
           atRest: drawnRef.current.atRest,
           picture: drawnRef.current.options,
           pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+          symbols: [...symbolBoxes(pictureRef.current.symbols).values()],
         },
       );
       const draft = useDraftsStore.getState().add(caseKey, kind, position);
@@ -1859,21 +1959,33 @@ function SldCanvasInner({
       const { addPanelOpen, addPanelDirty, closeAddPanel } = useCaseStore.getState();
       if (addPanelOpen && !addPanelDirty) closeAddPanel();
       if (shift !== null) {
-        // What the picture refused, with the rules passed, is a line: a
-        // draft stands beside one, where a device that is dragged onto it
-        // has it routed round.
+        // A draft stands beside a line, where a device that is dragged onto
+        // one has it routed round. What the picture refused with the rules
+        // passed is a line as well: one that would have had to give way.
         const onto =
-          shift.onto === 'no-way'
+          shift.onto === 'no-way' || shift.onto === 'line'
             ? 'A line runs where it was dropped, and a draft leaves the lines as they are.'
             : DROPPED_ON[shift.onto];
         toast.info('Draft placed in the nearest free place', {
           description: `${onto} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Drag it to move it.`,
           duration: 8_000,
         });
+        // Free ground may be some way off where the lines run close
+        // together: the view goes to a draft that came to stand out of it.
+        const pane = canvasRef.current?.querySelector('.react-flow')?.getBoundingClientRect();
+        const { width, height } = DRAFT_NODE_SIZE;
+        const corners = [position, { x: position.x + width, y: position.y + height }];
+        const onScreen = corners.map((corner) => rf.flowToScreenPosition(corner));
+        if (pane !== undefined && !withinPane(onScreen, pane)) {
+          void rf.setCenter(position.x + width / 2, position.y + height / 2, {
+            zoom: rf.getZoom(),
+            duration: 250,
+          });
+        }
       }
       return draft;
     },
-    [caseKey],
+    [caseKey, rf],
   );
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     // Required to make the area a valid drop target. Without this the
@@ -2167,7 +2279,9 @@ function SldCanvasInner({
       // handed out with it, the symbol of a transformer on it, the labels
       // around it. A route that leaves something drawn over something else
       // is not kept.
-      const before = graph.edges as ConnectionEdge[];
+      // Made from the edges the picture is made from, so a line that goes
+      // round a draft does so in both.
+      const before = drawnRef.current.edges;
       const after = before.map((e) =>
         e.id === edgeId
           ? {
