@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/tooltip';
 import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
 import { DynamicContentBadge } from './DynamicContentBadge';
+import { ReloadedCaseNote } from './ReloadedCaseNote';
 import { AddElementButton } from '@/components/elements/AddElementButton';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
@@ -233,23 +234,27 @@ export function CaseNav({ className }: CaseNavProps) {
             </>
           ) : (
             <>
-              No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
-              below, drop a case file anywhere in this window, or start a blank system with a
-              component from the{' '}
-              <button
-                type="button"
-                onClick={() => showLeftSidebarTab('components')}
-                data-testid="case-nav-open-components"
-                className={cn(
-                  'text-foreground underline underline-offset-2',
-                  'hover:text-primary focus-visible:outline-none',
-                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  'rounded-[var(--radius-sm)]',
-                )}
-              >
-                Components tab
-              </button>
-              .
+              {/* After a reload: which case it closed, and a button that reopens it. */}
+              <ReloadedCaseNote placement="project" className="mb-2" />
+              <p>
+                No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
+                below, drop a case file anywhere in this window, or start a blank system with a
+                component from the{' '}
+                <button
+                  type="button"
+                  onClick={() => showLeftSidebarTab('components')}
+                  data-testid="case-nav-open-components"
+                  className={cn(
+                    'text-foreground underline underline-offset-2',
+                    'hover:text-primary focus-visible:outline-none',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                    'rounded-[var(--radius-sm)]',
+                  )}
+                >
+                  Components tab
+                </button>
+                .
+              </p>
             </>
           )}
         </div>

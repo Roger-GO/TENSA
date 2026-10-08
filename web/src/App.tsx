@@ -22,6 +22,7 @@ import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { KeptResultsNote } from '@/components/history/KeptResultsNote';
+import { ReloadedCaseNote } from '@/components/case/ReloadedCaseNote';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
@@ -39,6 +40,7 @@ import { WorkspaceDropTarget } from '@/components/shell/WorkspaceDropTarget';
 // cascade (a case change clears the previous case's PF and analysis results).
 import '@/store';
 import { useCaseStore } from '@/store/case';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
@@ -153,13 +155,17 @@ function AppInner({ children }: { children: React.ReactNode }) {
  *   ComponentDropZone — directs the user to the left sidebar AND accepts
  *   a row dragged from the Components palette, which spins up a blank system and
  *   opens that kind's add form (the build-from-scratch entry the sidebar
- *   advertises but which previously did nothing on drop).
+ *   advertises but which previously did nothing on drop). After a reload that
+ *   closed a case it says so instead, and reopens it (``ReloadedCaseNote``).
  * - case loaded → SldCanvas (which itself shows the layout-skeleton
  *   while ELK runs and the canvas once positions are known).
  */
 function CanvasSlot() {
   const caseSelection = useCaseStore((s) => s.selection);
   const loadingPath = useCaseStore((s) => s.loadingPath);
+  // After a reload that closed a case, the note that reopens it stands where
+  // the sentence for a first visit does, so the page is no taller for it.
+  const closedByReload = useReloadedCaseStore((s) => s.closed !== null);
   const { add: addComponent } = useAddComponent();
   const [dropError, setDropError] = useState<string | null>(null);
 
@@ -203,10 +209,14 @@ function CanvasSlot() {
           title="No case loaded"
           description={
             dropError ??
-            'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.'
+            (closedByReload
+              ? undefined
+              : 'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.')
           }
           emptyStateKey="app-shell-no-case"
         >
+          {/* After a reload: the case it closed, with a button that reopens it. */}
+          <ReloadedCaseNote placement="diagram" />
           {/* What the browser kept from before a reload, which needs no case. */}
           <KeptResultsNote />
         </EmptyState>

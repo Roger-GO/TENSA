@@ -19,6 +19,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useLayoutStore } from '@/store/layout';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 
@@ -84,10 +85,12 @@ describe('<CaseNav />', () => {
     useCaseStore.setState({ selection: null, topology: null, layoutSidecar: null });
     useCaseStore.getState().closeAddPanel();
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useReloadedCaseStore.setState({ closed: null });
   });
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    useReloadedCaseStore.setState({ closed: null });
   });
 
   it('renders an inline empty hint (not the full picker) when no case is loaded', () => {
@@ -118,6 +121,81 @@ describe('<CaseNav />', () => {
     );
     await user.click(within(hint).getByRole('button', { name: 'Components tab' }));
     expect(useLayoutStore.getState().leftSidebarTab).toBe('components');
+  });
+
+  it('says nothing of a reload on a first visit', () => {
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { Wrapper } = makeWrapper();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    expect(screen.queryByTestId('reloaded-case-note-project')).not.toBeInTheDocument();
+  });
+
+  it('after a reload, names the case the reload closed and reopens it from the card', async () => {
+    // A reload starts an empty session, so the card read "No case loaded" as
+    // on a first visit and the case had to be found again among the saved ones.
+    useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
+    useSessionStore.setState({ sessionId: parseSessionId('sess-new') });
+    const loads: unknown[] = [];
+    fetchSpy.mockImplementation((...args: unknown[]) => {
+      const input = args[0] as RequestInfo | URL;
+      const init = args[1] as RequestInit | undefined;
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (url.endsWith('/api/workspace/files')) {
+        return Promise.resolve(
+          jsonResponse({
+            files: [
+              {
+                name: 'kundur_full.xlsx',
+                size_bytes: 1024,
+                modified_iso: '2026-05-01T00:00:00Z',
+                format: 'xlsx',
+              },
+            ],
+          }),
+        );
+      }
+      if (url.endsWith('/api/sessions/sess-new/case') && init?.method === 'POST') {
+        loads.push(JSON.parse(String(init.body)));
+        return Promise.resolve(jsonResponse(loadedTopology('pre-setup')));
+      }
+      return new Promise<Response>(() => {});
+    });
+    const { Wrapper } = makeWrapper();
+    const user = userEvent.setup();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    const hint = screen.getByTestId('case-nav-empty');
+    expect(within(hint).getByTestId('reloaded-case-note-project')).toHaveTextContent(
+      'A reload of the page closes the open case. kundur_full.xlsx was open.',
+    );
+    // The ways to another case are still there, under the note.
+    expect(hint).toHaveTextContent('No case loaded. Pick a file from Saved cases below');
+
+    await user.click(within(hint).getByRole('button', { name: 'Reopen kundur_full.xlsx' }));
+
+    expect(await screen.findByText('Loaded case')).toBeInTheDocument();
+    expect(screen.getByText('kundur_full.xlsx')).toBeInTheDocument();
+    expect(loads).toEqual([{ primary_path: 'kundur_full.xlsx', addfiles: null }]);
+    expect(screen.queryByTestId('reloaded-case-note-project')).not.toBeInTheDocument();
+  });
+
+  it('keeps the note of a reload away while a case is being opened', () => {
+    useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
+    useCaseStore.setState({ loadingPath: parseWorkspacePath('wscc9.xlsx') });
+    try {
+      fetchSpy.mockImplementation(() => new Promise(() => {}));
+      const { Wrapper } = makeWrapper();
+
+      render(<CaseNav />, { wrapper: Wrapper });
+
+      expect(screen.getByTestId('case-nav-empty')).toHaveTextContent('Loading wscc9.xlsx');
+      expect(screen.queryByTestId('reloaded-case-note-project')).not.toBeInTheDocument();
+    } finally {
+      useCaseStore.setState({ loadingPath: null });
+    }
   });
 
   it('says which case is loading, instead of "No case loaded", while a load runs', () => {

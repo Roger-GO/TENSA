@@ -17,7 +17,8 @@
  *   The finished runs themselves stay, and so do the power flows kept for
  *   comparison: they are results only this tab holds, and comparing a run on
  *   one case with a run on a modified copy is a normal workflow. They go when
- *   the session ends.
+ *   the session ends. The tab's mark of the case file it has open follows the
+ *   change too (`reloadedCase.ts`).
  * - When `pflow` clears (case change, reload, run reset), the EIG / CPF / SE
  *   results clear with it: they were computed from that operating point.
  *
@@ -47,6 +48,7 @@ import { useJobsStore } from './jobs';
 import { useMessagesStore } from './messages';
 import { useAnalyzeStore } from './analyze';
 import { useUiStore } from './ui';
+import { useReloadedCaseStore } from './reloadedCase';
 
 // Re-export slices so consumers have one import surface.
 export { useSessionStore } from './session';
@@ -146,6 +148,9 @@ export function wireStoreCascade(): void {
       // The ANDES variables picked for the next run, and the devices its
       // frequency controllers command, are the old case's.
       useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
+      // The tab's mark of the case file it has open, which is what a reload
+      // of the page reads to say which case it closed.
+      useReloadedCaseStore.getState().follow(next);
     }
     prevSelection = next;
   });

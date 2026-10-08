@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '@/App';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useRunsStore } from '@/store/runs';
 import { useSnapshotStore } from '@/store/snapshot';
 import { parseWorkspacePath } from '@/api/types';
@@ -14,6 +15,7 @@ describe('App scaffold', () => {
     useCaseStore.getState().setLoadingPath(null);
     usePflowStore.getState().clearPflow();
     useRunsStore.getState().clearRuns();
+    useReloadedCaseStore.setState({ closed: null });
   });
 
   it('mounts the AppShell with the top bar landmark', () => {
@@ -80,6 +82,40 @@ describe('App scaffold', () => {
     // The sidebar has the tabs the page names, and is on the one with the case files.
     expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Components' })).toBeInTheDocument();
+  });
+
+  it('says on the "No case loaded" page which case a reload closed, with a button that reopens it', () => {
+    // A reload starts an empty session. The page said nothing of the case that
+    // had been open, so it read as a first visit and the case as lost.
+    useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
+    render(<App />);
+    const page = screen
+      .getAllByTestId('empty-state')
+      .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-no-case')!;
+    expect(within(page).getByText('No case loaded')).toBeInTheDocument();
+    expect(within(page).getByTestId('reloaded-case-note-diagram')).toHaveTextContent(
+      'A reload of the page closes the open case. kundur_full.xlsx was open.',
+    );
+    expect(
+      within(page).getByRole('button', { name: 'Reopen kundur_full.xlsx' }),
+    ).toBeInTheDocument();
+    // The note stands where the sentence for a first visit does.
+    expect(page).not.toHaveTextContent('Pick a case file in the Project tab');
+    // The card of the sidebar says the same, where the case is looked for.
+    expect(screen.getByTestId('reloaded-case-note-project')).toBeInTheDocument();
+  });
+
+  it('wires the mark a reload reads: it follows the open case, and goes when the case is closed', () => {
+    // As for the cascade above: importing ``App`` has to be enough.
+    useCaseStore
+      .getState()
+      .setCase({ primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] });
+    expect(JSON.parse(window.sessionStorage.getItem('tensa:open-case-v1')!)).toEqual({
+      primaryPath: 'kundur_full.xlsx',
+      addfiles: [],
+    });
+    useCaseStore.getState().clearCase();
+    expect(window.sessionStorage.getItem('tensa:open-case-v1')).toBeNull();
   });
 
   it('has no such note while nothing is kept', () => {
