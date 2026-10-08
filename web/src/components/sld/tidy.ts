@@ -36,11 +36,13 @@
  *   through none of them, its own two included.
  * - No two routes share a run or run closer than `NEAR_LINE` side by side,
  *   none turns on another, and none passes through the corner of another:
- *   where two meet, they cross at a right angle. A crossing costs as much
- *   as a detour of `CROSS_COST`, and a bend as much as one of `BEND_COST`,
- *   so a route takes the way with the fewest of both that is not much
- *   longer. A device connector counts as a route that is already there:
- *   a route crosses it, and never runs along it.
+ *   where two meet, they cross at a right angle. Two do not turn corner to
+ *   corner either, each just short of the other, where the two bends would
+ *   read as one crossing. A crossing costs as much as a detour of
+ *   `CROSS_COST`, and a bend as much as one of `BEND_COST`, so a route
+ *   takes the way with the fewest of both that is not much longer. A device
+ *   connector counts as a route that is already there: a route crosses it,
+ *   never runs along it, and passes no bend of it nearer than `BEND_CLEAR`.
  * - The routes that are to stay as they are (`TidyOptions.keep`) are there
  *   before the first search: the rest are routed around them, at their own
  *   taps, and none of the kept ones is touched. That is how the canvas
@@ -85,11 +87,13 @@
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
+  BEND_CLEAR,
   RUN_CLEARANCE,
   SLIDE_CLEARANCE,
   TAP_INSET,
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
+  distanceToRun,
   faceSpan,
   layoutConnections,
   runsIn,
@@ -640,16 +644,6 @@ class Frontier {
   }
 }
 
-/** How far `p` is from the run from `a` to `b`. */
-function distanceToRun(p: Point, a: Point, b: Point): number {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  const length = dx * dx + dy * dy;
-  const t =
-    length === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length));
-  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
-}
-
 /** Whether the run from `a` to `b` and the run from `p` to `q` cross, each at a point inside it. */
 function runsCross(a: Point, b: Point, p: Point, q: Point): boolean {
   const side = (u: Point, v: Point, w: Point): number =>
@@ -1187,9 +1181,33 @@ export function tidyRoutes(
       }
     }
   };
+  /**
+   * The grid edge to the right of a point, and the one below it, passes a
+   * bend of such a line nearer than a line may come to one (`BEND_CLEAR`):
+   * a route that ran there would be drawn onto the corner, and read as
+   * meeting the line at it.
+   */
+  const wireTurnH = new Uint8Array(size);
+  const wireTurnV = new Uint8Array(size);
+  /** Shut the grid edges that pass the bend at `at` of a line that is no route of the grid. */
+  const wireTurn = (at: Point): void => {
+    const c0 = Math.max(0, colTo(at[0] - BEND_CLEAR));
+    const c1 = Math.min(nC - 1, colFrom(at[0] + BEND_CLEAR));
+    const r0 = Math.max(0, rowTo(at[1] - BEND_CLEAR));
+    const r1 = Math.min(nR - 1, rowFrom(at[1] + BEND_CLEAR));
+    for (let r = r0; r <= r1; r += 1) {
+      for (let c = c0; c <= c1; c += 1) {
+        const n = r * nC + c;
+        const here: Point = [xs[c]!, ys[r]!];
+        if (c < c1 && distanceToRun(at, here, [xs[c + 1]!, ys[r]!]) < BEND_CLEAR) wireTurnH[n] = 1;
+        if (r < r1 && distanceToRun(at, here, [xs[c]!, ys[r + 1]!]) < BEND_CLEAR) wireTurnV[n] = 1;
+      }
+    }
+  };
   for (const stub of stubs) {
     const points = base.routes.get(stub.id)?.points ?? [];
     for (let i = 1; i < points.length; i += 1) wire(points[i - 1]!, points[i]!);
+    for (let i = 1; i < points.length - 1; i += 1) wireTurn(points[i]!);
   }
 
   // ---- room for the symbols of the transformers ----
@@ -1329,6 +1347,13 @@ export function tidyRoutes(
   /** The same for the rows right over and under it. */
   const besideClearH = (c: number, r: number): boolean =>
     rws.near[r]!.every((r3) => occH[r3 * nC + c] === 0 && occBend[r3 * nC + c] === 0);
+  /**
+   * Whether no route turns right beside the point at `c`, `r` on a line of
+   * the grid that is neither its row nor its column: a bend there and one
+   * here would stand corner to corner.
+   */
+  const cornerClear = (c: number, r: number): boolean =>
+    rws.near[r]!.every((r3) => cols.near[c]!.every((c3) => occBend[r3 * nC + c3] === 0));
 
   /**
    * Whether a tap at `x` on the bar of `bus` keeps its distance from every
@@ -1412,6 +1437,7 @@ export function tidyRoutes(
             !forAnother(n, self) &&
             wireNode[n] === 0 &&
             wireBesideV[n] === 0 &&
+            wireTurnV[Math.min(n, n - step * nC)] === 0 &&
             occV[n] === 0 &&
             occBend[n] === 0 &&
             (r === row || occH[n] === 0);
@@ -1547,6 +1573,7 @@ export function tidyRoutes(
             !forAnother(n, self) &&
             wireNode[n] === 0 &&
             wireBesideV[n] === 0 &&
+            wireTurnV[n - nC] === 0 &&
             occV[n] === 0 &&
             occBend[n] === 0 &&
             besideClearV(c, r);
@@ -1554,6 +1581,7 @@ export function tidyRoutes(
           path.push(n);
         }
         if (!clear || cost === Infinity) continue;
+        if (wireTurnV[(lower.row - 1) * nC + c] !== 0) continue;
         if (throughSymbol(upper.row * nC + c, lower.row * nC + c, self)) continue;
         const down = upper === a;
         if (!down) path.reverse();
@@ -1589,7 +1617,8 @@ export function tidyRoutes(
       const r = (n / nC) | 0;
       return (
         rws.near[r]!.every((r3) => untouched(r3 * nC + c)) &&
-        cols.near[c]!.every((c3) => untouched(r * nC + c3))
+        cols.near[c]!.every((c3) => untouched(r * nC + c3)) &&
+        cornerClear(c, r)
       );
     };
     // No route runs along the line of a bar, its own two included.
@@ -1827,6 +1856,7 @@ export function tidyRoutes(
           if (!rowOpen(r) || onLabel(n) || onLabel(n2)) continue;
           if (tipZone[n] !== 0 || tipZone[n2] !== 0 || wireBesideH[n2] !== 0) continue;
           if (edgeH[edge] !== 0 || occH[n2] !== 0 || occBend[n2] !== 0) continue;
+          if (wireTurnH[edge] !== 0) continue;
           const ec = edge % nC;
           if (rws.near[r]!.some((r3) => edgeH[r3 * nC + ec] !== 0)) continue;
           if (!besideClearH(c2, r)) continue;
@@ -1837,6 +1867,7 @@ export function tidyRoutes(
         } else {
           if (wireBesideV[n2] !== 0) continue;
           if (edgeV[edge] !== 0 || occV[n2] !== 0 || occBend[n2] !== 0) continue;
+          if (wireTurnV[edge] !== 0) continue;
           const er = (edge / nC) | 0;
           if (cols.near[c]!.some((c3) => edgeV[er * nC + c3] !== 0)) continue;
           if (!besideClearV(c, r2)) continue;
@@ -2039,6 +2070,10 @@ export function tidyRoutes(
       const upright = Math.abs(p[0] - q[0]) <= EPS;
       if (!upright && Math.abs(p[1] - q[1]) > EPS) {
         wire(p, q);
+        // The bends it begins and ends in are passed no nearer than a bend
+        // of a device connector is.
+        if (i > 1) wireTurn(p);
+        if (i < points.length - 1) wireTurn(q);
         continue;
       }
       const from = nodeAt(upright ? [p[0], Math.min(p[1], q[1])] : [Math.min(p[0], q[0]), p[1]]);

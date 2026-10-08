@@ -9,7 +9,7 @@
  * checker, drawn whole.
  */
 import { describe, expect, it } from 'vitest';
-import type { Point } from '@/components/sld/connections';
+import { BEND_CLEAR, type Point } from '@/components/sld/connections';
 import {
   LINE_GAP,
   countCrossings,
@@ -61,18 +61,20 @@ describe('findOverlaps: two lines', () => {
         ],
       }),
     ).toEqual(['line-line a b']);
-    // End to end they share nothing.
-    expect(
+    // End to end they share no stretch, and with nothing between the two
+    // ends they still read as one line.
+    const below = (from: number): string[] =>
       check({
         lines: [
           a,
           line('b', [
-            [0, 100.5],
+            [0, from],
             [0, 200],
           ]),
         ],
-      }),
-    ).toEqual([]);
+      });
+    expect(below(100.5)).toEqual(['line-line a b']);
+    expect(below(100 + BEND_CLEAR)).toEqual([]);
   });
 
   it('finds two runs side by side nearer than the gap, and none at the gap', () => {
@@ -186,6 +188,128 @@ describe('findOverlaps: two lines', () => {
             [120, 70],
           ]),
         ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('finds a bend right beside another line, short of it or just past it, and none a clear way off', () => {
+    const upright = line('a', [
+      [48, 0],
+      [48, 200],
+    ]);
+    // The point of a `<` at `x`: with its corner by the upright it reads as
+    // a line that joins it there, a `K`.
+    const corner = (x: number): string[] =>
+      describeOverlaps(
+        findOverlaps({
+          lines: [
+            upright,
+            line('b', [
+              [160, 30],
+              [x, 100],
+              [160, 170],
+            ]),
+          ],
+          bars: [],
+          boxes: [],
+        }),
+      );
+    expect(corner(50)).toEqual(['line-line: a / b: the second turns 2.0 px from the other']);
+    // Past it by a pixel the two runs cross it, one right after the other.
+    expect(corner(47)).toEqual(['line-line: a / b: the second turns 1.0 px from the other']);
+    expect(corner(48 + BEND_CLEAR - 1)).toHaveLength(1);
+    expect(corner(48 - BEND_CLEAR + 1)).toHaveLength(1);
+    // A clear way short of it, and a clear way past it, where it crosses twice.
+    expect(corner(48 + BEND_CLEAR)).toEqual([]);
+    expect(corner(48 - BEND_CLEAR)).toEqual([]);
+    expect(corner(20)).toEqual([]);
+  });
+
+  it('finds two lines that turn corner to corner, and says which one where only one turns', () => {
+    // Each turns just short of the other: together the two bends read as a crossing.
+    expect(
+      describeOverlaps(
+        findOverlaps({
+          lines: [
+            line('a', [
+              [0, 103],
+              [96, 103],
+              [96, 200],
+            ]),
+            line('b', [
+              [97.5, 0],
+              [97.5, 100],
+              [200, 100],
+            ]),
+          ],
+          bars: [],
+          boxes: [],
+        }),
+      ),
+    ).toEqual(['line-line: a / b: the first turns 3.4 px from the other']);
+    // Corner to corner, a clear way apart.
+    expect(
+      check({
+        lines: [
+          line('a', [
+            [0, 106],
+            [90, 106],
+            [90, 200],
+          ]),
+          line('b', [
+            [97.5, 0],
+            [97.5, 100],
+            [200, 100],
+          ]),
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('finds an end that is on no bar right beside another line, and holds an end on a bar to the taps instead', () => {
+    const b = bar('bus', 0, 92, 103);
+    const passing = line('a', [
+      [-40, 60],
+      [140, 60],
+    ]);
+    // The connector of a device, out of the face of its symbol at 46, 64.
+    const connector = (from: number): DrawnLine =>
+      line(
+        'b',
+        [
+          [46, from],
+          [46, 103],
+        ],
+        'device',
+        'bus',
+      );
+    expect(
+      describeOverlaps(findOverlaps({ lines: [passing, connector(64)], bars: [b], boxes: [] })),
+    ).toEqual(['line-line: a / b: the second ends 4.0 px from the other']);
+    expect(check({ lines: [passing, connector(60 + BEND_CLEAR)], bars: [b] })).toEqual([]);
+    // The end of a line on its bar is beside the lines that end next to it
+    // there: what holds it is the spacing of the taps.
+    expect(
+      check({
+        lines: [
+          line(
+            'a',
+            [
+              [40, 103],
+              [40, 0],
+            ],
+            'bus',
+          ),
+          line(
+            'b',
+            [
+              [54, 103],
+              [54, 200],
+            ],
+            'bus',
+          ),
+        ],
+        bars: [b],
       }),
     ).toEqual([]);
   });

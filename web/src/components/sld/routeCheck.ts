@@ -9,7 +9,11 @@
  * in words for the user, or `null` when nothing does:
  *
  * - another line it would lie on, run too close beside, or end or turn on
- *   (two lines that cross are a crossing, and no overlap);
+ *   (two lines that cross are a crossing, and no overlap), and one it would
+ *   turn right beside: a bend of it keeps as far from every other line as
+ *   two lines side by side keep from each other (`HAND_BEND_CLEARANCE`),
+ *   and it keeps as far from the bends of the others, so that the corner of
+ *   one is never drawn onto the other and read as a junction of the two;
  * - the end of another line on the same bar, nearer than the taps keep,
  *   and the dot of such an end that a run of it would pass over or right
  *   beside (`HAND_TAP_CLEARANCE` from its middle);
@@ -54,6 +58,7 @@ import {
   TAP_DOT_RADIUS,
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
+  distanceToRun,
   labelBoxAt,
   onOwnSymbol,
   routeFolds,
@@ -64,6 +69,7 @@ import {
 } from './connections';
 import { placeTransformerSymbols, type LabelNode } from './labels';
 import {
+  LINE_GAP,
   findOverlaps,
   lengthInside,
   type DrawnBar,
@@ -114,6 +120,16 @@ export const HAND_LABEL_CLEARANCE = 4;
  * The overlap checker asks for less (`TAP_CLEAR`).
  */
 export const HAND_TAP_CLEARANCE = TAP_SPACING - TAP_DOT_RADIUS;
+
+/**
+ * The room a bend of a route that is moved by hand keeps to every other
+ * line, and the route to every bend of another line: what two lines side by
+ * side keep between them (`LINE_GAP`). A bend nearer than that to a line it
+ * does not cross is a corner drawn onto that line, or right beside it, and a
+ * line that crosses another does so clear of the bends of both. The overlap
+ * checker asks for less (`BEND_CLEAR`).
+ */
+export const HAND_BEND_CLEARANCE = LINE_GAP;
 
 /** Two distances closer than this are the same. */
 const EPS = 0.5;
@@ -168,16 +184,28 @@ function roomKept(
 function distanceTo(points: readonly Point[], at: Point): number {
   let least = Infinity;
   for (let k = 1; k < points.length; k += 1) {
-    const [a, b] = [points[k - 1]!, points[k]!];
-    const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
-    const length = ux * ux + uy * uy;
-    const t =
-      length < 1e-9
-        ? 0
-        : Math.min(1, Math.max(0, ((at[0] - a[0]) * ux + (at[1] - a[1]) * uy) / length));
-    least = Math.min(least, Math.hypot(a[0] + t * ux - at[0], a[1] + t * uy - at[1]));
+    least = Math.min(least, distanceToRun(at, points[k - 1]!, points[k]!));
   }
   return least;
+}
+
+/**
+ * How near the bends of the route `points` come to the route `other`, and
+ * the bends of `other` to `points`: the least of each, `Infinity` for a
+ * route that has no bend.
+ */
+function bendGaps(
+  points: readonly Point[],
+  other: readonly Point[],
+): { mine: number; theirs: number } {
+  let [mine, theirs] = [Infinity, Infinity];
+  for (let k = 1; k + 1 < points.length; k += 1) {
+    mine = Math.min(mine, distanceTo(other, points[k]!));
+  }
+  for (let k = 1; k + 1 < other.length; k += 1) {
+    theirs = Math.min(theirs, distanceTo(points, other[k]!));
+  }
+  return { mine, theirs };
 }
 
 function boxOf(points: readonly Point[], by: number): Rect {
@@ -254,10 +282,18 @@ function namer(
 function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): string {
   const other = nameOf(overlap.a === id ? overlap.b : overlap.a);
   switch (overlap.kind) {
-    case 'line-line':
+    case 'line-line': {
       if (overlap.detail.startsWith('lie on')) return `it would lie on ${other}`;
       if (overlap.detail.startsWith('run')) return `it would run too close beside ${other}`;
-      return `it would end or turn on ${other}`;
+      // One right beside where the other turns, or leaves its symbol.
+      const beside = /^the (first|second) (turns|ends)/.exec(overlap.detail);
+      if (beside === null) return `it would end or turn on ${other}`;
+      const own = (beside[1] === 'first' ? overlap.a : overlap.b) === id;
+      if (beside[2] === 'turns') return own ? BEND_NEAR(other) : NEAR_BEND(other);
+      return own
+        ? `it would leave its symbol too close to ${other}`
+        : `it would pass too close to where ${other} leaves its symbol`;
+    }
     case 'shared-tap':
       return `its end would be too close to the end of ${other}`;
     case 'line-tap':
@@ -276,6 +312,10 @@ function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): 
       return `it would be on ${other}`;
   }
 }
+
+/** What a route is refused for by a bend of it that is too near the line `other`, and by a bend of `other` it is too near. */
+const BEND_NEAR = (other: string): string => `a bend of it would be too close to ${other}`;
+const NEAR_BEND = (other: string): string => `it would pass too close to a bend of ${other}`;
 
 /** What the connector of a device is refused for by its own symbol (`onOwnSymbol`). */
 const OWN_SYMBOL: Record<NonNullable<ReturnType<typeof onOwnSymbol>>, string> = {
@@ -422,6 +462,17 @@ export function routeChecker<E extends ConnectionEdge>(
     }
     for (const tap of taps) tap.room = Math.min(tap.room, distanceTo(now, tap.at));
   }
+  // The bends: its own to every other line, and those of the others to it.
+  // Where one is nearer than that as the lines are drawn now, as near as it is.
+  const bendRoom = new Map<string, number>();
+  if (now !== undefined) {
+    const around = boxOf(now, REACH);
+    for (const { line, box } of others) {
+      if (!meet(box, around)) continue;
+      const { mine, theirs } = bendGaps(now, line.points);
+      bendRoom.set(line.id, Math.min(HAND_BEND_CLEARANCE, mine, theirs));
+    }
+  }
   /** What the line through `points` would pass too near, in words; `null` when it keeps its room. */
   const tooNear = (points: readonly Point[]): string | null => {
     const around = boxOf(points, REACH);
@@ -445,6 +496,14 @@ export function routeChecker<E extends ConnectionEdge>(
       if (distanceTo(points, at) < room - EPS) {
         return `it would pass too close to the end of ${nameOf(line)} on the bar`;
       }
+    }
+    for (const { line, box } of others) {
+      if (!meet(box, around)) continue;
+      const room = bendRoom.get(line.id) ?? HAND_BEND_CLEARANCE;
+      if (room <= EPS) continue;
+      const { mine, theirs } = bendGaps(points, line.points);
+      if (mine < room - EPS) return BEND_NEAR(nameOf(line.id));
+      if (theirs < room - EPS) return NEAR_BEND(nameOf(line.id));
     }
     return null;
   };

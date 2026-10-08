@@ -133,6 +133,15 @@ export const TAP_CLEAR = TAP_DOT_RADIUS + 2;
 export const BAR_CLEAR = 6;
 
 /**
+ * How near a bend of a line, or an end of it that is on no bar, may come to
+ * another line: nearer, the corner is drawn onto that line and the two read
+ * as meeting there, which two lines that cross do not. What the overlap
+ * checker holds every line to (`overlapCheck.ts`), and what the router keeps
+ * a route from the bends of the lines it goes round (`tidy.ts`).
+ */
+export const BEND_CLEAR = 6;
+
+/**
  * The least angle, in degrees, at which a line comes to the bar it ends on,
  * and at which the connector of a device leaves the face of its symbol.
  * Flatter than this, the line runs along the bar or the face before it gets
@@ -690,6 +699,21 @@ export function bringAlong(
   if (final === 'upright') out[last - 1]![0] += byTarget[0];
   else if (final === 'level') out[last - 1]![1] += byTarget[1];
   return out;
+}
+
+/** How far the point `p` is from the run from `a` to `b`, where the run is nearest to it. */
+export function distanceToRun(
+  p: readonly [number, number],
+  a: readonly [number, number],
+  b: readonly [number, number],
+): number {
+  const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+  const length = ux * ux + uy * uy;
+  const t =
+    length < 1e-9
+      ? 0
+      : Math.min(1, Math.max(0, ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) / length));
+  return Math.hypot(a[0] + t * ux - p[0], a[1] + t * uy - p[1]);
 }
 
 /** The part of the run from `a` to `b` that is inside `rect`, as a length; 0 when it stays outside. */

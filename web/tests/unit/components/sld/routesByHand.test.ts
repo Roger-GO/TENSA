@@ -1023,8 +1023,10 @@ describe('planTidy: a re-layout and the routes drawn by hand', () => {
       [48, 120],
       [48, 211],
     ];
+    // Far enough off for its connector, one slanted run to the tip of the
+    // bar, to pass no bend of the line.
     const graph = buildGraph(topology, coords, {
-      dragOverrides: { [LOAD_ID]: { x: 320, y: -200 } },
+      dragOverrides: { [LOAD_ID]: { x: 320, y: -260 } },
       bendPoints: new Map([['line-L1', through]]),
       bendAnchors: new Map([['line-L1', { source: coords['1'], target: coords['2'] }]]),
       bendManual: new Set(['line-L1']),

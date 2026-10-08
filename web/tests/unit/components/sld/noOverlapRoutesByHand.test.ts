@@ -17,7 +17,11 @@
  * routes that were found drawn along their bar, over the dot of the end
  * beside their own, or folded into a spike off the corner of their symbol
  * are refused where they were let by, and no bend that is moved alone or
- * taken out leaves one like them.
+ * taken out leaves one like them. No bend of it is let go on another line
+ * or right beside one either (`HAND_BEND_CLEARANCE`), where the corner would
+ * read as the two lines meeting: the two routes that were found drawn that
+ * way come to stand clear of the line beside them, and a layout that was
+ * saved with one has that line routed again around the bend.
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `noOverlap.test.ts`.
@@ -29,6 +33,8 @@ import {
   lengthInside,
   BAR_LENGTH,
   BAR_THICKNESS,
+  BEND_CLEAR,
+  distanceToRun,
   meetsBarFlat,
   onOwnSymbol,
   routeFolds,
@@ -36,7 +42,12 @@ import {
   type Point,
   type Rect,
 } from '@/components/sld/connections';
-import { HAND_CLEARANCE, HAND_TAP_CLEARANCE, routeChecker } from '@/components/sld/routeCheck';
+import {
+  HAND_BEND_CLEARANCE,
+  HAND_CLEARANCE,
+  HAND_TAP_CLEARANCE,
+  routeChecker,
+} from '@/components/sld/routeCheck';
 import {
   leavesKink,
   removeBend,
@@ -53,6 +64,7 @@ import {
   overlapsOf,
   routedByHand,
   routesByHand,
+  settled,
   tidied,
   type Diagram,
 } from '../../helpers/diagramStates';
@@ -116,6 +128,34 @@ function near(points: readonly Point[], box: Rect, room: number): boolean {
   return points.some((p, k) => k > 0 && lengthInside(points[k - 1]!, p, reach) > 0);
 }
 
+/** How far the place `at` is from the route `points`, where the route is nearest to it. */
+function offRoute(points: readonly Point[], at: Point): number {
+  return Math.min(...points.slice(1).map((b, k) => distanceToRun(at, points[k]!, b)));
+}
+
+/**
+ * How near the bends of the route `points` come to the route `other`, or the
+ * bends of `other` to `points`, whichever is nearer: `Infinity` where
+ * neither has a bend.
+ */
+function bendGap(points: readonly Point[], other: readonly Point[]): number {
+  return Math.min(
+    ...points.slice(1, -1).map((bend) => offRoute(other, bend)),
+    ...other.slice(1, -1).map((bend) => offRoute(points, bend)),
+  );
+}
+
+/** The routes `diagram` is drawn with, by edge id: worked out once for each diagram. */
+const routesDrawn = new WeakMap<Diagram, ReadonlyMap<string, { points: Point[] }>>();
+function routesOf(diagram: Diagram): ReadonlyMap<string, { points: Point[] }> {
+  let routes = routesDrawn.get(diagram);
+  if (routes === undefined) {
+    routes = drawn(diagram).connections.routes;
+    routesDrawn.set(diagram, routes);
+  }
+  return routes;
+}
+
 /**
  * What is wrong with the route `points`, which a move made of `route`, as a
  * line read by itself: nothing, for one the editor lets go of.
@@ -140,6 +180,15 @@ function shapeFaults(
     // Where it passed nearer than that already, it may stay as near.
     if (near(points, box, HAND_CLEARANCE) && !near(route, box, HAND_CLEARANCE)) {
       faults.push(`passes nearer than ${HAND_CLEARANCE} to ${id}`);
+    }
+  }
+  // No bend of it on another line or right beside one, and none of another
+  // line beside it: nearer than it was before the move, that is.
+  for (const [id, other] of routesOf(diagram)) {
+    if (id === edge.id) continue;
+    const gap = bendGap(points, other.points);
+    if (gap < HAND_BEND_CLEARANCE - 0.5 && gap < bendGap(route, other.points) - 0.5) {
+      faults.push(`has a bend ${gap.toFixed(1)} from ${id}, or passes one of its bends that near`);
     }
   }
   return faults;
@@ -535,6 +584,174 @@ describe('a line moved by hand ends on its own tap, and leaves its symbol by the
       // Bends are moved, and the ones that would leave the line on its bar are not taken out.
       expect(kept).toBeGreaterThan(0);
       expect(refused).toBeGreaterThan(0);
+    },
+    240_000,
+  );
+});
+
+/**
+ * `diagram` as a layout that was saved with the route of the edge `id`
+ * drawn by hand through `points` opens: the route is the user's whatever it
+ * is on, and the diagram draws the rest around it.
+ */
+function savedByHand(diagram: Diagram, id: string, points: readonly Point[]): Diagram {
+  const at = new Map(diagram.nodes.map((n) => [n.id, n.position]));
+  const edges = diagram.edges.map((edge) =>
+    edge.id !== id
+      ? edge
+      : {
+          ...edge,
+          data: {
+            ...edge.data,
+            bendPoints: points.map(([x, y]): [number, number] => [x, y]),
+            bendAnchors: {
+              source: { ...at.get(edge.source)! },
+              target: { ...at.get(edge.target)! },
+            },
+            bendManual: true,
+          },
+        },
+  );
+  return settled({ ...diagram, edges });
+}
+
+describe('a bend of a line moved by hand keeps off the lines beside it', () => {
+  it('WSCC 9: a bend pulled out of Line_8 is not put on Line_3, short of it or just past it', async () => {
+    const diagram = await opened(WSCC9);
+    const { edge, route, ends, check } = checkOf(diagram, 'line-Line_8');
+    const beside = routesOf(diagram).get('line-Line_3')!.points;
+    // Both drop square from the bar of one bus to the next, side by side.
+    expect(route).toHaveLength(2);
+    expect(beside).toHaveLength(2);
+    expect(beside[0]![0]).toBe(beside[1]![0]);
+    const x = beside[0]![0];
+    const middle = Math.round((route[0]![1] + route[1]![1]) / 2);
+    const pointed = (to: number): Point[] => [route[0]!, [to, middle], route[1]!];
+    // The point of the `<` two short of the other line, and one past it: a `K`.
+    expect(check(pointed(x + 2))).toBe('a bend of it would be too close to line Line_3');
+    expect(check(pointed(x - 1))).toBe('a bend of it would be too close to line Line_3');
+    expect(check(pointed(x + HAND_BEND_CLEARANCE))).toBeNull();
+
+    // Pulled there by its handle, as a drag of the + beside the run does,
+    // it comes to stand as far short of the line as two lines side by side keep.
+    const handle: Point = [route[0]![0] + 13, middle];
+    const pulled = settleEdit(
+      route,
+      { kind: 'pull', index: 0, at: handle },
+      [x + 2 - handle[0], 0],
+      ends,
+      check,
+    )!;
+    expect(pulled.refused).toBe('a bend of it would be too close to line Line_3');
+    expect(pulled.points).toEqual(pointed(x + HAND_BEND_CLEARANCE));
+    const kept = routedByHand(diagram, edge.id, pulled.points)!;
+    expect(kept).not.toBeNull();
+    expect(bothWays(kept)).toEqual([]);
+    // The line beside it stays where it was: it did not have to give way.
+    expect(routesOf(kept).get('line-Line_3')!.points).toEqual(beside);
+
+    // The bend moved alone to one past the line, as a drag with Shift held
+    // does: it goes on to where both its runs cross the line clear of it.
+    const again = checkOf(kept, edge.id);
+    const from = again.route[1]!;
+    const moved = settleEdit(
+      again.route,
+      { kind: 'bend', index: 1 },
+      [x - 1 - from[0], 0],
+      again.ends,
+      again.check,
+      { free: true },
+    )!;
+    expect(moved.refused).toBe('a bend of it would be too close to line Line_3');
+    expect(bendGap(moved.points, beside)).toBeGreaterThanOrEqual(HAND_BEND_CLEARANCE - 0.5);
+    const crossed = routedByHand(kept, edge.id, moved.points)!;
+    expect(crossed).not.toBeNull();
+    expect(bothWays(crossed)).toEqual([]);
+  }, 240_000);
+
+  it('Kundur: a bend of the connector of PQ_1 is not put on the lines it is dragged across', async () => {
+    const diagram = await opened(KUNDUR);
+    const { edge, route, ends, check } = checkOf(diagram, 'stub-load-PQ_1');
+    expect(route).toHaveLength(2);
+    const [from, tap] = [route[0]!, route[1]!];
+    // The lines that end on the bar to the left of its tap, each square to it.
+    const lines = ['line-Line_7', 'line-Line_8'].map((id) => routesOf(diagram).get(id)!.points);
+    for (const points of lines) expect(points[0]![0]).toBeLessThan(tap[0]);
+    // A bend pulled out a little way to the left, then dragged on alone
+    // across both lines towards the far end of the bar.
+    const handle: Point = [from[0] + 13, (from[1] + tap[1]) / 2];
+    const first = settleEdit(
+      route,
+      { kind: 'pull', index: 0, at: handle },
+      [from[0] - 14 - handle[0], from[1] - 18 - handle[1]],
+      ends,
+      check,
+    )!;
+    expect(first.points).toHaveLength(3);
+    let held = routedByHand(diagram, edge.id, first.points)!;
+    expect(held).not.toBeNull();
+    const start = checkOf(held, edge.id);
+    const bend = start.route[1]!;
+    const to: Point = [lines[0]![0]![0] - 24, tap[1] + 11];
+    let last: Point[] = start.route;
+    let stopped = 0;
+    for (let k = 1; k <= 12; k += 1) {
+      const by: [number, number] = [
+        Math.round(((to[0] - bend[0]) * k) / 12),
+        Math.round(((to[1] - bend[1]) * k) / 12),
+      ];
+      const move = settleEdit(
+        start.route,
+        { kind: 'bend', index: 1 },
+        by,
+        start.ends,
+        start.check,
+        {
+          free: true,
+        },
+      );
+      if (move === null) continue;
+      if (move.refused !== null) stopped += 1;
+      last = move.points;
+      for (const points of lines) {
+        expect(bendGap(move.points, points), `move ${k}`).toBeGreaterThanOrEqual(
+          HAND_BEND_CLEARANCE - 0.5,
+        );
+      }
+    }
+    // It was stopped short of the lines, and stands where the last clear place was.
+    expect(stopped).toBeGreaterThan(0);
+    held = routedByHand(held, edge.id, last)!;
+    expect(held).not.toBeNull();
+    expect(bothWays(held)).toEqual([]);
+    expect(shapeFaults(diagram, edge, route, last)).toEqual([]);
+  }, 240_000);
+
+  it.each([
+    ['WSCC 9', WSCC9, 'line-Line_8', 'line-Line_3', 2],
+    ['WSCC 9', WSCC9, 'line-Line_8', 'line-Line_3', -1],
+    ['Kundur', KUNDUR, 'stub-load-PQ_1', 'line-Line_7', 2],
+  ] as const)(
+    '%s: a layout saved with a bend of %s on %s has that line routed again around the bend (%i beside it)',
+    async (_name, topology, id, besideId, off) => {
+      const diagram = await opened(topology);
+      const route = routesOf(diagram).get(id)!.points;
+      const beside = routesOf(diagram).get(besideId)!.points;
+      const [first, last] = [route[0]!, route[route.length - 1]!];
+      // Half way along the line beside it, as the two were found.
+      const bend: Point = [
+        beside[0]![0] + off,
+        Math.round((Math.max(first[1], beside[0]![1]) + Math.min(last[1], beside[1]![1])) / 2),
+      ];
+      const y = [first[1], last[1]].sort((p, q) => p - q);
+      if (bend[1] <= y[0]! || bend[1] >= y[1]!) bend[1] = Math.round((first[1] + last[1]) / 2);
+      const saved = savedByHand(diagram, id, [first, bend, last]);
+      // The route is the user's still, drawn as it was saved.
+      expect(routesByHand(saved).get(id)).toEqual([first, bend, last]);
+      // The line it was drawn on has gone round the bend, and nothing is on anything.
+      expect(bothWays(saved)).toEqual([]);
+      const routed = routesOf(saved).get(besideId)!.points;
+      expect(offRoute(routed, bend)).toBeGreaterThanOrEqual(BEND_CLEAR - 0.5);
     },
     240_000,
   );

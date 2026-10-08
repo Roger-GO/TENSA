@@ -12,6 +12,7 @@ import type { ConnectionEdge, Point } from '@/components/sld/connections';
 import type { LabelNode } from '@/components/sld/labels';
 import { pictureOf } from '@/components/sld/picture';
 import {
+  HAND_BEND_CLEARANCE,
   HAND_CLEARANCE,
   HAND_LABEL_CLEARANCE,
   HAND_TAP_CLEARANCE,
@@ -143,6 +144,75 @@ describe('routeChecker', () => {
         [16, 243],
       ]),
     ).toBeNull();
+  });
+
+  it('keeps a bend off the other lines, short of them and past them', () => {
+    const check = checkerFor('line-L1');
+    /** Line L1 with one bend at `x`, out towards line L2, which runs upright at 48. */
+    const corner = (x: number): Point[] => [
+      [16, 3],
+      [x, 180],
+      [16, 243],
+    ];
+    // Two short of it the corner is drawn onto the line, and one past it too:
+    // either reads as the two lines meeting there.
+    expect(check(corner(46))).toBe('a bend of it would be too close to line L2');
+    expect(check(corner(49))).toBe('a bend of it would be too close to line L2');
+    expect(check(corner(48))).toBe('it would end or turn on line L2');
+    // As far as two lines side by side keep, on either side: beyond it the
+    // two runs cross the line, each clear of the bend.
+    expect(check(corner(48 - HAND_BEND_CLEARANCE + 1))).toBe(
+      'a bend of it would be too close to line L2',
+    );
+    expect(check(corner(48 + HAND_BEND_CLEARANCE - 1))).toBe(
+      'a bend of it would be too close to line L2',
+    );
+    expect(check(corner(48 - HAND_BEND_CLEARANCE))).toBeNull();
+    expect(check(corner(48 + HAND_BEND_CLEARANCE))).toBeNull();
+  });
+
+  it('keeps a line off the bends of the other lines', () => {
+    const check = checkerFor('line-L2');
+    // The transformer turns at 64, 120. Line L2 slants past the outside of
+    // that corner, `off` clear of it, and crosses neither of its runs.
+    const past = (off: number): Point[] => {
+      const shift = off / Math.sin(Math.atan2(40, 22));
+      return [
+        [48, 3],
+        [48, 100 + shift],
+        [70, 140 + shift],
+        [70, 200],
+        [48, 200],
+        [48, 243],
+      ];
+    };
+    expect(check(past(4))).toBe('it would pass too close to a bend of transformer T1');
+    expect(check(past(HAND_BEND_CLEARANCE - 2))).toBe(
+      'it would pass too close to a bend of transformer T1',
+    );
+    expect(check(past(HAND_BEND_CLEARANCE + 1))).toBeNull();
+  });
+
+  it('lets a bend that is nearer to a line already stay as near, and come no nearer', () => {
+    // A layout that came with a bend of line L1, drawn by hand, eight short
+    // of line L2.
+    const stored: Point[] = [
+      [16, 3],
+      [40, 180],
+      [16, 243],
+    ];
+    const byHand = branch('line-L1', 'topology', '1', '2', stored, { source: A, target: B });
+    const edges = EDGES.map((edge) =>
+      edge.id === 'line-L1' ? { ...byHand, data: { ...byHand.data, bendManual: true } } : edge,
+    );
+    const picture = pictureOf(NODES, edges, { values: false, steps: 0 });
+    expect(picture.connections.routes.get('line-L1')!.points).toEqual(stored);
+    const check = routeChecker(NODES, picture, edges[0]!, { values: false });
+    expect(check(stored)).toBeNull();
+    const at = (x: number, y: number): Point[] => [stored[0]!, [x, y], stored[2]!];
+    expect(check(at(40, 150))).toBeNull();
+    expect(check(at(30, 180))).toBeNull();
+    expect(check(at(42, 180))).toBe('a bend of it would be too close to line L2');
   });
 
   it('keeps the ends of two lines apart on a bar', () => {

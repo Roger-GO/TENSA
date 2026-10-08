@@ -9,8 +9,10 @@
  * - Two different lines share no stretch. They do not lie on top of each
  *   other, and where they run side by side they keep `LINE_GAP` between
  *   them. One does not end or turn on another either, which would read as a
- *   junction. Two lines that cross, each in the middle of a run, are a
- *   crossing and not an overlap.
+ *   junction, nor right beside it: a bend, and an end that is on no bar,
+ *   keeps `BEND_CLEAR` from every other line, so that its corner is not
+ *   drawn onto that line. Two lines that cross, each in the middle of a
+ *   run and clear of the bends of both, are a crossing and not an overlap.
  * - Every end of a line on a bar has a place of its own there: on the bar,
  *   and `TAP_SPACING` from every other end on that bar, whichever face each
  *   comes to. Two that came to one place from above and from below would
@@ -37,9 +39,11 @@
 import {
   BAR_CLEAR,
   BAR_THICKNESS,
+  BEND_CLEAR,
   TAP_CLEAR,
   TAP_INSET,
   TAP_SPACING,
+  distanceToRun,
   lengthInside,
   meetsBarFlat,
   type Point,
@@ -109,7 +113,10 @@ export interface Overlap {
    */
   a: string;
   b: string;
-  /** What is wrong, in words. */
+  /**
+   * What is wrong, in words. Of two lines, `the first` and `the second`
+   * are `a` and `b`: `the first turns 2.0 px from the other`.
+   */
   detail: string;
 }
 
@@ -154,6 +161,27 @@ interface Run {
   /** Whether it is the first run of its line, and the last. */
   first: boolean;
   last: boolean;
+  /**
+   * The places where its line turns or ends loose, of its two end points:
+   * the bend it ends in, and an end of the line that is on no bar. Each
+   * such place of a line is with one run of it.
+   */
+  turns: { at: Point; end: boolean }[];
+}
+
+/**
+ * How a turn of the line of `s` is right beside the run `t` of another
+ * line (nearer than `BEND_CLEAR`), in words that begin with `whose`;
+ * `null` when every turn of `s` is clear of it.
+ */
+function turnsBeside(s: Run, t: Run, whose: string): string | null {
+  for (const { at, end } of s.turns) {
+    const off = distanceToRun(at, t.a, t.b);
+    if (off < BEND_CLEAR - 0.5) {
+      return `${whose} ${end ? 'ends' : 'turns'} ${off.toFixed(1)} px from the other`;
+    }
+  }
+  return null;
 }
 
 /** How two runs of different lines are on each other, in words; `null` when they are apart or cross. */
@@ -256,13 +284,12 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
   drawn.lines.forEach((line, index) => {
     const points = line.points;
     for (let i = 1; i < points.length; i += 1) {
-      const run: Run = {
-        line: index,
-        a: points[i - 1]!,
-        b: points[i]!,
-        first: i === 1,
-        last: i === points.length - 1,
-      };
+      const [first, last] = [i === 1, i === points.length - 1];
+      const turns: Run['turns'] = [];
+      if (first && !bars.has(line.from)) turns.push({ at: points[0]!, end: true });
+      if (!last) turns.push({ at: points[i]!, end: false });
+      else if (!bars.has(line.to)) turns.push({ at: points[i]!, end: true });
+      const run: Run = { line: index, a: points[i - 1]!, b: points[i]!, first, last, turns };
       runs.push(run);
       runsNear.add(run, boxOfRun(run, gap));
     }
@@ -272,7 +299,11 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
   for (const run of runs) {
     for (const other of runsNear.around(boxOfRun(run, 0))) {
       if (other.line <= run.line) continue;
-      const how = runsMeet(run, other, gap);
+      // On each other, or one right beside where the other turns or ends.
+      const how =
+        runsMeet(run, other, gap) ??
+        turnsBeside(run, other, 'the first') ??
+        turnsBeside(other, run, 'the second');
       if (how !== null) {
         report('line-line', drawn.lines[run.line]!.id, drawn.lines[other.line]!.id, how);
       }

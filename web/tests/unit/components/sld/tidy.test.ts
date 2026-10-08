@@ -20,9 +20,11 @@ import type { TopologySummary } from '@/api/types';
 import { autoLayout } from '@/components/sld/layout';
 import { buildGraph } from '@/components/sld/graph';
 import {
+  BEND_CLEAR,
   RUN_CLEARANCE,
   SLIDE_CLEARANCE,
   TAP_SPACING,
+  distanceToRun,
   layoutConnections,
   type ConnectionEdge,
   type Point,
@@ -534,6 +536,54 @@ describe('tidyRoutes: the routes that stay as they are', () => {
     )!;
     expect(made.length).toBeGreaterThanOrEqual(2);
     expect(Math.abs(made[0]![0] - 144)).toBeGreaterThanOrEqual(TAP_SPACING);
+  });
+
+  it('passes no bend of a kept route that is drawn at an angle right beside it', () => {
+    // Two pairs of buses side by side. The kept line of the right pair is
+    // drawn as a `<` whose point comes to two beside where the line of the
+    // left pair drops straight down, half way between two lines of the grid.
+    const pairs = [bus('1', 0, 0), bus('2', 0, 144), bus('3', 200, 0), bus('4', 200, 144)];
+    const both = [line('new', '1', '2'), line('kept', '3', '4')];
+    const pointed: Point[] = [
+      [216, 3],
+      [50, 72],
+      [216, 147],
+    ];
+    expect(tidyRoutes(pairs, [both[0]!]).routes.get('new')).toEqual([
+      [48, 3],
+      [48, 147],
+    ]);
+    const made = tidyRoutes(pairs, both, { keep: new Map([['kept', pointed]]) }).routes.get('new')!;
+    const off = Math.min(...runsOf(made).map(([a, b]) => distanceToRun(pointed[1]!, a, b)));
+    expect(off).toBeGreaterThanOrEqual(BEND_CLEAR);
+  });
+
+  it('does not turn corner to corner with a kept route, each just short of the other', () => {
+    // The kept line comes in from the left at 99 and turns down at 45. The
+    // new one comes down at 48, and what stands to its right leaves it only
+    // the line of the grid at 96 to turn right on: three over the kept run
+    // and three beside the kept bend, where the two bends would read as one
+    // crossing. It goes another way.
+    const around = [bus('L', -160, 0), bus('1', 0, 0), bus('2', 0, 200), bus('3', 200, 200)];
+    const lines = [line('kept', 'L', '2'), line('new', '1', '3')];
+    const turned: Point[] = [
+      [-112, 3],
+      [-112, 99],
+      [45, 99],
+      [45, 203],
+    ];
+    const { routes, unrouted } = tidyRoutes(around, lines, {
+      keep: new Map([['kept', turned]]),
+      obstacles: [{ left: 56, right: 104, top: 10, bottom: 84 }],
+    });
+    expect(unrouted).toEqual([]);
+    const made = routes.get('new')!;
+    for (const bend of made.slice(1, -1)) {
+      for (const corner of turned.slice(1, -1)) {
+        const [dx, dy] = [Math.abs(bend[0] - corner[0]), Math.abs(bend[1] - corner[1])];
+        expect(Math.max(dx, dy), `${bend[0]}, ${bend[1]}`).toBeGreaterThanOrEqual(NEAR_LINE);
+      }
+    }
   });
 });
 
