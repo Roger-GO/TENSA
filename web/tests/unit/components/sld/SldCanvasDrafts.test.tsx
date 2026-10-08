@@ -166,6 +166,8 @@ import { TOPOLOGY_SCHEMA } from '../../helpers/topologySchema';
 
 let mockTopology: TopologySummary | null = null;
 const mockSidecar: SidecarLayout | null = null;
+// The fields of each model: `undefined` while they are still on their way.
+let mockSchema: typeof TOPOLOGY_SCHEMA | undefined = TOPOLOGY_SCHEMA;
 const putSidecarSpy = vi.fn();
 
 vi.mock('@/api/queries', async () => {
@@ -175,7 +177,7 @@ vi.mock('@/api/queries', async () => {
     useGetSidecar: () => ({ data: mockSidecar, isLoading: false, isError: false, error: null }),
     usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
-    useTopologySchema: () => ({ data: TOPOLOGY_SCHEMA }),
+    useTopologySchema: () => ({ data: mockSchema }),
     useEditElements: () => ({ mutate: vi.fn(), isPending: false }),
     useConnectivity: () => ({
       data: null,
@@ -254,7 +256,8 @@ beforeEach(() => {
   setCenter.mockReset();
   putSidecarSpy.mockReset();
   mockTopology = square();
-  useDraftsStore.setState({ byCase: {}, placements: {} });
+  mockSchema = TOPOLOGY_SCHEMA;
+  useDraftsStore.setState({ byCase: {}, placements: {}, routes: {} });
   useSldStore.getState().clearSelectedNodeId();
   useSldStore.setState({ pickedNodeIds: [] });
   useLayoutStore.setState({ sldSnapToGrid: false });
@@ -265,7 +268,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useCaseStore.getState().clearCase();
-  useDraftsStore.setState({ byCase: {}, placements: {} });
+  useDraftsStore.setState({ byCase: {}, placements: {}, routes: {} });
 });
 
 describe('a component dropped on the diagram', () => {
@@ -700,6 +703,139 @@ describe('a line that a draft stands on', () => {
         useCaseStore.getState().routeOverrides['line-L12']!.points,
       ),
     );
+  });
+});
+
+describe('a case with drafts that is opened again', () => {
+  const routeOf = (id: string) => (edge(id)!.data!.route as { points: [number, number][] }).points;
+  const LINE = draftBranchEdgeId('draft-2');
+  const kept = () => Object.values(useDraftsStore.getState().routes[CASE] ?? {}).at(-1);
+
+  /**
+   * A draft on the line from bus 1 to bus 2, which goes round it, and a
+   * draft line from bus 1 to bus 3, each as the diagram came to draw it.
+   */
+  async function withDraftsOnIt() {
+    await draw();
+    await waitFor(() => expect(edge('line-L12')?.data?.route).toBeDefined());
+    const before = routeOf('line-L12');
+    const [a, b] = [before[1]!, before[2]!];
+    act(() => {
+      const { add } = useDraftsStore.getState();
+      add(CASE, 'PQ', { x: (a[0] + b[0]) / 2 - W / 2, y: (a[1] + b[1]) / 2 - H + 8 });
+      add(CASE, 'Line', { x: 0, y: 0 }, { bus1: '1', bus2: '3' });
+    });
+    await waitFor(() => expect(routeOf('line-L12')).not.toEqual(before));
+    await waitFor(() => expect(edge(LINE)?.data?.route).toBeDefined());
+    // Kept with the drafts once the diagram is at rest.
+    await waitFor(() => expect(kept()?.round['line-L12']?.points).toEqual(routeOf('line-L12')));
+    await waitFor(() => expect(kept()?.own[LINE]?.points).toEqual(routeOf(LINE)));
+    return { before };
+  }
+
+  /** Close the case and open it again, as a reload of the page does: the drafts are this browser's still. */
+  async function reopen(): Promise<void> {
+    cleanup();
+    Object.assign(drawn, { nodes: [], edges: [] });
+    useCaseStore.getState().clearCase();
+    useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath(CASE), addfiles: [] });
+    await draw();
+  }
+
+  it('keeps how the lines run among the drafts with the drafts, and nothing of it in the layout', async () => {
+    const { before } = await withDraftsOnIt();
+    const system = Object.keys(useDraftsStore.getState().routes[CASE]!);
+    expect(system).toHaveLength(1);
+    expect(kept()).toMatchObject({
+      own: { [LINE]: { anchors: { source: node('1')!.position, target: node('3')!.position } } },
+      // In the place of the route the line keeps, which is the one it had.
+      round: { 'line-L12': { from: JSON.stringify(before) } },
+    });
+    expect(kept()!.stand).toContain('draft-1@');
+    // The layout a save takes along holds the line as it ran before the draft.
+    const saved = useCaseStore.getState().diagramLayout?.branches?.line?.L12?.bend_points;
+    expect(saved?.map((point) => [point.x, point.y])).toEqual(before);
+    // With the drafts gone nothing is kept for the case.
+    act(() => useDraftsStore.getState().removeAll(CASE));
+    await waitFor(() => expect(edge(LINE)).toBeUndefined());
+    expect(useDraftsStore.getState().routes[CASE]).toBeUndefined();
+  });
+
+  it('is drawn from what was kept: every line as it ran, and none routed afresh', async () => {
+    await withDraftsOnIt();
+    const [round, own] = [routeOf('line-L12'), routeOf(LINE)];
+    await reopen();
+    await waitFor(() => expect(edge(LINE)?.data?.route).toBeDefined());
+    expect(routeOf('line-L12')).toEqual(round);
+    expect(routeOf(LINE)).toEqual(own);
+    // The line of the draft came with its route: the diagram made none for it.
+    expect(useCaseStore.getState().routeOverrides[LINE]).toBeUndefined();
+  });
+
+  it('draws a line along the way that was kept for it, where another would be worked out afresh', async () => {
+    await withDraftsOnIt();
+    const system = Object.keys(useDraftsStore.getState().routes[CASE]!)[0]!;
+    const was = kept()!;
+    // Another way round the draft than the diagram finds: the run that passes
+    // the draft a step farther out, and the line of the draft a tap along.
+    const way = was.round['line-L12']!;
+    const draft = node('draft-1')!.position;
+    const points = way.points.map(([x, y]): [number, number] => [x, y]);
+    let run = 1;
+    for (let i = 2; i < points.length; i += 1) {
+      const long = (j: number) => Math.abs(points[j]![0] - points[j - 1]![0]);
+      if (long(i) > long(run)) run = i;
+    }
+    const out = points[run]![1] < draft.y + H / 2 ? -16 : 16;
+    points[run - 1]![1] += out;
+    points[run]![1] += out;
+    const line = was.own[LINE]!.points.map(([x, y]): [number, number] => [x + 14, y]);
+    act(() =>
+      useDraftsStore.getState().keepRoutes(CASE, system, {
+        ...was,
+        own: { [LINE]: { ...was.own[LINE]!, points: line } },
+        round: { 'line-L12': { ...way, points } },
+      }),
+    );
+    await reopen();
+    await waitFor(() => expect(edge(LINE)?.data?.route).toBeDefined());
+    expect(routeOf('line-L12')).toEqual(points);
+    expect(routeOf(LINE)).toEqual(line);
+  });
+
+  it('works the ways out afresh for drafts that stand somewhere else than they were kept for', async () => {
+    const { before } = await withDraftsOnIt();
+    // Moved while the case was closed: in another tab, say.
+    act(() => useDraftsStore.getState().move(CASE, { 'draft-1': { x: 700, y: 500 } }));
+    await reopen();
+    await waitFor(() => expect(node('draft-1')?.position).toEqual({ x: 700, y: 500 }));
+    await waitFor(() => expect(routeOf('line-L12')).toEqual(before));
+    await waitFor(() => expect(kept()?.round['line-L12']).toBeUndefined());
+  });
+
+  it('holds what was kept while the fields of the models are still on their way', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await withDraftsOnIt();
+    const [round, own] = [routeOf('line-L12'), routeOf(LINE)];
+    const was = useDraftsStore.getState().routes;
+    const stood = drafts().map((d) => d.position);
+    // Opened again before they are in: the drafts are drawn on no bus.
+    mockSchema = undefined;
+    info.mockClear();
+    await reopen();
+    await waitFor(() => expect(node('draft-2')).toBeDefined());
+    expect(edge(LINE)).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(useDraftsStore.getState().routes).toBe(was);
+    // Then they arrive, and the diagram is drawn as it was left.
+    mockSchema = TOPOLOGY_SCHEMA;
+    act(() => useCaseStore.getState().setSelectedElement({ kind: 'bus', idx: '4' }));
+    await waitFor(() => expect(edge(LINE)?.data?.route).toBeDefined());
+    await waitFor(() => expect(routeOf('line-L12')).toEqual(round));
+    expect(routeOf(LINE)).toEqual(own);
+    expect(drafts().map((d) => d.position)).toEqual(stood);
+    // No draft was taken for one that was just given its bus, and moved.
+    expect(info).not.toHaveBeenCalled();
   });
 });
 

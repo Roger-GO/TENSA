@@ -1,7 +1,8 @@
 /**
  * The routes the lines take round the drafts (`draftRoutes.ts`): a line that
  * gives way to a draft keeps the route it had, and the way round the draft
- * is held apart from it, for the drafts as they stand.
+ * is held apart from it, for the drafts as they stand. What is held is kept
+ * with the drafts, and a diagram that is opened again is drawn from it.
  *
  * The canvas is held to the same in `SldCanvasDrafts.test.tsx`, and the
  * example cases whole in `noOverlapDrafts*.test.ts`.
@@ -14,8 +15,11 @@ import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { ConnectionEdge } from '@/components/sld/connections';
 import {
   NO_DRAFT_ROUTES,
+  draftRoutesFrom,
+  draftRoutesKept,
   draftsStand,
   settleDraftRoutes,
+  systemOf,
   withDraftRoutes,
 } from '@/components/sld/draftRoutes';
 import { draftBranchEdgeId } from '@/components/sld/drafts';
@@ -285,5 +289,138 @@ describe('what a diagram with drafts on it keeps of the routes its picture made'
     );
     expect(kept.changed).toBe(picture.changed);
     expect(kept.routes).toBe(NO_DRAFT_ROUTES);
+  });
+});
+
+describe('what is kept with the drafts of a diagram at rest', () => {
+  /** IEEE 14 with a draft on two of its lines and a draft line from bus 12 to bus 14, at rest. */
+  async function atRestWithDrafts() {
+    const first = settled(await opened(IEEE14));
+    const five = first.nodes.find((n) => n.id === '5')!.position;
+    const there = withDrafts(first, [
+      load(five.x + 6, five.y - 112),
+      { id: 'draft-2', kind: 'Line', position: { x: 0, y: 0 }, values: { bus1: '12', bus2: '14' } },
+    ]);
+    const options = optionsOf(there);
+    const made = settleDraftRoutes(
+      there.nodes,
+      edgesOf(there),
+      drawn(there),
+      NO_DRAFT_ROUTES,
+      options,
+    );
+    // As the canvas keeps them: the line of the draft on the route it was given.
+    const edges = edgesOf(there).map((edge) => {
+      const route = made.changed.get(edge.id);
+      return route === undefined
+        ? edge
+        : { ...edge, data: { ...edge.data, bendPoints: route.points, bendAnchors: route.anchors } };
+    });
+    return { first, there, edges, held: made.routes, options };
+  }
+
+  it('is the ways round them and the route of each draft line, and a diagram opened again is drawn from them to the same picture', async () => {
+    const { there, edges, held, options } = await atRestWithDrafts();
+    const stand = draftsStand(there.nodes, edges);
+    const before = pictureOf(there.nodes, withDraftRoutes(edges, held, stand), options);
+    const kept = draftRoutesKept(edges, held, stand)!;
+    const line = draftBranchEdgeId('draft-2');
+    expect(kept.stand).toBe(stand);
+    expect(Object.keys(kept.own)).toEqual([line]);
+    expect(kept.own[line]!.points).toEqual(before.connections.routes.get(line)!.points);
+    expect(Object.keys(kept.round).sort()).toEqual([...held.routes.keys()].sort());
+    for (const [id, way] of Object.entries(kept.round)) {
+      expect(way).toEqual(held.routes.get(id));
+    }
+    // Through the storage, as text, and back onto the edges of the case as
+    // it is opened again: the lines of the system on the routes the layout
+    // holds, the line of the draft on the one that was kept for it.
+    const read = JSON.parse(JSON.stringify(kept)) as typeof kept;
+    const opened = edgesOf(there).map((edge) => {
+      const own = read.own[edge.id];
+      return own === undefined
+        ? edge
+        : { ...edge, data: { ...edge.data, bendPoints: own.points, bendAnchors: own.anchors } };
+    });
+    const again = pictureOf(
+      there.nodes,
+      withDraftRoutes(opened, draftRoutesFrom(read), draftsStand(there.nodes, opened)),
+      options,
+    );
+    // Nothing is searched for, and every line runs as it ran.
+    expect(again.changed.size).toBe(0);
+    for (const edge of edges) {
+      expect(again.connections.routes.get(edge.id)?.points).toEqual(
+        before.connections.routes.get(edge.id)?.points,
+      );
+    }
+  });
+
+  it('holds only the ways that are in place: not one made for a route the line no longer keeps', async () => {
+    const { there, edges, held } = await atRestWithDrafts();
+    const stand = draftsStand(there.nodes, edges);
+    const [id] = [...held.routes.keys()];
+    const rerouted = edges.map((edge) =>
+      edge.id === id
+        ? {
+            ...edge,
+            data: {
+              ...edge.data,
+              bendPoints: [...(edge.data!.bendPoints as [number, number][])].reverse(),
+            },
+          }
+        : edge,
+    );
+    const kept = draftRoutesKept(rerouted, held, stand)!;
+    expect(kept.round[id!]).toBeUndefined();
+    expect(Object.keys(kept.round)).toHaveLength(held.routes.size - 1);
+    // Nor any for drafts that stand somewhere else than the ways were made for.
+    expect(Object.keys(draftRoutesKept(edges, held, `${stand};moved`)!.round)).toEqual([]);
+  });
+
+  it('is nothing for a diagram without a draft, or with drafts no line runs another way for', async () => {
+    const first = settled(await opened(IEEE14));
+    expect(draftRoutesKept(edgesOf(first), NO_DRAFT_ROUTES, '')).toBeNull();
+    const xs = first.nodes.map((n) => n.position.x);
+    const aside = withDrafts(first, [load(Math.min(...xs) - 300, 0)]);
+    const stand = draftsStand(aside.nodes, edgesOf(aside));
+    expect(draftRoutesKept(edgesOf(aside), NO_DRAFT_ROUTES, stand)).toBeNull();
+    // And nothing kept is no way to hold.
+    expect(draftRoutesFrom(undefined)).toBe(NO_DRAFT_ROUTES);
+    expect(draftRoutesFrom({ stand, own: {}, round: {} })).toBe(NO_DRAFT_ROUTES);
+  });
+});
+
+describe('the name a system is kept under', () => {
+  it('is the same for the same elements between the same buses, whatever their values', () => {
+    const again = {
+      ...IEEE14,
+      state: 'committed' as const,
+      buses: IEEE14.buses.map((bus) => ({ ...bus, name: `${bus.name}!`, params: { Vn: 1 } })),
+    };
+    expect(systemOf(again)).toBe(systemOf(IEEE14));
+    expect(systemOf(IEEE14)).toMatch(/^b14-l\d+-[0-9a-z]+$/);
+  });
+
+  it('is another for another system, and for the same one with an element moved, added or taken away', () => {
+    const names = new Set([
+      systemOf(IEEE14),
+      systemOf({ ...IEEE14, buses: IEEE14.buses.slice(0, -1) }),
+      systemOf({ ...IEEE14, lines: IEEE14.lines.slice(1) }),
+      systemOf({
+        ...IEEE14,
+        loads: IEEE14.loads.map((entry, i) =>
+          i === 0 ? { ...entry, params: { ...entry.params, bus: 1 } } : entry,
+        ),
+      }),
+      systemOf({
+        ...IEEE14,
+        generators: [
+          ...IEEE14.generators,
+          { idx: 'G9', name: 'G9', kind: 'PV', params: { bus: 9 } },
+        ],
+      }),
+    ]);
+    expect(names.size).toBe(5);
   });
 });

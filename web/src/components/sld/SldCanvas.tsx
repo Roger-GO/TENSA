@@ -104,9 +104,11 @@ import {
   settledPlaces,
 } from './draftPlace';
 import {
-  NO_DRAFT_ROUTES,
+  draftRoutesFrom,
+  draftRoutesKept,
   draftsStand,
   settleDraftRoutes,
+  systemOf,
   withDraftRoutes,
   type DraftRoutes,
 } from './draftRoutes';
@@ -668,6 +670,9 @@ function SldCanvasInner({
   const caseKey = useCaseStore((s) => draftCaseKey(s.selection));
   const drafts = useDrafts();
   const schema = useTopologySchema().data ?? null;
+  // The system that is drawn, by name: what is kept of how its lines run
+  // among the drafts is kept under it (`KeptDraftRoutes`).
+  const system = useMemo(() => systemOf(topology), [topology]);
   // The draft that is picked: the one whose form the Inspector shows. Picking
   // a draft lets go of the element (`selectDraft`), so with an element
   // selected none is.
@@ -689,6 +694,10 @@ function SldCanvasInner({
   );
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  // Whether there are drafts and the fields of the models, by which each is
+  // read, are still on their way: the drafts are then drawn as symbols on no
+  // bus, which is not how they stand.
+  const draftsUnread = schema === null && drafts.length > 0;
   // Where an element that was just added from a draft comes to stand: the
   // middle of its box where the middle of its draft was. It counts as a drag
   // from the first graph that holds the element, and becomes one below.
@@ -729,6 +738,13 @@ function SldCanvasInner({
             topology,
             busPositions,
             routes: routeOverrides,
+            // In a case that was just opened again, the route each was last
+            // drawn along. Read where the graph is built: the canvas writes
+            // them from the graph itself, and is not drawn again for that.
+            kept:
+              caseKey === null
+                ? undefined
+                : useDraftsStore.getState().routes[caseKey]?.[system]?.own,
           });
     const built =
       drafted === null
@@ -808,6 +824,8 @@ function SldCanvasInner({
     schema,
     routeOverrides,
     placed,
+    caseKey,
+    system,
   ]);
 
   // The node an id that was picked is drawn on. The models of a generating
@@ -938,7 +956,18 @@ function SldCanvasInner({
   // keeps the route the line had (`routeOverrides`), which is what is
   // drawn again once the draft is moved, deleted or added, and what the
   // layout beside the case, an Undo and a figure are made from.
-  const [draftRoutes, setDraftRoutes] = useState<DraftRoutes>(NO_DRAFT_ROUTES);
+  // They are kept with the drafts as well (the effect below), and a case
+  // that is opened again starts from what was kept for it: its lines then
+  // run as they ran when it was left, where the ways worked out afresh, all
+  // in one pass, could be other ways than the ones they were left on.
+  const [draftRoutes, setDraftRoutes] = useState<DraftRoutes>(() =>
+    heldDraftRoutes(caseKey, system),
+  );
+  const [draftRoutesOf, setDraftRoutesOf] = useState(caseKey);
+  if (draftRoutesOf !== caseKey) {
+    setDraftRoutesOf(caseKey);
+    setDraftRoutes(heldDraftRoutes(caseKey, system));
+  }
   const {
     picture,
     given: givenEdges,
@@ -1483,7 +1512,10 @@ function SldCanvasInner({
     if (dragging || !coordsAreCurrent || settled === null || inTransit) return;
     if (baseGraph === null || edges !== baseGraph.edges) return;
     if (settled.routes === draftRoutes) draftRoutesRoundsRef.current = 0;
-    else if (draftRoutesRoundsRef.current < SETTLING_ROUNDS) {
+    // Until the fields of the models are in, a draft is drawn without what
+    // it is connected to: the ways round the drafts as they are drawn then
+    // do not take the place of the ones held for them as they stand.
+    else if (!draftsUnread && draftRoutesRoundsRef.current < SETTLING_ROUNDS) {
       draftRoutesRoundsRef.current += 1;
       setDraftRoutes(settled.routes);
     }
@@ -1549,7 +1581,45 @@ function SldCanvasInner({
     // case that was open, and what is drawn for that moment is the new
     // system under the name of the old one.
     if (routesToFollowRef.current) persistRequestedRef.current = true;
-  }, [settled, draftRoutes, dragging, coordsAreCurrent, baseGraph, edges, inTransit]);
+  }, [settled, draftRoutes, dragging, coordsAreCurrent, baseGraph, edges, inTransit, draftsUnread]);
+
+  // How the lines run among the drafts is kept with the drafts
+  // (`KeptDraftRoutes`): the ways round them that the picture is made with,
+  // and the route of each draft that is drawn as a line. Written whenever
+  // the diagram is at rest, so what is kept is what its picture was last
+  // made from, and a case that is opened again is drawn from the same to
+  // the same picture. Kept under the system that is drawn: the system of a
+  // case that is just being opened is drawn for a moment under the name of
+  // the case before it, and that picture must not take the place of the one
+  // kept for that case.
+  useEffect(() => {
+    if (dragging || !coordsAreCurrent || settled === null || inTransit || draftsUnread) return;
+    if (caseKey === null || baseGraph === null) return;
+    if (edges !== baseGraph.edges || nodes !== baseGraph.nodes) return;
+    useDraftsStore
+      .getState()
+      .keepRoutes(
+        caseKey,
+        system,
+        draftRoutesKept(
+          edges as ConnectionEdge[],
+          draftRoutes,
+          draftsStand(nodes, edges as ConnectionEdge[]),
+        ),
+      );
+  }, [
+    settled,
+    draftRoutes,
+    dragging,
+    coordsAreCurrent,
+    baseGraph,
+    nodes,
+    edges,
+    inTransit,
+    draftsUnread,
+    caseKey,
+    system,
+  ]);
 
   // ---- Drafts: where they stand --------------------------------------------
   //
@@ -1607,6 +1677,10 @@ function SldCanvasInner({
   }>({ caseKey: null, seen: new Set(), asked: new Map() });
   useEffect(() => {
     if (dragging || !coordsAreCurrent || baseGraph === null || nodes !== baseGraph.nodes) return;
+    // Not before the fields of the models are in: a draft is drawn without
+    // its bus until then, and one that is seen that way would count as given
+    // its bus on the diagram once they are.
+    if (draftsUnread) return;
     const draftNodes = nodes.filter((n) => n.type === DRAFT_NODE_TYPE);
     const ids = [
       ...draftNodes.map((n) => n.id),
@@ -1686,7 +1760,17 @@ function SldCanvasInner({
     }
     draftSettlingRef.current += 1;
     setDragOverrides({ ...useCaseStore.getState().dragOverrides, ...Object.fromEntries(moves) });
-  }, [nodes, baseGraph, dragging, coordsAreCurrent, connections, sizes, caseKey, setDragOverrides]);
+  }, [
+    nodes,
+    baseGraph,
+    dragging,
+    coordsAreCurrent,
+    connections,
+    sizes,
+    caseKey,
+    setDragOverrides,
+    draftsUnread,
+  ]);
 
   // A generator, load or shunt of the system that came to be on another bus
   // (the end of its connector was dragged there, or an Undo took that back)
@@ -4091,6 +4175,16 @@ function positionsOf(nodes: readonly Node[]): DragOverrides {
     positions[n.id] = { x: n.position.x, y: n.position.y };
   }
   return positions;
+}
+
+/**
+ * The ways round the drafts that were kept for the case `caseKey` as drawn
+ * for `system`: what the canvas starts from when the case is opened.
+ */
+function heldDraftRoutes(caseKey: string | null, system: string): DraftRoutes {
+  return draftRoutesFrom(
+    caseKey === null ? undefined : useDraftsStore.getState().routes[caseKey]?.[system],
+  );
 }
 
 /** Where every draft among `nodes` stands, by its id: the form the draft store keeps it in. */

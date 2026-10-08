@@ -292,7 +292,7 @@ describe('what the figure is made of', () => {
     // The same figure as without them: no symbol and no line of a draft.
     expect(said().sort()).toEqual(['BUS1', 'BUS2', 'BUS3', 'PQ_A', 'PQ_B']);
     expect(screen.getByTestId('sld-figure-size')).toHaveTextContent('5 buses and devices');
-    act(() => useDraftsStore.setState({ byCase: {} }));
+    act(() => useDraftsStore.setState({ byCase: {}, routes: {} }));
   });
 
   it('has the values of the power flow once one has run, and says what to do before', async () => {

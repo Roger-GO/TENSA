@@ -27,8 +27,22 @@
  * drafts ask for. It tells them apart by routing the diagram once more
  * without its drafts, and only when the picture made a route at all.
  *
+ * What the canvas holds goes when the canvas does, and a diagram that is
+ * opened again would work every way round its drafts out afresh: in one
+ * pass, where they were made one after the other as the drafts were placed
+ * and the devices moved, so the lines could come back on other ways than
+ * they were left on. So the ways are kept with the drafts (`KeptDraftRoutes`,
+ * in `store/drafts.ts`), and with them the route of each draft that is
+ * drawn as a line itself: `draftRoutesKept` is what a diagram at rest
+ * leaves to be kept, and `draftRoutesFrom` what the canvas holds of it when
+ * the case is opened again. They are kept for the system they were drawn
+ * for, which `systemOf` names.
+ *
  * Pure: no React, nothing read but the arguments.
  */
+import type { TopologySummary } from '@/api/types';
+import { fnv1a32 } from '@/lib/runIdToColor';
+import type { KeptDraftRoutes, KeptRoute } from '@/store/drafts';
 import type { ConnectionEdge } from './connections';
 import { DRAFT_NODE_TYPE, draftIdOf } from './drafts';
 import type { LabelNode } from './labels';
@@ -227,4 +241,81 @@ export function settleDraftRoutes<E extends ConnectionEdge>(
     });
   }
   return { changed, released: own.released, routes: routesAs(routes) };
+}
+
+/**
+ * A name for the system `topology` is, as short text: the same for two
+ * topologies with the same buses, branches, devices and controllers, each
+ * of the same model, between the same buses and on the same bus, whatever
+ * their other values. What
+ * is kept of a diagram with drafts on it is kept under it, so that the
+ * picture of another system does not pass for this one's.
+ */
+export function systemOf(topology: TopologySummary): string {
+  const end = (value: unknown): string => (value === undefined || value === null ? '' : `${value}`);
+  const parts: string[] = [];
+  const list = (name: string, entries: TopologySummary['buses'] | undefined): void => {
+    parts.push(name);
+    for (const entry of entries ?? []) {
+      const { bus, bus1, bus2 } = entry.params ?? {};
+      parts.push(`${entry.idx}:${entry.kind}:${end(bus)}:${end(bus1)}:${end(bus2)}`);
+    }
+  };
+  list('buses', topology.buses);
+  list('lines', topology.lines);
+  list('transformers', topology.transformers);
+  list('generators', topology.generators);
+  list('loads', topology.loads);
+  list('shunts', topology.shunts);
+  list('controllers', topology.controllers);
+  const branches = topology.lines.length + topology.transformers.length;
+  return `b${topology.buses.length}-l${branches}-${fnv1a32(parts.join('|')).toString(36)}`;
+}
+
+/**
+ * What a diagram at rest leaves to be kept with its drafts: the ways of
+ * `held` that are in place on `edges` (the edges as the diagram keeps them)
+ * with the drafts standing as `stand` says, and the route each draft that
+ * is drawn as a line or a transformer carries. `null` when there is neither.
+ */
+export function draftRoutesKept(
+  edges: readonly ConnectionEdge[],
+  held: DraftRoutes,
+  stand: string,
+): KeptDraftRoutes | null {
+  if (stand === '') return null;
+  const own: KeptDraftRoutes['own'] = {};
+  for (const edge of edges) {
+    if (edge.type === 'stub' || draftIdOf(edge) === null) continue;
+    const points = edge.data?.bendPoints;
+    const anchors = edge.data?.bendAnchors as RouteAnchors | undefined;
+    if (!Array.isArray(points) || anchors === undefined) continue;
+    own[edge.id] = keptRoute(points as [number, number][], anchors);
+  }
+  const round: KeptDraftRoutes['round'] = {};
+  for (const [id, way] of inPlace(edges, held, stand)) {
+    round[id] = { ...keptRoute(way.points, way.anchors), from: way.from };
+  }
+  if (Object.keys(own).length === 0 && Object.keys(round).length === 0) return null;
+  return { stand, own, round };
+}
+
+function keptRoute(
+  points: readonly (readonly [number, number])[],
+  anchors: RouteAnchors,
+): KeptRoute {
+  return {
+    points: points.map(([x, y]): [number, number] => [x, y]),
+    anchors: { source: { ...anchors.source }, target: { ...anchors.target } },
+  };
+}
+
+/**
+ * The ways round the drafts that `kept` holds, as the canvas holds them:
+ * `NO_DRAFT_ROUTES` when nothing was kept, or no way among it.
+ */
+export function draftRoutesFrom(kept: KeptDraftRoutes | undefined): DraftRoutes {
+  const ways = Object.entries(kept?.round ?? {});
+  if (kept === undefined || ways.length === 0) return NO_DRAFT_ROUTES;
+  return { stand: kept.stand, routes: new Map(ways) };
 }

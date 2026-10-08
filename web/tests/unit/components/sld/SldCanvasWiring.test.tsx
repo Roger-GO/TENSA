@@ -283,7 +283,7 @@ beforeEach(() => {
   editSpy.mockReset();
   editPending = false;
   mockTopology = square();
-  useDraftsStore.setState({ byCase: {}, placements: {}, connected: {} });
+  useDraftsStore.setState({ byCase: {}, placements: {}, connected: {}, routes: {} });
   useSldStore.getState().clearSelectedNodeId();
   useSldStore.setState({ pickedNodeIds: [], paletteDragKind: null });
   useLayoutStore.setState({ sldSnapToGrid: false });
@@ -298,7 +298,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   useCaseStore.getState().clearCase();
   useSessionStore.setState({ sessionId: null });
-  useDraftsStore.setState({ byCase: {}, placements: {}, connected: {} });
+  useDraftsStore.setState({ byCase: {}, placements: {}, connected: {}, routes: {} });
 });
 
 describe('a component dropped on a bus', () => {

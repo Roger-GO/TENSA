@@ -27,6 +27,18 @@
  * on, or the bus the end of its connector was dragged to. A form that is
  * open on the draft holds the values it was opened with, so each such change
  * is counted (`connected`), and the Inspector opens the form afresh on it.
+ *
+ * `routes` is how the lines ran among the drafts of a case when its diagram
+ * was last drawn: the way each line of the system took round them, and the
+ * route of each draft that is drawn as a line or a transformer. The layout
+ * beside the case holds nothing of a draft, so these are kept here, with the
+ * drafts and in the same storage, and the diagram that is opened again is
+ * drawn from them: the lines run as they ran, where working them out afresh
+ * could send them another way. They are kept by the case and by the system
+ * they were drawn for (`systemOf`), since the system of a case that is just
+ * being opened is drawn for a moment under the name of the case before it,
+ * and what is kept of that picture must not take the place of what was kept
+ * for the case itself.
  */
 import { create } from 'zustand';
 import type { ParamValue } from '@/api/types';
@@ -51,6 +63,16 @@ export const MAX_DRAFTS_PER_CASE = 200;
  */
 export const DRAFT_NODE_SIZE = { width: 96, height: 64 } as const;
 
+/** The key the routes kept with the drafts are stored under (`DraftsState.routes`). */
+export const DRAFT_ROUTES_STORAGE_KEY = 'tensa:sld-draft-routes-v1';
+
+/**
+ * For how many systems one case keeps the routes of its drafts: the system
+ * of the case itself, and the ones that were drawn under its name for a
+ * moment or that an edit has since replaced.
+ */
+export const MAX_DRAFT_ROUTE_SYSTEMS = 3;
+
 /** The prefix of a draft's id, which is also the id of its node on the diagram. */
 export const DRAFT_ID_PREFIX = 'draft-';
 
@@ -63,6 +85,25 @@ export interface DraftElement {
   position: { x: number; y: number };
   /** The fields that were set, by name. */
   values: Record<string, ParamValue>;
+}
+
+/** A route as it is kept: its points, and where the two buses of its line stood when it was made. */
+export interface KeptRoute {
+  points: [number, number][];
+  anchors: { source: { x: number; y: number }; target: { x: number; y: number } };
+}
+
+/** How the lines ran among the drafts of one system when its diagram was last drawn. */
+export interface KeptDraftRoutes {
+  /** Where the drafts stood then, and what each was connected to (`draftsStand`). */
+  stand: string;
+  /** The route of each draft that is drawn as a line or a transformer, by edge id. */
+  own: Record<string, KeptRoute>;
+  /**
+   * The way each line of the system took round the drafts, by edge id, with
+   * the route the line keeps, in the place of which it was drawn (`from`).
+   */
+  round: Record<string, KeptRoute & { from: string }>;
 }
 
 /** The key the drafts of the open case are kept under, or `null` with no case open. */
@@ -136,6 +177,87 @@ export function writePersistedDrafts(byCase: Readonly<Record<string, DraftElemen
   }
 }
 
+function isPlace(value: unknown): value is { x: number; y: number } {
+  if (value === null || typeof value !== 'object') return false;
+  const { x, y } = value as Record<string, unknown>;
+  return Number.isFinite(x) && Number.isFinite(y);
+}
+
+function isKeptRoute(value: unknown): value is KeptRoute {
+  if (value === null || typeof value !== 'object') return false;
+  const { points, anchors } = value as Record<string, unknown>;
+  const at = anchors as Record<string, unknown> | null | undefined;
+  return (
+    Array.isArray(points) &&
+    points.length >= 2 &&
+    points.every(
+      (point) =>
+        Array.isArray(point) &&
+        point.length === 2 &&
+        Number.isFinite(point[0]) &&
+        Number.isFinite(point[1]),
+    ) &&
+    at !== null &&
+    typeof at === 'object' &&
+    isPlace(at.source) &&
+    isPlace(at.target)
+  );
+}
+
+function isKeptDraftRoutes(value: unknown): value is KeptDraftRoutes {
+  if (value === null || typeof value !== 'object') return false;
+  const { stand, own, round } = value as Record<string, unknown>;
+  const routesOf = (held: unknown): unknown[] | null =>
+    held !== null && typeof held === 'object' && !Array.isArray(held) ? Object.values(held) : null;
+  const [ownRoutes, ways] = [routesOf(own), routesOf(round)];
+  return (
+    typeof stand === 'string' &&
+    ownRoutes !== null &&
+    ways !== null &&
+    ownRoutes.every(isKeptRoute) &&
+    ways.every((way) => isKeptRoute(way) && typeof (way as { from?: unknown }).from === 'string')
+  );
+}
+
+/** Read the routes kept with the drafts; anything missing or malformed is dropped. */
+export function readPersistedDraftRoutes(): Record<string, Record<string, KeptDraftRoutes>> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(DRAFT_ROUTES_STORAGE_KEY);
+    if (raw === null) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, Record<string, KeptDraftRoutes>> = {};
+    for (const [key, systems] of Object.entries(parsed)) {
+      if (key === BLANK_CASE_KEY || systems === null || typeof systems !== 'object') continue;
+      const kept = Object.entries(systems as Record<string, unknown>).filter(
+        (entry): entry is [string, KeptDraftRoutes] => isKeptDraftRoutes(entry[1]),
+      );
+      if (kept.length > 0) out[key] = Object.fromEntries(kept.slice(-MAX_DRAFT_ROUTE_SYSTEMS));
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist the routes kept with the drafts of the cases that are files. Returns `false` if storage threw. */
+export function writePersistedDraftRoutes(
+  routes: Readonly<Record<string, Record<string, KeptDraftRoutes>>>,
+): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    const kept = Object.fromEntries(
+      Object.entries(routes).filter(([key]) => key !== BLANK_CASE_KEY),
+    );
+    if (Object.keys(kept).length === 0) localStorage.removeItem(DRAFT_ROUTES_STORAGE_KEY);
+    else localStorage.setItem(DRAFT_ROUTES_STORAGE_KEY, JSON.stringify(kept));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The next free id among `drafts`: one more than the highest number in use. */
 function nextDraftId(drafts: readonly DraftElement[]): string {
   let highest = 0;
@@ -192,6 +314,19 @@ export interface DraftsState {
    * as it takes the layout.
    */
   copy: (fromKey: string, toKey: string) => void;
+  /**
+   * How the lines ran among the drafts of each case when its diagram was
+   * last drawn, by `draftCaseKey` and then by the system that was drawn
+   * (`systemOf`), the one drawn last coming last. A case keeps them for
+   * `MAX_DRAFT_ROUTE_SYSTEMS` systems, and for none once it has no draft.
+   */
+  routes: Record<string, Record<string, KeptDraftRoutes>>;
+  /**
+   * Keep how the lines run among the drafts of the case `caseKey`, drawn as
+   * the system `system`: `null` when no line runs another way for a draft
+   * and no draft is drawn as a line.
+   */
+  keepRoutes: (caseKey: string, system: string, kept: KeptDraftRoutes | null) => void;
   /** Keep the place the node `nodeId` takes once the system has its element. */
   place: (nodeId: string, position: { x: number; y: number }) => void;
   /** Let go of the places of `nodeIds`: the canvas has taken them over. */
@@ -199,6 +334,14 @@ export interface DraftsState {
 }
 
 export const useDraftsStore = create<DraftsState>((set, get) => {
+  /** Put `systems` in the place of the routes kept for `caseKey`, and write the result. */
+  const putRoutes = (caseKey: string, systems: Record<string, KeptDraftRoutes>): void => {
+    const routes = { ...get().routes };
+    if (Object.keys(systems).length === 0) delete routes[caseKey];
+    else routes[caseKey] = systems;
+    writePersistedDraftRoutes(routes);
+    set({ routes });
+  };
   /** Put `drafts` in the place of the drafts of `caseKey`, and write the result. */
   const put = (caseKey: string, drafts: DraftElement[]): void => {
     const byCase = { ...get().byCase };
@@ -206,11 +349,26 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
     else byCase[caseKey] = drafts;
     writePersistedDrafts(byCase);
     set({ byCase });
+    // With its last draft gone, no line of the case runs any way for one.
+    if (drafts.length === 0 && get().routes[caseKey] !== undefined) putRoutes(caseKey, {});
   };
   return {
     byCase: readPersistedDrafts(),
     placements: {},
     connected: {},
+    routes: readPersistedDraftRoutes(),
+    keepRoutes: (caseKey, system, kept) => {
+      const { [system]: held, ...others } = get().routes[caseKey] ?? {};
+      if (kept === null) {
+        if (held !== undefined) putRoutes(caseKey, others);
+        return;
+      }
+      // The same again for the system that was drawn last: nothing to write.
+      const last = Object.keys(get().routes[caseKey] ?? {}).at(-1);
+      if (last === system && JSON.stringify(held) === JSON.stringify(kept)) return;
+      const systems = [...Object.entries(others), [system, kept] as const];
+      putRoutes(caseKey, Object.fromEntries(systems.slice(-MAX_DRAFT_ROUTE_SYSTEMS)));
+    },
     add: (caseKey, kind, position, values = {}) => {
       const held = get().byCase[caseKey] ?? [];
       if (held.length >= MAX_DRAFTS_PER_CASE) return null;
@@ -275,6 +433,11 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
         toKey,
         held.map((d) => ({ ...d, position: { ...d.position }, values: { ...d.values } })),
       );
+      // The copy is drawn as this diagram is, so its lines run as these do.
+      const routes = get().routes[fromKey];
+      if (held.length > 0 && (routes !== undefined || get().routes[toKey] !== undefined)) {
+        putRoutes(toKey, { ...routes });
+      }
     },
     place: (nodeId, position) =>
       set((s) => ({

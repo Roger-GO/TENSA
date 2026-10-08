@@ -4,13 +4,46 @@
  * on, in this browser (localStorage), so they are there again after a reload
  * of the page; the drafts of a system built from scratch are kept in memory
  * and go with that system; and a storage that is missing, broken or holding
- * something else leaves the drafts working for the tab.
+ * something else leaves the drafts working for the tab. How the lines ran
+ * among the drafts of a case is kept with them, by the system it was drawn
+ * for.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseWorkspacePath } from '@/api/types';
+import type { KeptDraftRoutes } from '@/store/drafts';
 
 const KEY = 'tensa:sld-drafts-v1';
+const ROUTES_KEY = 'tensa:sld-draft-routes-v1';
 const CASE = 'ieee14.raw';
+
+/** A way round a draft and the route of a draft line, as a diagram leaves them to be kept. */
+function kept(stand: string): KeptDraftRoutes {
+  const anchors = { source: { x: 0, y: 0 }, target: { x: 96, y: 144 } };
+  return {
+    stand,
+    own: {
+      'draft-line-draft-2': {
+        points: [
+          [16, 3],
+          [16, 147],
+        ],
+        anchors,
+      },
+    },
+    round: {
+      'line-L1': {
+        points: [
+          [32, 3],
+          [32, 64],
+          [112, 64],
+          [112, 147],
+        ],
+        anchors,
+        from: '[[32,3],[32,147]]',
+      },
+    },
+  };
+}
 
 /** An in-memory `localStorage` whose methods a test can replace. */
 function installLocalStorageShim(): void {
@@ -32,8 +65,8 @@ function installLocalStorageShim(): void {
   Object.defineProperty(window, 'localStorage', { configurable: true, value: shim });
 }
 
-function stored(): unknown {
-  const raw = window.localStorage.getItem(KEY);
+function stored(key = KEY): unknown {
+  const raw = window.localStorage.getItem(key);
   return raw === null ? null : JSON.parse(raw);
 }
 
@@ -260,5 +293,100 @@ describe('drafts store', () => {
     expect(useDraftsStore.getState().placements).toEqual({ '15': { x: 7, y: 8 } });
     useCaseStore.getState().clearCase();
     expect(useDraftsStore.getState().placements).toEqual({});
+  });
+
+  it('keeps how the lines ran among the drafts of a case, and reads it at start', async () => {
+    const first = await load();
+    first.useDraftsStore.getState().add(CASE, 'PQ', { x: 10, y: 20 });
+    first.useDraftsStore.getState().keepRoutes(CASE, 'b2-l1-abc', kept('draft-1@10,20'));
+    expect(stored(ROUTES_KEY)).toEqual({ [CASE]: { 'b2-l1-abc': kept('draft-1@10,20') } });
+    // The same again writes nothing.
+    const held = first.useDraftsStore.getState().routes;
+    first.useDraftsStore.getState().keepRoutes(CASE, 'b2-l1-abc', kept('draft-1@10,20'));
+    expect(first.useDraftsStore.getState().routes).toBe(held);
+    // A reload of the page: the modules are evaluated again.
+    vi.resetModules();
+    const second = await load();
+    expect(second.useDraftsStore.getState().routes).toEqual({
+      [CASE]: { 'b2-l1-abc': kept('draft-1@10,20') },
+    });
+    // With no line running any way for a draft, nothing is kept for that system.
+    second.useDraftsStore.getState().keepRoutes(CASE, 'b2-l1-abc', null);
+    expect(second.useDraftsStore.getState().routes).toEqual({});
+    expect(stored(ROUTES_KEY)).toBeNull();
+  });
+
+  it('keeps them by the system that was drawn, the last drawn last, and for a few systems only', async () => {
+    const { useDraftsStore, MAX_DRAFT_ROUTE_SYSTEMS } = await load();
+    const { add, keepRoutes } = useDraftsStore.getState();
+    const systems = () => Object.keys(useDraftsStore.getState().routes[CASE] ?? {});
+    expect(MAX_DRAFT_ROUTE_SYSTEMS).toBe(3);
+    add(CASE, 'PQ', { x: 0, y: 0 });
+    keepRoutes(CASE, 'own', kept('a'));
+    // Another system drawn under the name of the case leaves what the case keeps.
+    keepRoutes(CASE, 'other', kept('b'));
+    expect(useDraftsStore.getState().routes[CASE]?.own).toEqual(kept('a'));
+    // Drawn again as it was kept, the system of the case is the last drawn again.
+    keepRoutes(CASE, 'own', kept('a'));
+    expect(systems()).toEqual(['other', 'own']);
+    keepRoutes(CASE, 'third', kept('c'));
+    keepRoutes(CASE, 'own', kept('a'));
+    keepRoutes(CASE, 'fourth', kept('d'));
+    // The one drawn longest ago went; the system of the case is still there.
+    expect(systems()).toEqual(['third', 'own', 'fourth']);
+    expect(Object.keys((stored(ROUTES_KEY) as Record<string, object>)[CASE]!)).toEqual(systems());
+  });
+
+  it('lets them go with the last draft of the case, and gives them to a copy of the system', async () => {
+    const { useDraftsStore, BLANK_CASE_KEY } = await load();
+    const { add, copy, keepRoutes, remove } = useDraftsStore.getState();
+    add(CASE, 'PQ', { x: 0, y: 0 });
+    add(CASE, 'Line', { x: 0, y: 0 });
+    keepRoutes(CASE, 'own', kept('a'));
+    add('saved.xlsx', 'Shunt', { x: 0, y: 0 });
+    keepRoutes('saved.xlsx', 'old', kept('z'));
+    copy(CASE, 'saved.xlsx');
+    expect(useDraftsStore.getState().routes['saved.xlsx']).toEqual({ own: kept('a') });
+    remove(CASE, 'draft-1');
+    expect(useDraftsStore.getState().routes[CASE]).toEqual({ own: kept('a') });
+    remove(CASE, 'draft-2');
+    expect(useDraftsStore.getState().routes[CASE]).toBeUndefined();
+    expect(stored(ROUTES_KEY)).toEqual({ 'saved.xlsx': { own: kept('a') } });
+    // Those of a system built from scratch are kept in memory only, like its drafts.
+    add(BLANK_CASE_KEY, 'Line', { x: 0, y: 0 });
+    keepRoutes(BLANK_CASE_KEY, 'own', kept('b'));
+    expect(useDraftsStore.getState().routes[BLANK_CASE_KEY]).toEqual({ own: kept('b') });
+    expect(stored(ROUTES_KEY)).toEqual({ 'saved.xlsx': { own: kept('a') } });
+  });
+
+  it('drops the routes a broken or foreign storage holds', async () => {
+    const good = kept('a');
+    window.localStorage.setItem(
+      ROUTES_KEY,
+      JSON.stringify({
+        [CASE]: {
+          good,
+          // No text for where the drafts stood, a route of one point, a way without
+          // the route it stands in for, anchors that are no places.
+          'no-stand': { ...good, stand: 3 },
+          'one-point': {
+            ...good,
+            own: { e: { ...good.own['draft-line-draft-2'], points: [[1, 2]] } },
+          },
+          'no-from': { ...good, round: { e: good.own['draft-line-draft-2'] } },
+          'no-anchor': {
+            ...good,
+            own: { e: { points: good.round['line-L1']!.points, anchors: {} } },
+          },
+        },
+        'other.raw': 'not routes',
+        ':blank': { good },
+      }),
+    );
+    const { useDraftsStore } = await load();
+    expect(useDraftsStore.getState().routes).toEqual({ [CASE]: { good } });
+    window.localStorage.setItem(ROUTES_KEY, '{ not json');
+    vi.resetModules();
+    expect((await load()).useDraftsStore.getState().routes).toEqual({});
   });
 });

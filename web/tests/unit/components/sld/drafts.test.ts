@@ -274,6 +274,51 @@ describe('what the diagram draws for a draft', () => {
     expect(dropped?.data?.bendPoints).toBeUndefined();
   });
 
+  it('draws a draft branch along the route kept with the drafts where no route was chosen for it', () => {
+    const id = draftBranchEdgeId('draft-1');
+    const points: [number, number][] = [
+      [1000, 0],
+      [1000, -40],
+      [1400, -40],
+      [1400, 0],
+    ];
+    const other: [number, number][] = [
+      [1016, 0],
+      [1016, -56],
+      [1416, -56],
+      [1416, 0],
+    ];
+    const drafts = [draft('Line', { bus1: '6', bus2: '8' })];
+    const here = { source: { ...BUS_POSITIONS.get('6')! }, target: { ...BUS_POSITIONS.get('8')! } };
+    const graph = (
+      routes: Parameters<typeof draftGraph>[1]['routes'],
+      kept: Parameters<typeof draftGraph>[1]['kept'],
+    ) =>
+      draftGraph(drafts, {
+        schema: TOPOLOGY_SCHEMA,
+        topology: IEEE14,
+        busPositions: BUS_POSITIONS,
+        routes,
+        kept,
+      }).edges[0];
+    // A case that was just opened again: nothing was chosen in this visit.
+    expect(graph({}, { [id]: { points, anchors: here } })).toMatchObject({
+      type: 'routed',
+      data: { bendPoints: points, bendAnchors: here },
+    });
+    // What was chosen in this visit comes first, and so does having none.
+    const chosen = { [id]: { points: other, anchors: here } };
+    expect(graph(chosen, { [id]: { points, anchors: here } })?.data?.bendPoints).toEqual(other);
+    expect(graph({ [id]: null }, { [id]: { points, anchors: here } })?.data?.bendPoints).toBe(
+      undefined,
+    );
+    // Kept for the buses where they stood: not for a bus that stands elsewhere now.
+    const moved = { ...here, target: { x: here.target.x + 16, y: here.target.y } };
+    const stale = graph({}, { [id]: { points, anchors: moved } });
+    expect(stale?.type).toBe('topology');
+    expect(stale?.data?.bendPoints).toBeUndefined();
+  });
+
   it('says of a node or an edge which draft it is drawn for', () => {
     const device = graphOf([draft('PQ', { bus: '4' })]);
     expect(draftIdOf(device.nodes[0])).toBe('draft-1');

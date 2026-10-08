@@ -45,7 +45,7 @@ import {
 } from '@/components/elements/elementValues';
 import { subKindForControllerClass } from '@/lib/controllers';
 import type { RouteOverride, SelectedElement } from '@/store/case';
-import { DRAFT_NODE_SIZE, type DraftElement } from '@/store/drafts';
+import { DRAFT_NODE_SIZE, type DraftElement, type KeptRoute } from '@/store/drafts';
 
 export { DRAFT_NODE_SIZE };
 
@@ -328,6 +328,12 @@ export interface DraftGraphOptions {
   busPositions: ReadonlyMap<string, { x: number; y: number }>;
   /** The route kept for the branch of a draft, by edge id (`routeOverrides`). */
   routes?: Readonly<Record<string, RouteOverride | null>>;
+  /**
+   * The route the branch of a draft was last drawn along, by edge id, as it
+   * is kept with the drafts (`KeptDraftRoutes.own`): for one `routes` says
+   * nothing of, as in a case that was just opened again.
+   */
+  kept?: Readonly<Record<string, KeptRoute>>;
 }
 
 const standsAt = (
@@ -360,7 +366,9 @@ export function draftGraph(
       // while its buses stand where they stood then.
       const id = draftBranchEdgeId(draft.id);
       const { from, to } = wiring.ends;
-      const held = options.routes?.[id] ?? undefined;
+      // `null` among the routes says that it has none, whatever was kept.
+      const chosen = options.routes?.[id];
+      const held = chosen === undefined ? options.kept?.[id] : (chosen ?? undefined);
       const fits =
         held !== undefined &&
         held.points.length >= 2 &&

@@ -456,7 +456,7 @@ describe('SldCanvas', () => {
     cleanup();
     usePflowStore.getState().clearPflow();
     useUiStore.setState({ hideLabels: false });
-    useDraftsStore.setState({ byCase: {}, placements: {} });
+    useDraftsStore.setState({ byCase: {}, placements: {}, routes: {} });
     __resetCascadeForTests();
     useConnectivityStore.setState({
       result: null,
