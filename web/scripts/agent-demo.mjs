@@ -29,8 +29,8 @@ const SIZE = { width: 1600, height: 900 };
 // lays out the diagram by hand the way a human would. Positions trace the
 // canonical WSCC 9-bus one-line: generator buses 2/3 at the top corners, the
 // 230 kV chain 7-8-9 across the middle, 5/6 below, and bus 4 → bus 1 (G1)
-// down the centre. The panel sits on the right (~420px), so drops stay left
-// of ~1130.
+// down the centre. The Inspector sits on the right, so drops stay left of
+// ~1130.
 const BUSES = [
   { idx: '2', name: 'BUS2', Vn: 18, at: [440, 175] }, // G2, top-left
   { idx: '3', name: 'BUS3', Vn: 13.8, at: [1040, 175] }, // G3, top-right
@@ -131,9 +131,9 @@ async function caption(page, title, sub = '', pos = 'bottom') {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Fill one form field inside the add-element panel. */
-async function fillField(page, name, value) {
-  const wrap = page.locator(`[data-testid="field-${name}"]`);
+/** Fill one field of `form`, the form of a draft in the Inspector. */
+async function fillField(form, name, value) {
+  const wrap = form.locator(`[data-testid="field-${name}"]`);
   const select = wrap.locator('select');
   if (await select.count()) {
     await select.selectOption(String(value));
@@ -156,11 +156,17 @@ async function showSidebarTab(page, tab) {
  * `kind` is the row's own value, which is the Kind picker's ("Bus", "PV",
  * "Transformer2W", ...). Dispatches the app's synthetic HTML5 DnD payload
  * (Playwright's mouse-drag fights React Flow's pane panning). The drop
- * opens — or switches — the Add Element panel to that kind, seeding the
- * bus drop coordinate. Before any case exists the target is the no-case
- * drop zone; afterwards it's the live React Flow pane.
+ * places a draft of that kind where it lands, picked, with its form in the
+ * Inspector. Before any case exists the target is the no-case drop zone,
+ * which starts a blank system with the draft in the middle of its diagram;
+ * afterwards it's the live React Flow pane.
  */
 async function dragComponentToCanvas(page, kind, x, y) {
+  // The diagram, or the page that stands in for it, is there to drop on.
+  await page
+    .locator('.react-flow__pane, [data-testid="no-case-drop-zone"]')
+    .first()
+    .waitFor({ timeout: 10_000 });
   // The hover only shows the viewer which row is taken (the drop below does
   // the work), so a row that is not there must not hold the recording up for
   // the default 30s.
@@ -185,34 +191,58 @@ async function dragComponentToCanvas(page, kind, x, y) {
 }
 
 /**
- * Fill the (already open) add panel: pick the kind, fill required
- * fields, optionally expand "Show advanced" for optional params, submit,
- * and wait for the server to accept it.
+ * Drag a row of the Components tab to beside the bus `bus`: over its bar, or
+ * under it, where a device of that bus is drawn. A draft that is dropped
+ * there and then given that bus is joined to the bar by a short connector
+ * and stays where it was put; one dropped on something stands in the
+ * nearest free place.
+ */
+async function dragComponentToBus(page, kind, bus, side = 'over') {
+  const bar = await page.locator(`[data-testid="bus-node-${bus}"]`).boundingBox();
+  if (!bar) return dragComponentToCanvas(page, kind, 360, 250);
+  const zoom = await page.evaluate(() => {
+    const transform = document.querySelector('.react-flow__viewport')?.style.transform ?? '';
+    return Number(/scale\(([\d.]+)\)/.exec(transform)?.[1] ?? 1);
+  });
+  // The draft is 64 high: its middle stands this far from the bar.
+  const away = 64 * zoom;
+  await dragComponentToCanvas(
+    page,
+    kind,
+    bar.x + bar.width / 2,
+    bar.y + (side === 'over' ? -away : away),
+  );
+}
+
+/**
+ * Fill the form of the draft that was just dropped (the Inspector shows
+ * it): the required fields, optionally "Show advanced" for optional
+ * params, then Add to system, which is on once nothing is missing, and
+ * wait for the server to accept it.
  */
 async function addElement(page, kind, submitModel, fields, advFields = null) {
-  await page.locator('[data-testid="add-element-kind"]').selectOption(kind);
-  const form = page.locator(`[data-testid="element-form-${submitModel}"]`);
+  const form = page.locator(
+    `[data-testid="draft-inspector"] [data-testid="element-form-${submitModel}"]`,
+  );
   await form.waitFor();
   for (const [name, value] of Object.entries(fields)) {
-    await fillField(page, name, value);
+    await fillField(form, name, value);
   }
   if (advFields) {
-    await page.locator('[data-testid="form-advanced-disclosure"]').click();
+    await form.locator('[data-testid="form-advanced-disclosure"]').click();
     for (const [name, value] of Object.entries(advFields)) {
-      await fillField(page, name, value);
+      await fillField(form, name, value);
     }
   }
   const [resp] = await Promise.all([
     page.waitForResponse((r) => r.url().includes('/elements') && r.request().method() === 'POST'),
-    // Inside the form: the Bus and Line rows of the Components tab are
-    // buttons of the same name.
-    form.getByRole('button', { name: `Add ${submitModel}`, exact: true }).click(),
+    form.locator('[data-testid="element-form-submit"]').click(),
   ]);
   if (!resp.ok()) {
     const body = await resp.text();
     throw new Error(`add ${kind} ${fields.idx ?? ''} failed: HTTP ${resp.status()} ${body}`);
   }
-  // Form remounts with fresh defaults after a successful add.
+  // The draft goes and the element takes its place.
   await sleep(120);
 }
 
@@ -310,29 +340,29 @@ async function main() {
   await caption(
     page,
     'Dragging the first Bus onto the empty canvas',
-    'This starts a blank system and opens the element builder',
+    'This starts a blank system with a draft of the bus on its diagram',
   );
   // Session creation is async on boot — the drop handler no-ops until the
-  // session exists, so retry until the panel appears.
+  // session exists, so retry until the draft's form appears.
   for (let attempt = 0; attempt < 15; attempt++) {
     await dragComponentToCanvas(page, 'Bus', BUSES[0].at[0], BUSES[0].at[1]);
     await sleep(1000);
     if (
       await page
-        .locator('[data-testid="add-element-panel"]')
+        .locator('[data-testid="draft-inspector"]')
         .isVisible()
         .catch(() => false)
     )
       break;
   }
-  await page.locator('[data-testid="add-element-panel"]').waitFor({ timeout: 5_000 });
+  await page.locator('[data-testid="draft-inspector"]').waitFor({ timeout: 5_000 });
   await sleep(700);
 
   // -- buses: each one dragged to its own spot on the canvas ----------------
   for (const [i, b] of BUSES.entries()) {
     await caption(page, `Placing ${b.name} (${b.Vn} kV) on the canvas`, `bus ${i + 1} of 9`);
     if (i > 0) {
-      // Switch the open panel to a fresh Bus drop at this position.
+      // A draft of the next bus, dropped at its position.
       await dragComponentToCanvas(page, 'Bus', b.at[0], b.at[1]);
       await sleep(500);
     }
@@ -350,25 +380,14 @@ async function main() {
       .locator(sel)
       .click({ timeout: 2500 })
       .catch(() => {});
-  // Re-frame the diagram mid-build: close the open builder so Fit View
-  // sees the full canvas width, fit, then leave the panel closed (the
-  // next drag of a row reopens it). This is the visible "rezoom to adjust"
+  // Re-frame the diagram mid-build. This is the visible "rezoom to adjust"
   // the layout gets as it grows — nothing is left drifting off-screen.
   const refitView = async (caption2) => {
-    await page
-      .getByRole('button', { name: /^cancel$/i })
-      .click()
-      .catch(() => {});
     await sleep(450);
     if (caption2) await caption(page, caption2[0], caption2[1]);
     await tap('button[aria-label="Fit View"]');
     await sleep(950);
   };
-  // Close the builder so the canvas reflows to full width before arranging.
-  await page
-    .getByRole('button', { name: /^cancel$/i })
-    .click()
-    .catch(() => {});
   await sleep(600);
   await tap('button[aria-label="Fit View"]');
   await sleep(1000);
@@ -377,7 +396,7 @@ async function main() {
     'Arranging the buses into the IEEE-9 one-line shape',
     'Dragging each node into place — the layout is yours to lay out',
   );
-  // Canonical target positions (client px, panel closed). Keyed by bus idx.
+  // Canonical target positions (client px). Keyed by bus idx.
   // Five clearly-separated horizontal rows so no two buses read as "stuck
   // together" and the generator/load/controller nodes that hang off each
   // bus have room: gen buses 2/3 at the top corners, the 230 kV ring
@@ -434,7 +453,7 @@ async function main() {
   // -- loads (drag the PQ load row) -----------------------------------------
   for (const d of LOADS) {
     await caption(page, `Adding load at bus ${d.bus}`, `${d.p0 * 100} MW / ${d.q0 * 100} MVAr`);
-    await dragComponentToCanvas(page, 'PQ', 360, 250);
+    await dragComponentToBus(page, 'PQ', d.bus);
     await sleep(400);
     await addElement(page, 'PQ', 'PQ', d);
   }
@@ -447,7 +466,8 @@ async function main() {
       `Adding ${kind === 'Slack' ? 'slack' : 'PV'} generator ${g.name} at bus ${g.bus}`,
       kind === 'Slack' ? 'V = 1.04 pu reference' : `P = ${rest.p0 * 100} MW, V = ${rest.v0} pu`,
     );
-    await dragComponentToCanvas(page, kind, 360, 250);
+    // G1 hangs under its bus, at the foot of the one-line; G2 and G3 stand over theirs.
+    await dragComponentToBus(page, kind, g.bus, kind === 'Slack' ? 'under' : 'over');
     await sleep(400);
     await addElement(page, kind, kind, rest);
   }
@@ -480,15 +500,9 @@ async function main() {
     await addElement(page, 'TGOV1', 'TGOV1', g);
   }
 
-  // -- close panel, fit the whole diagram into view ------------------------
-  // Close the builder FIRST so Fit View frames the full canvas width (with
-  // the panel open it would fit only the left ~1130px and push the
-  // generators off-screen). Fit twice with a beat between so the second
-  // fit accounts for the reflow after the panel collapses.
-  await page
-    .getByRole('button', { name: /^cancel$/i })
-    .click()
-    .catch(() => {});
+  // -- fit the whole diagram into view --------------------------------------
+  // Fit twice with a beat between so the second fit accounts for the last
+  // element settling into its place.
   await sleep(700);
   await page
     .locator('button[aria-label="Fit View"]')
