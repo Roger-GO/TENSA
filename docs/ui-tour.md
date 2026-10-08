@@ -26,7 +26,7 @@ The panels can be hidden to give the diagram room: `Ctrl+B` toggles the left rai
 
 The big blue button is **Run PF** or **Run TDS**, according to the **PF | TDS** toggle beside it. While a time-domain run goes, it turns into **Abort**, and `Esc` does the same. After a run, it reads **Reset run**, which reloads the case so that you can change it and run again.
 
-**Export** saves a bundle, a snapshot or an HTML report. Plots have an export menu of their own: CSV and PNG, COMTRADE for a time-domain run, and a MATLAB `.mat` file of the state matrix and eigenvalues for the eigenvalue plot.
+**Export** saves a bundle, a snapshot or an HTML report, and opens the figure of the diagram (see [A figure for a paper](#a-figure-for-a-paper)). Plots have an export menu of their own: CSV and PNG, COMTRADE for a time-domain run, and a MATLAB `.mat` file of the state matrix and eigenvalues for the eigenvalue plot.
 
 The other controls on the right of the bar:
 
@@ -84,6 +84,21 @@ After a power flow the diagram carries the results. Each bus shows its voltage a
 Zoom with the buttons at the bottom left or the mouse wheel. The minimap at the bottom right shows where you are, and **Search** (`Ctrl+/`) jumps to a bus or an element. Type part of its name, its idx or its ANDES model (`genrou`), or a word for what it is: `bus`, `generator`, `load`, `shunt`, `machine`, `exciter`, `governor`, `pss`, or `controller` for any controller. Every word typed has to be found, so `governor 2` lists the governors with a 2 in their name or idx, and each row says what it is and of which model. Under the box there is a button for each kind the diagram has (**Buses**, **Generators**, **Machines**, **Exciters**, **Governors** and so on) with how many there are. Press one to list that kind with nothing typed, which is how you see the controllers of a case whose names you do not know; **All** lists everything again. A machine or a controller of a generator is found too, and shown where its generator is. When nothing is found because the diagram has none of that kind, the list says so and names the dynamic models it does have, and for a case with no dynamic models it says that the case is static-only. Lines and transformers are not in the list: click one on the diagram. **Recompute connectivity** counts the electrical islands of the system after a run.
 
 A diagram opens fitted whole to its pane, so in a short window, or under a tall bottom drawer, it can be too small to read. The line above the diagram then says so and gives the zoom, and the button beside it, **Zoom to 100%**, brings the diagram to full size. The + button at the bottom left of the diagram, and the mouse wheel, zoom in a step at a time. With a bus or a device selected the button is named for it (**Zoom to PQ_1**) and goes there. Picking a bus or a device in a table of the bottom drawer, or in **Search**, also shows it at full size when the diagram is that small; otherwise the zoom stays as you set it. The connector of a selected generator, load or shunt is drawn heavier and in blue, and so is the connector of one you are dragging, so you can tell it from its neighbours and watch where it lands on the bar.
+
+### A figure for a paper
+
+The **Export** button over the diagram has two entries. **PNG** saves a picture of the pane as it is shown, colours, zoom and all. **Figure for a paper** opens the figure of the diagram: the diagram drawn for print, which you save as SVG, PDF or PNG. The Export menu of the top bar, a right-click on the background of the diagram and the command palette open the same dialog.
+
+The figure is the diagram as you arranged it. Every line runs along its route, every symbol stands where it stands on the diagram, and every label is where the diagram placed it, so arrange the diagram first and make the figure of it afterwards. What belongs to the screen is left out: the selection, the handles of a line that is being moved, the minimap. Nothing on the figure is drawn over anything else, as on the diagram.
+
+On the right you choose how it looks and what it shows, and the preview on the left redraws at once:
+
+- **Style** is black and white, or colour. In colour a bus or a line near or past a limit is amber or red, as on the diagram.
+- **Line width**, **Font** (Helvetica, Times or Courier) and **Text size**. The text size is the largest a label is set in. A label is set smaller where the room the diagram keeps for it is less, and the dialog says which labels were held back and to what size: with the values of a power flow on the figure, the labels of the buses are 10 px at the most. Under the preview you can read how large the figure is in inches and its text in points, at full size. Scaled down to the width of a column the text shrinks with it, so a large diagram is easier to read as a figure of a part, or with fewer labels.
+- **Show** has a box for each kind of label: the names of the buses, the names of the devices, the controllers of the generators, the voltages, the angles, the line flows, the P and Q of the generators and loads, and the marks of a limit. The last five come from a power flow, and can be chosen once one has run.
+- **Part of the diagram** is the whole diagram, or **Selection only**: the buses you picked together on the diagram (hold Shift and drag a box round them, or hold Ctrl and click each), with their generators, loads and shunts and the lines that run between two of them.
+
+**Download SVG**, **Download PDF** and **Download PNG** save the figure that is shown. SVG and PDF are vector, sharp at any size. The PDF has its text as text, and pdfLaTeX places it with `\includegraphics`. It is set in fonts that every PDF reader has and embeds none, so a publisher that requires every font to be embedded will ask you to embed them when you build the final file. A PNG is made at the resolution you choose, 300 dpi unless you change it, and the dialog says how many pixels that is. What you choose is kept with the layout of the case, and comes back with it.
 
 ## Inspector
 
