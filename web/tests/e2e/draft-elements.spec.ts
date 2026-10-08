@@ -8,10 +8,10 @@
  *   the server was sent nothing -> pick bus 12, which is across the diagram
  *   -> the draft goes beside bus 12 and is joined to its bar by a dashed
  *   connector from the middle of a face to a tap, with nothing on the diagram
- *   drawn over anything else -> drag PV generator onto the bar of bus 9 -> it
- *   stands in the nearest free place and a notice says so -> drag Line, pick
- *   buses 12 and 14 -> it is drawn as a dashed branch, in the place of its
- *   symbol -> the rule still holds
+ *   drawn over anything else -> drag PV generator onto the symbol of a load
+ *   -> it stands in the nearest free place and a notice says so -> drag Line,
+ *   pick buses 12 and 14 -> it is drawn as a dashed branch, in the place of
+ *   its symbol -> the rule still holds
  *
  *   reload the page -> reopen the case -> the three drafts are back where
  *   they stood, with what was typed into them -> fill the load in -> Ready,
@@ -136,7 +136,8 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
   const xs = Object.values(first.nodes).map((n) => n.x);
   const left = Math.min(...xs);
   const bus12 = first.nodes['12']!;
-  const bus9 = first.nodes['9']!;
+  // The load at the foot of the diagram, which hangs well under its bar.
+  const load8 = first.nodes['load-PQ_8']!;
 
   // ---- A load, dropped on free ground left of the diagram --------------------
   await page.getByRole('tab', { name: 'Components' }).click();
@@ -176,8 +177,15 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
   expect(connectionProblems(problems(now))).toEqual([]);
   expect(await overlapsOnScreen(page)).toEqual([]);
 
-  // ---- A generator dropped on a bar stands beside it -------------------------
-  await dropOnDiagram(page, 'Add PV generator', bus9.x + 40, bus9.y + 3);
+  // ---- A generator dropped on a symbol stands beside it ----------------------
+  // (Dropped on the bar of a bus it would be connected to that bus:
+  // `connect-by-drag.spec.ts`.)
+  await dropOnDiagram(
+    page,
+    'Add PV generator',
+    load8.x + load8.width / 2,
+    load8.y + load8.height - 4,
+  );
   await expect(
     page
       .locator('[data-sonner-toast]')

@@ -162,7 +162,7 @@ test('a row of the palette opens the form on its model by a click and places a d
 
   await componentsTab(page).click();
   await expect(page.getByTestId('component-library-hint')).toHaveText(
-    'Click a component to add it, or drag it onto the diagram to place it as a draft.',
+    'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.',
   );
 
   // ---- A click ---------------------------------------------------------------
@@ -219,7 +219,7 @@ test('with no case open, the case card leads to the palette, and a row starts a 
   await expect(page.getByTestId('add-element-kind')).toHaveValue('Bus');
   // With a system to add to, the palette says what a click does now.
   await expect(page.getByTestId('component-library-hint')).toHaveText(
-    'Click a component to add it, or drag it onto the diagram to place it as a draft.',
+    'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.',
   );
   await projectTab(page).click();
   await expect(page.getByRole('complementary', { name: 'Case navigation' })).toContainText(

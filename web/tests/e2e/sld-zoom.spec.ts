@@ -115,8 +115,11 @@ test('a diagram too small to read says so, and a pick in a table shows the devic
   await expect.poll(() => offCentre(page, 'load-node-PQ_1')).toBeLessThan(2);
   const load = await page.getByTestId('load-node-PQ_1').boundingBox();
   expect(load?.height).toBeGreaterThan(30);
-  // The diagram can be read again: the line is back to how it is worked on.
-  await expect(page.getByTestId('sld-canvas-hint')).toContainText('Drag a bus or device');
+  // The diagram can be read again: the line is back to how it is worked on,
+  // which for a device that is selected is how it is moved.
+  await expect(page.getByTestId('sld-canvas-hint')).toContainText(
+    'Load PQ_1 is selected. To move it to another bus, drag the ring',
+  );
   await expect(zoomIn).toHaveCount(0);
 
   // The connector of the selected load is picked out; the one beside it is not.
