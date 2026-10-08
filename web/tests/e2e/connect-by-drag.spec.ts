@@ -23,10 +23,16 @@
  *   the system runs as it ran -> Undo twice
  *
  *   drag the ring of the draft load onto bus 11 -> it is on bus 11, with
- *   nothing sent -> move load PQ_9 to bus 13 again, save, reload the page and
- *   reopen the case -> the load is on bus 13 where it stood, and the drafts
- *   are where they stood, on their buses and between them -> run a power
- *   flow -> the ring is off and says that a run has locked the system
+ *   nothing sent -> move load PQ_9 to bus 13 again, drag a load aside, save,
+ *   reload the page and reopen the case -> the load is on bus 13 where it
+ *   stood, the drafts are where they stood, on their buses and between
+ *   them, and every line of the system and of a draft runs as it ran -> run
+ *   a power flow -> the ring is off and says that a run has locked the system
+ *
+ *   and on copies of Kundur and WSCC 9: drafts dropped on buses, a line and
+ *   a transformer drawn, a load moved to another bus and another dragged
+ *   about -> save, reload, reopen -> the diagram is the one that was saved,
+ *   to the last bend of every line
  *
  * It drives the real UI against a real `tensa serve` (see
  * `playwright.config.ts`). After every step what is on screen is held to the
@@ -41,6 +47,7 @@
 import { test, expect, type Page } from './fixtures';
 import {
   drawing,
+  dropInDiagram,
   onAFaceMiddle,
   onATap,
   openCase,
@@ -158,6 +165,21 @@ function routesOfSystem(now: Drawing): Record<string, [number, number][]> {
       .filter(([id]) => !id.startsWith('stub-') && !id.startsWith('draft-'))
       .map(([id, edge]) => [id, edge.points]),
   );
+}
+
+/** The route of every line, transformer and connector on screen, of the system and of the drafts. */
+function routesOf(now: Drawing): Record<string, [number, number][]> {
+  return Object.fromEntries(Object.entries(now.edges).map(([id, edge]) => [id, edge.points]));
+}
+
+/** Write the open case to its file, with the layout of its diagram as drawn. */
+async function save(page: Page): Promise<void> {
+  const saved = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/save'),
+  );
+  await page.getByTestId('topbar-menu-workspace-trigger').click();
+  await page.getByTestId('topbar-menu-workspace-save').click();
+  expect((await saved).ok()).toBe(true);
 }
 
 /** Nothing on screen is drawn over anything else, and every connector keeps its rules. */
@@ -372,13 +394,11 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   now = await settled(page);
   await dragTo(page, await ringAt(page), onBar(now, '13'));
   await expect(toast(page, 'Load PQ_9 moved to bus 13')).toBeVisible();
+  // And a device that is dragged aside, with the drafts on the diagram.
+  await page.locator('.react-flow__pane').click({ position: { x: 4, y: 200 } });
+  await dropInDiagram(page, 'load-PQ_3', 130, 40);
   const kept = await expectClean(page);
-  const saved = page.waitForResponse(
-    (r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/save'),
-  );
-  await page.getByTestId('topbar-menu-workspace-trigger').click();
-  await page.getByTestId('topbar-menu-workspace-save').click();
-  expect((await saved).ok()).toBe(true);
+  await save(page);
   await page.reload();
   await page.getByRole('tab', { name: 'Project' }).click();
   await openCase(page, `${stem}.xlsx`);
@@ -392,8 +412,11 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
     expect(now.nodes[id]).toMatchObject({ x: kept.nodes[id]!.x, y: kept.nodes[id]!.y });
     expect(now.edges[`stub-${id}`]?.label).toBe(kept.edges[`stub-${id}`]!.label);
   }
-  // The line of a draft is worked out until it is in the system: it joins
-  // the same two bars, by whatever way is clear now.
+  // The diagram is the one that was saved: every line of the system runs
+  // as it ran, round the drafts where it went round them, and the line of
+  // each draft along the route it had, on the same taps of the same bars.
+  expect(routesOf(now)).toEqual(routesOf(kept));
+  expect(now.nodes).toEqual(kept.nodes);
   const again = now.edges['draft-line-draft-3']!;
   expect(onATap(again.points[0]!, now.nodes['12']!)).toBe(true);
   expect(onATap(again.points.at(-1)!, now.nodes['14']!)).toBe(true);
@@ -415,3 +438,112 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   expect(sent).toEqual([]);
   expect((await drawing(page)).edges['stub-load-PQ_9']?.label).toMatch(/connection to bus 13$/);
 });
+
+/** What is placed, drawn and moved on a copy of an example case before it is saved. */
+interface Arrangement {
+  file: string;
+  /** The buses a load and a shunt are dropped on. */
+  drops: [string, string];
+  /** The buses a line is drawn between, and a transformer. */
+  line: [string, string];
+  transformer: [string, string];
+  /** The load that is moved to another bus, and that bus. */
+  move: [string, string];
+  /** The load that is dragged about afterwards. */
+  drag: string;
+}
+
+const ARRANGEMENTS: Arrangement[] = [
+  {
+    file: 'kundur_full.xlsx',
+    drops: ['6', '9'],
+    line: ['5', '7'],
+    transformer: ['8', '10'],
+    move: ['load-PQ_0', '8'],
+    drag: 'load-PQ_1',
+  },
+  {
+    file: 'wscc9.xlsx',
+    drops: ['7', '5'],
+    line: ['4', '9'],
+    transformer: ['5', '8'],
+    move: ['load-PQ_1', '8'],
+    drag: 'load-PQ_2',
+  },
+];
+
+for (const plan of ARRANGEMENTS) {
+  test(`a diagram with drafts on it and devices that were moved reopens as it was saved: ${plan.file}`, async ({
+    page,
+  }) => {
+    await page.addInitScript((key) => {
+      try {
+        window.localStorage.setItem(key, 'dismissed');
+      } catch {
+        // Storage unavailable: the coach shows, which does not block the test.
+      }
+    }, FIRST_RUN_COACH_KEY);
+    await page.goto('/');
+    await openCase(page, plan.file);
+    const stem = `reopen-${plan.file.replace(/\W.*$/, '')}-${Date.now()}`;
+    await openCopy(page, stem);
+    let now = await expectClean(page);
+
+    // Drafts on two buses, and a line and a transformer drawn as drafts.
+    await page.getByRole('tab', { name: 'Components' }).click();
+    for (const [label, bus] of [
+      ['Add PQ load', plan.drops[0]],
+      ['Add Shunt', plan.drops[1]],
+    ] as const) {
+      const bar = onBar(now, bus);
+      await dropOnDiagram(page, label, bar.x, bar.y);
+      await expect(toast(page, `connected to bus ${bus}`)).toBeVisible();
+      now = await expectClean(page);
+    }
+    for (const [what, [from, to]] of [
+      ['line', plan.line],
+      ['transformer', plan.transformer],
+    ] as const) {
+      await page.getByRole('button', { name: `Draw ${what}`, exact: true }).click();
+      await page
+        .getByRole('button', { name: new RegExp(`^Start the ${what} at bus ${from} \\(`) })
+        .click();
+      await page
+        .getByRole('button', { name: new RegExp(`^End the ${what} at bus ${to} \\(`) })
+        .click();
+      await expect(toast(page, `Draft ${what} drawn from bus ${from} to bus ${to}`)).toBeVisible();
+      now = await expectClean(page);
+    }
+
+    // A load of the system goes to another bus, and another is dragged about.
+    const [device, bus] = plan.move;
+    await node(page, device).click();
+    await expect(page.getByTestId('sld-wire-grip')).toBeVisible();
+    now = await settled(page);
+    await dragTo(page, await ringAt(page), onBar(now, bus));
+    await expect(toast(page, `moved to bus ${bus}`)).toBeVisible();
+    await expectClean(page);
+    await page.locator('.react-flow__pane').click({ position: { x: 4, y: 200 } });
+    for (const [dx, dy] of [
+      [130, 40],
+      [-130, 110],
+      [0, -150],
+    ] as const) {
+      await dropInDiagram(page, plan.drag, dx, dy);
+      await expectClean(page);
+    }
+
+    const kept = await expectClean(page);
+    // Both that were drawn are lines of the diagram, each on a route of its own.
+    expect(Object.keys(kept.edges).filter((id) => id.startsWith('draft-line-'))).toHaveLength(2);
+    await save(page);
+    await page.reload();
+    await page.getByRole('tab', { name: 'Project' }).click();
+    await openCase(page, `${stem}.xlsx`);
+    now = await expectClean(page);
+    expect(routesOf(now)).toEqual(routesOf(kept));
+    expect(now.nodes).toEqual(kept.nodes);
+    // Nothing was moved or said to bring it there.
+    await expect(page.locator('[data-sonner-toast]')).toHaveCount(0);
+  });
+}
