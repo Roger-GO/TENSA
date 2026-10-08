@@ -89,6 +89,80 @@ export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditEl
   });
 }
 
+export interface EditElementsVars {
+  sessionId: SessionId;
+  /** The edits that make the change, in the order they are sent. */
+  edits: ReadonlyArray<Omit<EditElementVars, 'sessionId'>>;
+}
+
+/**
+ * Several edits that are one change to the user: a generating unit moved to
+ * another bus is an edit of its static generator and one of each machine or
+ * converter on it, since each names the bus itself.
+ *
+ * They are sent one after the other (`PUT /sessions/{id}/elements/{model}/{idx}`),
+ * and the topology is read again once, after the last: read after each, it
+ * would show the unit half moved, with its machine on another bus than its
+ * generator. When one is refused, the ones made before it are taken back
+ * (`POST /sessions/{id}/undo-last-edit`, once for each), so the change is
+ * made whole or not at all; should that fail too, the error says how many
+ * of them stand. Every request that was answered is recorded in the edit
+ * journal as the one it was, as a replay sends the same requests again.
+ */
+export function useEditElements(): UseMutationResult<TopologyEntry[], Error, EditElementsVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, edits }: EditElementsVars) => {
+      const session = encodeURIComponent(sessionId);
+      const journal = useEditJournalStore.getState();
+      const made: TopologyEntry[] = [];
+      try {
+        for (const { model, idx, params } of edits) {
+          const body: EditElementRequest = { params };
+          made.push(
+            await andesClient.put<TopologyEntry>(
+              `/sessions/${session}/elements/${encodeURIComponent(model)}/${encodeURIComponent(idx)}`,
+              { body, timeoutMs: TIMEOUTS.workspace },
+            ),
+          );
+          journal.record({ op: 'edit', model, idx, params: { ...params } });
+        }
+      } catch (err) {
+        let left = made.length;
+        try {
+          for (; left > 0; left -= 1) {
+            await andesClient.post<TopologySummary>(`/sessions/${session}/undo-last-edit`, {
+              body: {},
+              timeoutMs: TIMEOUTS.caseLoad,
+            });
+            journal.record({ op: 'undo' });
+          }
+        } catch {
+          const why = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `${why} ${left} of the ${edits.length} edits it takes were made before that and could not be taken back: Undo in the Edit menu takes them back.`,
+            { cause: err },
+          );
+        }
+        throw err;
+      }
+      return made;
+    },
+    onMutate: ({ edits }) => ({
+      jobId: registerJob('element-edit', { model: edits[0]?.model, idx: edits[0]?.idx }),
+    }),
+    onSuccess: (data, _vars, ctx) => {
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+    // Whatever came of it, the system may have changed.
+    onSettled: (_data, _err, { sessionId }) =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) }),
+  });
+}
+
 export interface DeleteElementVars {
   sessionId: SessionId;
   model: string;
