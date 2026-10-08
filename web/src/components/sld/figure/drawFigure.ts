@@ -14,6 +14,12 @@
  * (`fittedWidth`), and each kind of text is set no larger than the lines of
  * its box have room for.
  *
+ * The one thing the picture keeps no room for is the arrow of a flow, which
+ * the canvas draws at the place of the label, or half way along a line whose
+ * label has none. The figure draws it last, among everything else, and only
+ * where it is clear of all of it (`flowArrow.ts`): there, or at the nearest
+ * place along its line that is.
+ *
  * What a figure leaves out is what belongs to the screen: the selection,
  * the handles of a line that is being moved, the control that draws a chain
  * out, the highlight of a device that is being dragged. What it draws
@@ -31,7 +37,6 @@ import {
   BAR_THICKNESS,
   TAP_DOT_RADIUS,
   TRANSFORMER_SYMBOL_SIZE,
-  distanceToRun,
   labelBoxAt,
   routeMidpoint,
   type ConnectionEdge,
@@ -56,6 +61,7 @@ import type { VoltageBand, VoltageLimits, VoltageSide } from '../voltage';
 import {
   boxAround,
   fittedWidth,
+  itemBox,
   polyline,
   type Figure,
   type FigureColour,
@@ -63,6 +69,7 @@ import {
   type Stroke,
 } from './displayList';
 import { showsValues, type FigureSettings } from './figureSettings';
+import { arrowCorners, placeArrow } from './flowArrow';
 import { CAP_HEIGHT } from './fontMetrics';
 import { controllerSymbol, placeSteps, symbolForModel, type FigureSymbol } from './symbols';
 
@@ -110,13 +117,6 @@ const LEADING = 1.2;
 const READOUT_LEADING = 1.15;
 /** The gap between a bar and the label that hangs under it, and the padding of a label. */
 const LABEL_GAP = 4;
-/** Half the width of the arrow of a flow at the most: it stays clear of what stands beside its line. */
-const ARROW_HALF_WIDTH = 3.5;
-/** The room an arrow that stands beside a label keeps: to the label, to a bend, to a bar, and to another line. */
-const ARROW_OFF_LABEL = 2;
-const ARROW_OFF_BEND = 2;
-const ARROW_OFF_BAR = 9;
-const ARROW_OFF_LINE = 6;
 /** The most a text is set in, by kind, where its room is always the same. */
 const SIZE_LIMIT = { device: 11, flow: 12.5, chip: 8.5, chain: 10.8 } as const;
 
@@ -310,6 +310,8 @@ export function drawFigure(
   // ---- the layers, each painted over the ones before it --------------------
 
   const lines: FigureItem[] = [];
+  // The points each of them runs through: what an arrow is kept clear of.
+  const drawnLines: { of: string; points: readonly (readonly [number, number])[] }[] = [];
   const arrows: FigureItem[] = [];
   const bars: FigureItem[] = [];
   const dots: FigureItem[] = [];
@@ -422,6 +424,15 @@ export function drawFigure(
   // The room the picture gave each flow label (`figurePicture`).
   const flowWidths = values ? valueLabelWidths(source.nodes, source.edges, pflow).flows : undefined;
   const tapped = new Set<string>();
+  // The arrows of the flows are placed last, among everything else that is drawn.
+  const flowArrows: {
+    id: string;
+    points: readonly (readonly [number, number])[];
+    prefer: { x: number; y: number };
+    size: number;
+    forward: boolean;
+    label: Rect | null;
+  }[] = [];
   for (const edge of edges) {
     const route = connections.routes.get(edge.id);
     if (route === undefined || route.points.length < 2) continue;
@@ -442,6 +453,7 @@ export function drawFigure(
       steps: polyline(route.points),
       stroke: { colour: bandColour(band), width: line * heavier },
     });
+    drawnLines.push({ of: edge.id, points: route.points });
     // Where it lands on a bar, the dot of its tap.
     const ends: [string, readonly [number, number]][] = [
       [edge.source, route.points[0]!],
@@ -479,34 +491,17 @@ export function drawFigure(
       : null;
     if (overlay.direction !== 'neutral') {
       const magnitude = Math.abs(pflow?.line_flows?.[data.idx ?? '']?.p ?? 0);
-      const size = arrowSizeFromMw(magnitude, flowScale);
-      const forward = overlay.direction === 'forward';
-      // A label that stands on its line stands where the arrow would: the
-      // arrow is then drawn on the line right beside it.
-      const spot =
-        labelBox !== null && at?.label === undefined
-          ? arrowBeside(edge.id, route.points, at!, labelBox, size, forward)
-          : (at ?? routeMidpoint(route.points));
-      if (spot !== null) {
-        const turn = ((spot.angleDeg + (forward ? 0 : 180)) * Math.PI) / 180;
-        const [cos, sin] = [Math.cos(turn), Math.sin(turn)];
-        const corner = (dx: number, dy: number): [number, number] => [
-          spot.x + dx * cos - dy * sin,
-          spot.y + dx * sin + dy * cos,
-        ];
-        const half = Math.min(size * 0.3, ARROW_HALF_WIDTH);
-        arrows.push({
-          kind: 'path',
-          of: `arrow:${edge.id}`,
-          steps: [
-            ...polyline([corner(size / 2, 0), corner(-size / 2, -half), corner(-size / 2, half)]),
-            { op: 'Z' },
-          ],
-          // No halo round it, as the canvas draws one: in print the halo
-          // cuts a notch into the line under the tip.
-          fill: palette.ink,
-        });
-      }
+      flowArrows.push({
+        id: edge.id,
+        points: route.points,
+        // Where the canvas draws it: at the place of the label, or half way along.
+        prefer: at ?? routeMidpoint(route.points),
+        size: arrowSizeFromMw(magnitude, flowScale),
+        forward: overlay.direction === 'forward',
+        // A label that stands on its line stands where the arrow would: the
+        // arrow is then drawn on the line right beside it.
+        label: labelBox !== null && at?.label === undefined ? labelBox : null,
+      });
     }
     if (overlay.p_label === null) continue;
     if (labelBox === null || at === undefined) {
@@ -641,65 +636,6 @@ export function drawFigure(
     const rows = readoutRows.get(n.id);
     const place = picture.readouts.get(n.id);
     if (rows !== undefined && place !== undefined) drawReadout(n.id, rows, place.box, place.spot);
-  }
-
-  /**
-   * Where the arrow of a flow stands when the label stands on the line: on
-   * the same run, right past the end of the label the power flows towards,
-   * or before its other end where that is the one with room. `null` where
-   * neither has: the run ends too soon, or another line comes by there. The
-   * sign of the value still says which way the power goes.
-   */
-  function arrowBeside(
-    id: string,
-    points: readonly (readonly [number, number])[],
-    at: { x: number; y: number },
-    box: Rect,
-    size: number,
-    forward: boolean,
-  ): { x: number; y: number; angleDeg: number } | null {
-    let run = -1;
-    let nearest = 1.5;
-    for (let i = 0; i + 1 < points.length; i += 1) {
-      const d = distanceToRun([at.x, at.y], points[i]!, points[i + 1]!);
-      if (d < nearest) [run, nearest] = [i, d];
-    }
-    if (run < 0) return null;
-    const [a, b] = [points[run]!, points[run + 1]!];
-    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (length === 0) return null;
-    const [ux, uy] = [(b[0] - a[0]) / length, (b[1] - a[1]) / length];
-    const along = (at.x - a[0]) * ux + (at.y - a[1]) * uy;
-    // How far the box of the label reaches along the run, either way.
-    const reach =
-      (Math.abs(ux) * (box.right - box.left) + Math.abs(uy) * (box.bottom - box.top)) / 2;
-    // A run that ends on a bar ends under the dot of its tap; one that ends in a bend, at the bend.
-    const clearOfStart = run === 0 ? ARROW_OFF_BAR : ARROW_OFF_BEND;
-    const clearOfEnd = run === points.length - 2 ? ARROW_OFF_BAR : ARROW_OFF_BEND;
-    for (const way of forward ? [1, -1] : [-1, 1]) {
-      const middle = along + way * (reach + size / 2 + ARROW_OFF_LABEL);
-      if (middle - size / 2 < clearOfStart || middle + size / 2 > length - clearOfEnd) continue;
-      const samples = [-size / 2, 0, size / 2].map((d): [number, number] => [
-        a[0] + (middle + d) * ux,
-        a[1] + (middle + d) * uy,
-      ]);
-      const crossed = edges.some((other) => {
-        if (other.id === id) return false;
-        const theirs = connections.routes.get(other.id)?.points ?? [];
-        return theirs.some(
-          (point, i) =>
-            i > 0 &&
-            samples.some((sample) => distanceToRun(sample, theirs[i - 1]!, point) < ARROW_OFF_LINE),
-        );
-      });
-      if (crossed) continue;
-      return {
-        x: samples[1]![0],
-        y: samples[1]![1],
-        angleDeg: (Math.atan2(uy, ux) * 180) / Math.PI,
-      };
-    }
-    return null;
   }
 
   /** The two (or three) circles of a transformer, in line with the run they stand on. */
@@ -971,6 +907,13 @@ export function drawFigure(
         ]),
         stroke: { ...outline, dash: [2, 2] },
       });
+      drawnLines.push({
+        of: `tether:${id}`,
+        points: [
+          [x + 6, y + 8],
+          [x + dx + 12, y + dy + 8],
+        ],
+      });
     }
     blocks.push({
       kind: 'rect',
@@ -1003,6 +946,44 @@ export function drawFigure(
       'start',
       x + width - 6 - left,
     );
+  }
+
+  // ---- the arrows of the flows -----------------------------------------------
+
+  // Everything else is drawn by now, and an arrow is one more thing that is
+  // drawn over nothing: it stands where the canvas has it while that place
+  // is clear of every other line and of the box of everything that stands
+  // there, and otherwise at the nearest place on its line that is. A line
+  // with no such place gets no arrow; the sign of its value still says which
+  // way the power goes.
+  if (flowArrows.length > 0) {
+    const standing = new Map<string, Rect>();
+    for (const item of [...bars, ...dots, ...symbols, ...blocks, ...labels]) {
+      const box = itemBox(item);
+      const known = standing.get(item.of);
+      standing.set(item.of, {
+        left: Math.min(known?.left ?? Infinity, box.x),
+        right: Math.max(known?.right ?? -Infinity, box.x + box.width),
+        top: Math.min(known?.top ?? Infinity, box.y),
+        bottom: Math.max(known?.bottom ?? -Infinity, box.y + box.height),
+      });
+    }
+    const boxes = [...standing.values()];
+    for (const { id, points, prefer, size, forward, label } of flowArrows) {
+      const spot = placeArrow(points, prefer, size, forward, label, {
+        lines: drawnLines.filter((other) => other.of !== id).map((other) => other.points),
+        boxes,
+      });
+      if (spot === null) continue;
+      arrows.push({
+        kind: 'path',
+        of: `arrow:${id}`,
+        steps: [...polyline(arrowCorners(spot, size, forward)), { op: 'Z' }],
+        // No halo round it, as the canvas draws one: in print the halo
+        // cuts a notch into the line under the tip.
+        fill: palette.ink,
+      });
+    }
   }
 
   const items = [...lines, ...arrows, ...bars, ...dots, ...symbols, ...blocks, ...labels];

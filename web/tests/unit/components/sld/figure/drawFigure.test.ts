@@ -7,7 +7,10 @@
  *   out again, with and without the values of a power flow, in every font
  *   and at the largest text there is. The figure is read back as it was
  *   drawn (`figureAsDrawn`), each text as wide as its font sets it, so a
- *   label that left its room would be found on whatever it reached.
+ *   label that left its room would be found on whatever it reached. The
+ *   arrows of the flows are among what is read back, and each is held to
+ *   the room it keeps besides (`arrowsAmiss`): no line but its own comes
+ *   near it, and it stands in the middle of a run, off the bends and bars.
  * - It is the picture of the diagram: every line runs through the points of
  *   its route, every bar is where the picture has it, every line end on a
  *   bar has its dot, and every label is inside the box the picture keeps
@@ -22,13 +25,19 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { PflowResult, TopologySummary } from '@/api/types';
-import { BAR_THICKNESS, TAP_DOT_RADIUS, labelBoxAt } from '@/components/sld/connections';
+import {
+  BAR_THICKNESS,
+  TAP_DOT_RADIUS,
+  distanceToRun,
+  labelBoxAt,
+} from '@/components/sld/connections';
 import {
   FIGURE_MARGIN,
   drawFigure,
   figurePicture,
   figureScope,
   figureShowsValues,
+  type DrawnFigure,
   type FigureSource,
 } from '@/components/sld/figure/drawFigure';
 import {
@@ -38,6 +47,12 @@ import {
   type TextItem,
 } from '@/components/sld/figure/displayList';
 import { DEFAULT_FIGURE_SETTINGS } from '@/components/sld/figure/figureSettings';
+import {
+  ARROW_OFF_BAR,
+  ARROW_OFF_BEND,
+  ARROW_OFF_BOX,
+  ARROW_OFF_LINE,
+} from '@/components/sld/figure/flowArrow';
 import { textWidth } from '@/components/sld/figure/fontMetrics';
 import { LINE_LABEL_BOX, TRANSFORMER_LABEL_BOX } from '@/components/sld/labels';
 import { describeOverlaps, findOverlaps } from '@/components/sld/overlapCheck';
@@ -68,6 +83,79 @@ const overlapsOf = (
   ...rest: Parameters<typeof figureOf> extends [unknown, ...infer R] ? R : never
 ) => describeOverlaps(findOverlaps(figureAsDrawn(figureOf(source, ...rest), source)));
 
+type At = readonly [number, number];
+
+/** The points a path of straight runs is drawn through. */
+const pointsOf = (item: PathItem): At[] =>
+  item.steps.flatMap((step): At[] =>
+    step.op === 'M' || step.op === 'L' ? [[step.x, step.y]] : [],
+  );
+
+/** The arrows of the flows on `figure`: the tip of each, the middle of its base, and its line. */
+function arrowsOf(figure: DrawnFigure): { of: string; corners: At[]; tip: At; base: At }[] {
+  return figure.items
+    .filter((item): item is PathItem => item.kind === 'path' && item.of.startsWith('arrow:'))
+    .map((item) => {
+      const corners = pointsOf(item);
+      const [tip, left, right] = corners as [At, At, At];
+      return {
+        of: item.of.slice('arrow:'.length),
+        corners,
+        tip,
+        base: [(left[0] + right[0]) / 2, (left[1] + right[1]) / 2],
+      };
+    });
+}
+
+/**
+ * What is wrong with the arrows of the flows on `figure`, in words; empty
+ * when each stands in the middle of a run of its own line (off a bend by
+ * `ARROW_OFF_BEND`, off the bar its line ends on by `ARROW_OFF_BAR`) and no
+ * corner of it is nearer than `ARROW_OFF_LINE` to any other line. Worked
+ * out from what was drawn, and not the way the figure works it out.
+ */
+function arrowsAmiss(figure: DrawnFigure, source: FigureSource): string[] {
+  const edgeIds = new Set(source.edges.map((e) => e.id));
+  const drawn = figure.items
+    .filter(
+      (item): item is PathItem =>
+        item.kind === 'path' && (edgeIds.has(item.of) || item.of.startsWith('tether:')),
+    )
+    .map((item) => ({ of: item.of, points: pointsOf(item) }));
+  const amiss: string[] = [];
+  for (const { of, corners, tip, base } of arrowsOf(figure)) {
+    const own = drawn.find((line) => line.of === of)?.points ?? [];
+    const size = Math.hypot(tip[0] - base[0], tip[1] - base[1]);
+    const middle: At = [(tip[0] + base[0]) / 2, (tip[1] + base[1]) / 2];
+    // The run it lies along, with the room it has to either end of it.
+    const inRun = own.some((b, i) => {
+      if (i === 0) return false;
+      const a = own[i - 1]!;
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (length === 0 || distanceToRun(middle, a, b) > 0.01) return false;
+      const [ux, uy] = [(b[0] - a[0]) / length, (b[1] - a[1]) / length];
+      if (Math.abs((tip[0] - base[0]) * uy - (tip[1] - base[1]) * ux) > 0.01) return false;
+      const along = (middle[0] - a[0]) * ux + (middle[1] - a[1]) * uy;
+      const fromStart = i === 1 ? ARROW_OFF_BAR : ARROW_OFF_BEND;
+      const fromEnd = i === own.length - 1 ? ARROW_OFF_BAR : ARROW_OFF_BEND;
+      return along - size / 2 >= fromStart - 0.01 && along + size / 2 <= length - fromEnd + 0.01;
+    });
+    if (!inRun) amiss.push(`the arrow of ${of} is on a bend or an end of its line, or off it`);
+    for (const other of drawn) {
+      if (other.of === of) continue;
+      const off = Math.min(
+        ...other.points
+          .slice(1)
+          .flatMap((b, i) => corners.map((corner) => distanceToRun(corner, other.points[i]!, b))),
+      );
+      if (off < ARROW_OFF_LINE - 0.01) {
+        amiss.push(`the arrow of ${of} is ${off.toFixed(1)} px from ${other.of}`);
+      }
+    }
+  }
+  return amiss;
+}
+
 /** Whether `inner` lies in `outer`, to within `slack`. */
 function within(
   inner: { x: number; y: number; width: number; height: number },
@@ -95,6 +183,7 @@ describe('nothing on a figure is drawn over anything else', () => {
           const source = sourceOf(diagram, pflow);
           const where = `${state}, ${pflow === null ? 'plain' : 'with values'}`;
           expect(overlapsOf(source), where).toEqual([]);
+          expect(arrowsAmiss(figureOf(source), source), where).toEqual([]);
           // The font that is widest for its size, and the largest text.
           expect(overlapsOf(source, { font: 'mono', fontSize: 12 }), `${where}, mono 12`).toEqual(
             [],
@@ -112,14 +201,18 @@ describe('nothing on a figure is drawn over anything else', () => {
     });
   }
 
-  it('IEEE 118: as it opens and tidied, with values, within the time a click may take', async () => {
+  it('IEEE 118: as it opens, tidied and laid out again, with values, within the time a click may take', async () => {
     const first = await opened(CASE118);
-    for (const diagram of [first, tidied(first, false)]) {
+    for (const diagram of [first, tidied(first, false), tidied(first, true)]) {
       const source = sourceOf(diagram, solved(diagram));
       const started = performance.now();
       const figure = figureOf(source, { fontSize: 12 });
       const took = performance.now() - started;
       expect(describeOverlaps(findOverlaps(figureAsDrawn(figure, source)))).toEqual([]);
+      // Its lines cross where two of them are half way along, which is
+      // where an arrow is asked for: each stands clear of the crossing.
+      expect(arrowsAmiss(figure, source)).toEqual([]);
+      expect(arrowsOf(figure).length).toBeGreaterThan(170);
       expect(figure.shown).toBeGreaterThan(118);
       // The picture and the figure of it together; a choice in the dialog
       // redraws the figure alone, which is a small part of this.
@@ -493,43 +586,95 @@ describe('what is chosen for a figure shows on it', () => {
 
   it('draws the arrow of a flow with its label, on its own line, and neither without the flows', () => {
     const figure = figureOf(source);
-    const arrows = figure.items.filter((item) => item.of.startsWith('arrow:'));
-    expect(arrows.length).toBeGreaterThan(10);
+    const arrows = arrowsOf(figure);
+    // One for every line the power flow has a flow for; a transformer carries its symbol.
+    const lines = diagram.edges.filter((e) => e.id.startsWith('line-'));
+    expect(lines.length).toBeGreaterThan(10);
+    expect(arrows.map((arrow) => arrow.of).sort()).toEqual(lines.map((e) => e.id).sort());
+    expect(arrowsAmiss(figure, source)).toEqual([]);
     const picture = figurePicture(source, true);
-    const widths = valueLabelWidths(source.nodes, source.edges, pflow);
+    let beside = 0;
     for (const arrow of arrows) {
-      const edgeId = arrow.of.slice('arrow:'.length);
-      const box = itemBox(arrow);
-      const middle: [number, number] = [box.x + box.width / 2, box.y + box.height / 2];
-      // On a run of its own route.
-      const points = picture.connections.routes.get(edgeId)!.points;
-      const onRoute = points.some((point, i) => {
-        if (i === 0) return false;
-        const [a, b] = [points[i - 1]!, point];
-        const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const t =
-          ((middle[0] - a[0]) * (b[0] - a[0]) + (middle[1] - a[1]) * (b[1] - a[1])) / length ** 2;
-        const off = Math.hypot(
-          a[0] + t * (b[0] - a[0]) - middle[0],
-          a[1] + t * (b[1] - a[1]) - middle[1],
-        );
-        return t >= 0 && t <= 1 && off < 1.5;
-      });
-      expect(onRoute, arrow.of).toBe(true);
-      // Clear of its own label where that stands on the line: the patch of
-      // paper under the label would otherwise take the arrow out.
-      const at = picture.labelPlaces.get(edgeId);
+      const box = itemBox(itemsOf(figure, `arrow:${arrow.of}`)[0]!);
+      // Clear of its own label, with the room it keeps to one: where the
+      // label stands on the line, the patch of paper under it would
+      // otherwise take the arrow out.
+      for (const part of itemsOf(figure, `flow:${arrow.of}`)) {
+        const label = itemBox(part);
+        const apart =
+          box.x >= label.x + label.width + ARROW_OFF_BOX - 0.01 ||
+          box.x + box.width <= label.x - ARROW_OFF_BOX + 0.01 ||
+          box.y >= label.y + label.height + ARROW_OFF_BOX - 0.01 ||
+          box.y + box.height <= label.y - ARROW_OFF_BOX + 0.01;
+        expect(apart, arrow.of).toBe(true);
+      }
+      // Beside a label that stands on the line: on the same run, right past
+      // the room the diagram keeps for the label.
+      const at = picture.labelPlaces.get(arrow.of);
       if (at === undefined || at.hidden === true || at.label !== undefined) continue;
-      const label = labelBoxAt(at, widths.flows.get(edgeId)!, LINE_LABEL_BOX.height);
-      const apart =
-        box.x >= label.right ||
-        box.x + box.width <= label.left ||
-        box.y >= label.bottom ||
-        box.y + box.height <= label.top;
-      expect(apart, arrow.of).toBe(true);
+      beside += 1;
+      const room = labelBoxAt(
+        at,
+        valueLabelWidths(source.nodes, source.edges, pflow).flows.get(arrow.of)!,
+        LINE_LABEL_BOX.height,
+      );
+      const gap = Math.max(
+        box.x - room.right,
+        room.left - (box.x + box.width),
+        box.y - room.bottom,
+        room.top - (box.y + box.height),
+      );
+      expect(gap, arrow.of).toBeCloseTo(ARROW_OFF_BOX, 6);
     }
+    expect(beside).toBeGreaterThan(5);
     const without = figureOf(source, { flows: false });
     expect(without.items.filter((item) => /^(arrow|flow):/.test(item.of))).toEqual([]);
+  });
+
+  it('points the arrow of a flow the way the power goes: on along its line, or back along it', () => {
+    const figure = figureOf(source);
+    const picture = figurePicture(source, true);
+    const arrows = new Map(arrowsOf(figure).map((arrow) => [arrow.of, arrow]));
+    let [onwards, back] = [0, 0];
+    for (const edge of diagram.edges) {
+      const arrow = arrows.get(edge.id);
+      const idx = (edge.data as { idx?: string } | undefined)?.idx;
+      const flow = idx === undefined ? undefined : pflow.line_flows?.[idx];
+      if (arrow === undefined || flow === undefined) continue;
+      // The line is drawn from the bus the flow is measured at: its first
+      // point is on the bar of that bus.
+      const points = picture.connections.routes.get(edge.id)!.points;
+      expect(String(flow.from_idx), edge.id).toBe(edge.source);
+      const from = diagram.nodes.find((n) => n.id === edge.source)!;
+      expect(points[0]![1], edge.id).toBeCloseTo(from.position.y + BAR_THICKNESS / 2, 6);
+      /** How far along the line the point of it nearest to `p` is. */
+      const along = (p: At): number => {
+        let [best, travelled, nearest] = [0, 0, Infinity];
+        for (let i = 1; i < points.length; i += 1) {
+          const [a, b] = [points[i - 1]!, points[i]!];
+          const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          const off = distanceToRun(p, a, b);
+          if (length > 0 && off < nearest) {
+            const t = ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / length;
+            [best, nearest] = [travelled + Math.min(length, Math.max(0, t)), off];
+          }
+          travelled += length;
+        }
+        return best;
+      };
+      // A flow out of the first bus points on to the other end of the line;
+      // one into it points back to the first bus.
+      const ahead = along(arrow.tip) - along(arrow.base);
+      if (flow.p > 0) {
+        onwards += 1;
+        expect(ahead, edge.id).toBeGreaterThan(6);
+      } else {
+        back += 1;
+        expect(ahead, edge.id).toBeLessThan(-6);
+      }
+    }
+    expect(onwards).toBeGreaterThan(3);
+    expect(back).toBeGreaterThan(3);
   });
 
   it('counts the values that have no place on the diagram, and draws none of them', () => {

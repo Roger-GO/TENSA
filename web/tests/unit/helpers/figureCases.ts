@@ -104,9 +104,10 @@ export function itemsOf(figure: DrawnFigure, of: string): FigureItem[] {
  * `figure` as the overlap checker reads a diagram: every line and connector
  * with the points it is drawn through, every bar, and a box round each group
  * of things drawn for one element (a symbol with its name and chips, a
- * label, a readout, a flow label, the symbol of a transformer), as large as
- * what was really drawn. So a text that left its room, or a symbol drawn
- * out of its box, is found on whatever it reaches.
+ * label, a readout, a flow label, the symbol of a transformer, the arrow of
+ * a flow), as large as what was really drawn. So a text that left its room,
+ * or a symbol drawn out of its box, is found on whatever it reaches, and an
+ * arrow on any line but its own, on a bar, on a symbol or on a label.
  */
 export function figureAsDrawn(figure: DrawnFigure, source: FigureSource): DrawnDiagram {
   const nodeIds = new Map(source.nodes.map((n) => [n.id, n]));
@@ -133,9 +134,8 @@ export function figureAsDrawn(figure: DrawnFigure, source: FigureSource): DrawnD
       });
       continue;
     }
-    // The dot of a tap is part of its bar, the arrow of a flow of its line,
-    // and the tether of a badge is no box.
-    if (/^(tap|arrow|tether):/.test(item.of)) continue;
+    // The dot of a tap is part of its bar, and the tether of a badge is no box.
+    if (/^(tap|tether):/.test(item.of)) continue;
     grouped.set(item.of, [...(grouped.get(item.of) ?? []), item]);
   }
   const boxes: DrawnBox[] = [];
