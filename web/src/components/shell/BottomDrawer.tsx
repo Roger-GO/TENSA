@@ -20,7 +20,9 @@
  * and ``setBottomDrawerCollapsed(false)`` handles the expand. The tab
  * that is active already opens it as well. A drawer that is dragged
  * down to its strip counts as collapsed (``AppShell``), so the same
- * holds for it.
+ * holds for it. The button at the end of the strip does both by name:
+ * it takes the drawer down to its tabs, and opens it again, for whoever
+ * does not drag the divider.
  *
  * Unread-results bit: per F-DESIGN-5, opening the drawer or switching
  * tabs clears ``drawerHasUnreadResults`` (mirrors the click path on the
@@ -137,6 +139,51 @@ function MessagesCount() {
   );
 }
 
+/**
+ * The button at the end of the tab strip: down to the tabs alone, and open
+ * again. It says which in words, since the divider over the strip does not
+ * say that it can be dragged all the way down.
+ */
+function DrawerCollapseButton({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const label = collapsed ? 'Open the drawer' : 'Collapse the drawer to its tabs';
+  return (
+    <button
+      type="button"
+      data-testid="bottom-drawer-collapse"
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={label}
+      onClick={onToggle}
+      className={cn(
+        'border-l-border inline-flex w-8 shrink-0 items-center justify-center border-l',
+        'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+        'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        'transition-colors duration-[var(--duration-fast)]',
+      )}
+    >
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-4 w-4"
+      >
+        {/* Down while it is open (it goes down), up while it is at its tabs. */}
+        {collapsed ? <path d="M7 14l5-5 5 5" /> : <path d="M7 10l5 5 5-5" />}
+      </svg>
+    </button>
+  );
+}
+
 export interface BottomDrawerProps {
   className?: string;
 }
@@ -194,55 +241,61 @@ export function BottomDrawer({ className }: BottomDrawerProps) {
       data-collapsed={collapsed ? 'true' : 'false'}
       className={cn('flex h-full min-h-0 flex-col', className)}
     >
-      <TabsPrimitive.List
-        aria-label="Bottom drawer tabs"
-        className={cn(
-          'border-border bg-muted/30 flex h-8 shrink-0 items-stretch border-b',
-          'overflow-x-auto',
-        )}
-      >
-        {BOTTOM_DRAWER_TABS.map((tab) => (
-          <Fragment key={tab}>
-            {/* Group separator: the tabs before it are the per-bucket
+      <div className="border-border bg-muted/30 flex h-8 shrink-0 items-stretch border-b">
+        <TabsPrimitive.List
+          aria-label="Bottom drawer tabs"
+          className="flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        >
+          {BOTTOM_DRAWER_TABS.map((tab) => (
+            <Fragment key={tab}>
+              {/* Group separator: the tabs before it are the per-bucket
                 element grids, the dynamic-model tables and the violations
                 list; ``analysis``, ``activity`` and ``messages`` are the
                 tools group. A thin spacer + hairline before ``analysis``
                 makes that split read at a glance without a heavier divider. */}
-            {tab === 'analysis' ? (
-              <span
-                aria-hidden="true"
-                data-testid="bottom-drawer-tab-group-divider"
-                className="bg-border my-1.5 mr-1 ml-1 w-px shrink-0 self-stretch"
-              />
-            ) : null}
-            <TabsPrimitive.Trigger
-              value={tab}
-              data-testid={`bottom-drawer-tab-${tab}`}
-              // The tab that is active already changes nothing when it is
-              // clicked: on a collapsed drawer it opens it all the same.
-              onClick={() => {
-                if (collapsed) setCollapsed(false);
-              }}
-              className={cn(
-                'relative inline-flex items-center px-3 text-sm font-medium whitespace-nowrap',
-                'text-muted-foreground hover:text-foreground',
-                'border-r-border border-r last:border-r-0',
-                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-                'data-[state=active]:bg-background data-[state=active]:text-foreground',
-                // 2px primary top-rail on the active tab — the IDE pattern
-                // that makes the active tab read instantly even from a
-                // wide-aspect viewport.
-                'data-[state=active]:shadow-[inset_0_2px_0_0_var(--color-primary)]',
-                'transition-colors duration-[var(--duration-fast)]',
-              )}
-            >
-              {TAB_LABELS[tab]}
-              {tab === 'violations' ? <ViolationsCount /> : null}
-              {tab === 'messages' ? <MessagesCount /> : null}
-            </TabsPrimitive.Trigger>
-          </Fragment>
-        ))}
-      </TabsPrimitive.List>
+              {tab === 'analysis' ? (
+                <span
+                  aria-hidden="true"
+                  data-testid="bottom-drawer-tab-group-divider"
+                  className="bg-border my-1.5 mr-1 ml-1 w-px shrink-0 self-stretch"
+                />
+              ) : null}
+              <TabsPrimitive.Trigger
+                value={tab}
+                data-testid={`bottom-drawer-tab-${tab}`}
+                // The tab that is active already changes nothing when it is
+                // clicked: on a collapsed drawer it opens it all the same.
+                onClick={() => {
+                  if (collapsed) setCollapsed(false);
+                }}
+                className={cn(
+                  'relative inline-flex items-center px-3 text-sm font-medium whitespace-nowrap',
+                  'text-muted-foreground hover:text-foreground',
+                  'border-r-border border-r last:border-r-0',
+                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  'data-[state=active]:bg-background data-[state=active]:text-foreground',
+                  // 2px primary top-rail on the active tab — the IDE pattern
+                  // that makes the active tab read instantly even from a
+                  // wide-aspect viewport.
+                  'data-[state=active]:shadow-[inset_0_2px_0_0_var(--color-primary)]',
+                  'transition-colors duration-[var(--duration-fast)]',
+                )}
+              >
+                {TAB_LABELS[tab]}
+                {tab === 'violations' ? <ViolationsCount /> : null}
+                {tab === 'messages' ? <MessagesCount /> : null}
+              </TabsPrimitive.Trigger>
+            </Fragment>
+          ))}
+        </TabsPrimitive.List>
+        <DrawerCollapseButton
+          collapsed={collapsed}
+          onToggle={() => {
+            if (collapsed) clearDrawerUnread();
+            setCollapsed(!collapsed);
+          }}
+        />
+      </div>
 
       {/* When collapsed, render ONLY the strip — the panel is at
           ~4% height (collapsedSize=4 in AppShell). When expanded,

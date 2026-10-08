@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/cn';
 import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
+import { bottomDrawerSizes, type DrawerSizes } from './drawerSizes';
 import { FirstRunCoach } from './FirstRunCoach';
 import { TopBar } from './TopBar';
 import { Toaster } from '@/components/ui/Toaster';
@@ -219,6 +220,27 @@ export function AppShell({
   const rightInspectorPanelRef = useRef<ImperativePanelHandle>(null);
   const bottomDrawerPanelRef = useRef<ImperativePanelHandle>(null);
 
+  // The column the drawer shares with the diagram, measured: the group of
+  // panels the drawer is in. The panels are sized in percent of it, and the
+  // drawer needs so many pixels whatever the window: its tab strip when it
+  // is shut, and a table with a row or two when it is open
+  // (`bottomDrawerSizes`).
+  const [drawerSection, setDrawerSection] = useState<HTMLElement | null>(null);
+  const [columnHeight, setColumnHeight] = useState(0);
+  useLayoutEffect(() => {
+    const column = drawerSection?.closest<HTMLElement>('[data-panel-group]');
+    if (!column) return;
+    const measure = (): void => setColumnHeight(column.clientHeight);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(column);
+    return () => observer.disconnect();
+  }, [drawerSection]);
+  const drawerSizes = useMemo(() => bottomDrawerSizes(columnHeight), [columnHeight]);
+  const drawerSizesRef = useRef(drawerSizes);
+  drawerSizesRef.current = drawerSizes;
+
   // First-mount guard. The PanelGroup picks up ``defaultSize`` on first
   // paint, which already reflects the persisted state via the
   // ``defaultSize`` prop derived from the layout store. Calling the
@@ -242,7 +264,7 @@ export function AppShell({
   useEffect(() => {
     if (firstMountRef.current) return;
     syncPanel(bottomDrawerPanelRef.current, bottomDrawerCollapsed);
-    if (!bottomDrawerCollapsed) openEnough(bottomDrawerPanelRef.current);
+    if (!bottomDrawerCollapsed) openEnough(bottomDrawerPanelRef.current, drawerSizesRef.current);
   }, [bottomDrawerCollapsed]);
 
   // Keep the RightInspector panel in sync with the visibility predicate.
@@ -353,8 +375,14 @@ export function AppShell({
                   // a tab opens it again; dragged up from there it is open,
                   // and shows its content. The strip is no height to come
                   // back to, so it is not kept as one.
-                  const atStrip = drawerPct <= BOTTOM_DRAWER_COLLAPSED_PCT + 0.5;
-                  if (atStrip !== bottomDrawerCollapsed) setBottomDrawerCollapsed(atStrip);
+                  // Read as they are now, not as they were when this was
+                  // handed over: the drawer is sized again as soon as the
+                  // height of its strip in percent changes, before the
+                  // panels have this callback of the same render.
+                  const atStrip = drawerPct <= drawerSizesRef.current.strip + 0.5;
+                  if (atStrip !== useLayoutStore.getState().bottomDrawerCollapsed) {
+                    setBottomDrawerCollapsed(atStrip);
+                  }
                   if (!atStrip) setBottomDrawerHeightPct(drawerPct);
                 }}
               >
@@ -438,18 +466,19 @@ export function AppShell({
                   order={2}
                   collapsible
                   defaultSize={bottomDrawerHeightPct}
-                  // Collapsed size approximates the 32px tab strip Unit 11
-                  // will mount; KTD-7 specifies a 32px collapsed bar. As a
-                  // % of the right-side vertical group, ~4 covers it on
-                  // typical 800-1200px viewports without crowding.
-                  collapsedSize={BOTTOM_DRAWER_COLLAPSED_PCT}
-                  // Open, it is never lower than a table needs: dragged
-                  // below that it snaps down to its tab strip.
-                  minSize={BOTTOM_DRAWER_OPEN_MIN_PCT}
+                  // Collapsed, it is as high as its tab strip (KTD-7: a
+                  // 32px collapsed bar), whatever that is in percent of
+                  // the column at the height the window has.
+                  collapsedSize={drawerSizes.strip}
+                  // Open, it is never lower than a table needs for its
+                  // bar, its heading and a row or two: dragged below
+                  // that it snaps down to its tab strip.
+                  minSize={drawerSizes.openMin}
                   maxSize={75}
                   className="flex min-w-0 flex-col"
                 >
                   <section
+                    ref={setDrawerSection}
                     aria-label="Bottom drawer"
                     data-testid="app-shell-bottom-drawer"
                     data-collapsed={bottomDrawerCollapsed ? 'true' : 'false'}
@@ -547,24 +576,14 @@ function syncPanel(panel: ImperativePanelHandle | null, shouldBeCollapsed: boole
 }
 
 /**
- * The height of the bottom drawer when only its tab strip shows, the least
- * height at which it counts as open (room for the bar of a table, its
- * heading and a row or two), and the height it opens to from less than
- * that, each as a percentage of the column it shares with the diagram.
- */
-const BOTTOM_DRAWER_COLLAPSED_PCT = 4;
-const BOTTOM_DRAWER_OPEN_MIN_PCT = 15;
-const BOTTOM_DRAWER_OPEN_PCT = 35;
-
-/**
  * Give the bottom drawer its usual height where it opened to the least it
  * can have: a drawer that was dragged down to its tab strip has no height
- * to come back to, and opens with room for a row or two.
+ * to come back to, and opens to about a third of its column.
  */
-function openEnough(panel: ImperativePanelHandle | null): void {
+function openEnough(panel: ImperativePanelHandle | null, sizes: DrawerSizes): void {
   if (!panel) return;
   try {
-    if (panel.getSize() <= BOTTOM_DRAWER_OPEN_MIN_PCT + 0.5) panel.resize(BOTTOM_DRAWER_OPEN_PCT);
+    if (panel.getSize() <= sizes.openMin + 0.5) panel.resize(sizes.open);
   } catch {
     // Not registered yet: see `syncPanel`.
   }

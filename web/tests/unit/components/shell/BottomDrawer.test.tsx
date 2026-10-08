@@ -208,6 +208,31 @@ describe('<BottomDrawer />', () => {
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('lines');
   });
 
+  it('has a button at the end of the strip that takes it down to its tabs, and opens it again', async () => {
+    const user = userEvent.setup();
+    useLayoutStore.setState({ bottomDrawerCollapsed: false, drawerHasUnreadResults: false });
+    render(<BottomDrawer />, { wrapper });
+    // It is no tab: the tabs are the twelve they were.
+    expect(screen.getAllByRole('tab')).toHaveLength(12);
+    const button = screen.getByTestId('bottom-drawer-collapse');
+    expect(button).toHaveAccessibleName('Collapse the drawer to its tabs');
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(button);
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(true);
+    expect(button).toHaveAccessibleName('Open the drawer');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    // Only the strip is left, the button with it.
+    expect(screen.queryByTestId('bottom-drawer-tab-content-buses')).not.toBeInTheDocument();
+
+    // Opened by it, the results that came while it was shut count as seen.
+    useLayoutStore.setState({ drawerHasUnreadResults: true });
+    await user.click(button);
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().drawerHasUnreadResults).toBe(false);
+    expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('buses');
+  });
+
   it('when expanded mounts the active tab content', () => {
     useLayoutStore.setState({ activeBottomDrawerTab: 'buses' });
     render(<BottomDrawer />, { wrapper });
