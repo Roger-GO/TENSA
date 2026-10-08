@@ -290,6 +290,88 @@ describe('<SldFigureDialog /> shows the figure it saves', () => {
     expect(preview).toHaveStyle({ width: `${width}px` });
   });
 
+  it('says when the fitted figure is too small to read, and shows it at its own size when asked', async () => {
+    const user = userEvent.setup();
+    // jsdom lays nothing out: the pane of the preview is given a size here.
+    const paneSize = { width: 0, height: 0 };
+    const sized = (side: 'width' | 'height') => ({
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.testid === 'sld-figure-preview-pane' ? paneSize[side] : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', sized('width'));
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', sized('height'));
+    try {
+      // A pane with no size yet says nothing.
+      const first = render(<Harness source={solvedCase} />);
+      expect(screen.queryByTestId('sld-figure-fit-note')).toBeNull();
+      first.unmount();
+
+      // A short pane: the figure is fitted to its height, 8 px in from each edge.
+      Object.assign(paneSize, { width: 900, height: 316 });
+      const short = render(<Harness source={solvedCase} />);
+      const height = Number(screen.getByTestId('sld-figure-preview').dataset.height);
+      const percent = Math.round((300 / height) * 100);
+      expect(percent).toBeLessThan(40);
+      expect(screen.getByTestId('sld-figure-fit-note')).toHaveTextContent(
+        `Fitted to this window the figure is shown at ${percent}% of its size, too small to read its text.`,
+      );
+      await user.click(screen.getByRole('button', { name: 'Show at 100%' }));
+      expect(screen.getByRole('button', { name: '100%' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByTestId('sld-figure-fit-note')).toBeNull();
+      // Fitted again, it says so again.
+      await user.click(screen.getByRole('button', { name: 'Fit' }));
+      expect(screen.getByTestId('sld-figure-fit-note')).toBeInTheDocument();
+      short.unmount();
+
+      // A pane the figure fits into at its own size: nothing to say.
+      Object.assign(paneSize, { width: 4000, height: 4000 });
+      render(<Harness source={solvedCase} />);
+      expect(screen.queryByTestId('sld-figure-fit-note')).toBeNull();
+    } finally {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
+  it('shows what a power flow gives as not chosen before one has run, and says beside each what it needs', () => {
+    const onChange = vi.fn();
+    const before = render(<Harness source={plain} onChange={onChange} />);
+    for (const id of ['voltages', 'angles', 'flows', 'powers', 'limit-marks']) {
+      const box = screen.getByTestId(`sld-figure-${id}`);
+      expect(box, id).toBeDisabled();
+      // Empty, though the settings have it chosen: it is not on the figure.
+      expect(box, id).not.toBeChecked();
+      expect(screen.getByTestId(`sld-figure-${id}-unavailable`)).toHaveTextContent(
+        '(needs a power flow)',
+      );
+    }
+    for (const id of ['bus-names', 'device-names', 'chips']) {
+      expect(screen.getByTestId(`sld-figure-${id}`)).toBeEnabled();
+      expect(screen.getByTestId(`sld-figure-${id}`)).toBeChecked();
+      expect(screen.queryByTestId(`sld-figure-${id}-unavailable`)).toBeNull();
+    }
+    // Showing them empty chooses nothing.
+    expect(onChange).not.toHaveBeenCalled();
+    before.unmount();
+
+    // With a power flow they are what was chosen for them, and say nothing more.
+    render(<Harness source={solvedCase} initial={{ angles: false }} />);
+    for (const [id, chosen] of [
+      ['voltages', true],
+      ['angles', false],
+      ['flows', true],
+      ['powers', true],
+      ['limit-marks', false],
+    ] as const) {
+      const box = screen.getByTestId(`sld-figure-${id}`);
+      expect(box, id).toBeEnabled();
+      expect((box as HTMLInputElement).checked, id).toBe(chosen);
+      expect(screen.queryByTestId(`sld-figure-${id}-unavailable`)).toBeNull();
+    }
+  });
+
   it('says so, and offers nothing to save, when the diagram has nothing on it', () => {
     render(<Harness source={{ nodes: [], edges: [], pflow: null }} />);
     expect(screen.getByTestId('sld-figure-empty')).toHaveTextContent(

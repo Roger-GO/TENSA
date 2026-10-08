@@ -17,7 +17,7 @@
  * them with its layout (`onSettingsChange`), so they come back with the
  * case, on this machine or with a bundle on another.
  */
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -95,6 +95,15 @@ const SIZE_NOTE_FROM = 1;
 
 const DPI_HINT: Record<number, string> = { 96: 'screen', 300: 'print', 600: 'line art' };
 
+/** Why a value of the power flow cannot be chosen before one has run: said beside each of them. */
+const NEEDS_PFLOW = 'needs a power flow';
+
+/** A text shown smaller than this many px on the screen is too small to read. */
+const READABLE_PX = 6;
+
+/** The padding of the pane the preview is fitted into, either side. */
+const PANE_PADDING = 8;
+
 const ZOOMS = [
   { value: 'fit', label: 'Fit' },
   { value: '100', label: '100%' },
@@ -126,31 +135,43 @@ interface ChoiceProps {
   label: string;
   hint?: string;
   checked: boolean;
-  disabled?: boolean;
+  /**
+   * Why it cannot be chosen now, in a few words; absent while it can. It
+   * stands beside the label, and the box is drawn empty: what cannot be
+   * chosen is not on the figure, whatever was chosen for it before.
+   */
+  unavailable?: string;
   onChange: (checked: boolean) => void;
 }
 
 /** One thing a figure shows or leaves off. */
-function Show({ testId, label, hint, checked, disabled = false, onChange }: ChoiceProps) {
+function Show({ testId, label, hint, checked, unavailable, onChange }: ChoiceProps) {
+  const disabled = unavailable !== undefined;
+  const dimmed = disabled ? 'opacity-60' : undefined;
   return (
     <label
-      className={cn(
-        'flex items-start gap-2',
-        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
-      )}
+      className={cn('flex items-start gap-2', disabled ? 'cursor-not-allowed' : 'cursor-pointer')}
     >
       <input
         type="checkbox"
         data-testid={testId}
-        checked={checked}
+        checked={checked && !disabled}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className={CHECK_CLASS}
+        className={cn(CHECK_CLASS, dimmed)}
       />
       <span className="flex flex-col">
-        <span className="text-foreground">{label}</span>
+        <span>
+          <span className={cn('text-foreground', dimmed)}>{label}</span>
+          {disabled ? (
+            <span className="text-muted-foreground" data-testid={`${testId}-unavailable`}>
+              {' '}
+              ({unavailable})
+            </span>
+          ) : null}
+        </span>
         {hint !== undefined ? (
-          <span className="text-muted-foreground leading-snug">{hint}</span>
+          <span className={cn('text-muted-foreground leading-snug', dimmed)}>{hint}</span>
         ) : null}
       </span>
     </label>
@@ -202,6 +223,23 @@ export function SldFigureDialog({
       setOpener(typeof document === 'undefined' ? null : document.activeElement);
     }
   }
+  // The pane the preview stands in, and its size: how small the figure is
+  // shown when it is fitted into it is worked out from the two.
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
+  const [room, setRoom] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (pane === null || typeof ResizeObserver === 'undefined') return undefined;
+    const measure = (): void => {
+      const [width, height] = [pane.clientWidth, pane.clientHeight];
+      setRoom((was) =>
+        was !== null && was.width === width && was.height === height ? was : { width, height },
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [pane]);
   const styleName = useId();
   const partName = useId();
   const lineWidthId = useId();
@@ -255,6 +293,23 @@ export function SldFigureDialog({
       : Math.min(...drawnSizes) === Math.max(...drawnSizes)
         ? `text ${points(Math.max(...drawnSizes))} pt`
         : `text ${points(Math.min(...drawnSizes))} to ${points(Math.max(...drawnSizes))} pt`;
+  // Fitted to its pane a tall figure is shown at a fraction of its size,
+  // and its text with it: under `READABLE_PX` the preview says so, and how
+  // to read it. The figure is never shown larger than it is.
+  const fitScale =
+    room === null || empty || room.width === 0 || room.height === 0
+      ? null
+      : Math.min(
+          1,
+          (room.width - 2 * PANE_PADDING) / width,
+          (room.height - 2 * PANE_PADDING) / height,
+        );
+  const tooSmallToRead =
+    zoom === 'fit' &&
+    fitScale !== null &&
+    fitScale > 0 &&
+    drawnSizes.length > 0 &&
+    Math.min(...drawnSizes) * fitScale < READABLE_PX;
   const smaller =
     figure === null
       ? []
@@ -328,6 +383,7 @@ export function SldFigureDialog({
           {/* The figure itself. */}
           <div className="flex min-h-48 min-w-0 flex-1 flex-col gap-1.5">
             <div
+              ref={setPane}
               className="border-border min-h-0 flex-1 overflow-auto rounded-[var(--radius-md)] border bg-white p-2"
               data-testid="sld-figure-preview-pane"
             >
@@ -388,6 +444,25 @@ export function SldFigureDialog({
                 ))}
               </span>
             </div>
+            {tooSmallToRead && fitScale !== null ? (
+              <div className="text-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-snug">
+                <p role="status" data-testid="sld-figure-fit-note">
+                  Fitted to this window the figure is shown at {Math.round(fitScale * 100)}% of its
+                  size, too small to read its text.
+                </p>
+                <button
+                  type="button"
+                  data-testid="sld-figure-fit-note-zoom"
+                  onClick={() => setZoom('100')}
+                  className={cn(
+                    'border-border hover:bg-muted/60 rounded border px-1.5 py-0.5',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  )}
+                >
+                  Show at 100%
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {/* What it shows, and how. */}
@@ -510,8 +585,9 @@ export function SldFigureDialog({
                 checked={settings.chips}
                 onChange={(chips) => change({ chips })}
               />
-              {/* What a power flow gives. Before one, the reason they cannot
-                  be chosen stands over them, where the first of them is. */}
+              {/* What a power flow gives. Before one, what to do about it
+                  stands over them, where the first of them is, and each
+                  says beside its name what it is waiting for. */}
               <p
                 className={cn(
                   'mt-1 leading-snug',
@@ -527,14 +603,14 @@ export function SldFigureDialog({
                 testId="sld-figure-voltages"
                 label="Voltages"
                 checked={settings.voltages}
-                disabled={!hasPflow}
+                unavailable={hasPflow ? undefined : NEEDS_PFLOW}
                 onChange={(voltages) => change({ voltages })}
               />
               <Show
                 testId="sld-figure-angles"
                 label="Angles"
                 checked={settings.angles}
-                disabled={!hasPflow}
+                unavailable={hasPflow ? undefined : NEEDS_PFLOW}
                 onChange={(angles) => change({ angles })}
               />
               <Show
@@ -542,14 +618,14 @@ export function SldFigureDialog({
                 label="Line flows"
                 hint="The MW of each line, with an arrow the way it flows."
                 checked={settings.flows}
-                disabled={!hasPflow}
+                unavailable={hasPflow ? undefined : NEEDS_PFLOW}
                 onChange={(flows) => change({ flows })}
               />
               <Show
                 testId="sld-figure-powers"
                 label="P and Q of generators and loads"
                 checked={settings.powers}
-                disabled={!hasPflow}
+                unavailable={hasPflow ? undefined : NEEDS_PFLOW}
                 onChange={(powers) => change({ powers })}
               />
               <Show
@@ -557,7 +633,7 @@ export function SldFigureDialog({
                 label="Limit marks"
                 hint="A triangle at a bus or generator on a limit, and a heavier line near its rating."
                 checked={settings.limitMarks}
-                disabled={!hasPflow}
+                unavailable={hasPflow ? undefined : NEEDS_PFLOW}
                 onChange={(limitMarks) => change({ limitMarks })}
               />
               {figure !== null && figure.leftOff > 0 ? (

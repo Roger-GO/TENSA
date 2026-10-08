@@ -272,6 +272,7 @@ describe('what the figure is made of', () => {
     // Before a power flow there is nothing to show of one, and the choices say why.
     for (const id of ['voltages', 'angles', 'flows', 'powers', 'limit-marks']) {
       expect(screen.getByTestId(`sld-figure-${id}`)).toBeDisabled();
+      expect(screen.getByTestId(`sld-figure-${id}`)).not.toBeChecked();
     }
     expect(screen.getByTestId('sld-figure-no-pflow')).toHaveTextContent(
       'The five below come from a power flow, and none has run yet. Close this, press Run PF, and open the figure again to choose them.',
@@ -282,6 +283,8 @@ describe('what the figure is made of', () => {
     solve();
     await openFigure(user);
     expect(screen.getByTestId('sld-figure-voltages')).toBeEnabled();
+    // What was chosen for it all along: it was only not on the figure yet.
+    expect(screen.getByTestId('sld-figure-voltages')).toBeChecked();
     expect(screen.queryByTestId('sld-figure-no-pflow')).toBeNull();
     expect(said()).toEqual(
       expect.arrayContaining(['1.020 pu', '0.990 pu', '120.5 MW', '30.2 MVAr']),
