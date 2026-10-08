@@ -104,6 +104,21 @@ vi.mock('@/components/sld/elkClient', () => ({
   })),
 }));
 
+// Every picture the canvas makes, as it makes it, unless a test says what
+// else the picture reports (`withPicture`).
+type PictureOf = typeof import('@/components/sld/picture').pictureOf;
+let withPicture: ((made: ReturnType<PictureOf>) => ReturnType<PictureOf>) | null = null;
+vi.mock('@/components/sld/picture', async () => {
+  const actual = await vi.importActual<typeof import('@/components/sld/picture')>(
+    '@/components/sld/picture',
+  );
+  const pictureOf = (...args: Parameters<PictureOf>) => {
+    const made = actual.pictureOf(...args);
+    return withPicture === null ? made : withPicture(made);
+  };
+  return { ...actual, pictureOf };
+});
+
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { elkLayout } from '@/components/sld/elkClient';
 import {
@@ -227,6 +242,7 @@ function savedLayout(): SidecarLayout {
 beforeEach(() => {
   mockTopology = chain();
   mockSidecar = null;
+  withPicture = null;
   putSidecarSpy.mockClear();
   vi.mocked(elkLayout).mockClear();
   drawn.nodes = [];
@@ -334,6 +350,46 @@ describe('place, save, reload', () => {
     await reload('kundur.xlsx', vars.layout);
 
     expect(picture()).toEqual(placed);
+  });
+
+  it('the routes of a move are kept after many moves, also where a line is found the same way with every picture', async () => {
+    // The router takes a line out that does not hold as it is kept and
+    // routes it afresh; where the way it finds is the one the line had, it
+    // reports the line all the same, with every picture. That is no change
+    // to keep, and must not count as one: the canvas keeps routes only so
+    // many times in a row, and would stop keeping them for the rest of the
+    // visit.
+    withPicture = (made) => {
+      const edge = made.edges.find((e) => e.id === 'line-L23');
+      const points = made.connections.routes.get('line-L23')?.points;
+      const anchors = edge?.data?.bendAnchors as
+        | { source: { x: number; y: number }; target: { x: number; y: number } }
+        | undefined;
+      if (points === undefined || anchors === undefined || made.changed.has('line-L23')) {
+        return made;
+      }
+      const changed = new Map(made.changed);
+      changed.set('line-L23', {
+        points: points.map(([x, y]): [number, number] => [x, y]),
+        anchors,
+      });
+      return { ...made, changed };
+    };
+    open('kundur.xlsx');
+    await draw();
+    const start = picture().positions['1']!;
+    for (let move = 1; move <= 6; move += 1) {
+      const to = { x: start.x - 32 * move, y: start.y - 32 * move };
+      dragTo('1', to);
+      await waitFor(() =>
+        expect(useCaseStore.getState().routeOverrides['line-L12']?.anchors.source).toEqual(to),
+      );
+    }
+    // And the layout a save takes along holds the line as it runs after the last.
+    const kept = useCaseStore.getState().routeOverrides['line-L12']!.points;
+    await waitFor(() =>
+      expect(branchPolylines(savedLayout(), chain()).get('line-L12')).toEqual(kept),
+    );
   });
 
   it('a drag still waiting to be written when the canvas goes away is written then', async () => {

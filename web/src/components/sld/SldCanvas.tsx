@@ -1471,7 +1471,11 @@ function SldCanvasInner({
   // How many times in a row routes were kept with nothing else changing in
   // between. Each time should leave the next picture with nothing to route;
   // should two routes ever keep unsettling each other, this ends it. And the
-  // same count for the ways round the drafts.
+  // same count for the ways round the drafts. A picture that made only
+  // routes the diagram keeps already (a line that is taken out and found the
+  // same way again with every pass) has nothing to keep, and is at rest:
+  // counted as a change it would use the count up over the moves of a
+  // visit, and the routes of every move after that would be kept no more.
   const settlingRef = useRef(0);
   const draftRoutesRoundsRef = useRef(0);
   // A device of the system that has just come to be on another bus is drawn
@@ -1555,7 +1559,12 @@ function SldCanvasInner({
       changed = true;
       givenUp.push(id);
     }
-    if (!changed) return;
+    // Nothing the diagram does not keep already: it is at rest.
+    if (!changed) {
+      settlingRef.current = 0;
+      routesToFollowRef.current = false;
+      return;
+    }
     settlingRef.current += 1;
     useCaseStore.getState().setRouteOverrides(next);
     if (givenUp.length > 0) {
