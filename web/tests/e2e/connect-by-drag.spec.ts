@@ -219,6 +219,10 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   await expect(node(page, 'draft-2')).toBeVisible();
   now = await settled(page);
   expect(now.edges['stub-draft-2']).toBeUndefined();
+  // On no bus yet: the line above the diagram says how it is put on one.
+  await expect(page.getByTestId('sld-canvas-hint')).toContainText(
+    'To connect it, drag it onto the bar of a bus',
+  );
   const shunt = now.nodes['draft-2']!;
   const grab = await onPage(page, shunt.x + shunt.width / 2, shunt.y + shunt.height / 2);
   await dragTo(page, grab, onBar(now, '13'), async () => {

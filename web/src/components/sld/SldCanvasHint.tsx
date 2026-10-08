@@ -24,6 +24,14 @@ function movableHint(name: string, blocked: string | null): string {
     : `${selected} To move it to another bus, drag the ring where its connector meets the bar onto that bus, or click the ring and then the bus. Drag the symbol itself to move it on the diagram, or press the arrow keys.`;
 }
 
+/**
+ * What the line says while a draft that is on no bus yet is picked: that a
+ * drop on a bus connects it, which nothing on the draft shows.
+ */
+function connectableHint(name: string): string {
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} is selected. To connect it, drag it onto the bar of a bus (the bar is marked while the draft lies on it), or pick the bus in its form in the Inspector. Drag it anywhere else to move it.`;
+}
+
 export interface SldCanvasHintProps {
   /** The lock button of the controls is on: nothing can be dragged or selected. */
   locked: boolean;
@@ -48,6 +56,11 @@ export interface SldCanvasHintProps {
   movable?: string | null;
   /** Why that device cannot be moved to another bus now, or `null` when it can. */
   movableBlocked?: string | null;
+  /**
+   * The name of the picked draft that is on no bus yet and can be put on
+   * one: the line then says that a drop on a bus connects it. `null` with none.
+   */
+  connectable?: string | null;
 }
 
 /**
@@ -72,7 +85,8 @@ export interface SldCanvasHintProps {
  * bus to pick while something is connected by a drag (`SldWiring`). While a
  * device is selected whose connector can be taken to another bus, the line
  * says how that is done (`movable`), or why it cannot be done now
- * (`movableBlocked`).
+ * (`movableBlocked`), and for a draft that is on no bus yet, how it is put
+ * on one (`connectable`).
  */
 export const SldCanvasHint = memo(function SldCanvasHint({
   locked,
@@ -81,6 +95,7 @@ export const SldCanvasHint = memo(function SldCanvasHint({
   routeBarSlot = null,
   movable = null,
   movableBlocked = null,
+  connectable = null,
 }: SldCanvasHintProps) {
   const tooSmallPercent = useTooSmallZoomPercent();
   const zoomLabel = selectedName !== null ? `Zoom to ${selectedName}` : 'Zoom to 100%';
@@ -119,6 +134,15 @@ export const SldCanvasHint = memo(function SldCanvasHint({
           className="text-foreground line-clamp-2 min-w-0 flex-1 text-xs"
         >
           {movableHint(movable, movableBlocked)}
+        </p>
+      ) : connectable !== null ? (
+        <p
+          data-testid="sld-canvas-hint"
+          data-hint="connectable"
+          title={connectableHint(connectable)}
+          className="text-foreground line-clamp-2 min-w-0 flex-1 text-xs"
+        >
+          {connectableHint(connectable)}
         </p>
       ) : (
         <p

@@ -2433,6 +2433,16 @@ function SldCanvasInner({
     connections,
     moveBlocked,
   ]);
+  // The draft that is picked and on no bus yet, when it is of a kind that is
+  // put on one: the line above the diagram says that a drop on a bus does it.
+  const connectable = useMemo(() => {
+    if (pickedDraftId === null || grip !== null || wiring !== null) return null;
+    // One that is drawn as the branch it will be has both its buses.
+    const node = nodes.find((n) => n.id === pickedDraftId);
+    const draft = drafts.find((d) => d.id === pickedDraftId);
+    if (node === undefined || draft === undefined) return null;
+    return connectsToBus(draftFields(draft, schema)) ? wiredName(node) : null;
+  }, [pickedDraftId, grip, wiring, nodes, drafts, schema]);
   // Where the line to the pointer starts while a device is moved: the port
   // its connector leaves by, or the middle of a draft that has none yet.
   const moveAnchor = useMemo<Point | null>(() => {
@@ -3609,6 +3619,7 @@ function SldCanvasInner({
           }
           movable={grip?.name ?? null}
           movableBlocked={grip?.blocked ?? null}
+          connectable={connectable}
         />
         <SldArrangeControls
           locked={locked}

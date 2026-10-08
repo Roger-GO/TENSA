@@ -341,6 +341,8 @@ describe('a component dropped on a bus', () => {
     expect(drafts()[0]).toMatchObject({ kind: 'Bus', values: {} });
     await waitFor(() => expect(node('draft-1')).toBeDefined());
     expect(edge('stub-draft-1')).toBeUndefined();
+    // Nor is it told how to be put on one.
+    expect(screen.getByTestId('sld-canvas-hint')).not.toHaveAttribute('data-hint');
   });
 
   it('marks the bus under a row that is dragged over the diagram, for a kind that connects to one', async () => {
@@ -398,6 +400,12 @@ describe('a draft that is dragged onto a bus', () => {
     drop('PV', 700, 500);
     await waitFor(() => expect(node('draft-1')).toBeDefined());
     expect(drafts()[0]!.values).toEqual({});
+    // Picked, and on no bus: the line above the diagram says how it is put on one.
+    const hint = screen.getByTestId('sld-canvas-hint');
+    expect(hint).toHaveAttribute('data-hint', 'connectable');
+    expect(hint).toHaveTextContent(
+      /^Draft PV generator 4 is selected\. To connect it, drag it onto the bar of a bus/,
+    );
     const bar = onBar('2');
     dragTo('draft-1', { x: bar.x - W / 2, y: bar.y - H / 2 }, () => {
       expect(screen.getByTestId('sld-wire-target')).toHaveAttribute('data-bus', '2');
@@ -418,6 +426,10 @@ describe('a draft that is dragged onto a bus', () => {
     expect(info).not.toHaveBeenCalled();
     // The form that is open on it is opened afresh, to show the bus.
     expect(useDraftsStore.getState().connected).toEqual({ 'draft-1': 1 });
+    // Connected, it has a ring to move it by, and the line says so.
+    await waitFor(() =>
+      expect(screen.getByTestId('sld-canvas-hint')).toHaveAttribute('data-hint', 'movable'),
+    );
   });
 
   it('goes to another bus when it is dragged onto that one', async () => {

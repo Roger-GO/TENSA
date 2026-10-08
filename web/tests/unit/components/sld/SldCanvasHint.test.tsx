@@ -84,6 +84,22 @@ describe('<SldCanvasHint />', () => {
     expect(screen.getByTestId('sld-canvas-locked')).toBeInTheDocument();
   });
 
+  it('says how a picked draft that is on no bus yet is connected to one', () => {
+    render(
+      <SldCanvasHint
+        locked={false}
+        selectedName={null}
+        onZoomIn={vi.fn()}
+        connectable="draft PQ load PQ_12"
+      />,
+    );
+    const hint = screen.getByTestId('sld-canvas-hint');
+    expect(hint).toHaveAttribute('data-hint', 'connectable');
+    expect(hint).toHaveTextContent(
+      'Draft PQ load PQ_12 is selected. To connect it, drag it onto the bar of a bus (the bar is marked while the draft lies on it), or pick the bus in its form in the Inspector.',
+    );
+  });
+
   it('leaves its place to the bar of a line that is picked, and hands over where that is', () => {
     const slot = vi.fn();
     const { rerender } = render(
