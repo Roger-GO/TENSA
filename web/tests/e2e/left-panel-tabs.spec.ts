@@ -11,9 +11,9 @@
  *   Project
  *
  *   open IEEE 14 -> Components -> click GENROU -> the Add element form is on
- *   GENROU -> drag PQ load onto the diagram -> the form is on PQ -> run a power
- *   flow -> the palette says the run has locked the system, and its rows are
- *   disabled
+ *   GENROU -> drag PQ load onto the diagram -> a draft of it stands there, with
+ *   its form in the Inspector and no Add element form -> run a power flow -> the
+ *   palette says the run has locked the system, and its rows are disabled
  *
  *   no case open -> the hint of the case card opens the Components tab, which
  *   takes the keyboard focus and says a click starts a blank system -> click
@@ -153,7 +153,7 @@ test('the sidebar opens on Project, the palette is searched, and the tab is reme
   await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
 });
 
-test('a row of the palette opens the form on its model, by a click and by a drag, until a run locks the system', async ({
+test('a row of the palette opens the form on its model by a click and places a draft by a drag, until a run locks the system', async ({
   page,
 }) => {
   await dismissCoach(page);
@@ -162,7 +162,7 @@ test('a row of the palette opens the form on its model, by a click and by a drag
 
   await componentsTab(page).click();
   await expect(page.getByTestId('component-library-hint')).toHaveText(
-    'Click a component to add it, or drag it onto the diagram.',
+    'Click a component to add it, or drag it onto the diagram to place it as a draft.',
   );
 
   // ---- A click ---------------------------------------------------------------
@@ -179,10 +179,12 @@ test('a row of the palette opens the form on its model, by a click and by a drag
   await page
     .getByRole('button', { name: 'Add PQ load' })
     .dragTo(page.getByTestId('sld-canvas-surface'), { targetPosition: { x: 120, y: 160 } });
-  await expect(panel).toBeVisible();
-  await expect(page.getByTestId('add-element-kind')).toHaveValue('PQ');
-  await page.getByTestId('add-element-close').click();
+  // It is on the diagram at once, as a draft, and its form is the Inspector's.
+  await expect(page.getByTestId('draft-node-draft-1')).toBeVisible();
+  await expect(page.getByTestId('draft-inspector-header')).toContainText('PQ load');
   await expect(panel).toBeHidden();
+  await page.getByRole('button', { name: 'Delete draft' }).click();
+  await expect(page.getByTestId('draft-node-draft-1')).toHaveCount(0);
 
   // ---- A run locks the system, and the palette says so ----------------------
   await page.getByTestId('run-pflow-button').click();
@@ -217,7 +219,7 @@ test('with no case open, the case card leads to the palette, and a row starts a 
   await expect(page.getByTestId('add-element-kind')).toHaveValue('Bus');
   // With a system to add to, the palette says what a click does now.
   await expect(page.getByTestId('component-library-hint')).toHaveText(
-    'Click a component to add it, or drag it onto the diagram.',
+    'Click a component to add it, or drag it onto the diagram to place it as a draft.',
   );
   await projectTab(page).click();
   await expect(page.getByRole('complementary', { name: 'Case navigation' })).toContainText(
