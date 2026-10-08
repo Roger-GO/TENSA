@@ -154,8 +154,8 @@ function AppInner({ children }: { children: React.ReactNode }) {
  * - no case → EmptyState ("No case loaded"), wrapped in a
  *   ComponentDropZone — directs the user to the left sidebar AND accepts
  *   a row dragged from the Components palette, which spins up a blank system and
- *   opens that kind's add form (the build-from-scratch entry the sidebar
- *   advertises but which previously did nothing on drop). After a reload that
+ *   places a draft of that kind on its diagram (the build-from-scratch entry the
+ *   sidebar advertises but which previously did nothing on drop). After a reload that
  *   closed a case it says so instead, and reopens it (``ReloadedCaseNote``).
  * - case loaded → SldCanvas (which itself shows the layout-skeleton
  *   while ELK runs and the canvas once positions are known).
@@ -166,7 +166,7 @@ function CanvasSlot() {
   // After a reload that closed a case, the note that reopens it stands where
   // the sentence for a first visit does, so the page is no taller for it.
   const closedByReload = useReloadedCaseStore((s) => s.closed !== null);
-  const { add: addComponent } = useAddComponent();
+  const { place: placeComponent } = useAddComponent();
   const [dropError, setDropError] = useState<string | null>(null);
 
   if (caseSelection !== null) {
@@ -180,11 +180,12 @@ function CanvasSlot() {
     );
   }
 
-  // Drop = "start a blank system seeded with this element": the same as a click on
-  // a row of the Components palette, which says why when it cannot.
+  // Drop = "start a blank system with this element on its diagram": as a draft,
+  // which is what a row dropped on a diagram is. The palette says why when a row
+  // cannot be dragged.
   const handleDropComponent = (kind: string) => {
     setDropError(null);
-    addComponent(kind, setDropError);
+    placeComponent(kind, setDropError);
   };
 
   return (

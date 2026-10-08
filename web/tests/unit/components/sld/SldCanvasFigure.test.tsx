@@ -64,6 +64,7 @@ import {
   CONNECTOR_STYLE_SETTING,
 } from '@/components/sld/sidecar';
 import { useCaseStore } from '@/store/case';
+import { useDraftsStore } from '@/store/drafts';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { __requestSldCommand, useSldStore } from '@/store/sld';
@@ -83,6 +84,8 @@ vi.mock('@/api/queries', async () => {
     useGetSidecar: () => ({ data: mockSidecar, isLoading: false, isError: false, error: null }),
     usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
+    // The fields of each model: only a draft on the diagram is checked against them.
+    useTopologySchema: () => ({ data: undefined }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,
@@ -262,6 +265,33 @@ describe('what the figure is made of', () => {
       ),
     );
     expect([...colours].sort()).toEqual(['#000000', '#ffffff']);
+  });
+
+  it('leaves out the drafts: an element that was placed and is not in the system yet', async () => {
+    const user = userEvent.setup();
+    open('column.xlsx');
+    act(() =>
+      useDraftsStore.setState({
+        byCase: {
+          'column.xlsx': [
+            { id: 'draft-1', kind: 'PV', position: { x: 600, y: 40 }, values: {} },
+            {
+              id: 'draft-2',
+              kind: 'Line',
+              position: { x: 600, y: 200 },
+              values: { bus1: '1', bus2: '3' },
+            },
+          ],
+        },
+      }),
+    );
+    await draw();
+    await waitFor(() => expect(drawn.nodes.some((n) => n.id === 'draft-1')).toBe(true));
+    await openFigure(user);
+    // The same figure as without them: no symbol and no line of a draft.
+    expect(said().sort()).toEqual(['BUS1', 'BUS2', 'BUS3', 'PQ_A', 'PQ_B']);
+    expect(screen.getByTestId('sld-figure-size')).toHaveTextContent('5 buses and devices');
+    act(() => useDraftsStore.setState({ byCase: {} }));
   });
 
   it('has the values of the power flow once one has run, and says what to do before', async () => {

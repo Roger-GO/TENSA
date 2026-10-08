@@ -249,6 +249,8 @@ vi.mock('@/api/queries', async () => {
     useGetSidecar: () => ({ data: mockSidecar, isLoading: false, isError: false, error: null }),
     usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
+    // The fields of each model: only a draft on the diagram is checked against them.
+    useTopologySchema: () => ({ data: undefined }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,

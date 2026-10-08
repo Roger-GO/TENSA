@@ -118,6 +118,8 @@ vi.mock('@/api/queries', async () => {
     }),
     usePutSidecar: () => ({ mutate: vi.fn() }),
     useCurrentTopology: () => mockTopology,
+    // The fields of each model: only a draft on the diagram is checked against them.
+    useTopologySchema: () => ({ data: undefined }),
   };
 });
 

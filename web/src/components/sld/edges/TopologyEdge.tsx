@@ -10,6 +10,7 @@ import {
   type LabelPlace,
   type Point,
 } from '../connections';
+import { draftStrokeStyle } from '../drafts';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 import { EdgePickBox } from './EdgePickBox';
 import { LineFlowArrow } from './LineFlowArrow';
@@ -38,6 +39,10 @@ import { maxAbsFlowMw } from './lineFlowArrowMath';
  * way the active power flows; the stroke turns amber or red, and heavier, as
  * the line nears or passes its rating.
  *
+ * The line of a draft (`data.draft`: a line that was placed and names both
+ * its buses, but is not in the system yet) is dashed, in the colour of the
+ * draft's badge, and carries nothing else.
+ *
  * The box of the edge is centred on a point of the line (`EdgePickBox`), so
  * a click on the middle of the element is a click on the line, however the
  * line turns.
@@ -50,6 +55,10 @@ interface EdgeData {
   route?: ConnectorRoute;
   /** Where the arrow and the flow label stand on the route; absent: half way along. */
   labelAt?: LabelPlace;
+  /** Set on the line of a draft, with whether the draft can be added and whether it is picked. */
+  draft?: boolean;
+  ready?: boolean;
+  active?: boolean;
 }
 
 export const TopologyEdge = memo(function TopologyEdge({
@@ -87,11 +96,14 @@ export const TopologyEdge = memo(function TopologyEdge({
 
   // Style: a heavier stroke once we have flow data, amber or red as the line
   // nears or passes its rating; muted otherwise.
-  const { stroke, strokeWidth } = lineStrokeStyle(overlay);
+  const style =
+    edgeData.draft === true
+      ? draftStrokeStyle(edgeData.ready === true, edgeData.active === true)
+      : lineStrokeStyle(overlay);
 
   return (
     <>
-      <BaseEdge path={routePath(points)} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      <BaseEdge path={routePath(points)} markerEnd={markerEnd} style={style} />
       <EdgePickBox id={id} points={points} fromBar />
       {overlay && overlay.has_data && overlay.direction !== 'neutral' ? (
         <LineFlowArrow

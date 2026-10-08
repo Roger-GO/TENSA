@@ -244,6 +244,57 @@ describe('contextTargetAt', () => {
   });
 });
 
+describe('a right-click on a draft', () => {
+  const DRAFT: SldContextTarget = {
+    kind: 'draft',
+    id: 'draft-2',
+    name: 'PQ load PQ_12',
+    nodeId: 'draft-2',
+  };
+
+  it("is the draft's, on its symbol", () => {
+    expect(
+      contextTargetFromNode({
+        id: 'draft-2',
+        type: 'draft',
+        data: { draft: true, idx: 'draft-2', name: 'PQ load PQ_12', kind: 'PQ' },
+      }),
+    ).toEqual(DRAFT);
+  });
+
+  it("is the draft's on its connector too, which is not one to route by hand", () => {
+    expect(
+      contextTargetFromEdge({
+        id: 'stub-draft-2',
+        type: 'stub',
+        source: 'draft-2',
+        data: { draft: true, draftId: 'draft-2', name: 'PQ load PQ_12' },
+      }),
+    ).toEqual(DRAFT);
+  });
+
+  it("is the draft's on the line it is drawn as, which has no symbol to move", () => {
+    expect(
+      contextTargetFromEdge({
+        id: 'draft-line-draft-3',
+        type: 'topology',
+        source: '6',
+        data: { draft: true, draftId: 'draft-3', name: 'Line Line_21' },
+      }),
+    ).toEqual({ kind: 'draft', id: 'draft-3', name: 'Line Line_21', nodeId: null });
+  });
+
+  it('goes by the id of the draft where it has no name yet', () => {
+    expect(
+      contextTargetFromNode({
+        id: 'draft-9',
+        type: 'draft',
+        data: { draft: true, idx: 'draft-9' },
+      }),
+    ).toEqual({ kind: 'draft', id: 'draft-9', name: 'draft-9', nodeId: 'draft-9' });
+  });
+});
+
 describe('sameContextTarget', () => {
   it('is true for equal targets, labels included, and false otherwise', () => {
     const bus: SldContextTarget = { kind: 'bus', idx: '7', name: 'BUS7', nodeId: '7' };

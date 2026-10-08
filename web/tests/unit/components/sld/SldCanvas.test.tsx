@@ -221,8 +221,8 @@ vi.mock('@xyflow/react', async () => {
     // `getZoom`). v3 Unit 5 added `screenToFlowPosition` (consumed by
     // the drop handler that converts a screen-pixel drop into the
     // canvas's flow-coordinate space). The stub returns identity
-    // (screen == flow) so the drop tests can assert the exact
-    // coordinate flowed through to `openAddPanel(kind, dropCoord)`.
+    // (screen == flow) so the drop tests can assert where the draft
+    // that was dropped comes to stand.
     useReactFlow: () => ({
       setCenter: vi.fn(),
       getZoom: vi.fn(() => 1),
@@ -254,6 +254,7 @@ import { SldCanvas } from '@/components/sld/SldCanvas';
 import { buildGraph } from '@/components/sld/graph';
 import { elkLayout } from '@/components/sld/elkClient';
 import { useCaseStore } from '@/store/case';
+import { DRAFT_NODE_SIZE, useDraftsStore } from '@/store/drafts';
 import { __requestSldCommand, useSldStore } from '@/store/sld';
 import { toast } from '@/lib/toast';
 import { useSessionStore } from '@/store/session';
@@ -315,6 +316,8 @@ vi.mock('@/api/queries', async () => {
     }),
     usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
+    // The fields of each model: only a draft on the diagram is checked against them.
+    useTopologySchema: () => ({ data: undefined }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,
@@ -452,6 +455,7 @@ describe('SldCanvas', () => {
     cleanup();
     usePflowStore.getState().clearPflow();
     useUiStore.setState({ hideLabels: false });
+    useDraftsStore.setState({ byCase: {}, placements: {} });
     __resetCascadeForTests();
     useConnectivityStore.setState({
       result: null,
@@ -1188,19 +1192,19 @@ describe('SldCanvas', () => {
     expect(mockConnectivityRefetch).toHaveBeenCalledTimes(1);
   });
 
-  // ---- v3 Unit 5 — Component Library drag-and-drop ------------------------
+  // ---- Dropping a row of the Components palette ---------------------------
+  //
+  // What the drop does to the diagram (the draft it draws, its connector,
+  // its form) is held in `SldCanvasDrafts.test.tsx`; here, that the surface
+  // takes the drop.
 
-  it('drop with the andes-component-type MIME opens AddElementPanel with the dropCoord', async () => {
-    mockTopology = makeTopology([bus(1)]);
+  /** Drop `kind` on the diagram's surface with the pointer at `x`, `y`. */
+  async function dropOnSurface(kind: string, x: number, y: number): Promise<void> {
     act(() => {
       useCaseStore.setState({
-        selection: {
-          primaryPath: parseWorkspacePath('synthetic.raw'),
-          addfiles: [],
-        },
+        selection: { primaryPath: parseWorkspacePath('synthetic.raw'), addfiles: [] },
         addPanelOpen: false,
         addPanelKind: null,
-        addPanelDropCoord: null,
       });
     });
     render(withQueryClient(<SldCanvas />));
@@ -1208,110 +1212,52 @@ describe('SldCanvas', () => {
       expect(screen.getByTestId('sld-canvas-surface')).toBeInTheDocument();
     });
     const surface = screen.getByTestId('sld-canvas-surface');
-    // Synthesise a drop with the andes-component-type MIME. Use
-    // `fireEvent.drop` so React's synthetic-event bridge dispatches
-    // through the registered onDrop handler.
-    const getData = vi.fn((mime: string) =>
-      mime === 'application/andes-component-type' ? 'Generator' : '',
-    );
     const dataTransfer = {
-      getData,
+      getData: vi.fn((mime: string) => (mime === 'application/andes-component-type' ? kind : '')),
       setData: vi.fn(),
       effectAllowed: 'copy' as DataTransfer['effectAllowed'],
       dropEffect: 'copy' as DataTransfer['dropEffect'],
-      types: ['application/andes-component-type'] as ReadonlyArray<string>,
+      types: (kind === '' ? [] : ['application/andes-component-type']) as ReadonlyArray<string>,
       files: [] as unknown as FileList,
       items: [] as unknown as DataTransferItemList,
       clearData: vi.fn(),
       setDragImage: vi.fn(),
     };
-    const { fireEvent, createEvent } = await import('@testing-library/react');
+    const { createEvent } = await import('@testing-library/react');
     // jsdom's DragEvent constructor ignores clientX/clientY from the
     // init dict, so we build the event then patch the coords on. The
     // synthetic-event bridge propagates them to e.clientX/e.clientY in
     // the React handler.
     const dropEvent = createEvent.drop(surface, { dataTransfer });
-    Object.defineProperty(dropEvent, 'clientX', { value: 150 });
-    Object.defineProperty(dropEvent, 'clientY', { value: 250 });
-    fireEvent(surface, dropEvent);
-    expect(useCaseStore.getState().addPanelOpen).toBe(true);
-    expect(useCaseStore.getState().addPanelKind).toBe('Generator');
-    expect(useCaseStore.getState().addPanelDropCoord).toEqual({ x: 150, y: 250 });
+    Object.defineProperty(dropEvent, 'clientX', { value: x });
+    Object.defineProperty(dropEvent, 'clientY', { value: y });
+    act(() => {
+      fireEvent(surface, dropEvent);
+    });
+  }
+
+  it('drop with the andes-component-type MIME places a draft of that kind, and opens no form', async () => {
+    mockTopology = makeTopology([bus(1)]);
+    await dropOnSurface('PV', 600, 400);
+    const drafts = useDraftsStore.getState().byCase['synthetic.raw'] ?? [];
+    expect(drafts.map((d) => d.kind)).toEqual(['PV']);
+    // The middle of its box is where the pointer was let go (the stub of
+    // React Flow maps the screen to the diagram one to one).
+    expect(drafts[0]?.position).toEqual({
+      x: 600 - DRAFT_NODE_SIZE.width / 2,
+      y: 400 - DRAFT_NODE_SIZE.height / 2,
+    });
+    // It is picked, which is what opens its form in the Inspector.
+    expect(useSldStore.getState().selectedNodeId).toBe(drafts[0]?.id);
+    expect(useCaseStore.getState().addPanelOpen).toBe(false);
   });
 
   it('drop without an andes-component-type MIME is a no-op (some other DnD)', async () => {
     mockTopology = makeTopology([bus(1)]);
-    act(() => {
-      useCaseStore.setState({
-        selection: {
-          primaryPath: parseWorkspacePath('synthetic.raw'),
-          addfiles: [],
-        },
-        addPanelOpen: false,
-        addPanelKind: null,
-        addPanelDropCoord: null,
-      });
-    });
-    render(withQueryClient(<SldCanvas />));
-    await waitFor(() => {
-      expect(screen.getByTestId('sld-canvas-surface')).toBeInTheDocument();
-    });
-    const surface = screen.getByTestId('sld-canvas-surface');
-    const dataTransfer = {
-      getData: vi.fn(() => ''), // no payload at all
-      setData: vi.fn(),
-      effectAllowed: 'copy' as DataTransfer['effectAllowed'],
-      dropEffect: 'copy' as DataTransfer['dropEffect'],
-      types: [] as ReadonlyArray<string>,
-      files: [] as unknown as FileList,
-      items: [] as unknown as DataTransferItemList,
-      clearData: vi.fn(),
-      setDragImage: vi.fn(),
-    };
-    const { fireEvent } = await import('@testing-library/react');
-    fireEvent.drop(surface, { dataTransfer, clientX: 10, clientY: 10 });
-    // Panel state untouched.
+    await dropOnSurface('', 10, 10);
+    expect(useDraftsStore.getState().byCase['synthetic.raw']).toBeUndefined();
     expect(useCaseStore.getState().addPanelOpen).toBe(false);
     expect(useCaseStore.getState().addPanelKind).toBeNull();
-    expect(useCaseStore.getState().addPanelDropCoord).toBeNull();
-  });
-
-  it('drop of a Bus tile passes the dropCoord through to openAddPanel', async () => {
-    mockTopology = makeTopology([bus(1)]);
-    act(() => {
-      useCaseStore.setState({
-        selection: {
-          primaryPath: parseWorkspacePath('synthetic.raw'),
-          addfiles: [],
-        },
-        addPanelOpen: false,
-        addPanelKind: null,
-        addPanelDropCoord: null,
-      });
-    });
-    render(withQueryClient(<SldCanvas />));
-    await waitFor(() => {
-      expect(screen.getByTestId('sld-canvas-surface')).toBeInTheDocument();
-    });
-    const surface = screen.getByTestId('sld-canvas-surface');
-    const dataTransfer = {
-      getData: vi.fn((mime: string) => (mime === 'application/andes-component-type' ? 'Bus' : '')),
-      setData: vi.fn(),
-      effectAllowed: 'copy' as DataTransfer['effectAllowed'],
-      dropEffect: 'copy' as DataTransfer['dropEffect'],
-      types: ['application/andes-component-type'] as ReadonlyArray<string>,
-      files: [] as unknown as FileList,
-      items: [] as unknown as DataTransferItemList,
-      clearData: vi.fn(),
-      setDragImage: vi.fn(),
-    };
-    const { fireEvent, createEvent } = await import('@testing-library/react');
-    const dropEvent = createEvent.drop(surface, { dataTransfer });
-    Object.defineProperty(dropEvent, 'clientX', { value: 42 });
-    Object.defineProperty(dropEvent, 'clientY', { value: 99 });
-    fireEvent(surface, dropEvent);
-    expect(useCaseStore.getState().addPanelKind).toBe('Bus');
-    expect(useCaseStore.getState().addPanelDropCoord).toEqual({ x: 42, y: 99 });
   });
 
   // ---- v3 Unit 6 — dot-grid + IDE chrome ----------------------------------

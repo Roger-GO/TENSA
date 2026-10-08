@@ -3,6 +3,7 @@ import { useCaseStore } from '@/store/case';
 import { iconForModel } from '@/icons/iec60617/manifest';
 import { cn } from '@/lib/cn';
 import { ComponentDropZone } from './ComponentDropZone';
+import { placeDraftOffCanvas } from './draftActions';
 
 /**
  * SldEmptySystem — centered empty-state shown when a session has been
@@ -10,11 +11,11 @@ import { ComponentDropZone } from './ComponentDropZone';
  *
  * The CTA opens the AddElementPanel pre-filled with kind='Bus' so the
  * user lands directly on the Bus form instead of the kind picker. The
- * whole surface is also a drop target (ComponentDropZone): dragging a
- * Component Library tile here opens that kind's add form, matching the
- * loaded-canvas behaviour. Without this, the only way to add the first
- * element was the button — drag-and-drop silently failed on an empty
- * system.
+ * whole surface is also a drop target (ComponentDropZone): a row of the
+ * Components palette dropped here is placed as a draft, as one dropped on
+ * a diagram is, and the diagram takes the place of this page to show it
+ * (`SldCanvas`). Without this, the only way to add the first element was
+ * the button — drag-and-drop silently failed on an empty system.
  */
 export interface SldEmptySystemProps {
   className?: string;
@@ -24,7 +25,9 @@ export function SldEmptySystem({ className }: SldEmptySystemProps) {
   const openAddPanel = useCaseStore((s) => s.openAddPanel);
   return (
     <ComponentDropZone
-      onDropComponent={(kind) => openAddPanel(kind)}
+      onDropComponent={(kind) => {
+        placeDraftOffCanvas(kind);
+      }}
       role="status"
       data-testid="sld-empty-system"
       className={cn(

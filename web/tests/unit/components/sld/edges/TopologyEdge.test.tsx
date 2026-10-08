@@ -39,6 +39,7 @@ vi.mock('@xyflow/react', async () => {
         'data-testid': 'topology-edge-base',
         'data-path': path,
         'data-stroke': style?.stroke,
+        'data-stroke-dasharray': style?.strokeDasharray,
         'data-stroke-width': style?.strokeWidth,
       }),
     EdgeLabelRenderer: ({ children }: { children: ReactNode }) =>
@@ -65,6 +66,9 @@ interface RenderEdgeProps {
     bucket?: 'line' | 'transformer';
     route?: ConnectorRoute;
     labelAt?: LabelPlace;
+    draft?: boolean;
+    ready?: boolean;
+    active?: boolean;
   };
 }
 
@@ -470,5 +474,40 @@ describe('<TopologyEdge /> line loading', () => {
     setPflowFlow(lineFlow(20, 2, undefined, { rate_a: 100, loading_pct: 20.2 }));
     const quiet = renderEdge();
     expect(quiet.queryByTestId('line-flow-label-edge-1')).toBeNull();
+  });
+});
+
+describe('<TopologyEdge /> for a draft', () => {
+  beforeEach(() => {
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  });
+
+  it('is dashed, in the colour of the badge of its draft, where a line of the system is solid', () => {
+    const plain = renderEdge();
+    expect(
+      plain.getByTestId('topology-edge-base').getAttribute('data-stroke-dasharray'),
+    ).toBeNull();
+    plain.unmount();
+    const draft = renderEdge({ data: { draft: true, ready: false } });
+    const base = draft.getByTestId('topology-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-warning)');
+    expect(base.getAttribute('data-stroke-dasharray')).toBe('6 4');
+    draft.unmount();
+    const ready = renderEdge({ data: { draft: true, ready: true } });
+    expect(ready.getByTestId('topology-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-success)',
+    );
+    ready.unmount();
+    const picked = renderEdge({ data: { draft: true, ready: true, active: true } });
+    expect(picked.getByTestId('topology-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-primary)',
+    );
+  });
+
+  it('carries no flow: it is not in the system the power flow ran on', () => {
+    setPflow(40);
+    const { queryByTestId } = renderEdge({ id: 'draft-line-draft-1', data: { draft: true } });
+    expect(queryByTestId('line-flow-label-draft-line-draft-1')).toBeNull();
+    expect(queryByTestId('line-flow-arrow-draft-line-draft-1')).toBeNull();
   });
 });

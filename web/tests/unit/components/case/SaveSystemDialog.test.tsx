@@ -24,6 +24,7 @@ import { SaveSystemDialog } from '@/components/case/SaveSystemDialog';
 import { buildNonBusCoordinates, buildSidecarLayout } from '@/components/sld/sidecar';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { BLANK_CASE_KEY, useDraftsStore } from '@/store/drafts';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { ProblemDetails, TopologySummary } from '@/api/types';
 import { startBeatClock } from '../../helpers/beatClock';
@@ -215,6 +216,30 @@ describe('<SaveSystemDialog />', () => {
       schema_version: '2',
       coordinates: { '1': { x: 10, y: 20 }, '2': { x: 210, y: 20 } },
     });
+  });
+
+  it('keeps the drafts on the diagram with the file that was written as well', async () => {
+    const user = userEvent.setup();
+    // A system built from scratch, with a draft on its diagram.
+    useCaseStore.setState({ selection: { primaryPath: null, addfiles: [], blank: true } });
+    useDraftsStore.setState({
+      byCase: {
+        [BLANK_CASE_KEY]: [
+          { id: 'draft-1', kind: 'PQ', position: { x: 10, y: 20 }, values: { bus: '1' } },
+        ],
+      },
+    });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => {
+      expect(useDraftsStore.getState().byCase['my-system.xlsx']).toEqual([
+        { id: 'draft-1', kind: 'PQ', position: { x: 10, y: 20 }, values: { bus: '1' } },
+      ]);
+    });
+    // The system that is open keeps its own.
+    expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toHaveLength(1);
+    useDraftsStore.setState({ byCase: {} });
   });
 
   it('skips the sidecar write entirely when no diagram has been drawn', async () => {

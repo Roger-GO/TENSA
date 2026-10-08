@@ -46,6 +46,8 @@ interface RenderEdgeProps {
     bucket?: 'generator' | 'load' | 'shunt';
     kind?: string;
     active?: boolean;
+    draft?: boolean;
+    ready?: boolean;
   };
 }
 
@@ -133,5 +135,23 @@ describe('<StubEdge />', () => {
   it('draws no dot of its own: the bar marks every tap', () => {
     const { container } = renderEdge();
     expect(container.querySelectorAll('circle')).toHaveLength(0);
+  });
+
+  it('draws the connector of a draft dashed, in the colour of its badge', () => {
+    const incomplete = renderEdge({ data: { draft: true, ready: false } });
+    const base = incomplete.getByTestId('stub-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-warning)');
+    expect(base.getAttribute('data-stroke-dasharray')).toBe('6 4');
+    incomplete.unmount();
+    const ready = renderEdge({ data: { draft: true, ready: true } });
+    expect(ready.getByTestId('stub-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-success)',
+    );
+    ready.unmount();
+    // Picked, it is marked like the connector of a device, and still dashed.
+    const picked = renderEdge({ data: { draft: true, ready: true, active: true } });
+    const active = picked.getByTestId('stub-edge-base');
+    expect(active.getAttribute('data-stroke')).toBe('var(--color-primary)');
+    expect(active.getAttribute('data-stroke-dasharray')).toBe('6 4');
   });
 });

@@ -46,6 +46,7 @@ import { useSldStore, subscribeOpenSldSearch } from '@/store/sld';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { withShortcut } from '@/lib/shortcutFormatter';
 import { cn } from '@/lib/cn';
+import { DRAFT_NODE_TYPE } from './drafts';
 import type { UnitNodeData } from './graph';
 import {
   SEARCH_CATEGORIES,
@@ -177,6 +178,9 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
     const nodes = rf.getNodes();
     const out: SldSearchEntry[] = [];
     for (const n of nodes) {
+      // A draft is not in the system yet: the list of drafts over the
+      // diagram is where it is found.
+      if (n.type === DRAFT_NODE_TYPE) continue;
       const data = n.data as
         | { idx?: string; name?: string; kind?: string; unit?: UnitNodeData }
         | undefined;

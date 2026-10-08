@@ -26,6 +26,11 @@ export type SldContextTarget =
       /** Whether its route was drawn by hand. */
       manual?: boolean;
     }
+  /**
+   * A draft: its symbol, its connector, or the line it is drawn as once it
+   * names both its buses. `nodeId` is the node of its symbol, when it has one.
+   */
+  | { kind: 'draft'; id: string; name: string; nodeId: string | null }
   /** The connector of a generator, load or shunt to its bus: `name` is the device's. */
   | { kind: 'connector'; edgeId: string; name: string; manual: boolean }
   | {
@@ -49,8 +54,22 @@ interface NodeData {
   unit?: { expanded?: boolean };
 }
 
+/**
+ * The draft a node or an edge is drawn for (`draftGraph` marks both), as a
+ * target: whatever of a draft is right-clicked, the menu is the draft's.
+ */
+function draftTarget(data: unknown, nodeId: string | null): SldContextTarget | null {
+  const marked = data as { draft?: unknown; draftId?: unknown; idx?: unknown; name?: unknown };
+  if (marked?.draft !== true) return null;
+  const id = marked.draftId ?? marked.idx;
+  if (typeof id !== 'string') return null;
+  return { kind: 'draft', id, name: typeof marked.name === 'string' ? marked.name : id, nodeId };
+}
+
 /** The target for a right-click on a React Flow node. */
 export function contextTargetFromNode(node: Pick<Node, 'id' | 'type' | 'data'>): SldContextTarget {
+  const draft = draftTarget(node.data, node.id);
+  if (draft !== null) return draft;
   const data = node.data as NodeData;
   const idx = data.idx ?? node.id;
   const name = data.name ?? idx;
@@ -96,8 +115,12 @@ export function contextTargetFromNode(node: Pick<Node, 'id' | 'type' | 'data'>):
  * about how it is drawn, which can be changed by hand like the route of a line.
  */
 export function contextTargetFromEdge(
-  edge: Pick<Edge, 'type' | 'data'> & { id?: string },
+  edge: Pick<Edge, 'type' | 'data'> & { id?: string; source?: string },
 ): SldContextTarget {
+  // The connector of a draft, or the line a draft is drawn as, is the draft's:
+  // its route is worked out until the draft is added to the system.
+  const draft = draftTarget(edge.data, edge.type === 'stub' ? (edge.source ?? null) : null);
+  if (draft !== null) return draft;
   const data = edge.data as { idx?: string; name?: string; bendManual?: boolean } | undefined;
   const manual = data?.bendManual === true;
   if (edge.type === 'stub') {
@@ -127,7 +150,7 @@ export function contextTargetFromEdge(
 export function contextTargetAt(
   element: Element,
   nodes: ReadonlyArray<Pick<Node, 'id' | 'type' | 'data'>>,
-  edges: ReadonlyArray<Pick<Edge, 'id' | 'type' | 'data'>>,
+  edges: ReadonlyArray<Pick<Edge, 'id' | 'type' | 'data'> & { source?: string }>,
 ): SldContextTarget {
   const wrapper = element.closest('.react-flow__node, .react-flow__edge');
   const id = wrapper?.getAttribute('data-id');

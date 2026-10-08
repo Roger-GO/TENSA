@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import type { KeyboardEvent } from 'react';
+import { ElementKindGlyph } from '@/components/elements/ElementKindGlyph';
 import {
   ELEMENT_KINDS,
   groupElementKinds,
@@ -7,7 +8,6 @@ import {
   type ElementKind,
 } from '@/components/elements/elementKinds';
 import { ReloadedCaseNote } from '@/components/case/ReloadedCaseNote';
-import { ControllerGlyph } from '@/components/sld/nodes/ControllerGlyph';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/cn';
 import { useAddComponent } from '@/lib/useAddComponent';
@@ -33,13 +33,13 @@ import { useLayoutStore } from '@/store/layout';
  * collision with browser-default DnD types (image, link, plain text)
  * that the canvas would otherwise inadvertently handle. The payload is
  * the kind's ``value`` ("Bus", "PV", "GENROU", "Transformer2W", ...), which
- * is the Kind picker's own value; the canvas decodes and routes to
- * ``useCaseStore.openAddPanel(kind, dropCoord)``, so the form opens on
- * exactly the model that was dragged.
+ * is the Kind picker's own value; the canvas places a draft of exactly the
+ * model that was dragged where it was dropped (``store/drafts.ts``), and the
+ * Inspector opens on its form.
  *
  * A row can also be clicked (or reached with Tab and pressed with Enter or
- * Space), which opens the same form without a drag: dragging is a fiddly gesture
- * on a trackpad, and from the keyboard it is not possible at all. The arrow
+ * Space), which opens the Add element form on its model without a drag: dragging
+ * is a fiddly gesture on a trackpad, and from the keyboard it is not possible at all. The arrow
  * keys move between the rows, and down from the search box into them. The rows
  * are one stop for the Tab key between them (the row the keyboard was last on,
  * or the first), so Tab leaves the list in one press. A line
@@ -59,7 +59,7 @@ import { useLayoutStore } from '@/store/layout';
 export const COMPONENT_DND_MIME = 'application/andes-component-type';
 
 /** Shown under the search box while a row can add: to a case that is open, and with none. */
-const HINT = 'Click a component to add it, or drag it onto the diagram.';
+const HINT = 'Click a component to add it, or drag it onto the diagram to place it as a draft.';
 const HINT_NO_CASE =
   'Click a component, or drag it onto the diagram, to start a blank system with it.';
 
@@ -376,7 +376,7 @@ function Row({ kind, blockedReason, blockedId, tabStop, onFocus, onAdd }: RowPro
           'flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border',
         )}
       >
-        {GLYPHS[kind.value] ?? <BlockGlyph />}
+        <ElementKindGlyph kind={kind.value} />
       </span>
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="text-xs leading-tight font-medium">{kind.label}</span>
@@ -387,44 +387,6 @@ function Row({ kind, blockedReason, blockedId, tabStop, onFocus, onAdd }: RowPro
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Inline-SVG glyphs: the symbol the diagram draws for the kind
-// (`src/icons/iec60617`), so a row reads as what it puts there. Stroke is
-// currentColor so the icons inherit `text-muted-foreground` from the wrapper
-// in both themes; an exciter and a governor use the glyph of their badge on
-// the diagram.
-// ---------------------------------------------------------------------------
-
-const GLYPH_PROPS = {
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1.5,
-  strokeLinecap: 'round',
-  strokeLinejoin: 'round',
-  className: 'h-[18px] w-[18px]',
-} as const;
-
-const GLYPHS: Readonly<Record<string, ReactNode>> = {
-  Bus: <BusGlyph />,
-  Line: <LineGlyph />,
-  Transformer2W: <TransformerGlyph />,
-  PV: <GeneratorGlyph />,
-  Slack: <GeneratorGlyph />,
-  GENROU: <MachineGlyph />,
-  GENCLS: <MachineGlyph />,
-  IEEEX1: <ControllerGlyph subKind="exciter" className="h-[18px] w-[18px]" />,
-  ESDC2A: <ControllerGlyph subKind="exciter" className="h-[18px] w-[18px]" />,
-  EXST1: <ControllerGlyph subKind="exciter" className="h-[18px] w-[18px]" />,
-  SEXS: <ControllerGlyph subKind="exciter" className="h-[18px] w-[18px]" />,
-  TGOV1: <ControllerGlyph subKind="governor" className="h-[18px] w-[18px]" />,
-  IEEEG1: <ControllerGlyph subKind="governor" className="h-[18px] w-[18px]" />,
-  ESD1: <BatteryGlyph />,
-  PQ: <LoadGlyph />,
-  ZIP: <LoadGlyph />,
-  Shunt: <ShuntGlyph />,
-};
 
 function SearchGlyph() {
   return (
@@ -439,106 +401,6 @@ function SearchGlyph() {
     >
       <circle cx="11" cy="11" r="6.5" />
       <path d="m20 20-4.2-4.2" />
-    </svg>
-  );
-}
-
-function BusGlyph() {
-  // The bar a bus is drawn as, with its two end ticks.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <line x1="3" y1="12" x2="21" y2="12" strokeWidth="2.5" />
-      <line x1="3" y1="9" x2="3" y2="15" />
-      <line x1="21" y1="9" x2="21" y2="15" />
-    </svg>
-  );
-}
-
-function LineGlyph() {
-  // Two terminal dots + a horizontal line between them.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <line x1="4" y1="12" x2="20" y2="12" />
-      <circle cx="4" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="20" cy="12" r="1.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-function TransformerGlyph() {
-  // Two overlapping circles — the conventional 2-winding transformer.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <circle cx="9" cy="12" r="5" />
-      <circle cx="15" cy="12" r="5" />
-    </svg>
-  );
-}
-
-function GeneratorGlyph() {
-  // A circle with one sine wave: the source of the power flow.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M6 12q3-4.5 6 0t6 0" />
-    </svg>
-  );
-}
-
-function MachineGlyph() {
-  // The generator's circle and sine, over the winding of a synchronous machine.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M6 10q3-4.5 6 0t6 0" />
-      <path d="M7 16q.5 2 1.6 2 1.2 0 1.5-2 .3-2 1.5-2 1.2 0 1.5 2 .3 2 1.5 2 1.1 0 1.6-2" />
-    </svg>
-  );
-}
-
-function LoadGlyph() {
-  // The arrow a load is drawn as: a stem into a triangle that points down.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <line x1="12" y1="2" x2="12" y2="8" />
-      <path d="M4 8h16l-8 14z" />
-    </svg>
-  );
-}
-
-function ShuntGlyph() {
-  // A capacitor from the bus to the three bars of ground.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <line x1="12" y1="2" x2="12" y2="9" />
-      <line x1="6" y1="9" x2="18" y2="9" />
-      <line x1="6" y1="12.5" x2="18" y2="12.5" />
-      <line x1="12" y1="12.5" x2="12" y2="17" />
-      <line x1="7" y1="17" x2="17" y2="17" />
-      <line x1="9.5" y1="19.75" x2="14.5" y2="19.75" />
-      <line x1="11.25" y1="22.25" x2="12.75" y2="22.25" />
-    </svg>
-  );
-}
-
-function BatteryGlyph() {
-  // A cell on its side with its terminal cap, and the two plates of the
-  // battery symbol inside it.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <rect x="3" y="7" width="16" height="10" rx="1.5" />
-      <line x1="21.5" y1="10.5" x2="21.5" y2="13.5" />
-      <line x1="9.5" y1="9.5" x2="9.5" y2="14.5" />
-      <line x1="12.5" y1="11" x2="12.5" y2="13" />
-    </svg>
-  );
-}
-
-function BlockGlyph() {
-  // A plain block, for a kind the list gains before it has a symbol here.
-  return (
-    <svg {...GLYPH_PROPS}>
-      <rect x="5" y="7" width="14" height="10" rx="1.5" />
     </svg>
   );
 }

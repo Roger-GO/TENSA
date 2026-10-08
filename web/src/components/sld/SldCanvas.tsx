@@ -27,6 +27,7 @@ import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
 import type { DragOverrides, RouteOverride, RouteOverrides, SelectedElement } from '@/store/case';
+import { draftCaseKey, useDrafts, useDraftsStore, type DraftElement } from '@/store/drafts';
 import { useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import type { LayoutSnapshot } from '@/store/layoutHistory';
@@ -60,7 +61,13 @@ import {
   sameContextTarget,
   type SldContextTarget,
 } from './contextTarget';
-import { useGetSidecar, usePutSidecar, useCurrentTopology, useConnectivity } from '@/api/queries';
+import {
+  useGetSidecar,
+  usePutSidecar,
+  useCurrentTopology,
+  useConnectivity,
+  useTopologySchema,
+} from '@/api/queries';
 import type { BusCoord, TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
@@ -73,10 +80,15 @@ import { GeneratorNode } from './nodes/GeneratorNode';
 import { LoadNode } from './nodes/LoadNode';
 import { ShuntNode } from './nodes/ShuntNode';
 import { ControllerNode } from './nodes/ControllerNode';
+import { DraftNode } from './nodes/DraftNode';
 import { TopologyEdge } from './edges/TopologyEdge';
 import { TransformerEdge } from './edges/TransformerEdge';
 import { StubEdge } from './edges/StubEdge';
 import { SldCanvasHint } from './SldCanvasHint';
+import { SldDraftsIndicator } from './SldDraftsIndicator';
+import { deleteAllDrafts, deleteDraft, selectDraft } from './draftActions';
+import { connectedPlace, draftPlace, settledPlaces } from './draftPlace';
+import { DRAFT_NODE_TYPE, draftBranchEdgeId, draftGraph, draftIdOf, draftRows } from './drafts';
 import { SldArrangeControls, SldSelectionBar, type ArrangeCommand } from './SldArrangeControls';
 import {
   ALIGN_LABEL,
@@ -130,6 +142,7 @@ import { curatedLayoutFor } from './curated';
 import {
   buildGraph,
   defaultBarLengths,
+  deviceBoxSize,
   DEVICE_PORT,
   SOURCE_HANDLE,
   TARGET_HANDLE,
@@ -161,6 +174,7 @@ const NODE_TYPES: NodeTypes = {
   load: LoadNode,
   shunt: ShuntNode,
   controller: ControllerNode,
+  draft: DraftNode,
 };
 
 // A line that keeps a stored route (`routed`) is drawn like one that is routed
@@ -265,6 +279,8 @@ function miniMapNodeColor(node: Node): string {
       return 'var(--color-warning)';
     case 'line':
       return 'var(--color-primary)';
+    case 'draft':
+      return 'var(--color-warning)';
     default:
       return 'var(--color-border)';
   }
@@ -578,9 +594,49 @@ function SldCanvasInner({
     }
     return states;
   }, [savedLayout, chosenUnits]);
+  // The drafts of this case: the elements that were placed on the diagram and
+  // are not in the system yet (`store/drafts.ts`). Each is a node of the
+  // diagram, or, for a line or a transformer that names both its buses, the
+  // branch it will be (`draftGraph`), so everything the diagram does for what
+  // stands on it is done for a draft as well: the lines go round it, the
+  // labels keep off it, and it is dragged, lined up and put back by Undo as
+  // a device is. Where it stands is kept with the draft, so it is there again
+  // when the case is opened again, and a drag of this visit sits on top of
+  // that like any other (`dragOverrides`).
+  const caseKey = useCaseStore((s) => draftCaseKey(s.selection));
+  const drafts = useDrafts();
+  const schema = useTopologySchema().data ?? null;
+  // The draft that is picked: the one whose form the Inspector shows. Picking
+  // a draft lets go of the element (`selectDraft`), so with an element
+  // selected none is.
+  const pickedDraftId =
+    selectedElement === null && drafts.some((d) => d.id === selectedNodeId) ? selectedNodeId : null;
+  // The drafts as the list over the diagram shows them (`SldDraftsIndicator`).
+  const draftList = useMemo(() => draftRows(drafts, schema, topology), [drafts, schema, topology]);
+  // What the diagram draws of the drafts, as text. A value typed into the
+  // form of a draft changes the draft with every key, and mostly nothing
+  // that is drawn of it (its name, whether it is ready, what it is connected
+  // to): the graph is built again only when this changes, so typing into a
+  // form does not redraw a large diagram key by key.
+  const draftsDrawn = useMemo(
+    () =>
+      drafts.length === 0
+        ? ''
+        : JSON.stringify(draftGraph(drafts, { schema, topology, busPositions: NO_BUS_POSITIONS })),
+    [drafts, schema, topology],
+  );
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  // Where an element that was just added from a draft comes to stand: the
+  // middle of its box where the middle of its draft was. It counts as a drag
+  // from the first graph that holds the element, and becomes one below.
+  const placements = useDraftsStore((s) => s.placements);
+  const placed = useMemo(() => placedPositions(placements, topology), [placements, topology]);
   const baseGraph = useMemo(() => {
     if (!coords) return null;
-    const built = buildGraph(topology, coords, {
+    const placedOverrides =
+      Object.keys(placed).length === 0 ? dragOverrides : { ...placed, ...dragOverrides };
+    const fromTopology = buildGraph(topology, coords, {
       bendPoints: branchRoutes.bendPoints,
       bendAnchors: branchRoutes.bendAnchors,
       bendManual: branchRoutes.bendManual,
@@ -593,15 +649,39 @@ function SldCanvasInner({
       // is also re-applied below as a defensive cosmetic — the
       // pushOutCollisions locked-id guarantee already keeps overridden
       // ids at their override coord.
-      dragOverrides,
+      dragOverrides: placedOverrides,
     });
+    // The drafts stand on the diagram with the rest. The route of one that
+    // is drawn as a branch is kept like any route chosen in this visit, and
+    // held to where its two buses stand now.
+    const busPositions = new Map(
+      fromTopology.nodes
+        .filter((n) => n.type === 'bus')
+        .map((n) => [n.id, placedOverrides[n.id] ?? n.position]),
+    );
+    const drafted =
+      draftsDrawn === ''
+        ? null
+        : draftGraph(draftsRef.current, {
+            schema,
+            topology,
+            busPositions,
+            routes: routeOverrides,
+          });
+    const built =
+      drafted === null
+        ? fromTopology
+        : {
+            nodes: [...fromTopology.nodes, ...drafted.nodes],
+            edges: [...fromTopology.edges, ...drafted.edges],
+          };
     // Apply drag overrides on top of the freshly-derived positions.
     // (push-out's locked path keeps overridden ids stationary; this
     // is belt-and-braces for nodes that aren't push-out candidates.)
     let nextNodes = built.nodes;
-    if (Object.keys(dragOverrides).length > 0) {
+    if (Object.keys(placedOverrides).length > 0) {
       nextNodes = built.nodes.map((n) => {
-        const override = dragOverrides[n.id];
+        const override = placedOverrides[n.id];
         return override !== undefined ? { ...n, position: override } : n;
       });
     }
@@ -616,7 +696,7 @@ function SldCanvasInner({
     for (const n of nextNodes) {
       if (n.type === 'bus') continue;
       const previousPosition = prior.get(n.id);
-      if (dragOverrides[n.id] !== undefined) {
+      if (placedOverrides[n.id] !== undefined) {
         // User dragged it — the new position came from the user, not
         // from push-out. Clear the sticky bit so future renders don't
         // animate user-driven moves.
@@ -662,6 +742,10 @@ function SldCanvasInner({
     dragOverrides,
     nonBusCoordsMap,
     barLengths,
+    draftsDrawn,
+    schema,
+    routeOverrides,
+    placed,
   ]);
 
   // The node an id that was picked is drawn on. The models of a generating
@@ -918,6 +1002,14 @@ function SldCanvasInner({
   // could be seen.
   const [tidyNote, setTidyNote] = useState<string | null>(null);
   useEffect(() => setTidyNote(null), [topology]);
+  // Delete a draft of this diagram; the notice names it and offers to put it back.
+  const removeDraft = useCallback(
+    (id: string) => {
+      const row = draftList.find((draft) => draft.id === id);
+      if (caseKey !== null && row !== undefined) deleteDraft(caseKey, id, row.name);
+    },
+    [caseKey, draftList],
+  );
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
     dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
     setDraggedIds(dragged.map((n) => n.id));
@@ -1053,7 +1145,14 @@ function SldCanvasInner({
       // badge cannot be dragged: its place follows from what it is docked
       // to, and an override would pin it where that used to be.
       setDragOverrides(positionsOf(next));
-      persistRequestedRef.current = true;
+      // A draft keeps where it stands itself, for the next time the case is
+      // opened: written here with the drag, so the diagram is built once.
+      const draftsOf = draftCaseKey(useCaseStore.getState().selection);
+      if (draftsOf !== null) useDraftsStore.getState().move(draftsOf, draftPositionsOf(next));
+      // Nothing of a draft is in the layout beside the case, so a move of
+      // drafts alone writes nothing there.
+      const draftsAlone = moved.length > 0 && moved.every((n) => n.type === DRAFT_NODE_TYPE);
+      if (!draftsAlone) persistRequestedRef.current = true;
     },
     [setDragOverrides, setPickedNodeIds, rf],
   );
@@ -1182,6 +1281,130 @@ function SldCanvasInner({
     if (routesToFollowRef.current) persistRequestedRef.current = true;
   }, [picture, dragging, coordsAreCurrent, baseGraph, edges]);
 
+  // ---- Drafts: where they stand --------------------------------------------
+  //
+  // An element that was added from a draft takes the place its draft stood
+  // in (`placed`). Once the graph holds its node that place is a drag like
+  // any other: kept in `dragOverrides`, and no longer the draft store's. It
+  // is written beside the case with the next change that is (a drag, a
+  // tidy, a save of the system), as the place of an element added from the
+  // form is: adding to a system does not write a layout file for it. Its
+  // box is not the draft's, so it is brought clear of what stands around
+  // it below.
+  const toSettleRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (baseGraph === null) return;
+    const live = new Set(baseGraph.nodes.map((n) => n.id));
+    const arrived = Object.keys(placed).filter((id) => live.has(id));
+    if (arrived.length === 0) return;
+    const next = { ...useCaseStore.getState().dragOverrides };
+    for (const id of arrived) {
+      next[id] ??= placed[id]!;
+      toSettleRef.current.add(id);
+    }
+    setDragOverrides(next);
+    useDraftsStore.getState().forgetPlacements(arrived);
+  }, [baseGraph, placed, setDragOverrides]);
+
+  // Where a draft stands is kept with it. A drag writes that as it ends
+  // (`onNodesChange`); this is for whatever else moved one: Undo, Align, the
+  // settling below.
+  useEffect(() => {
+    if (dragging || caseKey === null || baseGraph === null || !coordsAreCurrent) return;
+    useDraftsStore.getState().move(caseKey, draftPositionsOf(baseGraph.nodes));
+  }, [baseGraph, dragging, caseKey, coordsAreCurrent]);
+
+  // A draft that something came to stand on (a re-layout, an element that
+  // was added, an arrangement put back by Undo) goes to the nearest place
+  // where it is on nothing, and so does an element that just took the place
+  // of its draft (`settledPlaces`). Should two of them ever keep unsettling
+  // each other, the count ends it, as it does for the routes above.
+  //
+  // A draft that was given its bus in its form was not dropped where it
+  // stands, so the picture was never asked whether its connector has a clear
+  // way from there. It is asked here (`connectedPlace`), once for each bus a
+  // draft is given and each place the two come to stand in. A draft whose
+  // connector would be drawn over something, or that was just given a bus
+  // its connector would cross other lines to, goes beside that bus, and a
+  // notice says so. `connectedRef` holds, for the drafts of the case in
+  // hand, which were on the diagram when it was last asked, and what was
+  // asked of each: the bus, and where the two stood.
+  const draftSettlingRef = useRef(0);
+  const connectedRef = useRef<{
+    caseKey: string | null;
+    seen: ReadonlySet<string>;
+    asked: ReadonlyMap<string, { bus: string; where: string }>;
+  }>({ caseKey: null, seen: new Set(), asked: new Map() });
+  useEffect(() => {
+    if (dragging || !coordsAreCurrent || baseGraph === null || nodes !== baseGraph.nodes) return;
+    const draftNodes = nodes.filter((n) => n.type === DRAFT_NODE_TYPE);
+    const ids = [
+      ...draftNodes.map((n) => n.id),
+      ...nodes.filter((n) => toSettleRef.current.has(n.id)).map((n) => n.id),
+    ];
+    toSettleRef.current.clear();
+    if (connectedRef.current.caseKey !== caseKey) {
+      connectedRef.current = { caseKey, seen: new Set(), asked: new Map() };
+    }
+    if (ids.length === 0) {
+      draftSettlingRef.current = 0;
+      connectedRef.current = { caseKey, seen: new Set(), asked: new Map() };
+      return;
+    }
+    if (draftSettlingRef.current >= SETTLING_ROUNDS) return;
+    const graphEdges = baseGraph.edges as ConnectionEdge[];
+    const step = useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined;
+    const moves = settledPlaces(nodes, graphEdges, ids, connections, { sizes, step });
+    if (moves.size === 0) {
+      const { seen, asked: last } = connectedRef.current;
+      const at = new Map(nodes.map((n) => [n.id, n.position]));
+      const asked = new Map<string, { bus: string; where: string }>();
+      const placeOf = (busAt: { x: number; y: number } | undefined, to: { x: number; y: number }) =>
+        `${busAt?.x},${busAt?.y}|${to.x},${to.y}`;
+      for (const n of draftNodes) {
+        const bus = (n.data as { parentBus?: string }).parentBus;
+        if (bus === undefined) continue;
+        const busAt = at.get(bus);
+        const where = placeOf(busAt, n.position);
+        const was = last.get(n.id);
+        asked.set(n.id, { bus, where });
+        if (was?.bus === bus && was.where === where) continue;
+        // Given this bus just now, in its form: it stood on the diagram
+        // before, without it. Not one that came with the bus when the case
+        // was opened, and not one that was moved with the bus it has.
+        const given = seen.has(n.id) && was?.bus !== bus;
+        const place = connectedPlace(nodes, graphEdges, n.id, connections, {
+          sizes,
+          step,
+          atRest: connections,
+          picture: drawnRef.current.options,
+          pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+          given,
+        });
+        if (place === null) continue;
+        moves.set(n.id, place.position);
+        // What is asked next is asked of the place it was brought to.
+        asked.set(n.id, { bus, where: placeOf(busAt, place.position) });
+        toast.info(
+          place.beside ? `Draft moved next to bus ${bus}` : 'Draft moved to the nearest free place',
+          {
+            description: given
+              ? `From there its connector drops square onto the bar. From where it stood it would have been long or slanted, crossed other lines or stepped round something. Drag it to move it.`
+              : `From where it stood, its connector to bus ${bus} would have run over something else. Drag it to move it.`,
+            duration: 8_000,
+          },
+        );
+      }
+      connectedRef.current = { caseKey, seen: new Set(draftNodes.map((n) => n.id)), asked };
+    }
+    if (moves.size === 0) {
+      draftSettlingRef.current = 0;
+      return;
+    }
+    draftSettlingRef.current += 1;
+    setDragOverrides({ ...useCaseStore.getState().dragOverrides, ...Object.fromEntries(moves) });
+  }, [nodes, baseGraph, dragging, coordsAreCurrent, connections, sizes, caseKey, setDragOverrides]);
+
   // The lines that are routed by hand, counted for the commands that reset
   // them, and gone with the diagram.
   const manualRoutes = useMemo(
@@ -1224,6 +1447,12 @@ function SldCanvasInner({
   const onNodeClick: NodeMouseHandler = useCallback(
     (_e, node) => {
       setRouteEditId(null);
+      // A draft is no element of the system: the Inspector shows its form.
+      const draftId = draftIdOf(node);
+      if (draftId !== null) {
+        selectDraft(draftId, 'diagram');
+        return;
+      }
       const data = node.data as { idx?: string; kind?: string };
       const idx = data.idx ?? node.id;
       // Map the React Flow nodeType back to the inspector's element-kind
@@ -1266,6 +1495,14 @@ function SldCanvasInner({
   const pickEdge = useCallback(
     (edge: Edge) => {
       const edgeType = edge.type ?? 'topology';
+      // The line of a draft is the draft's: a click on it picks the draft.
+      // Its route is worked out until the draft is added to the system.
+      const draftId = draftIdOf(edge);
+      if (draftId !== null) {
+        setRouteEditId(null);
+        selectDraft(draftId, 'diagram');
+        return;
+      }
       // A click picks the line to move its route by hand, the connector of
       // a device included. Not while nothing can be moved.
       setRouteEditId(locked || tidying ? null : edge.id);
@@ -1291,17 +1528,39 @@ function SldCanvasInner({
   // click on it does. React Flow only marks it selected for those keys.
   // Escape lets go of the line that is picked, wherever on the diagram the
   // focus is: a line that was clicked has it on the line, not on a handle.
+  //
+  // Delete or Backspace on a draft that has the keyboard focus (its symbol,
+  // its connector, or the line it is drawn as) deletes it. Nothing else on
+  // the diagram is taken out by a key: an element of the system is deleted
+  // from the Inspector, where what depends on it is asked about. Enter or
+  // Space on the symbol of a draft picks it, as a click does.
   const onSurfaceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
         setRouteEditId(null);
         return;
       }
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      if (!(e.target instanceof Element) || !e.target.classList.contains('react-flow__edge')) {
+      const focused = e.target instanceof Element ? e.target : null;
+      const onEdge = focused?.classList.contains('react-flow__edge') === true;
+      const onNode = focused?.classList.contains('react-flow__node') === true;
+      if (!onEdge && !onNode) return;
+      const id = focused!.getAttribute('data-id');
+      const held = onEdge ? baseGraphRef.current?.edges : baseGraphRef.current?.nodes;
+      const draftId = draftIdOf(held?.find((item) => item.id === id));
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (draftId === null) return;
+        e.preventDefault();
+        removeDraft(draftId);
         return;
       }
-      const id = e.target.getAttribute('data-id');
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (onNode) {
+        if (draftId === null) return;
+        e.preventDefault();
+        setRouteEditId(null);
+        selectDraft(draftId, 'diagram');
+        return;
+      }
       const edge = baseGraphRef.current?.edges.find((held) => held.id === id);
       if (edge === undefined) return;
       // Space would scroll the page.
@@ -1313,7 +1572,7 @@ function SldCanvasInner({
       focusRouteRef.current = true;
       pickEdge(edge);
     },
-    [pickEdge, locked],
+    [pickEdge, locked, removeDraft],
   );
 
   // Connectivity / island-detection overlay (Unit 17). Subscribes to
@@ -1375,7 +1634,9 @@ function SldCanvasInner({
         const selected =
           pickedSet !== null
             ? pickedSet.has(n.id)
-            : isSelectedNode(n, selectedElement, selectedDrawnId);
+            : n.type === DRAFT_NODE_TYPE
+              ? n.id === pickedDraftId
+              : isSelectedNode(n, selectedElement, selectedDrawnId);
         // Greying only applies to bus nodes — non-bus device nodes are
         // children of buses for the purposes of energisation, but
         // their own grey-out cascade is handled by the connectivity
@@ -1469,6 +1730,7 @@ function SldCanvasInner({
       nodes,
       selectedElement,
       selectedDrawnId,
+      pickedDraftId,
       pickedSet,
       connectivityResult,
       energisedBusIdxes,
@@ -1498,7 +1760,12 @@ function SldCanvasInner({
     const out = edges.map((edge) => {
       const route = connections.routes.get(edge.id);
       if (!route) return edge;
-      const active = edge.type === 'stub' && activeDeviceIds.has(edge.source);
+      // The connector of a device that is selected or dragged, and every
+      // line of the draft that is picked: its connector, or the branch it
+      // is drawn as.
+      const active =
+        (edge.type === 'stub' && activeDeviceIds.has(edge.source)) ||
+        (pickedDraftId !== null && draftIdOf(edge) === pickedDraftId);
       const labelAt = labelPlaces.get(edge.id);
       const signature = `${active ? 'active' : ''}${JSON.stringify(route)}${JSON.stringify(labelAt ?? null)}`;
       const held = routedEdgesRef.current.get(edge.id);
@@ -1511,7 +1778,7 @@ function SldCanvasInner({
     });
     routedEdgesRef.current = next;
     return out;
-  }, [edges, connections, activeDeviceIds, labelPlaces]);
+  }, [edges, connections, activeDeviceIds, labelPlaces, pickedDraftId]);
 
   // Pan-on-selection effect (Unit 11). When `selectedNodeId` flips,
   // centre the React Flow viewport on the matching node — keeping the
@@ -1531,9 +1798,16 @@ function SldCanvasInner({
     // to be shown it: the view stays where the selection is being made.
     if (useSldStore.getState().pickedNodeIds.length >= 2) return;
     const node = nodes.find((n) => n.id === selectedDrawnId);
-    if (!node) return;
+    // A draft that is drawn as the branch it will be has no node: the view
+    // goes to the middle of its line, when it was picked from the list of
+    // drafts. A click on the line itself moves nothing, as on any line.
+    const line =
+      node || useSldStore.getState().selectedOnDiagram
+        ? undefined
+        : connections.routes.get(draftBranchEdgeId(selectedDrawnId));
+    if (!node && !line) return;
     const currentZoom = rf.getZoom();
-    const centre = centreOf(node, sizes.get(node.id));
+    const centre = node ? centreOf(node, sizes.get(node.id)) : routeMidpoint(line!.points);
     rf.setCenter(centre.x, centre.y, {
       zoom: useSldStore.getState().selectedOnDiagram ? currentZoom : locateZoom(currentZoom),
       duration: 250,
@@ -1545,28 +1819,62 @@ function SldCanvasInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNodeId]);
 
-  // ---- Component Library drag-and-drop (v3 Unit 5) -----------------------
+  // ---- Dropping a component from the palette ------------------------------
   //
-  // The LeftSidebar's ComponentLibrary tiles are HTML5-draggable; the
-  // canvas accepts drops via the matching MIME type. The drop handler
-  // computes a flow-space coordinate via `useReactFlow().screenToFlowPosition`
-  // and routes through `useCaseStore.openAddPanel(kind, dropCoord)` so
-  // AddElementPanel can pre-fill the bus form's position seed when the
-  // dropped kind is "Bus". Non-Bus kinds get the panel opened with the
-  // kind pre-selected; the dropCoord is informational only (non-Bus
-  // elements anchor to a parent bus).
-  //
-  // F-DESIGN-1 cleanup: HTML5 dragend ALWAYS fires after a drop (whether
-  // successful or canceled / Escape / out-of-bounds). The drop handler
-  // does the productive work; the dragend handler is a no-op cleanup
-  // placeholder. We don't need to clear `addPanelDropCoord` from
-  // dragend because (a) on a successful drop the AddElementPanel close
-  // path already nulls the field via `closeAddPanel`, and (b) on a
-  // canceled drop the drop handler never ran so nothing was set in the
-  // first place. The `closeAddPanelDropCoord` action exists for the
-  // odd case where the drop handler ran but `openAddPanel` was rejected
-  // mid-flight by another action — defensive plumbing that's currently
-  // unreachable but documented for future contributors.
+  // The rows of the Components palette are HTML5-draggable; the canvas takes
+  // a drop of one by its MIME type. What is dropped is on the diagram at
+  // once, as a draft (`store/drafts.ts`): it stands with its middle where the
+  // pointer was let go, or at the nearest place to that where it is on
+  // nothing (`draftPlace`, which asks the picture as the drop of a device
+  // does), and it is picked, so the Inspector opens on its form. Nothing is sent to
+  // the server until the draft is added to the system from there.
+  const placeDraft = useCallback(
+    (kind: string, centre: { x: number; y: number }): DraftElement | null => {
+      if (caseKey === null) return null;
+      const graphEdges = (baseGraphRef.current?.edges ?? []) as ConnectionEdge[];
+      const { position, shift } = draftPlace(
+        nodesRef.current,
+        graphEdges,
+        centre,
+        drawnRef.current.connections,
+        {
+          step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
+          sizes: drawnRef.current.sizes,
+          atRest: drawnRef.current.atRest,
+          picture: drawnRef.current.options,
+          pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+        },
+      );
+      const draft = useDraftsStore.getState().add(caseKey, kind, position);
+      if (draft === null) {
+        toast.error('This diagram holds as many drafts as it can.', {
+          description: 'Add some of them to the system, or delete the ones you do not need.',
+        });
+        return null;
+      }
+      setRouteEditId(null);
+      selectDraft(draft.id, 'diagram');
+      // A form that is open over the Inspector would hide the draft's own;
+      // one that holds something typed stays, and is the user's to close.
+      const { addPanelOpen, addPanelDirty, closeAddPanel } = useCaseStore.getState();
+      if (addPanelOpen && !addPanelDirty) closeAddPanel();
+      if (shift !== null) {
+        // What the picture refused, with the rules passed, is a line: a
+        // draft stands beside one, where a device that is dragged onto it
+        // has it routed round.
+        const onto =
+          shift.onto === 'no-way'
+            ? 'A line runs where it was dropped, and a draft leaves the lines as they are.'
+            : DROPPED_ON[shift.onto];
+        toast.info('Draft placed in the nearest free place', {
+          description: `${onto} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Drag it to move it.`,
+          duration: 8_000,
+        });
+      }
+      return draft;
+    },
+    [caseKey],
+  );
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     // Required to make the area a valid drop target. Without this the
     // browser shows the "no-drop" cursor and onDrop never fires.
@@ -1581,18 +1889,24 @@ function SldCanvasInner({
       // handle the original behaviour.
       if (!kind) return;
       e.preventDefault();
-      const flowCoord = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      useCaseStore.getState().openAddPanel(kind, { x: flowCoord.x, y: flowCoord.y });
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      placeDraft(kind, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
     },
-    [rf],
+    [rf, locked, placeDraft],
   );
-  const onDragEnd = useCallback(() => {
-    // No-op cleanup placeholder per F-DESIGN-1. dragend always fires
-    // after drop (successful or canceled). The drop handler did the
-    // productive work; on cancel/escape it never ran. Nothing to clean
-    // up here. Comment is intentional — drops the noise from
-    // disappearing onDragEnd silently in code review.
+
+  // A pick from the list asks where the draft is, so the diagram goes to it
+  // (the pan effect above), which a pick on the diagram itself does not.
+  const pickDraft = useCallback((id: string) => {
+    setRouteEditId(null);
+    selectDraft(id);
   }, []);
+  const removeAllDrafts = useCallback(() => {
+    if (caseKey !== null) deleteAllDrafts(caseKey);
+  }, [caseKey]);
 
   // ---- Fit view and Reset to auto-layout ---------------------------------
   //
@@ -2394,12 +2708,13 @@ function SldCanvasInner({
     () => [{ id: 'figure', label: 'Figure for a paper (SVG, PDF, PNG)…', onSelect: openFigure }],
     [openFigure],
   );
+  // A draft is not part of the system, so it is not in a figure of it.
   const figureSource = useMemo<FigureSource | null>(
     () =>
       figureOpen
         ? {
-            nodes,
-            edges: edges as ConnectionEdge[],
+            nodes: nodes.filter((n) => draftIdOf(n) === null),
+            edges: (edges as ConnectionEdge[]).filter((edge) => draftIdOf(edge) === null),
             sizes,
             connectorStyle,
             barLengths,
@@ -2637,7 +2952,6 @@ function SldCanvasInner({
             data-testid="sld-canvas-surface"
             onDragOver={onDragOver}
             onDrop={onDrop}
-            onDragEnd={onDragEnd}
             onContextMenuCapture={onSurfaceContextMenuCapture}
             onPointerDownCapture={onSurfacePointerDownCapture}
             onKeyDown={onSurfaceKeyDown}
@@ -2716,6 +3030,17 @@ function SldCanvasInner({
             <div className="pointer-events-none absolute top-2 left-2 z-10 flex w-[200px] flex-col gap-1.5">
               <SldVoltageLegend />
               <SldLimitsLegend />
+            </div>
+            {/* The drafts of the diagram, counted and listed, while it has any. */}
+            <div className="pointer-events-none absolute top-2 right-2 z-10 flex">
+              <SldDraftsIndicator
+                rows={draftList}
+                selectedId={pickedDraftId}
+                onSelect={pickDraft}
+                onDelete={removeDraft}
+                onDeleteAll={removeAllDrafts}
+                className="pointer-events-auto"
+              />
             </div>
             {/* Align and Distribute, while several nodes are picked together. */}
             <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
@@ -2904,6 +3229,58 @@ function positionsOf(nodes: readonly Node[]): DragOverrides {
   for (const n of nodes) {
     if (n.draggable === false) continue;
     positions[n.id] = { x: n.position.x, y: n.position.y };
+  }
+  return positions;
+}
+
+/** Where every draft among `nodes` stands, by its id: the form the draft store keeps it in. */
+function draftPositionsOf(nodes: readonly Node[]): Record<string, { x: number; y: number }> {
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const n of nodes) {
+    if (n.type === DRAFT_NODE_TYPE) positions[n.id] = { x: n.position.x, y: n.position.y };
+  }
+  return positions;
+}
+
+const NOT_PLACED: DragOverrides = {};
+
+/** No bus stands anywhere: for asking what is drawn of the drafts whatever routes they keep. */
+const NO_BUS_POSITIONS: ReadonlyMap<string, { x: number; y: number }> = new Map();
+
+/**
+ * Where the nodes named in `placements` come to stand, as positions: each
+ * with the middle of its box where `placements` has the middle of the draft
+ * it was added from, on the grid while the nodes snap to it. A bus is taken
+ * by its bar and a device by the box its name gives it (`deviceBoxSize`).
+ * One that `topology` does not hold yet has no entry.
+ */
+function placedPositions(
+  placements: Readonly<Record<string, { x: number; y: number }>>,
+  topology: TopologySummary,
+): DragOverrides {
+  const middles = Object.entries(placements);
+  if (middles.length === 0) return NOT_PLACED;
+  const boxes = new Map<string, NodeSize>();
+  for (const bus of topology.buses) {
+    boxes.set(String(bus.idx), { width: BAR_LENGTH, height: BAR_THICKNESS });
+  }
+  const devices = [
+    ['generator', topology.generators ?? []],
+    ['load', topology.loads ?? []],
+    ['shunt', topology.shunts ?? []],
+  ] as const;
+  for (const [type, entries] of devices) {
+    for (const entry of entries) {
+      boxes.set(`${type}-${String(entry.idx)}`, deviceBoxSize(entry.name || String(entry.idx)));
+    }
+  }
+  const snap = useLayoutStore.getState().sldSnapToGrid;
+  const onGrid = (value: number) => (snap ? Math.round(value / GRID_STEP) * GRID_STEP : value);
+  const positions: DragOverrides = {};
+  for (const [id, middle] of middles) {
+    const box = boxes.get(id);
+    if (box === undefined) continue;
+    positions[id] = { x: onGrid(middle.x - box.width / 2), y: onGrid(middle.y - box.height / 2) };
   }
   return positions;
 }
@@ -3109,6 +3486,9 @@ export function SldCanvas() {
   const sidecarQuery = useGetSidecar(primaryPath);
   const putSidecarMutation = usePutSidecar();
   const savedSidecar = sidecarQuery.data ?? null;
+  const hasDrafts = useDrafts().length > 0;
+  // An element was just added from a draft and its node is still to come.
+  const placing = useDraftsStore((s) => Object.keys(s.placements).length > 0);
 
   // TanStack Query v5 recreates the mutation result object every render but
   // guarantees `.mutate` is referentially stable; depend on it directly so
@@ -3129,8 +3509,11 @@ export function SldCanvas() {
     return <SldLayoutSkeleton />;
   }
   // No buses yet (blank session, or a case loaded from a file with no
-  // buses — rare but possible on a malformed case) → empty-state CTA.
-  if (topology.buses.length === 0) {
+  // buses — rare but possible on a malformed case) → empty-state CTA. Not
+  // once a draft was placed: a draft stands on the diagram, so there is one.
+  // Nor between the add of the first bus from its draft and the topology
+  // that has it: the diagram stays, and the bus takes the place of the draft.
+  if (topology.buses.length === 0 && !hasDrafts && !placing) {
     return <SldEmptySystem />;
   }
 

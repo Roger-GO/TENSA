@@ -26,6 +26,9 @@
  * - A generator the form chose is given up once a device takes it, and none is
  *   chosen while the case is being read again.
  * - A bus without a generator offers to add one there.
+ * - The form of a draft (`live`): it is checked as it is typed, opens with the
+ *   values that were kept for it, reports every field that is set, cannot be
+ *   sent while anything is missing, and says why.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -1436,5 +1439,192 @@ describe('<ElementForm /> offers the generator a device lacks', () => {
     await user.selectOptions(busSelect(), '5');
     expect(screen.getByTestId('field-warning-bus')).toBeInTheDocument();
     expect(screen.queryByTestId('field-action-add-generator')).toBeNull();
+  });
+});
+
+describe('<ElementForm /> checked as it is typed (the form of a draft)', () => {
+  function busTopology(): TopologySummary {
+    return {
+      ...emptyTopology(),
+      buses: [
+        { idx: 3, name: 'BUS3', kind: 'Bus' },
+        { idx: 5, name: 'BUS5', kind: 'Bus' },
+      ],
+      generators: [{ idx: 'PV_1', name: 'PV_1', kind: 'PV', params: { bus: 3 } }],
+    };
+  }
+
+  function renderDraft(
+    props: Partial<Parameters<typeof ElementForm>[0]> = {},
+    model = 'PV',
+  ): ReturnType<typeof render> {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model={model}
+          live
+          submitLabel="Add to system"
+          cancelLabel="Delete draft"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          {...props}
+        />,
+      ),
+    );
+  }
+
+  beforeEach(() => {
+    MOCK_TOPOLOGY = busTopology();
+  });
+
+  it('says what is missing from the start, and keeps the submit off until nothing is', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderDraft({ onSubmit });
+    // Nothing was sent or even tried, and the empty required fields say so.
+    expect(screen.getByTestId('field-error-bus')).toHaveTextContent('Required. Pick one');
+    expect(screen.getByTestId('field-error-p0')).toHaveTextContent('Required. Enter a value');
+    expect(screen.queryByTestId('field-error-idx')).toBeNull();
+    const problems = screen.getByTestId('form-problems');
+    expect(problems).toHaveTextContent('Not ready to add: bus and p0 are required and empty.');
+    const submit = screen.getByRole('button', { name: 'Add to system' });
+    expect(submit).toBeDisabled();
+    // The reason is tied to the button for a reader that does not see the page.
+    expect(submit.getAttribute('aria-describedby')).toBe(problems.id);
+    // The lines of a form that was never sent are not read out as alerts.
+    expect(screen.getByTestId('field-error-bus')).not.toHaveAttribute('role');
+
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
+    expect(screen.queryByTestId('field-error-bus')).toBeNull();
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Not ready to add: p0 is required and empty.',
+    );
+    await user.type(screen.getByLabelText(/^p0/), '0.4');
+    expect(screen.queryByTestId('form-problems')).toBeNull();
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(onSubmit).toHaveBeenCalledWith({ idx: 'PV_2', name: 'PV_2', bus: '5', p0: 0.4 });
+  });
+
+  it('refuses a value as it is typed, and an idx the case already has', async () => {
+    const user = userEvent.setup();
+    renderDraft({ heldValues: { bus: '5', p0: '0.4' } });
+    expect(screen.getByRole('button', { name: 'Add to system' })).toBeEnabled();
+    const idx = screen.getByLabelText(/^idx/);
+    await user.clear(idx);
+    await user.type(idx, 'PV_1');
+    expect(screen.getByTestId('field-error-idx')).toHaveTextContent('idx "PV_1" is already taken');
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Not ready to add: idx holds a value that cannot be used.',
+    );
+    expect(screen.getByRole('button', { name: 'Add to system' })).toBeDisabled();
+  });
+
+  it('opens with the values that were kept, over what a form opens with', () => {
+    renderDraft({ heldValues: { idx: 'G9', bus: '5' } });
+    expect(screen.getByLabelText(/^idx/)).toHaveValue('G9');
+    // A static generator is named after its idx until it is given a name.
+    expect(screen.getByLabelText(/^name/)).toHaveValue('G9');
+    expect(screen.getByTestId('bus-idx-select')).toHaveValue('5');
+    expect(screen.getByTestId('form-problems')).toHaveTextContent('p0 is required and empty');
+  });
+
+  it('reports every field that is set, and not the name that only followed the idx', async () => {
+    const user = userEvent.setup();
+    const onFieldsChange = vi.fn();
+    renderDraft({ onFieldsChange });
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ bus: '5' });
+    await user.type(screen.getByLabelText(/^idx/), 'x');
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ idx: 'PV_2x' });
+    expect(screen.getByLabelText(/^name/)).toHaveValue('PV_2x');
+    await user.type(screen.getByLabelText(/^name/), 'y');
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ name: 'PV_2xy' });
+  });
+
+  it('reports the generator a pick of the bus brought along, and the one it gave up', async () => {
+    const user = userEvent.setup();
+    const onFieldsChange = vi.fn();
+    renderDraft({ onFieldsChange }, 'GENROU');
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '3');
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ bus: '3', gen: 'PV_1' });
+    // A bus without a generator empties the field, which nobody then set.
+    await user.selectOptions(screen.getByTestId('bus-idx-select'), '5');
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ bus: '5', gen: null });
+  });
+
+  it('refuses a kept pick the case no longer has', () => {
+    renderDraft({ heldValues: { bus: '9', p0: '0.4' } });
+    expect(screen.getByTestId('field-error-bus')).toHaveTextContent(
+      'Bus 9 is not in the system. Pick one from the list.',
+    );
+    expect(screen.getByRole('button', { name: 'Add to system' })).toBeDisabled();
+  });
+
+  it('cannot be sent while the system takes no element, and says why', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderDraft({
+      onSubmit,
+      heldValues: { bus: '5', p0: '0.4' },
+      blockedReason: 'A run has set the system up.',
+    });
+    const blocked = screen.getByTestId('form-blocked');
+    expect(blocked).toHaveTextContent('A run has set the system up.');
+    const submit = screen.getByRole('button', { name: 'Add to system' });
+    expect(submit).toBeDisabled();
+    expect(submit.getAttribute('aria-describedby')).toBe(blocked.id);
+    await user.click(submit);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('opens on the next free idx past the ones that are reserved, and follows them', () => {
+    const { rerender } = renderDraft({ reservedIdxs: ['PV_2', 'PV_3'] });
+    expect(screen.getByLabelText(/^idx/)).toHaveValue('PV_4');
+    expect(screen.getByLabelText(/^name/)).toHaveValue('PV_4');
+    // The draft before it was added or deleted: its idx is free again.
+    rerender(
+      withQueryClient(
+        <ElementForm
+          model="PV"
+          live
+          reservedIdxs={['PV_2']}
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    expect(screen.getByLabelText(/^idx/)).toHaveValue('PV_3');
+  });
+
+  it('keeps an idx that was typed, whatever is reserved', () => {
+    renderDraft({ heldValues: { idx: 'PV_2' }, reservedIdxs: ['PV_2'] });
+    expect(screen.getByLabelText(/^idx/)).toHaveValue('PV_2');
+  });
+
+  it('opens the advanced fields of a form that was kept with one of them set', () => {
+    const { unmount } = renderDraft({ heldValues: { name: 'B9' } }, 'Bus');
+    expect(screen.getByTestId('form-advanced-disclosure')).not.toHaveAttribute('open');
+    unmount();
+    // A value in there that cannot be used is in view, with what is wrong with it.
+    renderDraft({ heldValues: { name: 'B9', Vn: '110', vmax: 'abc' } }, 'Bus');
+    expect(screen.getByTestId('form-advanced-disclosure')).toHaveAttribute('open');
+    expect(screen.getByTestId('field-error-vmax')).toHaveTextContent('Enter a finite number');
+    expect(screen.getByTestId('form-problems')).toHaveTextContent(
+      'Not ready to add: vmax holds a value that cannot be used.',
+    );
+  });
+
+  it('names its buttons as the caller asks', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    renderDraft({ onCancel });
+    await user.click(screen.getByRole('button', { name: 'Delete draft' }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull();
   });
 });

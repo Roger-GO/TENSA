@@ -115,7 +115,6 @@ beforeEach(() => {
     loadingPath: null,
     addPanelOpen: false,
     addPanelKind: null,
-    addPanelDropCoord: null,
   });
   usePflowStore.setState({ isRunning: false });
   useLayoutStore.setState({ ...DEFAULT_LAYOUT, leftSidebarTab: 'components' });
@@ -303,7 +302,6 @@ describe('<ComponentLibrary /> click to add', () => {
     expect(useCaseStore.getState()).toMatchObject({
       addPanelOpen: true,
       addPanelKind: 'Shunt',
-      addPanelDropCoord: null,
     });
   });
 
@@ -335,7 +333,7 @@ describe('<ComponentLibrary /> click to add', () => {
     openCase();
     render(<ComponentLibrary />);
     expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
-      'Click a component to add it, or drag it onto the diagram.',
+      'Click a component to add it, or drag it onto the diagram to place it as a draft.',
     );
   });
 

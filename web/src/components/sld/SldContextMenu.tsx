@@ -20,6 +20,10 @@
  *  - **A controller**: Inspect. Its badge is placed from what it acts on and
  *    cannot be moved on its own. (A controller of a generating unit has no
  *    badge: the symbol of the unit names it.)
+ *  - **A draft** (an element that was placed and is not in the system yet; its
+ *    symbol, its connector, or the dashed line it is drawn as): Edit in the
+ *    Inspector, which is where it is filled in and added, Move with arrow keys
+ *    for one that stands as a symbol, and Delete draft.
  *  - **The canvas**: Add element, Fit view, Tidy diagram, Tidy and re-layout,
  *    Reset manual routes (every line that was routed by hand, at once) and
  *    Reset to auto-layout (the same commands the palette has), Snap to grid, how
@@ -66,6 +70,7 @@ import { toast } from '@/lib/toast';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
+import { draftCaseKey } from '@/store/drafts';
 import { blankFaultSpec, blankToggleSpec, disturbanceSummary } from '@/store/disturbance';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useLayoutStore } from '@/store/layout';
@@ -77,6 +82,7 @@ import { ALIGN_LABEL, DISTRIBUTE_LABEL, type AlignMode, type DistributeAxis } fr
 import type { ArrangeCommand } from './SldArrangeControls';
 import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
+import { deleteDraft, selectDraft } from './draftActions';
 import { ROUTE_FOCUS_ATTR } from './routeEdit';
 
 const ALIGN_MODES: readonly AlignMode[] = ['left', 'centre', 'right', 'top', 'middle', 'bottom'];
@@ -107,6 +113,8 @@ function titleOf(target: SldContextTarget): string {
       return `${target.transformer ? 'Transformer' : 'Line'} ${labelOf(target.idx, target.name)}`;
     case 'connector':
       return `Connector of ${target.name}`;
+    case 'draft':
+      return `Draft ${target.name}`;
     case 'device': {
       const kind = target.element.kind;
       const noun =
@@ -121,6 +129,18 @@ function inspect(element: SelectedElement, nodeId: string | null): void {
   useCaseStore.getState().setSelectedElement(element);
   if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
   useLayoutStore.getState().setRightInspectorCollapsed(false);
+}
+
+/** Show the form of the draft `id` in the Inspector, opening the Inspector if it is folded away. */
+function editDraft(id: string): void {
+  selectDraft(id, 'diagram');
+  useLayoutStore.getState().setRightInspectorCollapsed(false);
+}
+
+/** Delete the draft `id` of the open case; the notice offers to put it back. */
+function removeDraft(id: string, name: string): void {
+  const caseKey = draftCaseKey(useCaseStore.getState().selection);
+  if (caseKey !== null) deleteDraft(caseKey, id, name);
 }
 
 /** The handle of the line that is picked which takes the keyboard focus: its longest run. */
@@ -482,6 +502,33 @@ export function SldContextMenuBody({
                 {target.unit.expanded ? 'Hide control chain' : 'Show control chain'}
               </ContextMenuItem>
             ) : null}
+          </>
+        ) : null}
+        {target.kind === 'draft' ? (
+          <>
+            <ContextMenuItem
+              data-testid="sld-context-edit-draft"
+              onSelect={() => editDraft(target.id)}
+            >
+              Edit in the Inspector
+            </ContextMenuItem>
+            {target.nodeId === null ? null : (
+              <MoveItem
+                label={titleOf(target)}
+                locked={locked}
+                onMove={() => {
+                  selectDraft(target.id, 'diagram');
+                  moveNodeRef.current = target.nodeId;
+                }}
+              />
+            )}
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              data-testid="sld-context-delete-draft"
+              onSelect={() => removeDraft(target.id, target.name)}
+            >
+              Delete draft
+            </ContextMenuItem>
           </>
         ) : null}
         {target.kind === 'selection' ? (

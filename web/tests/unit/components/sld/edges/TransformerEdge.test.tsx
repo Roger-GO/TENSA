@@ -30,6 +30,7 @@ vi.mock('@xyflow/react', async () => {
         'data-testid': 'transformer-edge-base',
         'data-path': path,
         'data-stroke': style?.stroke,
+        'data-stroke-dasharray': style?.strokeDasharray,
         'data-stroke-width': style?.strokeWidth,
       }),
     EdgeLabelRenderer: ({ children }: { children: ReactNode }) =>
@@ -57,6 +58,9 @@ interface RenderEdgeProps {
     route?: ConnectorRoute;
     labelAt?: { x: number; y: number; angleDeg: number };
     winding?: '2w' | '3w';
+    draft?: boolean;
+    ready?: boolean;
+    active?: boolean;
   };
 }
 
@@ -232,5 +236,33 @@ describe('<TransformerEdge /> loading', () => {
       'data-loading-band',
       'neutral',
     );
+  });
+});
+
+describe('<TransformerEdge /> for a draft', () => {
+  it('is dashed, and so is the ring of its symbol, in the colour of the badge of its draft', () => {
+    const { getByTestId } = renderEdge({ data: { draft: true, ready: false, winding: '2w' } });
+    const base = getByTestId('transformer-edge-base');
+    expect(base.getAttribute('data-stroke')).toBe('var(--color-warning)');
+    expect(base.getAttribute('data-stroke-dasharray')).toBe('6 4');
+    const icon = getByTestId('transformer-edge-icon-tfm-edge-1');
+    expect(icon).toHaveAttribute('data-draft', 'true');
+    expect(icon.className).toContain('border-dashed');
+    expect(icon.className).toContain('border-warning');
+    expect(icon).toHaveAttribute('title', 'A draft: not in the system yet.');
+  });
+
+  it('turns to the colour of a draft that can be added', () => {
+    const { getByTestId } = renderEdge({ data: { draft: true, ready: true } });
+    expect(getByTestId('transformer-edge-base').getAttribute('data-stroke')).toBe(
+      'var(--color-success)',
+    );
+    expect(getByTestId('transformer-edge-icon-tfm-edge-1').className).toContain('border-success');
+  });
+
+  it('is solid, with no mark of a draft, for a transformer of the system', () => {
+    const { getByTestId } = renderEdge({ data: { idx: 'T1' } });
+    expect(getByTestId('transformer-edge-base').getAttribute('data-stroke-dasharray')).toBeNull();
+    expect(getByTestId('transformer-edge-icon-tfm-edge-1')).not.toHaveAttribute('data-draft');
   });
 });

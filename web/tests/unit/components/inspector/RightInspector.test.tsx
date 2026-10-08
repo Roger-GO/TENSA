@@ -19,7 +19,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { useCaseStore } from '@/store/case';
+import { useDraftsStore } from '@/store/drafts';
 import { usePflowStore } from '@/store/pflow';
+import { useSldStore } from '@/store/sld';
 import { useRunsStore } from '@/store/runs';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { useSessionStore } from '@/store/session';
@@ -95,6 +97,49 @@ afterEach(() => {
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set<string>() });
   useDisturbanceStore.getState().clearDisturbances();
+});
+
+describe('<RightInspector /> with a draft picked', () => {
+  const draft = { id: 'draft-1', kind: 'PQ', position: { x: 0, y: 0 }, values: {} };
+
+  beforeEach(() => {
+    seedLoadedCase();
+    useDraftsStore.setState({ byCase: { 'ieee14.raw': [draft] }, placements: {} });
+    useSldStore.getState().setSelectedNodeId('draft-1', 'diagram');
+  });
+  afterEach(() => {
+    useDraftsStore.setState({ byCase: {}, placements: {} });
+    useSldStore.getState().clearSelectedNodeId();
+  });
+
+  it('shows the form of the draft in the place of everything else', () => {
+    render(withQueryClient(<RightInspector />));
+    expect(screen.getByTestId('draft-inspector')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-inspector-header')).toHaveTextContent('PQ load');
+    expect(screen.queryByTestId('right-inspector')).toBeNull();
+  });
+
+  it('shows an element that was selected after it, whatever the diagram still has picked', () => {
+    // Inspect in the right-click menu of a line selects the line and leaves
+    // the node the diagram had picked.
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+    render(withQueryClient(<RightInspector />));
+    expect(screen.queryByTestId('draft-inspector')).toBeNull();
+    expect(screen.getByTestId('right-inspector-header')).toHaveTextContent('BUS_5');
+  });
+
+  it('goes back to nothing selected once the draft is gone', () => {
+    useDraftsStore.setState({ byCase: {} });
+    render(withQueryClient(<RightInspector />));
+    expect(screen.queryByTestId('draft-inspector')).toBeNull();
+    expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+  });
+
+  it('shows nothing of a draft of another case that has the same id', () => {
+    useDraftsStore.setState({ byCase: { 'other.raw': [draft] } });
+    render(withQueryClient(<RightInspector />));
+    expect(screen.queryByTestId('draft-inspector')).toBeNull();
+  });
 });
 
 describe('<RightInspector />', () => {

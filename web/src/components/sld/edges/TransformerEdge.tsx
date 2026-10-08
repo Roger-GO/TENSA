@@ -12,6 +12,7 @@ import {
   type LabelPlace,
   type Point,
 } from '../connections';
+import { draftStrokeStyle } from '../drafts';
 import { getLineOverlayState, lineStrokeStyle } from '../overlay';
 import { EdgePickBox } from './EdgePickBox';
 
@@ -38,6 +39,10 @@ interface EdgeData {
   /** Where the symbol stands on the route; absent: half way along. */
   labelAt?: LabelPlace;
   winding?: '2w' | '3w';
+  /** Set on the branch of a draft, with whether the draft can be added and whether it is picked. */
+  draft?: boolean;
+  ready?: boolean;
+  active?: boolean;
 }
 
 const ICON_SIZE = 24;
@@ -69,7 +74,12 @@ export const TransformerEdge = memo(function TransformerEdge({
   // we read the overlay for both bucket values.
   const branchIdx = edgeData.idx;
   const overlay = branchIdx ? getLineOverlayState(branchIdx, pflowResult, hideLabels) : null;
-  const { stroke, strokeWidth } = lineStrokeStyle(overlay);
+  // The branch of a draft (a transformer that was placed and names both its
+  // buses, but is not in the system yet) is dashed, and so is its symbol.
+  const isDraft = edgeData.draft === true;
+  const style = isDraft
+    ? draftStrokeStyle(edgeData.ready === true, edgeData.active === true)
+    : lineStrokeStyle(overlay);
   // A transformer is rated like a line: its icon takes the same outline when it
   // is near or past its rating, and says so to assistive tooling.
   const loadingBand = overlay?.loading_band ?? 'neutral';
@@ -79,7 +89,7 @@ export const TransformerEdge = memo(function TransformerEdge({
 
   return (
     <>
-      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke, strokeWidth }} />
+      <BaseEdge path={path} markerEnd={markerEnd} style={style} />
       {/* Off the icon, which is drawn over the line and takes its own clicks. */}
       <EdgePickBox id={id} points={points} fromBar avoid={mid} />
       <EdgeLabelRenderer>
@@ -87,10 +97,13 @@ export const TransformerEdge = memo(function TransformerEdge({
           data-testid={`transformer-edge-icon-${id}`}
           data-winding={winding}
           data-loading-band={loadingBand}
+          data-draft={isDraft ? 'true' : undefined}
           title={
-            overlay?.loading_status && overlay.loading_label
-              ? `${overlay.loading_status}: ${overlay.loading_label} of its rating`
-              : undefined
+            isDraft
+              ? 'A draft: not in the system yet.'
+              : overlay?.loading_status && overlay.loading_label
+                ? `${overlay.loading_status}: ${overlay.loading_label} of its rating`
+                : undefined
           }
           style={{
             position: 'absolute',
@@ -100,11 +113,15 @@ export const TransformerEdge = memo(function TransformerEdge({
           }}
           className={cn(
             'bg-background flex h-7 w-7 items-center justify-center rounded-full border',
-            loadingBand === 'danger'
-              ? 'border-danger border-2'
-              : loadingBand === 'warning'
-                ? 'border-warning border-2'
-                : 'border-border',
+            isDraft
+              ? edgeData.ready === true
+                ? 'border-success border-dashed'
+                : 'border-warning border-dashed'
+              : loadingBand === 'danger'
+                ? 'border-danger border-2'
+                : loadingBand === 'warning'
+                  ? 'border-warning border-2'
+                  : 'border-border',
           )}
         >
           <img

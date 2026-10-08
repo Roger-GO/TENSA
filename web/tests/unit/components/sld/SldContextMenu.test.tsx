@@ -18,6 +18,7 @@ import { SldContextMenuBody } from '@/components/sld/SldContextMenu';
 import type { SldContextTarget } from '@/components/sld/contextTarget';
 import { ROUTE_FOCUS_ATTR } from '@/components/sld/routeEdit';
 import { useCaseStore } from '@/store/case';
+import { useDraftsStore } from '@/store/drafts';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePlotStore } from '@/store/plot';
@@ -25,7 +26,7 @@ import { useRunsStore } from '@/store/runs';
 import { subscribeUnitExpanded, useSldStore } from '@/store/sld';
 import { useSnapshotStore } from '@/store/snapshot';
 import { toast } from '@/lib/toast';
-import { parseSessionId } from '@/api/types';
+import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 import { useSessionStore } from '@/store/session';
 
@@ -732,6 +733,70 @@ describe('menu for the canvas: connectors and snapshots', () => {
     await userEvent.click(within(menu).getByTestId('sld-context-save-snapshot'));
     // The dialog is mounted at the app's root and opens from this flag.
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+  });
+});
+
+describe('menu for a draft', () => {
+  const CASE = 'case.xlsx';
+  const DRAFT: SldContextTarget = {
+    kind: 'draft',
+    id: 'draft-1',
+    name: 'PQ load PQ_3',
+    nodeId: 'draft-1',
+  };
+
+  beforeEach(() => {
+    useCaseStore.setState({ selection: { primaryPath: parseWorkspacePath(CASE), addfiles: [] } });
+    useDraftsStore.setState({
+      byCase: { [CASE]: [{ id: 'draft-1', kind: 'PQ', position: { x: 0, y: 0 }, values: {} }] },
+    });
+  });
+  afterEach(() => {
+    useDraftsStore.setState({ byCase: {} });
+    useCaseStore.setState({ selection: null });
+  });
+
+  it('is titled with the draft, and offers its form, a move by the keys, and its deletion', async () => {
+    const menu = await openMenu(DRAFT);
+    expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
+      'Draft PQ load PQ_3',
+    );
+    expect(within(menu).getByTestId('sld-context-edit-draft')).toHaveTextContent(
+      'Edit in the Inspector',
+    );
+    expect(within(menu).getByTestId('sld-context-move')).toBeInTheDocument();
+    expect(within(menu).getByTestId('sld-context-delete-draft')).toHaveTextContent('Delete draft');
+    // Nothing of an element of the system, nor of a route drawn by hand.
+    expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
+    expect(within(menu).queryByTestId('sld-context-edit-route')).toBeNull();
+  });
+
+  it('Edit in the Inspector picks the draft and opens an Inspector that was folded away', async () => {
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    useLayoutStore.setState({ rightInspectorCollapsed: true });
+    await openMenu(DRAFT);
+    await userEvent.click(screen.getByTestId('sld-context-edit-draft'));
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    // The element that was inspected is let go of: the Inspector shows the draft.
+    expect(useCaseStore.getState().selectedElement).toBeNull();
+    expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
+  });
+
+  it('Delete draft takes it off the diagram, and the notice offers to put it back', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await openMenu(DRAFT);
+    await userEvent.click(screen.getByTestId('sld-context-delete-draft'));
+    expect(useDraftsStore.getState().byCase[CASE]).toBeUndefined();
+    expect(info).toHaveBeenCalledWith(
+      'Draft deleted: PQ load PQ_3',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),
+    );
+  });
+
+  it('has no move by the keys for a draft that is drawn as a line', async () => {
+    const menu = await openMenu({ ...DRAFT, nodeId: null });
+    expect(within(menu).queryByTestId('sld-context-move')).toBeNull();
+    expect(within(menu).getByTestId('sld-context-edit-draft')).toBeInTheDocument();
   });
 });
 

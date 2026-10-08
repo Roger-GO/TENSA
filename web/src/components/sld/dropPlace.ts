@@ -139,6 +139,13 @@ export interface DropOptions<N extends ConnectionNode = ConnectionNode> {
    * dropped.
    */
   back?: { dx: number; dy: number };
+  /**
+   * Hold the nodes to their boxes alone, and not to the straight way of
+   * their own connectors (what may stand between a device that was moved
+   * and its bus): for a node that was not dragged, whose connector goes
+   * round what is in its way.
+   */
+  boxesOnly?: boolean;
 }
 
 /**
@@ -219,21 +226,33 @@ function near(a: Rect, b: Rect, across: number, down: number = across): boolean 
 }
 
 /**
- * How far the nodes `movedIds` of `nodes`, which stand where they were
- * dropped, are to be shifted to stand clear of the rest. `connections` is
- * the diagram as it was last drawn: the bars as long as they are, and the
- * connectors of the devices, with `edges` saying which device and bus each
- * joins. The answer also says what the nodes were dropped on (`onto`).
+ * What the nodes `movedIds` of `nodes` are on where they stand, by the
+ * rules about the boxes alone (the picture is not asked): `null` where the
+ * rules pass. For a place that is tried without a drop.
  */
-export function clearDrop<N extends ConnectionNode>(
+export function inTheWay<N extends ConnectionNode>(
   nodes: readonly N[],
   edges: readonly ConnectionEdge[],
   movedIds: ReadonlySet<string>,
   connections: ConnectionLayout,
-  options: DropOptions<N> = {},
-): DropShift | null {
+  options: Pick<DropOptions<N>, 'sizes' | 'atRest' | 'boxesOnly'> = {},
+): DropObstacle | null {
+  return dropRules(nodes, edges, movedIds, connections, options)?.(0, 0) ?? null;
+}
+
+/**
+ * The rules about the boxes, for the nodes `movedIds` of `nodes` where
+ * they stand: what they are on when shifted by `dx`, `dy`, or `null` there.
+ * `null` itself when there is nothing to hold them against.
+ */
+function dropRules<N extends ConnectionNode>(
+  nodes: readonly N[],
+  edges: readonly ConnectionEdge[],
+  movedIds: ReadonlySet<string>,
+  connections: ConnectionLayout,
+  options: Pick<DropOptions<N>, 'sizes' | 'atRest' | 'boxesOnly'>,
+): ((dx: number, dy: number) => DropObstacle | null) | null {
   if (movedIds.size === 0) return null;
-  const step = options.step ?? DROP_STEP;
   const devicesOf = new Map<string, Set<string>>();
   for (const edge of edges) {
     if (edge.type !== 'stub') continue;
@@ -348,6 +367,7 @@ export function clearDrop<N extends ConnectionNode>(
       const room = roomFor({ bar: own.bar, box });
       for (const [a, b] of fixed) if (crosses(a, b, room)) return 'connector';
     }
+    if (options.boxesOnly === true) return null;
     for (const { device, bus } of carried) {
       const [p, q] = straight(moved(device.box, dx, dy), moved(bus.box, dx, dy));
       for (const other of standing) if (crosses(p, q, roomFor(other))) return 'connector';
@@ -361,6 +381,26 @@ export function clearDrop<N extends ConnectionNode>(
     }
     return null;
   };
+  return inTheWayAt;
+}
+
+/**
+ * How far the nodes `movedIds` of `nodes`, which stand where they were
+ * dropped, are to be shifted to stand clear of the rest. `connections` is
+ * the diagram as it was last drawn: the bars as long as they are, and the
+ * connectors of the devices, with `edges` saying which device and bus each
+ * joins. The answer also says what the nodes were dropped on (`onto`).
+ */
+export function clearDrop<N extends ConnectionNode>(
+  nodes: readonly N[],
+  edges: readonly ConnectionEdge[],
+  movedIds: ReadonlySet<string>,
+  connections: ConnectionLayout,
+  options: DropOptions<N> = {},
+): DropShift | null {
+  const inTheWayAt = dropRules(nodes, edges, movedIds, connections, options);
+  if (inTheWayAt === null) return null;
+  const step = options.step ?? DROP_STEP;
   // Whether the diagram can be drawn with the nodes shifted by `dx`, `dy`:
   // asked of a few places only, and of none right next to one that failed.
   const { clear } = options;

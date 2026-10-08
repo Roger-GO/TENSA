@@ -24,6 +24,7 @@ import {
   DROP_ROW_GAP,
   DROP_TIP_ROOM,
   clearDrop,
+  inTheWay,
 } from '@/components/sld/dropPlace';
 
 function bus(id: string, x: number, y: number): ConnectionNode {
@@ -331,5 +332,66 @@ describe('clearDrop, with a place held to the picture of the diagram', () => {
       clear: () => false,
     });
     expect(shift).toEqual(byRules);
+  });
+});
+
+describe('a node that was not dragged, held to its box alone', () => {
+  const nodes = [
+    bus('1', 0, 100),
+    device('load-A', 26, 30),
+    bus('2', 300, 100),
+    device('load-B', 326, 30),
+  ];
+  const edges = [stub('load-A', '1'), stub('load-B', '2')];
+  const moved = new Set(['load-A']);
+
+  it('is not moved for a bar that stands between it and its own bus', () => {
+    // Bus 3 stands over bus 1, and load A beyond it: a drop there is
+    // refused, but a device that came to stand so is left where it is.
+    const there = [...nodes, bus('3', 0, 20)].map((n) =>
+      n.id === 'load-A' ? { ...n, position: { x: 26, y: -70 } } : n,
+    );
+    const connections = layoutConnections(there, edges);
+    expect(clearDrop(there, edges, moved, connections)).toMatchObject({ onto: 'bar-between' });
+    expect(clearDrop(there, edges, moved, connections, { boxesOnly: true })).toBeNull();
+  });
+
+  it('still knows its own bar from another: it may stand as near to it as a drop may', () => {
+    // Just clear of its own bar, where it would be too near a bar that is not its own.
+    const y = 100 - 40 - DROP_CLEARANCE - 2;
+    const there = nodes.map((n) => (n.id === 'load-A' ? { ...n, position: { x: 26, y } } : n));
+    const connections = layoutConnections(there, edges);
+    expect(clearDrop(there, edges, moved, connections, { boxesOnly: true })).toBeNull();
+    // The same box with no connector to that bus is too near it.
+    expect(clearDrop(there, [edges[1]!], moved, connections, { boxesOnly: true })).toMatchObject({
+      onto: 'symbol-bar',
+    });
+  });
+
+  it('is still taken off a symbol it stands on', () => {
+    const there = nodes.map((n) => (n.id === 'load-A' ? { ...n, position: { x: 330, y: 34 } } : n));
+    const connections = layoutConnections(there, edges);
+    expect(clearDrop(there, edges, moved, connections, { boxesOnly: true })).toMatchObject({
+      onto: 'symbol-symbol',
+    });
+  });
+});
+
+describe('inTheWay', () => {
+  const nodes = [bus('1', 0, 100), device('load-A', 26, 30), device('load-B', 326, 30)];
+  const edges = [stub('load-A', '1')];
+
+  it('says what a node stands on where it is, by the rules about the boxes, and nothing where it is clear', () => {
+    const at = (x: number, y: number) => {
+      const there = nodes.map((n) => (n.id === 'load-A' ? { ...n, position: { x, y } } : n));
+      return inTheWay(there, edges, new Set(['load-A']), layoutConnections(there, edges));
+    };
+    expect(at(26, 30)).toBeNull();
+    expect(at(330, 34)).toBe('symbol-symbol');
+    expect(at(26, 90)).toBe('symbol-bar');
+  });
+
+  it('has nothing to say of no node at all', () => {
+    expect(inTheWay(nodes, edges, new Set(), layoutConnections(nodes, edges))).toBeNull();
   });
 });

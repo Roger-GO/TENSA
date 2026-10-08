@@ -196,6 +196,27 @@ describe('SldNodeSearch — happy path (14 buses)', () => {
   });
 });
 
+describe('SldNodeSearch and drafts', () => {
+  it('does not list a draft: it is not in the system, and has a list of its own', async () => {
+    const user = userEvent.setup();
+    mockNodes = [
+      ...makeBusNodes(2),
+      {
+        id: 'draft-1',
+        type: 'draft',
+        data: { idx: 'draft-1', name: 'PV generator 6', kind: 'PV' },
+        position: { x: 0, y: 0 },
+      },
+    ];
+    render(<SldNodeSearch />);
+    await openPopover(user);
+    expect(screen.getByTestId('sld-node-search-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('sld-node-search-row-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('sld-node-search-row-draft-1')).toBeNull();
+    expect(screen.getByTestId('sld-node-search-count')).toHaveTextContent('2 matches');
+  });
+});
+
 describe('SldNodeSearch — edge cases', () => {
   it('shows "No nodes match" when the filter has no matches', async () => {
     mockNodes = makeBusNodes(5);

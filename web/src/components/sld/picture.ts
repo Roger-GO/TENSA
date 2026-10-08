@@ -25,7 +25,9 @@
  * it was dropped (`clearDrop`): whether the diagram, drawn with the nodes
  * there, has anything on anything else that was not so before the move.
  * `routesDrawClear` asks it of a route that was drawn by hand, before the
- * diagram keeps it.
+ * diagram keeps it, and `connectorDrawn` of something that came to be drawn
+ * without a move: the connector of a draft that was just given its bus.
+ * `drawsUndisturbed` asks besides that no line had to give way.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
@@ -66,6 +68,7 @@ import {
   type ReadoutPlace,
 } from './labels';
 import {
+  countCrossings,
   findOverlaps,
   type DrawnBar,
   type DrawnBox,
@@ -356,16 +359,102 @@ export function drawsClear<E extends DrawnEdge>(
 }
 
 /**
- * What is on what in the picture of `nodes` and `edges`, each as one name:
- * of what is drawn whatever is in the way. A readout or a flow label that
- * has no place is left off, so neither is ever on anything, and placing
- * them is most of the work of a picture with values on it.
+ * As `drawsClear`, and asking more: that no line or transformer has to be
+ * routed afresh for the nodes to stand where they are put, beyond the ones
+ * the picture before routed afresh already. A device that is dragged onto a
+ * line has the line routed round it; something that is placed where nothing
+ * was dragged (a draft dropped from the palette) leaves the lines as they
+ * run, and stands beside them.
  */
-function overlapsDrawn<E extends DrawnEdge>(
+export function drawsUndisturbed<E extends DrawnEdge>(
+  before: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): (nodes: readonly LabelNode[]) => boolean {
+  let known: { overlaps: Set<string>; rerouted: number } | null = null;
+  const named = ({ kind, a, b }: { kind: string; a: string; b: string }) => `${kind}|${a}|${b}`;
+  return (nodes) => {
+    const now = diagramDrawn(nodes, edges, options);
+    const found = findOverlaps(now.diagram);
+    if (found.length === 0 && now.rerouted === 0) return true;
+    if (known === null) {
+      const was = diagramDrawn(before, edges, options);
+      known = { overlaps: new Set(findOverlaps(was.diagram).map(named)), rerouted: was.rerouted };
+    }
+    const { overlaps, rerouted } = known;
+    return now.rerouted <= rerouted && found.every((overlap) => overlaps.has(named(overlap)));
+  };
+}
+
+/** What `connectorDrawn` says of a connector. */
+export interface ConnectorDrawn {
+  over: boolean;
+  crossings: number;
+  bends: number;
+  /** How far its most slanted run is off level or upright: 0 when every run is one or the other. */
+  slant: number;
+  /** How long the connector is, along its runs. */
+  length: number;
+  /** How many lines and transformers had to be routed afresh for the picture. */
+  rerouted: number;
+}
+
+/**
+ * How the picture of `nodes` and `edges` draws the device `nodeId` and its
+ * connector `edgeId`: whether either is on anything else, or anything else
+ * on it (`over`), how many other lines the connector crosses, how many
+ * bends it has and how far its runs slant (no bend and no slant when it runs
+ * straight up or down to its bar), how long it is, and how many lines
+ * the picture had to route afresh (none when every route kept for the
+ * diagram still holds with the device there). Asked of something that came
+ * to be drawn without a move, which `drawsClear` has no diagram before to
+ * hold it against: a draft that was just given its bus.
+ */
+export function connectorDrawn<E extends DrawnEdge>(
   nodes: readonly LabelNode[],
   edges: readonly E[],
   options: PictureOptions,
-): string[] {
+  nodeId: string,
+  edgeId: string,
+): ConnectorDrawn {
+  const { diagram, rerouted } = diagramDrawn(nodes, edges, options);
+  const its = (id: string) => id === nodeId || id === edgeId;
+  const connector = diagram.lines.find((line) => line.id === edgeId);
+  let crossings = 0;
+  if (connector !== undefined) {
+    for (const line of diagram.lines) {
+      if (line !== connector) crossings += countCrossings([connector, line]);
+    }
+  }
+  const points = connector?.points ?? [];
+  let length = 0;
+  let slant = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const [across, down] = [points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]];
+    length += Math.hypot(across, down);
+    slant = Math.max(slant, Math.min(Math.abs(across), Math.abs(down)));
+  }
+  return {
+    over: findOverlaps(diagram).some(({ a, b }) => its(a) || its(b)),
+    crossings,
+    bends: Math.max(0, points.length - 2),
+    slant,
+    length,
+    rerouted,
+  };
+}
+
+/**
+ * The picture of `nodes` and `edges` as the overlap checker reads it, of
+ * what is drawn whatever is in the way. A readout or a flow label that has
+ * no place is left off, so neither is ever on anything, and placing them is
+ * most of the work of a picture with values on it.
+ */
+function diagramDrawn<E extends DrawnEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): { diagram: DrawnDiagram; rerouted: number } {
   const { routed, chains, busLabels } = drawnAlways(nodes, edges, options);
   const picture = {
     ...routed,
@@ -374,7 +463,19 @@ function overlapsDrawn<E extends DrawnEdge>(
     readouts: new Map<string, ReadoutPlace>(),
     labelPlaces: routed.symbols,
   };
-  return findOverlaps(drawnDiagram(nodes, picture, { sizes: options.sizes, values: false })).map(
+  return {
+    diagram: drawnDiagram(nodes, picture, { sizes: options.sizes, values: false }),
+    rerouted: routed.changed.size,
+  };
+}
+
+/** What is on what in that picture, each as one name. */
+function overlapsDrawn<E extends DrawnEdge>(
+  nodes: readonly LabelNode[],
+  edges: readonly E[],
+  options: PictureOptions,
+): string[] {
+  return findOverlaps(diagramDrawn(nodes, edges, options).diagram).map(
     ({ kind, a, b }) => `${kind}|${a}|${b}`,
   );
 }

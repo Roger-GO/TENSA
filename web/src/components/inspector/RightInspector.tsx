@@ -8,11 +8,14 @@ import { findTopologyEntry } from '@/lib/topology';
 import { useCurrentTopology } from '@/api/queries';
 import { usePflowStore } from '@/store/pflow';
 import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
+import { draftCaseKey, useDrafts } from '@/store/drafts';
+import { useSldStore } from '@/store/sld';
 import { cn } from '@/lib/cn';
 import { PropertiesAccordion } from './PropertiesAccordion';
 import { PlotsAccordion } from './PlotsAccordion';
 import { DisturbancesAccordion } from './DisturbancesAccordion';
 import { EditModeToggle } from './EditModeToggle';
+import { DraftInspector } from './DraftInspector';
 
 /**
  * RightInspector (v3 Unit 7).
@@ -33,6 +36,10 @@ import { EditModeToggle } from './EditModeToggle';
  * mount on selection-or-toggle visibility, so this empty branch should
  * only paint when the user has manually opened the inspector with no
  * selection).
+ *
+ * A draft that is picked on the diagram, or in the list of drafts over it,
+ * takes the place of all of this: the Inspector then shows the form the
+ * draft is filled in and added to the system by (``DraftInspector``).
  *
  * Header: small element-kind glyph + ``<Kind> <name>`` (or just
  * ``<Kind> <idx>`` when the topology hasn't resolved a name), the Edit/Run
@@ -246,6 +253,16 @@ export interface RightInspectorProps {
 export function RightInspector({ className }: RightInspectorProps) {
   const selectedElement = useCaseStore((s) => s.selectedElement);
   const topology = useCurrentTopology();
+  // The draft that is picked, if the node the diagram has picked is one's.
+  // Picking a draft lets go of the element (`selectDraft`), so an element
+  // that is selected was selected after it, and is what is shown.
+  const caseKey = useCaseStore((s) => draftCaseKey(s.selection));
+  const pickedNodeId = useSldStore((s) => s.selectedNodeId);
+  const drafts = useDrafts();
+  const draft =
+    pickedNodeId === null || selectedElement !== null
+      ? undefined
+      : drafts.find((d) => d.id === pickedNodeId);
 
   // Per-element-kind open-state. Hydrate from localStorage on kind change
   // so switching from bus → generator picks up that kind's persisted set.
@@ -277,6 +294,10 @@ export function RightInspector({ className }: RightInspectorProps) {
     return findTopologyEntry(topology, selectedElement);
   }, [selectedElement, topology]);
   const headerName = entry?.name ?? null;
+
+  if (draft !== undefined && caseKey !== null) {
+    return <DraftInspector draft={draft} caseKey={caseKey} className={className} />;
+  }
 
   if (!selectedElement) {
     return (

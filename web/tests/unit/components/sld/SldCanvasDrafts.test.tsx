@@ -1,0 +1,636 @@
+/**
+ * Drafts on the diagram, as the canvas draws them and acts on them.
+ *
+ * A component dropped from the palette is on the diagram at once, as a
+ * draft: a symbol of its own where it was dropped, picked, with nothing sent
+ * to the server. Given a bus it is connected to it; a line that names both
+ * its buses is drawn as the branch it will be. A draft is moved like a
+ * device and keeps where it stands, is deleted by a key, is listed over the
+ * diagram, and is no part of the layout that is written beside the case. An
+ * element that was added from a draft stands where its draft stood.
+ *
+ * React Flow is replaced by a recorder of what it was asked to draw and of
+ * the handlers it was given, as in `SldCanvasArrange.test.tsx`.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import type { ReactNode } from 'react';
+
+interface DrawnNode {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  selected?: boolean;
+  ariaLabel?: string;
+  data: Record<string, unknown>;
+}
+interface DrawnEdge {
+  id: string;
+  type?: string;
+  source: string;
+  target: string;
+  ariaLabel?: string;
+  data?: Record<string, unknown>;
+}
+type Change = {
+  id: string;
+  type: 'position';
+  position: { x: number; y: number };
+  dragging: boolean;
+};
+type DragHandler = (
+  event: unknown,
+  node: Pick<DrawnNode, 'id' | 'position'>,
+  nodes: Pick<DrawnNode, 'id' | 'position'>[],
+) => void;
+
+const drawn: {
+  nodes: DrawnNode[];
+  edges: DrawnEdge[];
+  onNodesChange: ((changes: Change[]) => void) | null;
+  onNodeDragStart: DragHandler | null;
+  onNodeDragStop: DragHandler | null;
+  onNodeClick: ((event: unknown, node: DrawnNode) => void) | null;
+  onEdgeClick: ((event: unknown, edge: DrawnEdge) => void) | null;
+} = {
+  nodes: [],
+  edges: [],
+  onNodesChange: null,
+  onNodeDragStart: null,
+  onNodeDragStop: null,
+  onNodeClick: null,
+  onEdgeClick: null,
+};
+const setCenter = vi.fn();
+
+vi.mock('@xyflow/react', async () => {
+  const React = await import('react');
+  return {
+    // The wrapper of each node and edge is drawn, as React Flow draws it:
+    // the keys of the diagram are read off whichever has the focus.
+    ReactFlow: (props: {
+      nodes: DrawnNode[];
+      edges: DrawnEdge[];
+      onNodesChange: (changes: Change[]) => void;
+      onNodeDragStart: DragHandler;
+      onNodeDragStop: DragHandler;
+      onNodeClick: (event: unknown, node: DrawnNode) => void;
+      onEdgeClick: (event: unknown, edge: DrawnEdge) => void;
+      children?: ReactNode;
+    }) => {
+      Object.assign(drawn, {
+        nodes: props.nodes,
+        edges: props.edges,
+        onNodesChange: props.onNodesChange,
+        onNodeDragStart: props.onNodeDragStart,
+        onNodeDragStop: props.onNodeDragStop,
+        onNodeClick: props.onNodeClick,
+        onEdgeClick: props.onEdgeClick,
+      });
+      return React.createElement(
+        React.Fragment,
+        null,
+        ...props.nodes.map((n) =>
+          React.createElement('div', {
+            key: `node-${n.id}`,
+            className: 'react-flow__node',
+            'data-id': n.id,
+            'data-testid': `rf-node-${n.id}`,
+            tabIndex: 0,
+          }),
+        ),
+        ...props.edges.map((e) =>
+          React.createElement('div', {
+            key: `edge-${e.id}`,
+            className: 'react-flow__edge',
+            'data-id': e.id,
+            'data-testid': `rf-edge-${e.id}`,
+            tabIndex: 0,
+          }),
+        ),
+        props.children,
+      );
+    },
+    ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
+    Handle: () => null,
+    Background: () => null,
+    Controls: () => null,
+    MiniMap: () => null,
+    BaseEdge: () => null,
+    BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
+    Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
+    SelectionMode: { Partial: 'partial', Full: 'full' },
+    useStore: (selector: (s: { transform: [number, number, number] }) => unknown) =>
+      selector({ transform: [0, 0, 1] }),
+    useReactFlow: () => ({
+      setCenter,
+      getZoom: () => 1,
+      getNodes: () => [],
+      fitView: vi.fn(),
+      // The screen is the diagram, one to one.
+      screenToFlowPosition: (p: { x: number; y: number }) => p,
+    }),
+  };
+});
+
+// Two buses to a row, 300 apart, the rows 220 apart.
+vi.mock('@/components/sld/elkClient', () => ({
+  elkLayout: vi.fn(async (graph: { children?: { id: string }[] }) => ({
+    children: (graph.children ?? []).map((c, i) => ({
+      id: c.id,
+      x: 300 * (i % 2),
+      y: 220 * Math.floor(i / 2),
+    })),
+  })),
+}));
+
+import { SldCanvas } from '@/components/sld/SldCanvas';
+import { DRAFT_NODE_SIZE, draftBranchEdgeId } from '@/components/sld/drafts';
+import { toast } from '@/lib/toast';
+import { useCaseStore } from '@/store/case';
+import { useDraftsStore, type DraftElement } from '@/store/drafts';
+import { useLayoutStore } from '@/store/layout';
+import { useSldStore } from '@/store/sld';
+import { parseWorkspacePath } from '@/api/types';
+import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
+import { TOPOLOGY_SCHEMA } from '../../helpers/topologySchema';
+
+let mockTopology: TopologySummary | null = null;
+const mockSidecar: SidecarLayout | null = null;
+const putSidecarSpy = vi.fn();
+
+vi.mock('@/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
+  return {
+    ...actual,
+    useGetSidecar: () => ({ data: mockSidecar, isLoading: false, isError: false, error: null }),
+    usePutSidecar: () => ({ mutate: putSidecarSpy }),
+    useCurrentTopology: () => mockTopology,
+    useTopologySchema: () => ({ data: TOPOLOGY_SCHEMA }),
+    useConnectivity: () => ({
+      data: null,
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+  };
+});
+
+const CASE = 'square.xlsx';
+const MIME = 'application/andes-component-type';
+const { width: W, height: H } = DRAFT_NODE_SIZE;
+
+function entry(idx: string | number, kind: string, params: TopologyEntry['params']): TopologyEntry {
+  return { idx, name: String(idx), kind, params };
+}
+
+/** Four buses, two to a row, with a line from bus 1 to bus 2 and a load on bus 4. */
+function square(): TopologySummary {
+  return {
+    state: 'pre-setup',
+    buses: [1, 2, 3, 4].map((i) => entry(i, 'Bus', { Vn: 110 })),
+    lines: [entry('L12', 'Line', { bus1: 1, bus2: 2 })],
+    transformers: [],
+    generators: [],
+    loads: [entry('PQ_1', 'PQ', { bus: 4 })],
+    shunts: [],
+    controllers: [],
+  };
+}
+
+const drafts = (): DraftElement[] => useDraftsStore.getState().byCase[CASE] ?? [];
+const node = (id: string) => drawn.nodes.find((n) => n.id === id);
+const edge = (id: string) => drawn.edges.find((e) => e.id === id);
+
+async function draw(): Promise<void> {
+  render(<SldCanvas />);
+  await waitFor(() => expect(drawn.nodes.length).toBeGreaterThan(0));
+}
+
+/** Drop the row of the palette for `kind` with the pointer at `x`, `y` of the diagram. */
+function drop(kind: string, x: number, y: number): void {
+  const surface = screen.getByTestId('sld-canvas-surface');
+  const dataTransfer = {
+    getData: (mime: string) => (mime === MIME ? kind : ''),
+    types: [MIME],
+    dropEffect: 'copy',
+  };
+  const event = createEvent.drop(surface, { dataTransfer });
+  Object.defineProperty(event, 'clientX', { value: x });
+  Object.defineProperty(event, 'clientY', { value: y });
+  act(() => {
+    fireEvent(surface, event);
+  });
+}
+
+/** Give the draft `id` values, as its form in the Inspector does. */
+function give(id: string, values: DraftElement['values']): void {
+  act(() => useDraftsStore.getState().setValues(CASE, id, values));
+}
+
+/** Drag the node `id` to `to` and let it go. */
+function dragTo(id: string, to: { x: number; y: number }): void {
+  const from = node(id)!.position;
+  act(() => drawn.onNodeDragStart!(null, { id, position: from }, [{ id, position: from }]));
+  act(() => drawn.onNodesChange!([{ id, type: 'position', position: to, dragging: true }]));
+  act(() => drawn.onNodesChange!([{ id, type: 'position', position: to, dragging: false }]));
+  act(() => drawn.onNodeDragStop!(null, { id, position: to }, [{ id, position: to }]));
+}
+
+beforeEach(() => {
+  Object.assign(drawn, { nodes: [], edges: [] });
+  setCenter.mockReset();
+  putSidecarSpy.mockReset();
+  mockTopology = square();
+  useDraftsStore.setState({ byCase: {}, placements: {} });
+  useSldStore.getState().clearSelectedNodeId();
+  useSldStore.setState({ pickedNodeIds: [] });
+  useLayoutStore.setState({ sldSnapToGrid: false });
+  useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath(CASE), addfiles: [] });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  useCaseStore.getState().clearCase();
+  useDraftsStore.setState({ byCase: {}, placements: {} });
+});
+
+describe('a component dropped on the diagram', () => {
+  it('is on it at once as a draft, where it was dropped, picked, with the list over the diagram', async () => {
+    await draw();
+    expect(screen.queryByTestId('sld-drafts-indicator')).toBeNull();
+    drop('PV', 700, 500);
+    expect(drafts()).toEqual([
+      { id: 'draft-1', kind: 'PV', position: { x: 700 - W / 2, y: 500 - H / 2 }, values: {} },
+    ]);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(node('draft-1')).toMatchObject({
+      type: 'draft',
+      position: { x: 700 - W / 2, y: 500 - H / 2 },
+      selected: true,
+      ariaLabel: 'Draft PV generator PV_1: Missing bus, Sn, Vn, p0 and v0',
+      data: { draft: true, kind: 'PV', ready: false },
+    });
+    // Picked on the diagram: the Inspector shows its form, and the view stays.
+    expect(useSldStore.getState()).toMatchObject({
+      selectedNodeId: 'draft-1',
+      selectedOnDiagram: true,
+    });
+    expect(useCaseStore.getState().addPanelOpen).toBe(false);
+    const indicator = screen.getByTestId('sld-drafts-indicator');
+    expect(indicator).toHaveAttribute('data-draft-count', '1');
+    expect(indicator).toHaveAttribute('data-incomplete-count', '1');
+  });
+
+  it('stands in the nearest free place when it is dropped on a bar, and a notice says so', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await draw();
+    const bar = node('1')!.position;
+    drop('PQ', bar.x + 46, bar.y + 3);
+    const at = drafts()[0]!.position;
+    // Clear of the bar it was dropped on.
+    expect(at.y + H <= bar.y || at.y >= bar.y + 6 || at.x >= bar.x + 92 || at.x + W <= bar.x).toBe(
+      true,
+    );
+    expect(info).toHaveBeenCalledWith(
+      'Draft placed in the nearest free place',
+      expect.objectContaining({ description: expect.stringContaining('Drag it to move it.') }),
+    );
+  });
+
+  it('closes a form that is open with nothing typed, and leaves one that holds something', async () => {
+    await draw();
+    act(() => useCaseStore.getState().openAddPanel('Bus'));
+    drop('PV', 700, 500);
+    expect(useCaseStore.getState().addPanelOpen).toBe(false);
+    act(() => {
+      useCaseStore.getState().openAddPanel('Bus');
+      useCaseStore.getState().setAddPanelDirty(true);
+    });
+    drop('PQ', 700, 300);
+    expect(useCaseStore.getState().addPanelOpen).toBe(true);
+    expect(drafts()).toHaveLength(2);
+  });
+
+  it('writes nothing of the draft beside the case', async () => {
+    await draw();
+    drop('PV', 700, 500);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    const layout = useCaseStore.getState().diagramLayout;
+    expect(layout).not.toBeNull();
+    expect(JSON.stringify(layout)).not.toContain('draft');
+  });
+});
+
+describe('a draft that is given a bus', () => {
+  it('is connected to it by a dashed connector of its own, like the device it will be', async () => {
+    await draw();
+    const bus = node('3')!.position;
+    // Over bus 3, where a device of that bus would stand.
+    drop('PQ', bus.x + 46, bus.y - 90);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(edge('stub-draft-1')).toBeUndefined();
+    give('draft-1', { bus: '3' });
+    await waitFor(() => expect(edge('stub-draft-1')).toBeDefined());
+    const stub = edge('stub-draft-1')!;
+    expect(stub).toMatchObject({
+      type: 'stub',
+      source: 'draft-1',
+      target: '3',
+      data: { draft: true, draftId: 'draft-1', ready: false, active: true },
+    });
+    // It leaves the middle of the face that looks at the bus, and lands on the bar.
+    const route = (stub.data!.route as { points: [number, number][] }).points;
+    const at = node('draft-1')!.position;
+    expect(route[0]).toEqual([at.x + W / 2, at.y + H]);
+    expect(route.at(-1)![1]).toBe(bus.y + 3);
+    expect(node('draft-1')!.data.parentBus).toBe('3');
+  });
+
+  it('goes beside that bus when it was dropped far from it, and a notice says so', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await draw();
+    const [one, four] = [node('1')!.position, node('4')!.position];
+    // Far to the left of bus 1; bus 4 is across the diagram.
+    drop('PQ', one.x - 400, one.y);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    give('draft-1', { bus: '4' });
+    await waitFor(() => {
+      const at = node('draft-1')!.position;
+      expect(Math.abs(at.x + W / 2 - (four.x + 46))).toBeLessThan(200);
+    });
+    expect(info).toHaveBeenCalledWith(
+      'Draft moved next to bus 4',
+      expect.objectContaining({ description: expect.stringContaining('Drag it to move it.') }),
+    );
+    // Where it stands is kept with the draft.
+    await waitFor(() => expect(drafts()[0]!.position).toEqual(node('draft-1')!.position));
+  });
+
+  it('is drawn as the branch it will be once a line names both its buses, in the place of its symbol', async () => {
+    await draw();
+    drop('Line', 700, 500);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    give('draft-1', { bus1: '3' });
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    give('draft-1', { bus2: '4' });
+    const id = draftBranchEdgeId('draft-1');
+    await waitFor(() => expect(edge(id)).toBeDefined());
+    expect(node('draft-1')).toBeUndefined();
+    expect(edge(id)).toMatchObject({
+      source: '3',
+      target: '4',
+      data: { draft: true, draftId: 'draft-1', active: true },
+    });
+    // Its route is worked out with the rest, and it is still listed.
+    await waitFor(() =>
+      expect((edge(id)!.data!.route as { points: unknown[] }).points.length).toBeGreaterThan(1),
+    );
+    expect(screen.getByTestId('sld-drafts-indicator')).toHaveAttribute('data-draft-count', '1');
+  });
+
+  it('a click on the line of a draft picks the draft, and no route to move by hand', async () => {
+    useDraftsStore.setState({
+      byCase: {
+        [CASE]: [
+          {
+            id: 'draft-1',
+            kind: 'Line',
+            position: { x: 700, y: 500 },
+            values: { bus1: '3', bus2: '4' },
+          },
+        ],
+      },
+    });
+    await draw();
+    const id = draftBranchEdgeId('draft-1');
+    await waitFor(() => expect(edge(id)).toBeDefined());
+    expect(edge(id)!.data!.active).toBeUndefined();
+    act(() => drawn.onEdgeClick!(null, edge(id)!));
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    await waitFor(() => expect(edge(id)!.data!.active).toBe(true));
+    expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+    // The line of the system beside it is not marked for it.
+    expect(edge('line-L12')!.data!.active).toBeUndefined();
+  });
+});
+
+describe('a draft on the diagram', () => {
+  const HELD: DraftElement[] = [
+    { id: 'draft-1', kind: 'PV', position: { x: 700, y: 400 }, values: {} },
+    { id: 'draft-2', kind: 'Line', position: { x: 700, y: 600 }, values: { bus1: '3', bus2: '4' } },
+  ];
+
+  it('is there again when its case is opened again, where it stood', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(node('draft-1')!.position).toEqual({ x: 700, y: 400 });
+    expect(edge(draftBranchEdgeId('draft-2'))).toBeDefined();
+    // Not picked: nothing was asked about it yet.
+    expect(node('draft-1')!.selected).toBe(false);
+  });
+
+  it('is moved like a device, and keeps where it was dropped', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    dragTo('draft-1', { x: 760, y: 120 });
+    await waitFor(() => expect(node('draft-1')!.position).toEqual({ x: 760, y: 120 }));
+    expect(drafts()[0]!.position).toEqual({ x: 760, y: 120 });
+  });
+
+  it('is not drawn again for a value typed into its form that changes nothing of what is drawn', async () => {
+    useDraftsStore.setState({
+      byCase: {
+        [CASE]: [{ id: 'draft-1', kind: 'PV', position: { x: 700, y: 400 }, values: { Sn: '1' } }],
+      },
+    });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    const before = node('draft-1')!.data;
+    // More of a number that was begun: the draft holds it, the diagram is as it was.
+    give('draft-1', { Sn: '100' });
+    expect(drafts()[0]!.values.Sn).toBe('100');
+    expect(node('draft-1')!.data).toBe(before);
+    // A field that was missing is given: what the draft lacks is said anew.
+    give('draft-1', { Vn: '69' });
+    await waitFor(() => expect(node('draft-1')!.data).not.toBe(before));
+    expect(node('draft-1')!.ariaLabel).toBe('Draft PV generator PV_1: Missing bus, p0 and v0');
+  });
+
+  it('writes no layout beside the case for a move of a draft, and one for a move of a bus', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    dragTo('draft-1', { x: 760, y: 120 });
+    await waitFor(() => expect(drafts()[0]!.position).toEqual({ x: 760, y: 120 }));
+    // Past the delay a write waits out.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+    const bus = node('2')!.position;
+    dragTo('2', { x: bus.x + 40, y: bus.y - 60 });
+    await waitFor(() => expect(putSidecarSpy).toHaveBeenCalled(), { timeout: 3000 });
+    const [{ layout }] = putSidecarSpy.mock.calls.at(-1) as [{ layout: SidecarLayout }];
+    expect(JSON.stringify(layout)).not.toContain('draft');
+  });
+
+  it('is deleted by Delete or Backspace while it has the focus, its symbol or its line', async () => {
+    const info = vi.spyOn(toast, 'info');
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.keyDown(screen.getByTestId('rf-node-draft-1'), { key: 'Delete' });
+    expect(drafts().map((d) => d.id)).toEqual(['draft-2']);
+    expect(info).toHaveBeenCalledWith(
+      'Draft deleted: PV generator PV_1',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),
+    );
+    await waitFor(() => expect(node('draft-1')).toBeUndefined());
+    fireEvent.keyDown(screen.getByTestId(`rf-edge-${draftBranchEdgeId('draft-2')}`), {
+      key: 'Backspace',
+    });
+    expect(drafts()).toEqual([]);
+    await waitFor(() => expect(screen.queryByTestId('sld-drafts-indicator')).toBeNull());
+  });
+
+  it('takes nothing of the system out by a key: a bus and a line stay', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.keyDown(screen.getByTestId('rf-node-1'), { key: 'Delete' });
+    fireEvent.keyDown(screen.getByTestId('rf-edge-line-L12'), { key: 'Backspace' });
+    expect(node('1')).toBeDefined();
+    expect(edge('line-L12')).toBeDefined();
+    expect(drafts()).toHaveLength(2);
+  });
+
+  it('is picked by Enter on its symbol, and by a click on it', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '1' } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.keyDown(screen.getByTestId('rf-node-draft-1'), { key: 'Enter' });
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    // The bus that was inspected is let go of: the Inspector shows the draft.
+    expect(useCaseStore.getState().selectedElement).toBeNull();
+    act(() => useSldStore.getState().clearSelectedNodeId());
+    act(() => drawn.onNodeClick!(null, node('draft-1')!));
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    await waitFor(() => expect(node('draft-1')!.selected).toBe(true));
+  });
+
+  it('is found from the list over the diagram, which brings a line into view by its middle', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(edge(draftBranchEdgeId('draft-2'))?.data?.route).toBeDefined());
+    fireEvent.click(screen.getByTestId('sld-drafts-indicator'));
+    fireEvent.click(await screen.findByTestId('sld-drafts-row-draft-2'));
+    expect(useSldStore.getState()).toMatchObject({
+      selectedNodeId: 'draft-2',
+      selectedOnDiagram: false,
+    });
+    await waitFor(() => expect(setCenter).toHaveBeenCalled());
+    const route = (
+      edge(draftBranchEdgeId('draft-2'))!.data!.route as { points: [number, number][] }
+    ).points;
+    const xs = route.map((p) => p[0]);
+    const [x] = setCenter.mock.calls.at(-1)!;
+    expect(x).toBeGreaterThanOrEqual(Math.min(...xs));
+    expect(x).toBeLessThanOrEqual(Math.max(...xs));
+  });
+
+  it('is deleted from the list, one by its row and all at once', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.click(screen.getByTestId('sld-drafts-indicator'));
+    fireEvent.click(await screen.findByTestId('sld-drafts-delete-draft-1'));
+    expect(drafts().map((d) => d.id)).toEqual(['draft-2']);
+    act(() => {
+      useDraftsStore.getState().add(CASE, 'Bus', { x: 900, y: 100 });
+    });
+    fireEvent.click(await screen.findByTestId('sld-drafts-delete-all'));
+    expect(drafts()).toEqual([]);
+  });
+
+  it('is not marked as picked once an element of the system is selected', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    act(() => drawn.onNodeClick!(null, node('draft-1')!));
+    await waitFor(() => expect(node('draft-1')!.selected).toBe(true));
+    // Inspect in a right-click menu selects an element and leaves the node.
+    act(() => useCaseStore.getState().setSelectedElement({ kind: 'line', idx: 'L12' }));
+    await waitFor(() => expect(node('draft-1')!.selected).toBe(false));
+  });
+});
+
+describe('an element that was added from a draft', () => {
+  it('stands where its draft stood: a bus with the middle of its bar there', async () => {
+    await draw();
+    // What the Inspector does when the server has taken the add.
+    act(() => useDraftsStore.getState().place('5', { x: 900, y: 500 }));
+    mockTopology = { ...square(), buses: [...square().buses, entry(5, 'Bus', { Vn: 110 })] };
+    cleanup();
+    await draw();
+    await waitFor(() => expect(node('5')).toBeDefined());
+    await waitFor(() => expect(node('5')!.position).toEqual({ x: 900 - 46, y: 500 - 3 }));
+    // The place is the diagram's from here on, like one it was dragged to.
+    await waitFor(() => expect(useDraftsStore.getState().placements).toEqual({}));
+    expect(useCaseStore.getState().dragOverrides['5']).toEqual({ x: 900 - 46, y: 500 - 3 });
+    // It is in the layout a save of the system takes along, and adding it
+    // wrote no layout file by itself.
+    await waitFor(() =>
+      expect(useCaseStore.getState().diagramLayout?.coordinates['5']).toEqual({
+        x: 900 - 46,
+        y: 500 - 3,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('a system with nothing in it', () => {
+  it('draws its diagram for a draft, and goes back to the empty page without one', async () => {
+    mockTopology = { ...square(), buses: [], lines: [], loads: [] };
+    render(<SldCanvas />);
+    expect(screen.getByTestId('sld-empty-system')).toBeInTheDocument();
+    act(() => {
+      useDraftsStore.getState().add(CASE, 'Bus', { x: -48, y: -32 });
+    });
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(screen.queryByTestId('sld-empty-system')).toBeNull();
+    act(() => useDraftsStore.getState().removeAll(CASE));
+    await waitFor(() => expect(screen.getByTestId('sld-empty-system')).toBeInTheDocument());
+  });
+
+  it('keeps its diagram between the add of its first bus from a draft and the topology that has the bus', async () => {
+    mockTopology = { ...square(), buses: [], lines: [], loads: [] };
+    act(() => {
+      useDraftsStore.getState().add(CASE, 'Bus', { x: -48, y: -32 });
+    });
+    render(<SldCanvas />);
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    // What the Inspector does when the server has taken the add: the place
+    // is kept, and the draft goes. The topology is still the one without it.
+    act(() => {
+      useDraftsStore.getState().place('1', { x: 0, y: 0 });
+      useDraftsStore.getState().remove(CASE, 'draft-1');
+    });
+    expect(screen.queryByTestId('sld-empty-system')).toBeNull();
+    expect(screen.getByTestId('sld-canvas-surface')).toBeInTheDocument();
+  });
+});
