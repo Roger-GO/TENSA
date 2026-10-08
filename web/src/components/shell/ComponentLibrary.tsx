@@ -13,6 +13,7 @@ import { cn } from '@/lib/cn';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import { useLayoutStore } from '@/store/layout';
+import { useSldStore } from '@/store/sld';
 
 /**
  * ComponentLibrary: the palette of the left sidebar's Components tab.
@@ -59,7 +60,8 @@ import { useLayoutStore } from '@/store/layout';
 export const COMPONENT_DND_MIME = 'application/andes-component-type';
 
 /** Shown under the search box while a row can add: to a case that is open, and with none. */
-const HINT = 'Click a component to add it, or drag it onto the diagram to place it as a draft.';
+const HINT =
+  'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.';
 const HINT_NO_CASE =
   'Click a component, or drag it onto the diagram, to start a blank system with it.';
 
@@ -354,7 +356,11 @@ function Row({ kind, blockedReason, blockedId, tabStop, onFocus, onAdd }: RowPro
         // The canvas onDrop reads the same MIME below.
         e.dataTransfer.setData(COMPONENT_DND_MIME, kind.value);
         e.dataTransfer.effectAllowed = 'copy';
+        // A drop target cannot read the payload before the drop: the diagram
+        // marks the bus under the pointer only for a kind that connects to one.
+        useSldStore.getState().setPaletteDragKind(kind.value);
       }}
+      onDragEnd={() => useSldStore.getState().setPaletteDragKind(null)}
       className={cn(
         'flex items-start gap-2 px-1 py-1',
         'rounded-[var(--radius-sm)] border border-transparent',

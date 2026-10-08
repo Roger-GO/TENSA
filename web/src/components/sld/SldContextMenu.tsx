@@ -4,16 +4,21 @@
  * What it offers depends on what was clicked:
  *
  *  - **A bus**: Inspect, Move with arrow keys, Add element here (opens the Add
- *    element panel with this bus chosen in the form), Fault here (opens the Add
- *    disturbance dialog with a fault on this bus), Plot voltage (puts the bus's
- *    voltage on the time-series plot of the active run).
+ *    element panel with this bus chosen in the form), Draw line from here and
+ *    Draw transformer from here (the bus it goes to is clicked next, and the
+ *    branch is placed as a draft), Fault here (opens the Add disturbance dialog
+ *    with a fault on this bus), Plot voltage (puts the bus's voltage on the
+ *    time-series plot of the active run).
  *  - **A line or transformer**: Inspect, Trip line (the dialog with a toggle on
  *    this branch), Move route by hand (picks the line, which shows its handles
  *    and the bar that goes with them: `SldRouteEditor`), and Reset route, which
  *    gives a route that was drawn by hand back to the automatic routing.
  *  - **The connector of a generator, load or shunt**: Move route by hand and
- *    Reset route, as for a line.
- *  - **A generator, load or shunt**: Inspect, Move with arrow keys. A generator
+ *    Reset route, as for a line, and Move to another bus, as for its device.
+ *  - **A generator, load or shunt**: Inspect, Move with arrow keys, and Move to
+ *    another bus, which asks for the bus to be clicked: the same as dragging the
+ *    ring at the bar end of its connector there. It is greyed out, with the
+ *    reason, while the system cannot be changed. A generator
  *    that stands for a unit of several models (a machine, its exciter, its
  *    governor) also has Show control chain, or Hide control chain once it is
  *    drawn out: the same as the control at the end of the unit's name.
@@ -23,7 +28,7 @@
  *  - **A draft** (an element that was placed and is not in the system yet; its
  *    symbol, its connector, or the dashed line it is drawn as): Edit in the
  *    Inspector, which is where it is filled in and added, Move with arrow keys
- *    for one that stands as a symbol, and Delete draft.
+ *    and Connect to a bus for one that stands as a symbol, and Delete draft.
  *  - **The canvas**: Add element, Fit view, Tidy diagram, Tidy and re-layout,
  *    Reset manual routes (every line that was routed by hand, at once) and
  *    Reset to auto-layout (the same commands the palette has), Snap to grid, how
@@ -84,6 +89,7 @@ import type { ConnectorStyle } from './connections';
 import type { SldContextTarget } from './contextTarget';
 import { deleteDraft, selectDraft } from './draftActions';
 import { ROUTE_FOCUS_ATTR } from './routeEdit';
+import type { BranchKind } from './wiring';
 
 const ALIGN_MODES: readonly AlignMode[] = ['left', 'centre', 'right', 'top', 'middle', 'bottom'];
 const DISTRIBUTE_AXES: readonly DistributeAxis[] = ['horizontal', 'vertical'];
@@ -290,6 +296,12 @@ export interface SldContextMenuBodyProps {
   onResetManualRoutes?: () => void;
   /** Open the figure of the diagram, to save it as SVG, PDF or PNG. */
   onFigure?: () => void;
+  /** Draw a line or a transformer that starts at the bus `busId`. */
+  onDrawFrom?: (model: BranchKind, busId: string) => void;
+  /** Ask for the bus the device or draft drawn as the node `nodeId` is to be on. */
+  onMoveToBus?: (nodeId: string) => void;
+  /** Why no element of the system can be moved to another bus now, or `null`. */
+  moveBlocked?: string | null;
 }
 
 /**
@@ -336,6 +348,43 @@ function RouteItems({
   );
 }
 
+/**
+ * "Move to another bus…": asks for the bus to be clicked, which is the same
+ * as dragging the ring at the bar end of the connector there. Greyed out,
+ * with the reason, while the diagram is locked or the system cannot be
+ * changed (`blocked`); a draft is not in the system and has no such reason.
+ */
+function MoveToBusItem({
+  nodeId,
+  label,
+  locked,
+  blocked,
+  onMoveToBus,
+}: {
+  nodeId: string;
+  label: string;
+  locked: boolean;
+  blocked: string | null;
+  onMoveToBus?: (nodeId: string) => void;
+}) {
+  const off = locked || blocked !== null;
+  return (
+    <ContextMenuItem
+      data-testid="sld-context-move-to-bus"
+      disabled={off}
+      onSelect={() => onMoveToBus?.(nodeId)}
+      className={blocked !== null && !locked ? 'flex-col items-start gap-0.5' : undefined}
+    >
+      <span>{label}</span>
+      {locked ? (
+        <LockedNote />
+      ) : blocked !== null ? (
+        <span className="text-muted-foreground max-w-[16rem] text-xs leading-snug">{blocked}</span>
+      ) : null}
+    </ContextMenuItem>
+  );
+}
+
 /** The note a greyed-out item carries while the diagram is locked. */
 function LockedNote() {
   return <span className="text-muted-foreground ml-auto pl-3 text-xs">diagram is locked</span>;
@@ -360,6 +409,9 @@ export function SldContextMenuBody({
   manualRoutes = 0,
   onResetManualRoutes,
   onFigure,
+  onDrawFrom,
+  onMoveToBus,
+  moveBlocked = null,
 }: SldContextMenuBodyProps) {
   const addDisturbance = useDisturbanceStore((s) => s.addDisturbance);
   // The spec the Add disturbance dialog opens with, or null while it is closed.
@@ -424,6 +476,22 @@ export function SldContextMenuBody({
             />
             <AddElementItem busIdx={target.idx} />
             <ContextMenuItem
+              data-testid="sld-context-draw-line"
+              disabled={locked}
+              onSelect={() => onDrawFrom?.('Line', target.nodeId)}
+            >
+              <span>Draw line from here…</span>
+              {locked ? <LockedNote /> : null}
+            </ContextMenuItem>
+            <ContextMenuItem
+              data-testid="sld-context-draw-transformer"
+              disabled={locked}
+              onSelect={() => onDrawFrom?.('Transformer2W', target.nodeId)}
+            >
+              <span>Draw transformer from here…</span>
+              {locked ? <LockedNote /> : null}
+            </ContextMenuItem>
+            <ContextMenuItem
               data-testid="sld-context-fault"
               onSelect={() => setSeed({ ...blankFaultSpec(), bus_idx: asIdx(target.idx) })}
             >
@@ -468,13 +536,27 @@ export function SldContextMenuBody({
           </>
         ) : null}
         {target.kind === 'connector' ? (
-          <RouteItems
-            edgeId={target.edgeId}
-            manual={target.manual}
-            locked={locked}
-            onEditRoute={editRoute}
-            onResetRoute={onResetRoute}
-          />
+          <>
+            <RouteItems
+              edgeId={target.edgeId}
+              manual={target.manual}
+              locked={locked}
+              onEditRoute={editRoute}
+              onResetRoute={onResetRoute}
+            />
+            {target.nodeId !== undefined ? (
+              <>
+                <ContextMenuSeparator />
+                <MoveToBusItem
+                  nodeId={target.nodeId}
+                  label="Move to another bus…"
+                  locked={locked}
+                  blocked={moveBlocked}
+                  onMoveToBus={onMoveToBus}
+                />
+              </>
+            ) : null}
+          </>
         ) : null}
         {target.kind === 'device' ? (
           <>
@@ -485,11 +567,20 @@ export function SldContextMenuBody({
               Inspect
             </ContextMenuItem>
             {target.element.kind === 'controller' ? null : (
-              <MoveItem
-                label={titleOf(target)}
-                locked={locked}
-                onMove={() => move(target.element, target.nodeId)}
-              />
+              <>
+                <MoveItem
+                  label={titleOf(target)}
+                  locked={locked}
+                  onMove={() => move(target.element, target.nodeId)}
+                />
+                <MoveToBusItem
+                  nodeId={target.nodeId}
+                  label="Move to another bus…"
+                  locked={locked}
+                  blocked={moveBlocked}
+                  onMoveToBus={onMoveToBus}
+                />
+              </>
             )}
             {target.unit !== undefined ? (
               <ContextMenuItem
@@ -513,14 +604,23 @@ export function SldContextMenuBody({
               Edit in the Inspector
             </ContextMenuItem>
             {target.nodeId === null ? null : (
-              <MoveItem
-                label={titleOf(target)}
-                locked={locked}
-                onMove={() => {
-                  selectDraft(target.id, 'diagram');
-                  moveNodeRef.current = target.nodeId;
-                }}
-              />
+              <>
+                <MoveItem
+                  label={titleOf(target)}
+                  locked={locked}
+                  onMove={() => {
+                    selectDraft(target.id, 'diagram');
+                    moveNodeRef.current = target.nodeId;
+                  }}
+                />
+                <MoveToBusItem
+                  nodeId={target.nodeId}
+                  label="Connect to a bus…"
+                  locked={locked}
+                  blocked={null}
+                  onMoveToBus={onMoveToBus}
+                />
+              </>
             )}
             <ContextMenuSeparator />
             <ContextMenuItem

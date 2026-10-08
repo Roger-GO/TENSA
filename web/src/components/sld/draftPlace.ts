@@ -21,6 +21,9 @@
  * where it stands now: one that something came to stand on, and one that
  * was given its bus in its form, whose connector the picture was never
  * asked about. `draftDrop` is for one that was dragged and let go.
+ * `connectedPlace` is also where a generator, load or shunt of the system
+ * goes that was moved to another bus (`wiring.ts`): it reads nothing of its
+ * node that is a draft's alone.
  *
  * Pure: no React, nothing read but the arguments. `SldCanvas` calls them
  * with the diagram as it was last drawn, and the tests that hold a diagram
@@ -314,6 +317,13 @@ const ROW_STRIDE = 2 * GRID_STEP;
  */
 const SLANT_LEFT_ALONE = GRID_STEP / 2;
 
+/**
+ * The same for what was put on its bus on the diagram, which no hand put
+ * down beside that bus: a connector that runs straight, to the half pixel
+ * the routes are worked out in (`ConnectedPlaceOptions.slant`).
+ */
+export const SLANT_PUT_ON_BUS = 0.5;
+
 export interface ConnectedPlaceOptions extends DraftPlaceOptions {
   picture: PictureOptions;
   /**
@@ -322,6 +332,15 @@ export interface ConnectedPlaceOptions extends DraftPlaceOptions {
    * lines from there is reason enough to bring it to its bus.
    */
   given: boolean;
+  /**
+   * How far off level or upright its connector may run from where it
+   * stands for it to be left there: `SLANT_LEFT_ALONE` unless it says
+   * otherwise. One that was put on its bus on the diagram (dropped on the
+   * bar, or moved there by the end of its connector) was not put down
+   * beside that bus by hand, so it is given a place where its connector
+   * drops square whenever the row of its bus has one.
+   */
+  slant?: number;
 }
 
 /**
@@ -343,8 +362,9 @@ export interface ConnectedPlaceOptions extends DraftPlaceOptions {
  *   diagram and then given a bus in the middle of it is meant to be on
  *   that bus, not to reach for it across everything between. One whose
  *   connector only steps round something on its way, or runs to the bar as
- *   a diagonal, goes to the row of its bus as well, when that has a place
- *   where the connector drops square onto the bar; it stays otherwise.
+ *   a diagonal (off level or upright by more than `slant`), goes to the row
+ *   of its bus as well, when that has a place where the connector drops
+ *   square onto the bar; it stays otherwise.
  *
  * It goes beside its bus (`beside`), and stands off the lines there as one
  * that is dropped does: a draft is a placeholder, and where the diagram
@@ -432,7 +452,7 @@ export function connectedPlace(
   // style has of itself), or runs to the bar at an angle.
   const bent =
     now.bends > (options.picture.connectorStyle === 'elbow' ? 1 : 0) ||
-    now.slant > SLANT_LEFT_ALONE;
+    now.slant > (options.slant ?? SLANT_LEFT_ALONE);
   if (!must && !(options.given && bent)) return null;
   // The nearest place to `from` that the rules pass and `good` says yes to, or `null`.
   const near = (

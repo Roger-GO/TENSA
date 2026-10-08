@@ -318,6 +318,7 @@ vi.mock('@/api/queries', async () => {
     useCurrentTopology: () => mockTopology,
     // The fields of each model: only a draft on the diagram is checked against them.
     useTopologySchema: () => ({ data: undefined }),
+    useEditElements: () => ({ mutate: vi.fn(), isPending: false }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,
@@ -1368,11 +1369,11 @@ describe('SldCanvas', () => {
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
       /Drag a bus.*Right-click a bus, line or the background/,
     );
-    // The way to move something without a drag, that a line can be moved
-    // too, how to pick several and take a move back, and that an arrangement
-    // is kept.
+    // The way to move something without a drag, how a component is
+    // connected and a line drawn, that a line can be moved too, how to pick
+    // several and take a move back, and that an arrangement is kept.
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      /click it and press the arrow keys\. Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
+      /click it and press the arrow keys\. Drop a component from the Components tab on a bus to connect it there; Draw line \(top left\) joins two buses\. Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
     );
   });
 

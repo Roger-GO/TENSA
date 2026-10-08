@@ -88,6 +88,9 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
           : null;
 
   const draftId = draft.id;
+  // How many times the diagram gave the draft a value (the bus it was dropped
+  // on): the form holds the values it opened with, so it is opened afresh.
+  const connected = useDraftsStore((s) => s.connected[draftId] ?? 0);
   const onFieldsChange = useCallback(
     (patch: Record<string, ParamValue | null>) => {
       useDraftsStore.getState().setValues(caseKey, draftId, patch);
@@ -223,8 +226,9 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
           </Button>
         ) : null}
         <ElementForm
-          // The form of another draft is another form.
-          key={draft.id}
+          // The form of another draft is another form, and so is the form of
+          // one that was connected on the diagram since.
+          key={`${draft.id}:${connected}`}
           model={model}
           kindHint={kind.value}
           defaultParams={defaults}

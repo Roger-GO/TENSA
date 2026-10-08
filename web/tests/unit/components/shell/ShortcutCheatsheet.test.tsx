@@ -180,6 +180,32 @@ describe('<ShortcutCheatsheet /> — content', () => {
     expect(section).toHaveTextContent('Reset manual routes in the Arrange menu');
   });
 
+  it('lists how things are connected on the diagram by a drag', async () => {
+    render(withProviders(<ShortcutCheatsheet />));
+    act(() => {
+      useShortcutCheatsheetStore.getState().openCheatsheet();
+    });
+    await screen.findByTestId('shortcut-cheatsheet');
+    const section = screen.getByTestId('shortcut-cheatsheet-group-connect');
+    expect(section).toHaveTextContent('Diagram: connecting by a drag');
+    expect(screen.getByTestId('shortcut-cheatsheet-gesture-connect-drop')).toHaveTextContent(
+      'Connect a component to a bus: drop a row of the Components tab, or a draft, on its bar',
+    );
+    const draw = screen.getByTestId('shortcut-cheatsheet-gesture-connect-draw');
+    expect(draw).toHaveTextContent('Draw a line or a transformer from one bus to another');
+    expect([...draw.querySelectorAll('kbd')].map((key) => key.textContent)).toEqual([
+      'Drag',
+      'Click',
+    ]);
+    expect(screen.getByTestId('shortcut-cheatsheet-gesture-connect-move')).toHaveTextContent(
+      'the ring where its connector meets the bar',
+    );
+    for (const id of ['connect-keys', 'connect-stop']) {
+      expect(screen.getByTestId(`shortcut-cheatsheet-gesture-${id}`)).toBeInTheDocument();
+    }
+    expect(section).toHaveTextContent('are drafts until they are added to the system');
+  });
+
   it('renders kbd chips for the cheatsheet binding itself', async () => {
     render(withProviders(<ShortcutCheatsheet />));
     act(() => {

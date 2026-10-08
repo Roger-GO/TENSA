@@ -60,6 +60,8 @@ const onEditRoute = vi.fn();
 const onResetRoute = vi.fn();
 const onResetManualRoutes = vi.fn();
 const onFigure = vi.fn();
+const onDrawFrom = vi.fn();
+const onMoveToBus = vi.fn();
 
 /**
  * Opens the menu for `target`. The surface holds a stand-in for the node React
@@ -73,11 +75,13 @@ function openMenu(
     connectorStyle,
     snap = false,
     manualRoutes = 0,
+    moveBlocked = null,
   }: {
     locked?: boolean;
     connectorStyle?: 'straight' | 'elbow';
     snap?: boolean;
     manualRoutes?: number;
+    moveBlocked?: string | null;
   } = {},
 ) {
   const client = new QueryClient();
@@ -111,6 +115,9 @@ function openMenu(
           manualRoutes={manualRoutes}
           onResetManualRoutes={onResetManualRoutes}
           onFigure={onFigure}
+          onDrawFrom={onDrawFrom}
+          onMoveToBus={onMoveToBus}
+          moveBlocked={moveBlocked}
         />
       </ContextMenu>
     </QueryClientProvider>,
@@ -132,6 +139,8 @@ beforeEach(() => {
   onResetRoute.mockReset();
   onResetManualRoutes.mockReset();
   onFigure.mockReset();
+  onDrawFrom.mockReset();
+  onMoveToBus.mockReset();
   currentTopology = TOPOLOGY;
   useSessionStore.setState({ sessionId: parseSessionId('s') });
   useCaseStore.setState({ selectedElement: null, topology: TOPOLOGY });
@@ -165,6 +174,28 @@ describe('menu for a bus', () => {
     expect(within(menu).getByTestId('sld-context-plot-voltage')).toBeInTheDocument();
     expect(within(menu).queryByTestId('sld-context-trip-line')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-fit-view')).toBeNull();
+  });
+
+  it('draws a line or a transformer that starts at the bus', async () => {
+    let menu = await openMenu(BUS);
+    const line = within(menu).getByTestId('sld-context-draw-line');
+    expect(line).toHaveTextContent('Draw line from here…');
+    await userEvent.click(line);
+    expect(onDrawFrom).toHaveBeenCalledExactlyOnceWith('Line', '1');
+    cleanup();
+    menu = await openMenu(BUS);
+    const transformer = within(menu).getByTestId('sld-context-draw-transformer');
+    expect(transformer).toHaveTextContent('Draw transformer from here…');
+    await userEvent.click(transformer);
+    expect(onDrawFrom).toHaveBeenLastCalledWith('Transformer2W', '1');
+  });
+
+  it('greys the two out, and says why, while the diagram is locked', async () => {
+    const menu = await openMenu(BUS, { locked: true });
+    for (const id of ['sld-context-draw-line', 'sld-context-draw-transformer']) {
+      expect(within(menu).getByTestId(id)).toHaveAttribute('data-disabled');
+      expect(within(menu).getByTestId(id)).toHaveTextContent('diagram is locked');
+    }
   });
 
   it('Inspect selects the bus and opens an Inspector that was folded away', async () => {
@@ -463,6 +494,19 @@ describe('moving the route of a line by hand', () => {
     expect(onResetRoute).toHaveBeenCalledWith('stub-load-PQ_1');
   });
 
+  it('moves the device of a connector to another bus from the menu of the connector', async () => {
+    const menu = await openMenu({
+      kind: 'connector',
+      edgeId: 'stub-load-PQ_1',
+      name: 'PQ_1',
+      manual: false,
+      nodeId: 'load-PQ_1',
+    });
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+    await userEvent.click(within(menu).getByTestId('sld-context-move-to-bus'));
+    expect(onMoveToBus).toHaveBeenCalledExactlyOnceWith('load-PQ_1');
+  });
+
   it('greys both out, and says why, while the diagram is locked', async () => {
     const menu = await openMenu({ ...LINE, manual: true }, { locked: true });
     for (const id of ['sld-context-edit-route', 'sld-context-reset-route']) {
@@ -505,11 +549,55 @@ describe('menu for a generator, load, shunt or controller', () => {
     expect(within(menu).getByTestId('sld-context-menu-title')).toHaveTextContent(
       'Generator G3 (idx 3)',
     );
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(2);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
     expect(within(menu).getByTestId('sld-context-move')).toBeInTheDocument();
+    expect(within(menu).getByTestId('sld-context-move-to-bus')).toHaveTextContent(
+      'Move to another bus…',
+    );
     await userEvent.click(within(menu).getByTestId('sld-context-inspect'));
     expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'generator', idx: '3' });
     expect(useSldStore.getState().selectedNodeId).toBe('generator-3');
+  });
+
+  it('Move to another bus asks for the bus the device is to be on', async () => {
+    const menu = await openMenu({
+      kind: 'device',
+      element: { kind: 'load', idx: 'PQ_1' },
+      name: 'PQ_1',
+      nodeId: 'load-PQ_1',
+    });
+    const item = within(menu).getByTestId('sld-context-move-to-bus');
+    expect(item).not.toHaveAttribute('data-disabled');
+    await userEvent.click(item);
+    expect(onMoveToBus).toHaveBeenCalledExactlyOnceWith('load-PQ_1');
+  });
+
+  it('greys Move to another bus out, with the reason, while the system cannot be changed or the diagram is locked', async () => {
+    const target: SldContextTarget = {
+      kind: 'device',
+      element: { kind: 'load', idx: 'PQ_1' },
+      name: 'PQ_1',
+      nodeId: 'load-PQ_1',
+    };
+    let menu = await openMenu(target, { moveBlocked: 'A run has locked the system.' });
+    let item = within(menu).getByTestId('sld-context-move-to-bus');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(item).toHaveTextContent('A run has locked the system.');
+    cleanup();
+    menu = await openMenu(target, { locked: true });
+    item = within(menu).getByTestId('sld-context-move-to-bus');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(item).toHaveTextContent('diagram is locked');
+  });
+
+  it('has no move to another bus for a controller, which is on none', async () => {
+    const menu = await openMenu({
+      kind: 'device',
+      element: { kind: 'controller', subKind: 'exciter', modelClass: 'EXST1', idx: '1' },
+      name: 'EXST1_1',
+      nodeId: 'controller-EXST1-1',
+    });
+    expect(within(menu).queryByTestId('sld-context-move-to-bus')).toBeNull();
   });
 
   it('offers the control chain of a generator that stands for a unit, to draw out or to fold away', async () => {
@@ -524,7 +612,7 @@ describe('menu for a generator, load, shunt or controller', () => {
     });
 
     let menu = await openMenu(unit(false));
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(3);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(4);
     const show = within(menu).getByTestId('sld-context-unit-chain');
     expect(show).toHaveTextContent('Show control chain');
     await userEvent.click(show);
@@ -769,6 +857,15 @@ describe('menu for a draft', () => {
     // Nothing of an element of the system, nor of a route drawn by hand.
     expect(within(menu).queryByTestId('sld-context-inspect')).toBeNull();
     expect(within(menu).queryByTestId('sld-context-edit-route')).toBeNull();
+  });
+
+  it('Connect to a bus asks for the bus, whatever a run has locked: a draft is not in the system', async () => {
+    const menu = await openMenu(DRAFT, { moveBlocked: 'A run has locked the system.' });
+    const item = within(menu).getByTestId('sld-context-move-to-bus');
+    expect(item).toHaveTextContent('Connect to a bus…');
+    expect(item).not.toHaveAttribute('data-disabled');
+    await userEvent.click(item);
+    expect(onMoveToBus).toHaveBeenCalledExactlyOnceWith('draft-1');
   });
 
   it('Edit in the Inspector picks the draft and opens an Inspector that was folded away', async () => {

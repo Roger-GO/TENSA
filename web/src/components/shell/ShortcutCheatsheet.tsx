@@ -93,6 +93,72 @@ const DIAGRAM_GESTURES: readonly { id: string; label: string; keys: readonly str
   { id: 'done', label: 'Let go of the line', keys: ['Esc'] },
 ];
 
+/** How things are connected on the diagram by a drag, in the same form. */
+const CONNECT_GESTURES: typeof DIAGRAM_GESTURES = [
+  {
+    id: 'connect-drop',
+    label: 'Connect a component to a bus: drop a row of the Components tab, or a draft, on its bar',
+    keys: ['Drag'],
+  },
+  {
+    id: 'connect-draw',
+    label: 'Draw a line or a transformer from one bus to another (Draw line, top left)',
+    keys: ['Drag', 'or', 'Click'],
+  },
+  {
+    id: 'connect-move',
+    label: 'Move the selected device to another bus (the ring where its connector meets the bar)',
+    keys: ['Drag', 'or', 'Click'],
+  },
+  {
+    id: 'connect-keys',
+    label: 'Pick a bus that is asked for with the keys (Tab goes from bus to bus)',
+    keys: ['Enter', 'or', 'Space'],
+  },
+  { id: 'connect-stop', label: 'Stop without connecting anything', keys: ['Esc'] },
+];
+
+/** The rows of a list of gestures: what is done, and the pointer and the keys it is done with. */
+function GestureRows({ gestures }: { gestures: typeof DIAGRAM_GESTURES }) {
+  return (
+    <ul className="flex flex-col">
+      {gestures.map((gesture) => (
+        <li
+          key={gesture.id}
+          data-testid={`shortcut-cheatsheet-gesture-${gesture.id}`}
+          className={cn(
+            'flex items-center justify-between gap-3',
+            'rounded-[var(--radius-sm)] px-2 py-1.5',
+            'hover:bg-muted/40',
+          )}
+        >
+          <span className="text-sm">{gesture.label}</span>
+          <span className="flex shrink-0 items-center gap-1">
+            {gesture.keys.map((key, i) =>
+              key === 'or' ? (
+                <span key={i} className="text-muted-foreground/80 text-[11px]">
+                  or
+                </span>
+              ) : (
+                <kbd
+                  key={i}
+                  className={cn(
+                    'inline-flex h-5 min-w-[1.5rem] items-center justify-center px-1.5',
+                    'rounded border font-mono text-[10px] whitespace-nowrap',
+                    'border-border bg-muted text-foreground',
+                  )}
+                >
+                  {key}
+                </kbd>
+              ),
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ShortcutCheatsheet() {
   const open = useShortcutCheatsheetStore((s) => s.open);
   const closeCheatsheet = useShortcutCheatsheetStore((s) => s.closeCheatsheet);
@@ -197,45 +263,25 @@ export function ShortcutCheatsheet() {
               <h3 className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase">
                 Diagram: moving a line by hand
               </h3>
-              <ul className="flex flex-col">
-                {DIAGRAM_GESTURES.map((gesture) => (
-                  <li
-                    key={gesture.id}
-                    data-testid={`shortcut-cheatsheet-gesture-${gesture.id}`}
-                    className={cn(
-                      'flex items-center justify-between gap-3',
-                      'rounded-[var(--radius-sm)] px-2 py-1.5',
-                      'hover:bg-muted/40',
-                    )}
-                  >
-                    <span className="text-sm">{gesture.label}</span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {gesture.keys.map((key, i) =>
-                        key === 'or' ? (
-                          <span key={i} className="text-muted-foreground/80 text-[11px]">
-                            or
-                          </span>
-                        ) : (
-                          <kbd
-                            key={i}
-                            className={cn(
-                              'inline-flex h-5 min-w-[1.5rem] items-center justify-center px-1.5',
-                              'rounded border font-mono text-[10px] whitespace-nowrap',
-                              'border-border bg-muted text-foreground',
-                            )}
-                          >
-                            {key}
-                          </kbd>
-                        ),
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <GestureRows gestures={DIAGRAM_GESTURES} />
               <p className="text-muted-foreground px-2 text-xs leading-snug">
                 A line you moved is left as it is by Tidy diagram. Reset route, on the bar above the
                 diagram while the line is picked, gives it back to the automatic routing, and Reset
                 manual routes in the Arrange menu does so for all of them.
+              </p>
+            </section>
+            <section
+              data-testid="shortcut-cheatsheet-group-connect"
+              className="flex flex-col gap-1"
+            >
+              <h3 className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase">
+                Diagram: connecting by a drag
+              </h3>
+              <GestureRows gestures={CONNECT_GESTURES} />
+              <p className="text-muted-foreground px-2 text-xs leading-snug">
+                A line that is drawn, and a component dropped on a bus, are drafts until they are
+                added to the system in the Inspector. Moving a device of the system to another bus
+                is an edit, which Undo takes back.
               </p>
             </section>
           </div>

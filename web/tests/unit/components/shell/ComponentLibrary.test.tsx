@@ -36,6 +36,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
 import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
+import { useSldStore } from '@/store/sld';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
 const blankMutate = vi.fn();
@@ -193,6 +194,15 @@ describe('<ComponentLibrary />', () => {
     expect(dataTransfer.effectAllowed).toBe('copy');
   });
 
+  it('says which kind is dragged for as long as the drag lasts, for the diagram to mark the bus under it', () => {
+    act(() => useSldStore.getState().setPaletteDragKind(null));
+    render(<ComponentLibrary />);
+    fireEvent.dragStart(row('PQ'), { dataTransfer: dataTransferStub() });
+    expect(useSldStore.getState().paletteDragKind).toBe('PQ');
+    fireEvent.dragEnd(row('PQ'));
+    expect(useSldStore.getState().paletteDragKind).toBeNull();
+  });
+
   it('each row sets its own kind on dragstart: the value the Kind picker knows it by', () => {
     render(<ComponentLibrary />);
     for (const kind of ELEMENT_KINDS) {
@@ -329,11 +339,11 @@ describe('<ComponentLibrary /> click to add', () => {
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Line' });
   });
 
-  it('says that a row can be clicked or dragged', () => {
+  it('says that a row can be clicked or dragged, and that one dropped on a bus is connected to it', () => {
     openCase();
     render(<ComponentLibrary />);
     expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
-      'Click a component to add it, or drag it onto the diagram to place it as a draft.',
+      'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.',
     );
   });
 

@@ -161,6 +161,22 @@ describe('contextTargetFromEdge', () => {
     expect(
       contextTargetFromEdge({ id: 'stub-load-PQ_1', type: 'stub', data: { name: 'PQ_1' } }),
     ).toEqual({ kind: 'connector', edgeId: 'stub-load-PQ_1', name: 'PQ_1', manual: false });
+    // With the node of its device, where the edge says which it is: the
+    // connector is what is dragged to move that device to another bus.
+    expect(
+      contextTargetFromEdge({
+        id: 'stub-load-PQ_1',
+        type: 'stub',
+        source: 'load-PQ_1',
+        data: { name: 'PQ_1' },
+      }),
+    ).toEqual({
+      kind: 'connector',
+      edgeId: 'stub-load-PQ_1',
+      name: 'PQ_1',
+      manual: false,
+      nodeId: 'load-PQ_1',
+    });
     expect(
       contextTargetFromEdge({
         id: 'stub-load-PQ_1',

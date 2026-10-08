@@ -1041,6 +1041,41 @@ function useCommandSets(): CommandSets {
         action: () => __requestSldCommand('tidy-relayout'),
         when: () => diagramVisible && !diagramLocked,
       },
+      // A line or a transformer drawn on the diagram: the canvas then asks for
+      // the two buses, by a click on each or a drag from one to the other,
+      // and places the branch as a draft. The buttons over the top left
+      // corner of the diagram and the right-click menu of a bus do the same.
+      ...(
+        [
+          ['line', 'Draw line between two buses', 'A line'],
+          ['transformer', 'Draw transformer between two buses', 'A transformer'],
+        ] as const
+      ).map<Command>(([noun, label, subject]) => ({
+        id: `view.draw-${noun}`,
+        label,
+        description: `Asks for two buses on the diagram: click the one it starts from and then the one it goes to, or drag from one to the other. ${subject} is placed between them as a draft, dashed, and is in the system once its form in the Inspector is filled in and added.`,
+        group: 'view',
+        keywords: [
+          'draw',
+          'connect',
+          'wire',
+          'branch',
+          'add',
+          noun,
+          'bus',
+          'drag',
+          'diagram',
+          'sld',
+        ],
+        action: () => __requestSldCommand(`draw-${noun}`),
+        when: () => diagramVisible && !diagramLocked && (topology?.buses.length ?? 0) >= 2,
+        unavailableReason: () =>
+          !diagramVisible
+            ? null
+            : diagramLocked
+              ? 'The diagram is locked. Unlock it with the padlock at its bottom left.'
+              : 'It runs between two buses, and this system has fewer. Add buses first.',
+      })),
       // A line that was moved by hand (click it on the diagram for its
       // handles) is left alone by a tidy. This gives all of them back to the
       // automatic routing in one step, which Undo takes back.

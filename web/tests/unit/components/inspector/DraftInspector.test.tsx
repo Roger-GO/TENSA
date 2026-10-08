@@ -139,6 +139,23 @@ describe('<DraftInspector />', () => {
     );
   });
 
+  it('shows the bus the diagram gave the draft while its form is open, with what was typed kept', async () => {
+    const user = userEvent.setup();
+    renderDraft();
+    await user.type(screen.getByTestId('field-Sn').querySelector('input')!, '100');
+    expect(screen.getByTestId('bus-idx-select')).toHaveValue('');
+    // The draft was dropped on bus 9, or the end of its connector dragged there.
+    act(() => useDraftsStore.getState().connect(CASE, 'draft-1', { bus: '9' }));
+    expect(screen.getByTestId('bus-idx-select')).toHaveValue('9');
+    expect(screen.getByTestId('field-Sn').querySelector('input')).toHaveValue(100);
+    expect(screen.getByTestId('draft-inspector-summary')).toHaveTextContent(
+      'Missing Vn, p0 and v0.',
+    );
+    // And what the form sets next goes on top of it, not of what it opened with.
+    await user.type(screen.getByTestId('field-Vn').querySelector('input')!, '69');
+    expect(held()).toEqual({ Sn: '100', bus: '9', Vn: '69' });
+  });
+
   it('opens on what the draft was given before, and says Ready once nothing is missing', () => {
     renderDraft([
       {

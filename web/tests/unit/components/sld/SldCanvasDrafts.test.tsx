@@ -176,6 +176,7 @@ vi.mock('@/api/queries', async () => {
     usePutSidecar: () => ({ mutate: putSidecarSpy }),
     useCurrentTopology: () => mockTopology,
     useTopologySchema: () => ({ data: TOPOLOGY_SCHEMA }),
+    useEditElements: () => ({ mutate: vi.fn(), isPending: false }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,
@@ -294,11 +295,12 @@ describe('a component dropped on the diagram', () => {
     expect(indicator).toHaveAttribute('data-incomplete-count', '1');
   });
 
-  it('stands in the nearest free place when it is dropped on a bar, and a notice says so', async () => {
+  it('stands in the nearest free place when it is dropped on a bar it is not connected to, and a notice says so', async () => {
     const info = vi.spyOn(toast, 'info');
     await draw();
     const bar = node('1')!.position;
-    drop('PQ', bar.x + 46, bar.y + 3);
+    // A bus is on no bus: dropped on a bar, it only has to stand clear of it.
+    drop('Bus', bar.x + 46, bar.y + 3);
     const at = drafts()[0]!.position;
     // Clear of the bar it was dropped on.
     expect(at.y + H <= bar.y || at.y >= bar.y + 6 || at.x >= bar.x + 92 || at.x + W <= bar.x).toBe(

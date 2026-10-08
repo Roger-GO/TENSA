@@ -22,6 +22,11 @@
  * `placements` is where an element that a draft was just added as comes to
  * stand, by the id of its node: the canvas draws it there and takes the entry
  * over (`SldCanvas`). In memory only.
+ *
+ * `connect` is how the diagram gives a draft a value: the bus it was dropped
+ * on, or the bus the end of its connector was dragged to. A form that is
+ * open on the draft holds the values it was opened with, so each such change
+ * is counted (`connected`), and the Inspector opens the form afresh on it.
  */
 import { create } from 'zustand';
 import type { ParamValue } from '@/api/types';
@@ -164,6 +169,19 @@ export interface DraftsState {
     id: string,
     patch: Readonly<Record<string, ParamValue | null>>,
   ) => void;
+  /**
+   * How many times each draft was given values from the diagram, by its id
+   * (`connect`). In memory only.
+   */
+  connected: Record<string, number>;
+  /**
+   * Set fields of a draft from the diagram: the bus it was dropped on, or
+   * the bus the end of its connector was dragged to. The same as
+   * `setValues`, and counted in `connected`: a form that is open on the
+   * draft holds values of its own, and reads the draft's again when the
+   * count changes.
+   */
+  connect: (caseKey: string, id: string, patch: Readonly<Record<string, ParamValue>>) => void;
   /** Move drafts: each named in `moves` to its place there. */
   move: (caseKey: string, moves: Readonly<Record<string, { x: number; y: number }>>) => void;
   remove: (caseKey: string, id: string) => void;
@@ -192,6 +210,7 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
   return {
     byCase: readPersistedDrafts(),
     placements: {},
+    connected: {},
     add: (caseKey, kind, position, values = {}) => {
       const held = get().byCase[caseKey] ?? [];
       if (held.length >= MAX_DRAFTS_PER_CASE) return null;
@@ -219,6 +238,11 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
           return { ...d, values };
         }),
       );
+    },
+    connect: (caseKey, id, patch) => {
+      if (!(get().byCase[caseKey] ?? []).some((d) => d.id === id)) return;
+      get().setValues(caseKey, id, patch);
+      set((s) => ({ connected: { ...s.connected, [id]: (s.connected[id] ?? 0) + 1 } }));
     },
     move: (caseKey, moves) => {
       const held = get().byCase[caseKey] ?? [];
@@ -293,4 +317,6 @@ useCaseStore.subscribe((state) => {
   const store = useDraftsStore.getState();
   if (was !== null && was.primaryPath === null) store.removeAll(BLANK_CASE_KEY);
   if (Object.keys(store.placements).length > 0) useDraftsStore.setState({ placements: {} });
+  // A draft goes by a number that the drafts of the next case have as well.
+  if (Object.keys(store.connected).length > 0) useDraftsStore.setState({ connected: {} });
 });

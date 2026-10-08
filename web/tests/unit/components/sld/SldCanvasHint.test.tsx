@@ -45,6 +45,45 @@ describe('<SldCanvasHint />', () => {
     );
   });
 
+  it('says how a component is connected to a bus and how a line is drawn', () => {
+    render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
+    expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
+      'Drop a component from the Components tab on a bus to connect it there; Draw line (top left) joins two buses.',
+    );
+  });
+
+  it('says how the selected device is moved to another bus, while it can be', () => {
+    const { rerender } = render(
+      <SldCanvasHint locked={false} selectedName="PQ_3" onZoomIn={vi.fn()} movable="load PQ_3" />,
+    );
+    const hint = screen.getByTestId('sld-canvas-hint');
+    expect(hint).toHaveAttribute('data-hint', 'movable');
+    expect(hint).toHaveTextContent(
+      'Load PQ_3 is selected. To move it to another bus, drag the ring where its connector meets the bar onto that bus, or click the ring and then the bus. Drag the symbol itself to move it on the diagram, or press the arrow keys.',
+    );
+    // The whole of it where two lines cut it.
+    expect(hint.title).toMatch(/press the arrow keys\.$/);
+    // While it cannot be moved, the line says why: the ring on its bar is greyed out.
+    rerender(
+      <SldCanvasHint
+        locked={false}
+        selectedName="PQ_3"
+        onZoomIn={vi.fn()}
+        movable="load PQ_3"
+        movableBlocked="A run has locked the system."
+      />,
+    );
+    const blocked = screen.getByTestId('sld-canvas-hint');
+    expect(blocked).toHaveAttribute('data-hint', 'immovable');
+    expect(blocked).toHaveTextContent(
+      'Load PQ_3 is selected. It cannot be moved to another bus now, which is why the ring on its bar is greyed out. A run has locked the system.',
+    );
+    // The lock comes first, as before anything else.
+    rerender(<SldCanvasHint locked selectedName="PQ_3" onZoomIn={vi.fn()} movable="load PQ_3" />);
+    expect(screen.queryByTestId('sld-canvas-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sld-canvas-locked')).toBeInTheDocument();
+  });
+
   it('leaves its place to the bar of a line that is picked, and hands over where that is', () => {
     const slot = vi.fn();
     const { rerender } = render(

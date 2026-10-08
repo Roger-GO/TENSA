@@ -31,8 +31,11 @@ export type SldContextTarget =
    * names both its buses. `nodeId` is the node of its symbol, when it has one.
    */
   | { kind: 'draft'; id: string; name: string; nodeId: string | null }
-  /** The connector of a generator, load or shunt to its bus: `name` is the device's. */
-  | { kind: 'connector'; edgeId: string; name: string; manual: boolean }
+  /**
+   * The connector of a generator, load or shunt to its bus: `name` is the
+   * device's, and `nodeId` the node it is drawn as, where that is known.
+   */
+  | { kind: 'connector'; edgeId: string; name: string; manual: boolean; nodeId?: string }
   | {
       kind: 'device';
       element: SelectedElement;
@@ -126,7 +129,13 @@ export function contextTargetFromEdge(
   if (edge.type === 'stub') {
     return edge.id === undefined
       ? { kind: 'canvas' }
-      : { kind: 'connector', edgeId: edge.id, name: data?.name ?? 'the device', manual };
+      : {
+          kind: 'connector',
+          edgeId: edge.id,
+          name: data?.name ?? 'the device',
+          manual,
+          ...(edge.source === undefined ? {} : { nodeId: edge.source }),
+        };
   }
   const idx = data?.idx;
   if (!idx) return { kind: 'canvas' };

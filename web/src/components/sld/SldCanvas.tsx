@@ -27,9 +27,16 @@ import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
 import type { DragOverrides, RouteOverride, RouteOverrides, SelectedElement } from '@/store/case';
-import { draftCaseKey, useDrafts, useDraftsStore, type DraftElement } from '@/store/drafts';
+import {
+  draftCaseKey,
+  draftsOf,
+  useDrafts,
+  useDraftsStore,
+  type DraftElement,
+} from '@/store/drafts';
 import { useLayoutStore } from '@/store/layout';
 import { useLayoutHistoryStore } from '@/store/layoutHistory';
+import { useEditJournalStore } from '@/store/editJournal';
 import type { LayoutSnapshot } from '@/store/layoutHistory';
 import { subKindForControllerClass } from '@/lib/controllers';
 import type { ControllerSubKind } from '@/lib/controllers';
@@ -49,6 +56,7 @@ import type { SldCommand } from '@/store/sld';
 import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from '@/lib/toast';
+import { describeError } from '@/lib/describeError';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { LazyMount } from '@/components/ui/Lazy';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -66,6 +74,7 @@ import {
   usePutSidecar,
   useCurrentTopology,
   useConnectivity,
+  useEditElements,
   useTopologySchema,
 } from '@/api/queries';
 import type { BusCoord, TopologySummary, SidecarLayout } from '@/api/types';
@@ -87,7 +96,13 @@ import { StubEdge } from './edges/StubEdge';
 import { SldCanvasHint } from './SldCanvasHint';
 import { SldDraftsIndicator } from './SldDraftsIndicator';
 import { deleteAllDrafts, deleteDraft, selectDraft } from './draftActions';
-import { connectedPlace, draftDrop, draftPlace, settledPlaces } from './draftPlace';
+import {
+  SLANT_PUT_ON_BUS,
+  connectedPlace,
+  draftDrop,
+  draftPlace,
+  settledPlaces,
+} from './draftPlace';
 import {
   NO_DRAFT_ROUTES,
   draftsStand,
@@ -99,10 +114,31 @@ import {
   DRAFT_NODE_SIZE,
   DRAFT_NODE_TYPE,
   draftBranchEdgeId,
+  draftFields,
   draftGraph,
   draftIdOf,
+  draftKind,
+  draftName,
+  draftReservedIdxs,
   draftRows,
+  draftStatus,
 } from './drafts';
+import { SldWiring, type WiringGrip } from './SldWiring';
+import {
+  BRANCH_NOUN,
+  BUS_HIT_PX,
+  attachDraft,
+  branchValues,
+  busAt,
+  busBars,
+  busUnderBox,
+  connectsToBus,
+  isBranchKind,
+  moveToBus,
+  movedModels,
+  type BranchKind,
+  type WiringMode,
+} from './wiring';
 import { SldArrangeControls, SldSelectionBar, type ArrangeCommand } from './SldArrangeControls';
 import {
   ALIGN_LABEL,
@@ -251,6 +287,16 @@ const DROPPED_ON: Record<DropObstacle, string> = {
  */
 const DROP_PICTURES_UP_TO = 120;
 const DROP_PICTURES_LARGE = 3;
+
+/** The node types of the devices of the system that hang off a bus by a connector. */
+const HUNG_TYPES: ReadonlySet<string> = new Set(['generator', 'load', 'shunt']);
+
+/**
+ * Why no element of the system can be moved to another bus while a run has
+ * set it up, and the way out: the words the palette has for an add.
+ */
+const RUN_LOCKS_MOVES =
+  'A run has locked the system. Select an element and use Reset run in the Inspector to move elements to another bus again.';
 
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
@@ -1072,6 +1118,96 @@ function SldCanvasInner({
     },
     [caseKey, draftList],
   );
+  // ---- Connecting by a drag ---------------------------------------------------
+  //
+  // What is dropped on a bus is connected to it, a line is drawn from one bus
+  // to another, and the end of a connector that is dragged to another bus
+  // takes its device there (`wiring.ts`, `SldWiring`). `wiring` is what a
+  // bus is being picked for, while one is, and `dropTarget` the bus under a
+  // row of the palette or a draft that is dragged over the diagram.
+  const [wiring, setWiring] = useState<WiringMode | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  // The drafts that were just given their bus on the diagram. Each is
+  // brought beside that bus where its connector would not be drawn well from
+  // where it stands (the settling below), and the notice of the connection
+  // is all that is said of it.
+  const givenRef = useRef<Set<string>>(new Set());
+  // Connect the draft `id` to the bus `bus`: a device is on it, a line or a
+  // transformer starts there, or ends there once it has a start. Nothing is
+  // sent anywhere; the draft holds it, and its form in the Inspector shows it.
+  const connectDraft = useCallback(
+    (id: string, bus: string): boolean => {
+      // As the store has them: one that was placed in this same press is in it.
+      const held = draftsOf(useDraftsStore.getState().byCase, caseKey);
+      const draft = held.find((d) => d.id === id);
+      if (caseKey === null || draft === undefined) return false;
+      const status = draftStatus(
+        draft,
+        schema,
+        topology,
+        draftReservedIdxs(held, topology).get(id),
+      );
+      const name = draftName(draft, status);
+      const attached = attachDraft(
+        draftKind(draft)?.label ?? draft.kind,
+        draftFields(draft, schema),
+        status?.values ?? draft.values,
+        bus,
+      );
+      if ('refused' in attached) {
+        toast.info(`Draft ${name} was not connected`, { description: attached.refused });
+        return false;
+      }
+      if (attached.ends === undefined) givenRef.current.add(id);
+      useDraftsStore.getState().connect(caseKey, id, attached.patch);
+      selectDraft(id, 'diagram');
+      const ends = attached.ends;
+      if (ends === undefined) {
+        toast.success(`Draft ${name} connected to bus ${bus}`, {
+          description:
+            'It stands by that bus, on a dashed connector, until it is in the system: fill in what its form in the Inspector still asks for and press Add to system.',
+        });
+      } else if (ends.from !== null && ends.to !== null) {
+        toast.success(`Draft ${name} runs from bus ${ends.from} to bus ${ends.to}`, {
+          description:
+            'It is drawn dashed until it is in the system: fill in what its form in the Inspector still asks for and press Add to system.',
+        });
+      } else {
+        toast.success(`Draft ${name} starts at bus ${bus}`, {
+          description:
+            'Drop it on the bus it goes to, or pick that bus in its form in the Inspector, and it is drawn as a line between the two.',
+        });
+      }
+      return true;
+    },
+    [caseKey, schema, topology],
+  );
+  // The bus a draft that is dragged alone lies on, when it can be connected
+  // there: `null` for anything else that is dragged, for a kind that is on
+  // no bus, and over the bus the draft is on already.
+  const landingOf = useCallback(
+    (standing: readonly Node[], changes: NodeChange[]): { id: string; bus: string } | null => {
+      const ids = new Set(changes.filter((c) => c.type === 'position').map((c) => c.id));
+      if (ids.size !== 1) return null;
+      const node = standing.find((n) => ids.has(n.id));
+      const draft =
+        node?.type === DRAFT_NODE_TYPE
+          ? draftsRef.current.find((d) => d.id === node.id)
+          : undefined;
+      if (node === undefined || draft === undefined) return null;
+      const fields = draftFields(draft, schema);
+      if (!connectsToBus(fields)) return null;
+      const { x, y } = node.position;
+      const bus = busUnderBox(
+        { left: x, top: y, right: x + DRAFT_NODE_SIZE.width, bottom: y + DRAFT_NODE_SIZE.height },
+        busBars(standing, drawnRef.current.connections),
+      );
+      if (bus === null || 'refused' in attachDraft('', fields, draft.values, bus)) return null;
+      return { id: node.id, bus };
+    },
+    [schema],
+  );
+
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
     dragOriginRef.current = new Map(dragged.map((n) => [n.id, { ...n.position }]));
     setDraggedIds(dragged.map((n) => n.id));
@@ -1111,6 +1247,10 @@ function SldCanvasInner({
           c.type === 'position' && c.dragging === false && c.position !== undefined,
       );
       setMoving(start.dragged && !dragEnded);
+      // A draft that is dragged alone is connected to the bus it is let go
+      // on: the bar it lies on is marked while it is over one.
+      const landing = start.dragged ? landingOf(next, changes) : null;
+      setDropTarget(dragEnded ? null : (landing?.bus ?? null));
       const origin = dragOriginRef.current;
       // To the nearest pixel: the positions are in flow units, and a pointer
       // that went two pixels comes back from them as a hair over or under two.
@@ -1121,6 +1261,10 @@ function SldCanvasInner({
       // A press that slipped puts everything back, the devices its bus took
       // along as well.
       if (slipped) next = withPositions(next, new Map(start.nodes.map((n) => [n.id, n.position])));
+      // The draft that was let go on a bus, to be connected to it. It cannot
+      // stand on the bar, so it goes to the nearest free place like anything
+      // dropped there, and the notice of the connection says the rest.
+      const landed = dragEnded && !slipped ? landing : null;
       // Whether what was dropped went back where it stood, with no place
       // near where it was dropped that the diagram can be drawn with.
       let putBack = false;
@@ -1184,10 +1328,12 @@ function SldCanvasInner({
           // gone the same way (a grid they snap to).
           next = withPositions(next, stood);
           putBack = true;
-          toast.info('Put back where it was', {
-            description: `${DROPPED_ON[shift.onto]} No place near there is clear either, and nothing on the diagram is drawn over anything else, so the move was not made.`,
-            duration: 8_000,
-          });
+          if (landed === null) {
+            toast.info('Put back where it was', {
+              description: `${DROPPED_ON[shift.onto]} No place near there is clear either, and nothing on the diagram is drawn over anything else, so the move was not made.`,
+              duration: 8_000,
+            });
+          }
         } else if (shift !== null) {
           next = withPositions(
             next,
@@ -1197,10 +1343,12 @@ function SldCanvasInner({
                 .map((n) => [n.id, { x: n.position.x + shift.dx, y: n.position.y + shift.dy }]),
             ),
           );
-          toast.info('Moved to the nearest free place', {
-            description: `${DROPPED_ON[shift.onto]} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Undo puts it back where it was before the move.`,
-            duration: 8_000,
-          });
+          if (landed === null) {
+            toast.info('Moved to the nearest free place', {
+              description: `${DROPPED_ON[shift.onto]} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Undo puts it back where it was before the move.`,
+              duration: 8_000,
+            });
+          }
         }
       }
       if (next !== nodesRef.current) {
@@ -1209,6 +1357,8 @@ function SldCanvasInner({
       }
       if (!dragEnded) return;
       moveStartRef.current = null;
+      // Connected wherever it came to stand, and where it went back as well.
+      if (landed !== null) connectDraft(landed.id, landed.bus);
       // A move that was not made is no step for Undo, and nothing to write.
       if (slipped || putBack) return;
       // The move can be taken back: keep the arrangement it started from.
@@ -1236,7 +1386,7 @@ function SldCanvasInner({
       const draftsAlone = moved.length > 0 && moved.every((n) => n.type === DRAFT_NODE_TYPE);
       if (!draftsAlone) persistRequestedRef.current = true;
     },
-    [setDragOverrides, setPickedNodeIds, rf],
+    [setDragOverrides, setPickedNodeIds, rf, landingOf, connectDraft],
   );
 
   // Keep the layout of the diagram as drawn where a save can reach it
@@ -1295,6 +1445,33 @@ function SldCanvasInner({
   // same count for the ways round the drafts.
   const settlingRef = useRef(0);
   const draftRoutesRoundsRef = useRef(0);
+  // A device of the system that has just come to be on another bus is drawn
+  // for a moment where it stood, on a connector that reaches across the
+  // diagram to its new bus, until it is brought beside that bus (the effect
+  // further down, which says what `hungRef` and `movedRef` hold). The lines
+  // that picture routes round the connector are no routes to keep: the
+  // connector is gone with the next one.
+  const movedRef = useRef<Map<string, string>>(new Map());
+  const hungRef = useRef<{
+    caseKey: string | null;
+    topology: TopologySummary | null;
+    revision: number;
+    on: ReadonlyMap<string, string>;
+  }>({ caseKey: null, topology: null, revision: 0, on: new Map() });
+  // Counted each time the devices were looked at, so that `inTransit` is
+  // worked out again from what `hungRef` then holds.
+  const [hungSeen, setHungSeen] = useState(0);
+  const inTransit = useMemo(() => {
+    const last = hungRef.current;
+    if (last.caseKey !== caseKey) return false;
+    return nodes.some((n) => {
+      if (!HUNG_TYPES.has(n.type ?? '')) return false;
+      const before = last.on.get(n.id);
+      return before !== undefined && before !== (n.data as { parentBus?: unknown }).parentBus;
+    });
+    // `hungSeen` stands for `hungRef`, which the effect writes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, caseKey, hungSeen]);
   // Not from a graph whose positions are a render behind its layout (a
   // snapshot that was just restored, a layout that was just reset and whose
   // automatic arrangement is still on its way), and not from the edges of
@@ -1303,7 +1480,7 @@ function SldCanvasInner({
   // diagram yet, and routes kept from it would stand in for the ones the
   // layout brings.
   useEffect(() => {
-    if (dragging || !coordsAreCurrent || settled === null) return;
+    if (dragging || !coordsAreCurrent || settled === null || inTransit) return;
     if (baseGraph === null || edges !== baseGraph.edges) return;
     if (settled.routes === draftRoutes) draftRoutesRoundsRef.current = 0;
     else if (draftRoutesRoundsRef.current < SETTLING_ROUNDS) {
@@ -1372,7 +1549,7 @@ function SldCanvasInner({
     // case that was open, and what is drawn for that moment is the new
     // system under the name of the old one.
     if (routesToFollowRef.current) persistRequestedRef.current = true;
-  }, [settled, draftRoutes, dragging, coordsAreCurrent, baseGraph, edges]);
+  }, [settled, draftRoutes, dragging, coordsAreCurrent, baseGraph, edges, inTransit]);
 
   // ---- Drafts: where they stand --------------------------------------------
   //
@@ -1462,10 +1639,12 @@ function SldCanvasInner({
         const was = last.get(n.id);
         asked.set(n.id, { bus, where });
         if (was?.bus === bus && was.where === where) continue;
-        // Given this bus just now, in its form: it stood on the diagram
-        // before, without it. Not one that came with the bus when the case
-        // was opened, and not one that was moved with the bus it has.
-        const given = seen.has(n.id) && was?.bus !== bus;
+        // Given this bus just now, on the diagram (`givenRef`) or in its
+        // form: it stood on the diagram before, without it. Not one that
+        // came with the bus when the case was opened, and not one that was
+        // moved with the bus it has.
+        const dropped = givenRef.current.delete(n.id);
+        const given = dropped || (seen.has(n.id) && was?.bus !== bus);
         const place = connectedPlace(nodes, graphEdges, n.id, connections, {
           sizes,
           step,
@@ -1474,11 +1653,17 @@ function SldCanvasInner({
           pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
           symbols: [...symbolBoxes(pictureRef.current.symbols).values()],
           given,
+          // One that was put on its bus on the diagram stands square to it
+          // where it can; one that was given it in its form stays where it
+          // was put down while its connector is all but square.
+          ...(dropped ? { slant: SLANT_PUT_ON_BUS } : {}),
         });
         if (place === null) continue;
         moves.set(n.id, place.position);
         // What is asked next is asked of the place it was brought to.
         asked.set(n.id, { bus, where: placeOf(busAt, place.position) });
+        // One that was dropped on its bus is expected beside it.
+        if (dropped) continue;
         const there =
           place.square === false
             ? 'From there its connector reaches the bar across no line, and no line has to go round the draft.'
@@ -1502,6 +1687,88 @@ function SldCanvasInner({
     draftSettlingRef.current += 1;
     setDragOverrides({ ...useCaseStore.getState().dragOverrides, ...Object.fromEntries(moves) });
   }, [nodes, baseGraph, dragging, coordsAreCurrent, connections, sizes, caseKey, setDragOverrides]);
+
+  // A generator, load or shunt of the system that came to be on another bus
+  // (the end of its connector was dragged there, or an Undo took that back)
+  // is held to what a draft that is given its bus is held to: where its
+  // connector would be long from where it stands, cross other lines or run
+  // over something, it goes beside its bus (`connectedPlace`). `hungRef` is
+  // the bus each device was on in the topology that was last looked at, and
+  // `movedRef` the buses the canvas itself just sent devices to. A device
+  // that is on another bus than before was moved there only when an edit
+  // was made in between (the edit journal counts them): the system of a
+  // case that is just being opened is drawn for a moment under the name of
+  // the case before it, and its devices go by the same ids. Until this has
+  // looked at them, the routes the diagram makes are not kept (`inTransit`).
+  useEffect(() => {
+    if (dragging || !coordsAreCurrent || baseGraph === null || nodes !== baseGraph.nodes) return;
+    const last = hungRef.current;
+    if (last.caseKey === caseKey && last.topology === topology) return;
+    const revision = useEditJournalStore.getState().revision;
+    const edited = last.caseKey === caseKey && revision > last.revision;
+    const on = new Map<string, string>();
+    const moves: DragOverrides = {};
+    const graphEdges = baseGraph.edges as ConnectionEdge[];
+    for (const n of nodes) {
+      if (!HUNG_TYPES.has(n.type ?? '')) continue;
+      const bus = (n.data as { parentBus?: unknown }).parentBus;
+      if (typeof bus !== 'string') continue;
+      on.set(n.id, bus);
+      const sent = movedRef.current.get(n.id) === bus;
+      if (sent) movedRef.current.delete(n.id);
+      const before = last.caseKey === caseKey ? last.on.get(n.id) : undefined;
+      if (before === undefined || before === bus || !(edited || sent)) continue;
+      const place = connectedPlace(nodes, graphEdges, n.id, connections, {
+        sizes,
+        step: useLayoutStore.getState().sldSnapToGrid ? GRID_STEP : undefined,
+        atRest: connections,
+        picture: drawnRef.current.options,
+        pictures: graphEdges.length > DROP_PICTURES_UP_TO ? DROP_PICTURES_LARGE : DROP_PICTURES,
+        symbols: [...symbolBoxes(pictureRef.current.symbols).values()],
+        given: true,
+        slant: SLANT_PUT_ON_BUS,
+      });
+      if (place !== null) moves[n.id] = place.position;
+      // It may now stand a bus or two away from where it was looked at: the
+      // view goes to one that came to stand out of it.
+      const at = place?.position ?? n.position;
+      const size = sizes.get(n.id);
+      const [width, height] = [
+        size?.width ?? n.initialWidth ?? 0,
+        size?.height ?? n.initialHeight ?? 0,
+      ];
+      const pane = canvasRef.current?.querySelector('.react-flow')?.getBoundingClientRect();
+      const corners = [at, { x: at.x + width, y: at.y + height }];
+      if (
+        pane !== undefined &&
+        !withinPane(
+          corners.map((corner) => rf.flowToScreenPosition(corner)),
+          pane,
+        )
+      ) {
+        void rf.setCenter(at.x + width / 2, at.y + height / 2, {
+          zoom: rf.getZoom(),
+          duration: 250,
+        });
+      }
+    }
+    hungRef.current = { caseKey, topology, revision, on };
+    setHungSeen((seen) => seen + 1);
+    if (Object.keys(moves).length > 0) {
+      setDragOverrides({ ...useCaseStore.getState().dragOverrides, ...moves });
+    }
+  }, [
+    nodes,
+    baseGraph,
+    dragging,
+    coordsAreCurrent,
+    connections,
+    sizes,
+    caseKey,
+    topology,
+    setDragOverrides,
+    rf,
+  ]);
 
   // The lines that are routed by hand, counted for the commands that reset
   // them, and gone with the diagram.
@@ -1636,6 +1903,7 @@ function SldCanvasInner({
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
         setRouteEditId(null);
+        setWiring(null);
         return;
       }
       const focused = e.target instanceof Element ? e.target : null;
@@ -1917,6 +2185,266 @@ function SldCanvasInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNodeId]);
 
+  // ---- Connecting by a drag: the gestures -----------------------------------
+  //
+  // Drawing a line starts from a button over the diagram, the right-click
+  // menu of a bus, the command palette, or a line of the palette that is
+  // dropped on a bus; moving a device to another bus from the ring at the
+  // bar end of its connector, or from its right-click menu. Either way a
+  // bus is then picked (`wiring`), by a click on it or by a drag that ends
+  // on it (`SldWiring`).
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const pfRunning = usePflowStore((s) => s.isRunning);
+  const editElements = useEditElements();
+  // Why no element of the system can be moved to another bus now. A draft
+  // can always: it is not in the system.
+  const moveBlocked =
+    sessionId === null
+      ? 'The server session is not ready yet.'
+      : topology.state === 'committed'
+        ? RUN_LOCKS_MOVES
+        : pfRunning
+          ? 'Wait for the power flow to finish.'
+          : editElements.isPending
+            ? 'The last move is still being made.'
+            : null;
+  const sayBlocked = useCallback((reason: string) => {
+    toast.info('Not moved to another bus', { description: reason, duration: 8_000 });
+  }, []);
+  const busCount = topology.buses.length;
+  const startDraw = useCallback(
+    (model: BranchKind, from: string | null = null) => {
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      if (tidying) return;
+      if (busCount < 2) {
+        toast.info(`A ${BRANCH_NOUN[model]} runs between two buses`, {
+          description:
+            busCount === 0
+              ? 'This system has no bus yet. Add two buses first.'
+              : 'This system has one bus. Add another bus first.',
+        });
+        return;
+      }
+      setWiring({ kind: 'draw', model, from });
+    },
+    [locked, tidying, busCount],
+  );
+  const drawingModel = wiring?.kind === 'draw' ? wiring.model : null;
+  const setDrawFrom = useCallback(
+    (bus: string) => setWiring((held) => (held?.kind === 'draw' ? { ...held, from: bus } : held)),
+    [],
+  );
+  // The line that was drawn is a draft from here on: on the diagram at once,
+  // as the dashed branch it will be, and in the system once its form in the
+  // Inspector is filled in and added.
+  const drawBetween = useCallback(
+    (from: string, to: string) => {
+      setWiring(null);
+      if (caseKey === null || drawingModel === null || from === to) return;
+      const at = new Map(nodesRef.current.map((n) => [n.id, n.position]));
+      const [a, b] = [at.get(from), at.get(to)];
+      // Where it would stand as a symbol, should one of its ends be taken away.
+      const middle = {
+        x: ((a?.x ?? 0) + (b?.x ?? 0) + BAR_LENGTH) / 2,
+        y: ((a?.y ?? 0) + (b?.y ?? 0)) / 2,
+      };
+      const draft = useDraftsStore.getState().add(
+        caseKey,
+        drawingModel,
+        {
+          x: middle.x - DRAFT_NODE_SIZE.width / 2,
+          y: middle.y - DRAFT_NODE_SIZE.height / 2,
+        },
+        branchValues(from, to),
+      );
+      if (draft === null) {
+        toast.error('This diagram holds as many drafts as it can.', {
+          description: 'Add some of them to the system, or delete the ones you do not need.',
+        });
+        return;
+      }
+      selectDraft(draft.id, 'diagram');
+      const { addPanelOpen, addPanelDirty, closeAddPanel } = useCaseStore.getState();
+      if (addPanelOpen && !addPanelDirty) closeAddPanel();
+      const noun = BRANCH_NOUN[drawingModel];
+      toast.success(`Draft ${noun} drawn from bus ${from} to bus ${to}`, {
+        description:
+          'It is dashed until it is in the system: fill in what its form in the Inspector still asks for and press Add to system. No run sees it before that.',
+        duration: 8_000,
+      });
+    },
+    [caseKey, drawingModel],
+  );
+  // Ask for the bus the device or draft drawn as `nodeId` is to be on.
+  const startMove = useCallback(
+    (nodeId: string) => {
+      if (locked) {
+        toast.info(LOCKED_NOTICE);
+        return;
+      }
+      if (tidying) return;
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (node === undefined) return;
+      const { parentBus } = node.data as { parentBus?: string };
+      if (node.type === DRAFT_NODE_TYPE) {
+        const draft = draftsRef.current.find((d) => d.id === nodeId);
+        if (draft === undefined || !connectsToBus(draftFields(draft, schema))) {
+          toast.info(`${capitalised(wiredName(node))} is not connected to a bus`, {
+            description:
+              'What it acts on is picked in its form in the Inspector. It stays where it stands on the diagram.',
+          });
+          return;
+        }
+        setWiring({ kind: 'move', nodeId, name: wiredName(node), bus: parentBus ?? null });
+        return;
+      }
+      if (moveBlocked !== null) {
+        sayBlocked(moveBlocked);
+        return;
+      }
+      if (typeof parentBus !== 'string') return;
+      setWiring({ kind: 'move', nodeId, name: wiredName(node), bus: parentBus });
+    },
+    [locked, tidying, schema, moveBlocked, sayBlocked],
+  );
+  const { mutate: sendEdits } = editElements;
+  // Put the device or draft drawn as `nodeId` on the bus `bus`. A draft
+  // holds that itself; for an element of the system it is an edit, which
+  // Undo in the Edit menu takes back.
+  const moveTo = useCallback(
+    (nodeId: string, bus: string) => {
+      setWiring(null);
+      const node = nodesRef.current.find((n) => n.id === nodeId);
+      if (node === undefined) return;
+      if (node.type === DRAFT_NODE_TYPE) {
+        connectDraft(nodeId, bus);
+        return;
+      }
+      if (moveBlocked !== null) {
+        sayBlocked(moveBlocked);
+        return;
+      }
+      const plan = moveToBus(topology, schema, nodeId, bus);
+      if ('refused' in plan) {
+        toast.info('Not moved to another bus', { description: plan.refused });
+        return;
+      }
+      if (sessionId === null) return;
+      const name = wiredName(node);
+      sendEdits(
+        { sessionId, edits: plan.edits },
+        {
+          onSuccess: () => {
+            // Once the system has it there, it is brought beside that bus.
+            movedRef.current.set(nodeId, plan.to);
+            // Its connector was drawn to the bus it left: one that was
+            // drawn by hand is worked out again.
+            const stub = `stub-${nodeId}`;
+            const routes = useCaseStore.getState().routeOverrides;
+            const byHand =
+              baseGraphRef.current?.edges.some(
+                (edge) => edge.id === stub && edge.data?.bendManual === true,
+              ) === true;
+            if (byHand || (routes[stub] ?? null) !== null) {
+              useCaseStore.getState().setRouteOverrides({ ...routes, [stub]: null });
+            }
+            const several = plan.edits.length > 1;
+            toast.success(`${capitalised(name)} moved to bus ${plan.to}`, {
+              description: [
+                `It was on bus ${plan.from}.`,
+                several ? `${movedModels(plan.edits)} went together.` : '',
+                plan.rated !== null
+                  ? `The rated voltage Vn went with the bus, from ${plan.rated.from} to ${plan.rated.to} kV.`
+                  : '',
+                several
+                  ? `Undo in the Edit menu takes it back, one step for each of the ${plan.edits.length}.`
+                  : 'Undo in the Edit menu takes it back.',
+              ]
+                .filter((part) => part !== '')
+                .join(' '),
+              duration: 8_000,
+            });
+          },
+          onError: (err) => {
+            toast.error(`Could not move ${name} to bus ${plan.to}`, {
+              description: describeError(err),
+            });
+          },
+        },
+      );
+    },
+    [connectDraft, moveBlocked, sayBlocked, topology, schema, sessionId, sendEdits],
+  );
+  const cancelWiring = useCallback(() => setWiring(null), []);
+  // A bus is picked on a diagram that can be changed, with one thing in
+  // hand: not while it is locked or tidied, and not the route of a line too.
+  useEffect(() => {
+    if (wiring === null) return;
+    if (locked || tidying) setWiring(null);
+    else setRouteEditId(null);
+  }, [wiring, locked, tidying]);
+  // The node that is being connected went (its draft was deleted, its case closed).
+  const movedNodeId = wiring?.kind === 'move' ? wiring.nodeId : null;
+  useEffect(() => {
+    if (movedNodeId !== null && baseGraph !== null && !nodes.some((n) => n.id === movedNodeId)) {
+      setWiring(null);
+    }
+  }, [movedNodeId, baseGraph, nodes]);
+  // The bars of the buses as they are drawn: what a drop is aimed at.
+  const bars = useMemo(() => busBars(nodes, connections), [nodes, connections]);
+  // The end of the connector of the device that is selected, or of the draft
+  // that is picked: dragged onto another bus, it takes the device there. Not
+  // while a line is picked to have its route moved by hand: the handles of a
+  // connector reach down to its bar, and the ring would lie on them.
+  const grip = useMemo<WiringGrip | null>(() => {
+    if (locked || tidying || dragging || pickedSet !== null || routeEditId !== null) return null;
+    // While a line is drawn, the buses are for that.
+    if (wiring?.kind === 'draw') return null;
+    const of = wiring?.kind === 'move' ? wiring.nodeId : (pickedDraftId ?? selectedDrawnId);
+    const stub =
+      of === null ? undefined : edges.find((edge) => edge.type === 'stub' && edge.source === of);
+    if (stub === undefined) return null;
+    const node = nodes.find((n) => n.id === stub.source);
+    const at = connections.routes.get(stub.id)?.points.at(-1);
+    if (node === undefined || at === undefined) return null;
+    const isDraft = node.type === DRAFT_NODE_TYPE;
+    if (!isDraft && !HUNG_TYPES.has(node.type ?? '')) return null;
+    return {
+      nodeId: node.id,
+      name: wiredName(node),
+      at,
+      bus: stub.target,
+      blocked: isDraft ? null : moveBlocked,
+    };
+  }, [
+    locked,
+    tidying,
+    dragging,
+    pickedSet,
+    wiring,
+    pickedDraftId,
+    selectedDrawnId,
+    routeEditId,
+    edges,
+    nodes,
+    connections,
+    moveBlocked,
+  ]);
+  // Where the line to the pointer starts while a device is moved: the port
+  // its connector leaves by, or the middle of a draft that has none yet.
+  const moveAnchor = useMemo<Point | null>(() => {
+    if (movedNodeId === null) return null;
+    const port = connections.routes.get(`stub-${movedNodeId}`)?.points[0];
+    if (port !== undefined) return port;
+    const node = nodes.find((n) => n.id === movedNodeId);
+    if (node === undefined) return null;
+    const centre = centreOf(node, sizes.get(node.id));
+    return [centre.x, centre.y];
+  }, [movedNodeId, connections, nodes, sizes]);
+
   // ---- Dropping a component from the palette ------------------------------
   //
   // The rows of the Components palette are HTML5-draggable; the canvas takes
@@ -1927,8 +2455,17 @@ function SldCanvasInner({
   // picture as the drop of a device does), and it is picked, so the
   // Inspector opens on its form. Nothing is sent to the server until the
   // draft is added to the system from there.
+  //
+  // One that is dropped on a bus is connected to it: the bar under the
+  // pointer is marked while the row is dragged over the diagram, a device
+  // is a draft on that bus from the start, and a line or a transformer
+  // starts there and asks for the bus it goes to.
   const placeDraft = useCallback(
-    (kind: string, centre: { x: number; y: number }): DraftElement | null => {
+    (
+      kind: string,
+      centre: { x: number; y: number },
+      bus: string | null = null,
+    ): DraftElement | null => {
       if (caseKey === null) return null;
       const graphEdges = (baseGraphRef.current?.edges ?? []) as ConnectionEdge[];
       const { position, shift } = draftPlace(
@@ -1958,6 +2495,15 @@ function SldCanvasInner({
       // one that holds something typed stays, and is the user's to close.
       const { addPanelOpen, addPanelDirty, closeAddPanel } = useCaseStore.getState();
       if (addPanelOpen && !addPanelDirty) closeAddPanel();
+      // Dropped on a bus: connected to it. It could not stand on the bar, so
+      // that it stands beside it needs no notice of its own.
+      if (
+        bus !== null &&
+        connectsToBus(draftFields(draft, schema)) &&
+        connectDraft(draft.id, bus)
+      ) {
+        return draft;
+      }
       if (shift !== null) {
         // A draft stands beside a line, where a device that is dragged onto
         // one has it routed round. What the picture refused with the rules
@@ -1985,16 +2531,51 @@ function SldCanvasInner({
       }
       return draft;
     },
-    [caseKey, rf],
+    [caseKey, rf, schema, connectDraft],
   );
-  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    // Required to make the area a valid drop target. Without this the
-    // browser shows the "no-drop" cursor and onDrop never fires.
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+  /** The bus under the pointer of `e`, within the reach a drop is aimed with. */
+  const busUnderPointer = useCallback(
+    (e: { clientX: number; clientY: number }): string | null => {
+      const zoom = rf.getZoom();
+      return busAt(
+        rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+        busBars(nodesRef.current, drawnRef.current.connections),
+        BUS_HIT_PX / (zoom > 0 ? zoom : 1),
+      );
+    },
+    [rf],
+  );
+  const onDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      // Required to make the area a valid drop target. Without this the
+      // browser shows the "no-drop" cursor and onDrop never fires.
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      // The bus a row of the palette would be connected to, marked while it
+      // is over one. What is dragged cannot be read before it is dropped,
+      // so the palette says which kind it is (`paletteDragKind`); a kind
+      // that is on no bus, as a bus itself, marks none.
+      const kind = useSldStore.getState().paletteDragKind;
+      const row = Array.from(e.dataTransfer.types ?? []).includes(COMPONENT_DND_MIME);
+      const connects = kind === null || connectsToBus(draftFields({ kind }, schema));
+      setDropTarget(row && connects && !locked ? busUnderPointer(e) : null);
+    },
+    [busUnderPointer, schema, locked],
+  );
+  const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Out of the diagram, not from one part of it to another.
+    if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+    setDropTarget(null);
   }, []);
+  // A drag of a row that ends anywhere (dropped elsewhere, or given up with
+  // Esc over the diagram) leaves no bus marked.
+  const paletteDragKind = useSldStore((s) => s.paletteDragKind);
+  useEffect(() => {
+    if (paletteDragKind === null) setDropTarget(null);
+  }, [paletteDragKind]);
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
+      setDropTarget(null);
       const kind = e.dataTransfer.getData(COMPONENT_DND_MIME);
       // Empty payload → some other DnD interaction (file drop, image
       // drag, etc.). Bail without preventDefault so the browser can
@@ -2005,9 +2586,16 @@ function SldCanvasInner({
         toast.info(LOCKED_NOTICE);
         return;
       }
-      placeDraft(kind, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+      const bus = busUnderPointer(e);
+      // A line dropped on a bus starts there: the bus it goes to is picked
+      // next. With one bus only there is none to pick, and it is a draft.
+      if (bus !== null && isBranchKind(kind) && busCount >= 2) {
+        startDraw(kind, bus);
+        return;
+      }
+      placeDraft(kind, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), bus);
     },
-    [rf, locked, placeDraft],
+    [rf, locked, placeDraft, busUnderPointer, busCount, startDraw],
   );
 
   // A pick from the list asks where the draft is, so the diagram goes to it
@@ -2883,6 +3471,12 @@ function SldCanvasInner({
         case 'figure':
           openFigure();
           break;
+        case 'draw-line':
+          startDraw('Line');
+          break;
+        case 'draw-transformer':
+          startDraw('Transformer2W');
+          break;
         default:
           arrangePicked(command);
       }
@@ -2895,6 +3489,7 @@ function SldCanvasInner({
       stepThroughHistory,
       resetRoutes,
       openFigure,
+      startDraw,
       arrangePicked,
     ],
   );
@@ -3007,7 +3602,13 @@ function SldCanvasInner({
           locked={locked}
           selectedName={selectedName}
           onZoomIn={zoomToFullSize}
-          routeBarSlot={routeEditId !== null && editedRoute !== null ? setRouteBarSlot : null}
+          routeBarSlot={
+            wiring !== null || (routeEditId !== null && editedRoute !== null)
+              ? setRouteBarSlot
+              : null
+          }
+          movable={grip?.name ?? null}
+          movableBlocked={grip?.blocked ?? null}
         />
         <SldArrangeControls
           locked={locked}
@@ -3065,6 +3666,7 @@ function SldCanvasInner({
             className="relative min-h-0 flex-1"
             data-testid="sld-canvas-surface"
             onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
             onDrop={onDrop}
             onContextMenuCapture={onSurfaceContextMenuCapture}
             onPointerDownCapture={onSurfacePointerDownCapture}
@@ -3136,14 +3738,45 @@ function SldCanvasInner({
                   barSlot={routeBarSlot}
                 />
               ) : null}
+              {/* What connecting by a drag draws: the bus a drop would land
+                  on, the ring at the bar end of the connector of the device
+                  that is selected, and the buses to pick while one is
+                  being picked. */}
+              <SldWiring
+                mode={wiring}
+                bars={bars}
+                target={dropTarget}
+                grip={grip}
+                anchor={moveAnchor}
+                onGrab={startMove}
+                onBlocked={sayBlocked}
+                onFrom={setDrawFrom}
+                onDraw={drawBetween}
+                onMove={moveTo}
+                onCancel={cancelWiring}
+                barSlot={routeBarSlot}
+              />
             </ReactFlow>
             {/* Keys to the bus colours and limit markers, and to the line
             loading and generator limit markers. Inside the surface so the PNG
             export carries them; each draws nothing until a power flow or a
             run has put what it explains on the diagram. */}
-            <div className="pointer-events-none absolute top-2 left-2 z-10 flex w-[200px] flex-col gap-1.5">
-              <SldVoltageLegend />
-              <SldLimitsLegend />
+            <div className="pointer-events-none absolute top-0.5 left-2 z-10 flex flex-col items-start gap-1.5">
+              {/* Draw a line or a transformer from one bus to another. No
+                  higher than the margin a fitted diagram keeps to the top
+                  of its pane, so the buttons stand on none of it. */}
+              <SldDrawTools
+                drawing={drawingModel}
+                locked={locked}
+                busy={tidying}
+                busCount={busCount}
+                onDraw={startDraw}
+                onCancel={cancelWiring}
+              />
+              <div className="flex w-[200px] flex-col gap-1.5">
+                <SldVoltageLegend />
+                <SldLimitsLegend />
+              </div>
             </div>
             {/* The drafts of the diagram, counted and listed, while it has any. */}
             <div className="pointer-events-none absolute top-2 right-2 z-10 flex">
@@ -3190,8 +3823,110 @@ function SldCanvasInner({
           manualRoutes={manualRoutes}
           onResetManualRoutes={resetAllRoutes}
           onFigure={openFigure}
+          onDrawFrom={startDraw}
+          onMoveToBus={startMove}
+          moveBlocked={moveBlocked}
         />
       </ContextMenu>
+    </div>
+  );
+}
+
+interface SldDrawToolsProps {
+  /** The kind that is being drawn, while a bus is being picked for one. */
+  drawing: BranchKind | null;
+  locked: boolean;
+  /** A tidy is being worked out: nothing can be changed meanwhile. */
+  busy: boolean;
+  /** How many buses the system has: a branch needs two. */
+  busCount: number;
+  onDraw: (model: BranchKind) => void;
+  onCancel: () => void;
+}
+
+const DRAW_TOOLS: ReadonlyArray<{ model: BranchKind; label: string }> = [
+  { model: 'Line', label: 'Draw line' },
+  { model: 'Transformer2W', label: 'Draw transformer' },
+];
+
+/**
+ * The two buttons over the top left corner of the diagram that draw a line
+ * or a transformer from one bus to another. A press asks for the two buses
+ * (`SldWiring`), and the button stays pressed until they are picked; a
+ * second press, like Cancel and Esc, stops. While nothing can be drawn they
+ * are greyed out with the reason beside them, in full in their tooltip and
+ * in the notice a press still gets. Left out of a PNG of the view.
+ */
+function SldDrawTools({ drawing, locked, busy, busCount, onDraw, onCancel }: SldDrawToolsProps) {
+  // Why nothing can be drawn now: in a few words to show beside the
+  // buttons, and in full for their tooltip and the notice a press gets.
+  const reason = locked
+    ? {
+        short: 'The diagram is locked.',
+        long: 'The diagram is locked: unlock it with the padlock at its bottom left.',
+      }
+    : busy
+      ? { short: 'Tidying.', long: 'Wait for the tidy to finish.' }
+      : busCount < 2
+        ? {
+            short: 'Needs two buses.',
+            long: 'It runs between two buses, and this system has fewer: add buses first.',
+          }
+        : null;
+  return (
+    <div
+      role="group"
+      aria-label="Draw between two buses"
+      data-testid="sld-draw-tools"
+      data-export-ignore=""
+      className="pointer-events-auto flex h-[22px] items-stretch gap-1"
+    >
+      {DRAW_TOOLS.map(({ model, label }) => {
+        const noun = BRANCH_NOUN[model];
+        const pressed = drawing === model;
+        return (
+          <button
+            key={model}
+            type="button"
+            data-testid={`sld-draw-${noun}`}
+            aria-pressed={pressed}
+            aria-disabled={reason !== null ? true : undefined}
+            aria-describedby={reason !== null ? 'sld-draw-tools-reason' : undefined}
+            title={
+              reason !== null
+                ? `${label}: not now. ${reason.long}`
+                : pressed
+                  ? `Drawing a ${noun}: click the two buses, or press again to stop.`
+                  : `${label}: click here, then the bus it starts from and the bus it goes to (or drag from one to the other). It is placed as a draft.`
+            }
+            onClick={() => {
+              if (reason !== null) toast.info(`${label}: not now`, { description: reason.long });
+              else if (pressed) onCancel();
+              else onDraw(model);
+            }}
+            className={cn(
+              'rounded border px-1.5 text-[11px] leading-none font-medium whitespace-nowrap shadow-sm',
+              pressed
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-background text-foreground hover:bg-muted/60',
+              reason !== null ? 'cursor-not-allowed opacity-60' : '',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            )}
+          >
+            {label}
+          </button>
+        );
+      })}
+      {reason !== null ? (
+        <span
+          id="sld-draw-tools-reason"
+          data-testid="sld-draw-tools-reason"
+          title={reason.long}
+          className="text-muted-foreground bg-background/80 self-center rounded px-1 text-[11px] leading-none whitespace-nowrap"
+        >
+          {reason.short}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -3474,6 +4209,21 @@ function routeNameOf(edge: Pick<Edge, 'id' | 'type' | 'data'>): string {
   const name = data?.name || data?.idx || edge.id;
   if (edge.type === 'stub') return `the connector of ${name}`;
   return `${edge.type === 'transformer' ? 'transformer' : 'line'} ${name}`;
+}
+
+/**
+ * What a device or a draft is called where it is connected to a bus:
+ * `load PQ_3`, `generator 2`, `draft PQ load 12`. Many cases name their
+ * devices by a number, which says nothing without what it is a number of.
+ */
+function wiredName(node: Pick<Node, 'id' | 'type' | 'data'>): string {
+  const data = node.data as { name?: string; idx?: string };
+  const named = data.name || data.idx || node.id;
+  return `${node.type === DRAFT_NODE_TYPE ? 'draft' : (node.type ?? 'element')} ${named}`;
+}
+
+function capitalised(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** The nodes of `after` that stand somewhere else than in `before`. */

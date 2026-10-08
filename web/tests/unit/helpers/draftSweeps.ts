@@ -166,7 +166,7 @@ export function draggedDraft(diagram: Diagram, id: string, dx: number, dy: numbe
 }
 
 /** The drafts that stand on `diagram` as symbols, as the store would hold them. */
-function draftsOn(diagram: Diagram): DraftElement[] {
+export function draftsOn(diagram: Diagram): DraftElement[] {
   return diagram.nodes
     .filter((n) => n.type === DRAFT_NODE_TYPE)
     .map((n) => {

@@ -1401,6 +1401,53 @@ describe('useCommandRegistry: Tidy diagram, Snap to grid, Align and Distribute',
     );
   });
 
+  it('offers to draw a line or a transformer while the system has two buses to join, and posts it to the canvas', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    const one = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(one.result.current, 'view.draw-line')).toBeUndefined();
+    // The menu keeps it in view, with what is missing.
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    expect(menu.result.current.find((c) => c.id === 'view.draw-line')?.unavailable).toMatch(
+      /^It runs between two buses, and this system has fewer\./,
+    );
+    one.unmount();
+    menu.unmount();
+
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      buses: [
+        { idx: '1', name: 'BUS1', kind: 'Bus', params: {} },
+        { idx: '2', name: 'BUS2', kind: 'Bus', params: {} },
+      ],
+    };
+    const seen: SldCommand[] = [];
+    const unsubscribe = subscribeSldCommand((c) => seen.push(c));
+    try {
+      const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+      const line = find(result.current, 'view.draw-line');
+      expect(line).toMatchObject({ group: 'view', label: 'Draw line between two buses' });
+      expect(line?.description).toMatch(/drag from one to the other.*as a draft/);
+      expect(line?.keywords).toEqual(expect.arrayContaining(['draw', 'connect', 'line']));
+      expect(find(result.current, 'view.draw-transformer')?.label).toBe(
+        'Draw transformer between two buses',
+      );
+      act(() => line?.action());
+      act(() => find(result.current, 'view.draw-transformer')?.action());
+    } finally {
+      unsubscribe();
+    }
+    expect(seen).toEqual(['draw-line', 'draw-transformer']);
+
+    // Not while the diagram is locked, and the menu says so.
+    act(() => useSldStore.setState({ diagramLocked: true }));
+    const locked = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(find(locked.result.current, 'view.draw-line')).toBeUndefined();
+    const lockedMenu = renderHook(() => useMenuCommands(), { wrapper });
+    expect(lockedMenu.result.current.find((c) => c.id === 'view.draw-line')?.unavailable).toMatch(
+      /^The diagram is locked\./,
+    );
+  });
+
   it('offers Reset manual routes while a line is routed by hand, and says how many are', () => {
     MOCK_TOPOLOGY = oneBusTopology();
     const none = renderHook(() => useCommandRegistry(), { wrapper });

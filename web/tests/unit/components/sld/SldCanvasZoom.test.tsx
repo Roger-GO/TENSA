@@ -101,6 +101,7 @@ vi.mock('@/api/queries', async () => {
     useCurrentTopology: () => mockTopology,
     // The fields of each model: only a draft on the diagram is checked against them.
     useTopologySchema: () => ({ data: undefined }),
+    useEditElements: () => ({ mutate: vi.fn(), isPending: false }),
     useConnectivity: () => ({
       data: null,
       isLoading: false,

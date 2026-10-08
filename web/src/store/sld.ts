@@ -93,6 +93,15 @@ export interface SldState {
    */
   manualBranchIdxes: string[];
   setManualBranchIdxes: (idxes: string[]) => void;
+  /**
+   * The kind of the palette row that is being dragged (a `value` of
+   * `ELEMENT_KINDS`), from the start of the drag to its end; `null` with
+   * none. A drop target cannot read what is dragged over it until it is
+   * dropped, and the diagram marks the bus under the pointer only for a
+   * kind that connects to one.
+   */
+  paletteDragKind: string | null;
+  setPaletteDragKind: (kind: string | null) => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
@@ -126,6 +135,8 @@ export const useSldStore = create<SldState>((set) => ({
         ? s
         : { manualBranchIdxes: idxes },
     ),
+  paletteDragKind: null,
+  setPaletteDragKind: (kind: string | null) => set({ paletteDragKind: kind }),
 }));
 
 // The nodes picked together are those of one diagram. A bus goes by its idx,
@@ -181,7 +192,8 @@ export function subscribeOpenSldSearch(listener: Listener): () => void {
 //
 // Fit view, Reset to auto-layout, the choice of how device connectors are
 // drawn, Tidy diagram, resetting the routes drawn by hand, undoing a change to
-// the arrangement, aligning what is picked and making a figure of the diagram
+// the arrangement, aligning what is picked, making a figure of the diagram and
+// drawing a line or a transformer between two buses
 // are commands in the registry
 // (palette, shortcuts) but act on
 // state only the mounted canvas holds: React Flow's viewport, and the diagram
@@ -206,6 +218,9 @@ export type SldCommand =
   | 'reset-manual-routes'
   /** Open the figure of the diagram, to save it as SVG, PDF or PNG. */
   | 'figure'
+  /** Draw a line, or a transformer, from one bus to another: the next two buses that are clicked. */
+  | 'draw-line'
+  | 'draw-transformer'
   | 'align-left'
   | 'align-centre'
   | 'align-right'

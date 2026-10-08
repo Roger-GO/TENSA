@@ -87,6 +87,29 @@ describe('drafts store', () => {
     expect(useDraftsStore.getState().byCase[CASE]?.[0]?.values).toEqual({ bus: '4', Sn: '' });
   });
 
+  it('counts each value the diagram gives a draft, so a form that is open on it can be opened afresh', async () => {
+    const { useDraftsStore, useCaseStore } = await load();
+    const { add, connect, setValues } = useDraftsStore.getState();
+    add(CASE, 'PQ', { x: 0, y: 0 });
+    // What the form sets itself is not counted: it holds that already.
+    setValues(CASE, 'draft-1', { p0: '0.2' });
+    expect(useDraftsStore.getState().connected).toEqual({});
+    connect(CASE, 'draft-1', { bus: '4' });
+    expect(useDraftsStore.getState().byCase[CASE]?.[0]?.values).toEqual({ p0: '0.2', bus: '4' });
+    expect(useDraftsStore.getState().connected).toEqual({ 'draft-1': 1 });
+    connect(CASE, 'draft-1', { bus: '5' });
+    expect(useDraftsStore.getState().connected).toEqual({ 'draft-1': 2 });
+    expect(stored()).toEqual({
+      [CASE]: [expect.objectContaining({ values: { p0: '0.2', bus: '5' } })],
+    });
+    // A draft the case does not hold is given nothing, and nothing is counted for it.
+    connect(CASE, 'draft-9', { bus: '4' });
+    expect(useDraftsStore.getState().connected).toEqual({ 'draft-1': 2 });
+    // The count is the diagram's: the drafts of the next case go by the same ids.
+    useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath('other.raw'), addfiles: [] });
+    expect(useDraftsStore.getState().connected).toEqual({});
+  });
+
   it('moves the drafts that are named, and leaves the state alone when none moved', async () => {
     const { useDraftsStore } = await load();
     const { add, move } = useDraftsStore.getState();
