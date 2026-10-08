@@ -28,8 +28,11 @@
  * says whether the route is drawn by hand, how the handles are used, and
  * what a move was refused for. It is drawn in the row above the diagram,
  * in the place of the line that says what can be done on it (`barSlot`,
- * which `SldCanvasHint` leaves for it), so that it covers nothing of the
- * diagram and is no higher than what it takes the place of.
+ * which `SldCanvasHint` leaves for it), and is no higher than what it takes
+ * the place of, so that the diagram does not move when a line is picked.
+ * What it says about a move is read whole: a note too long for its one
+ * line goes on under it, over the top edge of the diagram, and is not cut
+ * off.
  *
  * Nothing on the diagram is drawn over anything else, so a move is held to
  * a check of the route (`routeCheck.ts`) while it is made: where the part
@@ -43,7 +46,7 @@
  * drawing. It is rendered as a child of `<ReactFlow>`, over the diagram and
  * under its controls, and left out of a PNG export.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReactFlow, useStore } from '@xyflow/react';
 
@@ -101,12 +104,17 @@ const BEND_ADDED_NOTE =
   'Bend added. Drag it, or press the arrow keys, to make the line turn there; drag the run on either side of it for a square step.';
 
 /**
- * How the handles are used, as the bar says it while it has nothing else to
- * say: short enough for the one line it has, with the rest in its tooltip.
+ * How the handles are used and how the line is let go of, as the bar says
+ * it while it has nothing else to say: short enough for the one line it
+ * has beside an open Inspector, with the rest in its tooltip.
  */
 export const ROUTE_EDIT_HINT =
-  'Drag a run of the blue line to slide it, a square to move a bend, a + to add one.';
-export const ROUTE_EDIT_HELP = `${ROUTE_EDIT_HINT} Double-click a run to add a bend, a square to remove it. The arrow keys move the run or the bend you clicked (Shift for bigger steps). Hold Alt or Shift while dragging a bend to move it alone. Click the background or press Esc when done.`;
+  'Drag the line to slide it, a square to move a bend, a + to add one. Esc to finish.';
+export const ROUTE_EDIT_HELP =
+  'Drag a run of the blue line to slide it sideways, a square to move a bend, a + to add one. Double-click a run to add a bend, a square to remove it. The arrow keys move the run or the bend you clicked (Shift for bigger steps). Hold Alt or Shift while dragging a bend to move it alone. Nothing changes until you move a part of the line. Press Esc or Done, or click the background, when you have finished.';
+
+/** The height of the one line the note of the bar has, in pixels. */
+const NOTE_LINE_PX = 14;
 
 export interface SldRouteEditorProps {
   /** The id of the edge that is picked. */
@@ -602,6 +610,15 @@ export function SldRouteEditor({
   const pickedRun =
     picked?.kind === 'run' && picked.index < working.length - 1 ? picked.index : null;
 
+  // Whether what the bar says about a move takes more than its one line:
+  // it then goes on under the line, and is set off from the diagram there.
+  const noteRef = useRef<HTMLParagraphElement | null>(null);
+  const [noteWraps, setNoteWraps] = useState(false);
+  useLayoutEffect(() => {
+    const wraps = note !== null && (noteRef.current?.scrollHeight ?? 0) > NOTE_LINE_PX + 1;
+    if (wraps !== noteWraps) setNoteWraps(wraps);
+  }, [note, noteWraps]);
+
   const dragging = shown !== null;
   const drawnPoints = shown?.points ?? working;
   const half = (HANDLE_PX / 2) * px;
@@ -879,23 +896,34 @@ export function SldRouteEditor({
                   Done
                 </BarButton>
               </div>
-              <p
-                role="status"
-                aria-live="polite"
-                data-testid="sld-route-note"
-                data-tone={note?.tone ?? 'hint'}
-                title={note?.text ?? ROUTE_EDIT_HELP}
-                className={cn(
-                  'truncate text-[11px] leading-[14px]',
-                  note === null
-                    ? 'text-muted-foreground'
-                    : note.tone === 'refused'
-                      ? 'text-danger font-medium'
-                      : 'text-foreground',
-                )}
-              >
-                {note?.text ?? ROUTE_EDIT_HINT}
-              </p>
+              {/* One line of the bar, whatever the note says. The hint is
+                  cut to it (its tooltip has the rest). What is said about a
+                  move is not: it goes on under the line, over the top edge
+                  of the diagram, where it takes no click. */}
+              <div className="relative" style={{ height: NOTE_LINE_PX }}>
+                <p
+                  ref={noteRef}
+                  role="status"
+                  aria-live="polite"
+                  data-testid="sld-route-note"
+                  data-tone={note?.tone ?? 'hint'}
+                  data-wraps={noteWraps ? 'true' : undefined}
+                  title={note?.text ?? ROUTE_EDIT_HELP}
+                  className={cn(
+                    'absolute inset-x-0 top-0 z-10 text-[11px] leading-[14px]',
+                    note === null
+                      ? 'text-muted-foreground truncate'
+                      : cn(
+                          'bg-background pointer-events-none',
+                          note.tone === 'refused' ? 'text-danger font-medium' : 'text-foreground',
+                        ),
+                    noteWraps &&
+                      'border-border -mx-1 rounded-b border-x border-b px-1 pb-0.5 shadow-md',
+                  )}
+                >
+                  {note?.text ?? ROUTE_EDIT_HINT}
+                </p>
+              </div>
             </div>,
             barSlot,
           )}

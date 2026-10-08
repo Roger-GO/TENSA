@@ -8,7 +8,7 @@ import { useTooSmallZoomPercent } from './zoom';
  * the right-click menu, and that an arrangement is kept.
  */
 const INTERACTION_HINT =
-  'Drag a bus or device to move it, or click it and press the arrow keys. Click a line, or its row in the Lines table, to move its route by hand. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
+  'Drag a bus or device to move it, or click it and press the arrow keys. Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table. Shift+drag a box to pick several; Ctrl+Z takes a move back. Your layout is saved with the case. Right-click a bus, line or the background for more actions.';
 
 export interface SldCanvasHintProps {
   /** The lock button of the controls is on: nothing can be dragged or selected. */

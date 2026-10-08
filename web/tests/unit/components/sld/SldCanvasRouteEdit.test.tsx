@@ -368,7 +368,7 @@ describe('picking a line', () => {
     open('square.xlsx');
     await draw();
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      'Click a line, or its row in the Lines table, to move its route by hand.',
+      'Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table.',
     );
     expect(screen.queryByTestId('sld-route-editor')).toBeNull();
 
@@ -395,7 +395,9 @@ describe('picking a line', () => {
     expect(screen.getByTestId('sld-canvas-route-slot')).toContainElement(bar);
     expect(screen.getByTestId('sld-route-name')).toHaveTextContent('Line Line L14');
     expect(screen.getByTestId('sld-route-status')).toHaveTextContent('Routed automatically');
-    expect(note()).toHaveTextContent('Drag a run of the blue line to slide it');
+    // How the handles are used, and how the line is let go of again.
+    expect(note()).toHaveTextContent('Drag the line to slide it');
+    expect(note()).toHaveTextContent('Esc to finish.');
     // Nothing that cannot be used is offered: no bend is picked, and the route is the diagram's.
     expect(screen.queryByTestId('sld-route-remove-bend')).toBeNull();
     expect(screen.queryByTestId('sld-route-reset')).toBeNull();

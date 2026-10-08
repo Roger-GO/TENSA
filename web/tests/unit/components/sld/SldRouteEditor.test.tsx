@@ -583,6 +583,29 @@ describe('the bar', () => {
     expect(screen.getByTestId('sld-route-status')).toHaveTextContent('Routed automatically');
     expect(note()).toHaveTextContent(ROUTE_EDIT_HINT);
     expect(note()).toHaveAttribute('title', expect.stringContaining('Double-click a run'));
+    // How to let go of the line is said where it is read, and in the tooltip.
+    expect(ROUTE_EDIT_HINT).toContain('Esc to finish.');
+    expect(note()).toHaveAttribute('title', expect.stringContaining('Press Esc or Done'));
+    expect(screen.getByTestId('sld-route-done')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Esc'),
+    );
+  });
+
+  it('cuts the hint to its one line, and never what it says about a move', () => {
+    draw();
+    // The hint has its tooltip for what does not fit.
+    expect(note()).toHaveClass('truncate');
+    // A bend that is added is answered in a sentence too long for most bars:
+    // it is shown whole, over the top edge of the diagram, and takes no click there.
+    fireEvent.click(screen.getByTestId('sld-route-add-bend'));
+    expect(note()).toHaveAttribute('data-tone', 'plain');
+    expect(note()).toHaveTextContent('Bend added.');
+    expect(note()).not.toHaveClass('truncate');
+    expect(note()).toHaveClass('pointer-events-none');
+    // The bar itself stays as high as it was: the note is laid over, not into, the row.
+    expect(note()).toHaveClass('absolute');
+    expect(note().parentElement).toHaveStyle({ height: '14px' });
   });
 
   it('offers Reset route for a route drawn by hand, and Remove bend while a bend is picked', () => {

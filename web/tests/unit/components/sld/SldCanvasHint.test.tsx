@@ -38,9 +38,10 @@ describe('<SldCanvasHint />', () => {
 
   it('says that a line can be moved by hand, which nothing on the diagram shows', () => {
     render(<SldCanvasHint locked={false} selectedName={null} onZoomIn={vi.fn()} />);
-    // And how to pick one without aiming at a line a pixel or two wide.
+    // The connector of a device as well, which has no row in a table, and
+    // how to pick a line without aiming at one a pixel or two wide.
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      'Click a line, or its row in the Lines table, to move its route by hand.',
+      'Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table.',
     );
   });
 
