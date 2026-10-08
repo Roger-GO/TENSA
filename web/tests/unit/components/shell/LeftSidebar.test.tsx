@@ -277,6 +277,19 @@ describe('<LeftSidebar />', () => {
       expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
     });
 
+    it('goes to the Project tab that the line of the palette opened', async () => {
+      useLayoutStore.setState({ leftSidebarTab: 'components' });
+      const user = userEvent.setup();
+      render(withClient(<LeftSidebar />));
+      const link = screen.getByRole('button', { name: 'Project tab' });
+      act(() => link.focus());
+      await user.keyboard('{Enter}');
+      expect(link).not.toBeVisible();
+      expect(projectTab()).toHaveFocus();
+      expect(projectTab()).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('saved-cases-list')).toBeVisible();
+    });
+
     it('goes to the tab something else opened while the focus was in the other panel', () => {
       useLayoutStore.setState({ leftSidebarTab: 'components' });
       render(withClient(<LeftSidebar />));

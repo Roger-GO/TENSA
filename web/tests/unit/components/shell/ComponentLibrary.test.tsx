@@ -18,6 +18,9 @@
  *  - A line under the search box says how to add, or why nothing can be added,
  *    and a row that cannot add is marked disabled, cannot be dragged and does
  *    nothing.
+ *  - With no case open, a line above the search box leads to the Project tab,
+ *    where the saved cases are, and after a reload of the page a note names
+ *    the case the reload closed and reopens it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -29,12 +32,15 @@ import type { TopologySummary } from '@/api/types';
 import { ELEMENT_KINDS, groupElementKinds } from '@/components/elements/elementKinds';
 import { COMPONENT_DND_MIME, ComponentLibrary } from '@/components/shell/ComponentLibrary';
 import { useCaseStore } from '@/store/case';
+import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
 const blankMutate = vi.fn();
 let blankPending = false;
+const loadCaseMutate = vi.fn();
 
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
@@ -42,6 +48,9 @@ vi.mock('@/api/queries', async () => {
     ...actual,
     useCurrentTopology: () => MOCK_TOPOLOGY,
     useBlankSystem: () => ({ mutate: blankMutate, isPending: blankPending }),
+    // What the note of a case closed by a reload asks for.
+    useListWorkspaceFiles: () => ({ data: { files: [{ name: 'kundur_full.xlsx' }] } }),
+    useLoadCase: () => ({ mutateAsync: loadCaseMutate, isPending: false }),
   };
 });
 
@@ -97,15 +106,20 @@ beforeEach(() => {
   MOCK_TOPOLOGY = null;
   blankPending = false;
   blankMutate.mockReset();
+  loadCaseMutate.mockReset();
+  loadCaseMutate.mockResolvedValue({});
   toastError.mockReset();
   useSessionStore.setState({ sessionId: parseSessionId('test-session-id') });
   useCaseStore.setState({
     selection: null,
+    loadingPath: null,
     addPanelOpen: false,
     addPanelKind: null,
     addPanelDropCoord: null,
   });
   usePflowStore.setState({ isRunning: false });
+  useLayoutStore.setState({ ...DEFAULT_LAYOUT, leftSidebarTab: 'components' });
+  useReloadedCaseStore.setState({ closed: null });
 });
 
 afterEach(() => {
@@ -119,9 +133,10 @@ describe('<ComponentLibrary />', () => {
   });
 
   it('has a row for every kind the Add element form can add, in the same order', () => {
+    openCase();
     render(<ComponentLibrary />);
     expect(shownKinds()).toEqual(ELEMENT_KINDS.map((k) => k.value));
-    // The search box is a text field: the rows are the only buttons.
+    // The search box is a text field: with a case open the rows are the only buttons.
     expect(screen.getAllByRole('button')).toHaveLength(ELEMENT_KINDS.length);
   });
 
@@ -380,6 +395,68 @@ describe('<ComponentLibrary /> click to add', () => {
       'A system is already loaded; discard it first or open a fresh tab.',
     );
     expect(useCaseStore.getState().addPanelOpen).toBe(false);
+  });
+});
+
+describe('<ComponentLibrary /> with no case open', () => {
+  const noCaseLine = () => screen.queryByTestId('component-library-no-case');
+
+  it('says that no case is open, and where the saved ones are', () => {
+    render(<ComponentLibrary />);
+    expect(noCaseLine()).toHaveTextContent(
+      'No case is open. To open a saved one, go to the Project tab.',
+    );
+    expect(shownKinds()).toEqual(ELEMENT_KINDS.map((k) => k.value));
+  });
+
+  it('opens the Project tab from that line, in a sidebar that was collapsed too', async () => {
+    useLayoutStore.setState({ leftSidebarCollapsed: true });
+    render(<ComponentLibrary />);
+    await userEvent.click(screen.getByRole('button', { name: 'Project tab' }));
+    expect(useLayoutStore.getState()).toMatchObject({
+      leftSidebarTab: 'project',
+      leftSidebarCollapsed: false,
+    });
+  });
+
+  it('puts the line before the search box, which stays one Tab from the rows', async () => {
+    const user = userEvent.setup();
+    render(<ComponentLibrary />);
+    screen.getByRole('button', { name: 'Project tab' }).focus();
+    await user.tab();
+    expect(search()).toHaveFocus();
+    await user.tab();
+    expect(row('Bus')).toHaveFocus();
+  });
+
+  it('has no such line once a case is open', () => {
+    openCase();
+    render(<ComponentLibrary />);
+    expect(noCaseLine()).not.toBeInTheDocument();
+  });
+
+  it('has no such line while a case is being opened', () => {
+    useCaseStore.setState({ loadingPath: 'kundur_full.xlsx' });
+    render(<ComponentLibrary />);
+    expect(noCaseLine()).not.toBeInTheDocument();
+  });
+
+  it('has no note about a reload on a first visit', () => {
+    render(<ComponentLibrary />);
+    expect(screen.queryByTestId('reloaded-case-note-components')).not.toBeInTheDocument();
+  });
+
+  it('names the case a reload of the page closed, and reopens it', async () => {
+    useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
+    render(<ComponentLibrary />);
+    expect(screen.getByTestId('reloaded-case-note-components')).toHaveTextContent(
+      'A reload of the page closes the open case. kundur_full.xlsx was open.',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Reopen kundur_full.xlsx' }));
+    expect(loadCaseMutate).toHaveBeenCalledWith({
+      sessionId: 'test-session-id',
+      request: { primary_path: 'kundur_full.xlsx', addfiles: null },
+    });
   });
 });
 

@@ -6,11 +6,13 @@ import {
   searchElementKinds,
   type ElementKind,
 } from '@/components/elements/elementKinds';
+import { ReloadedCaseNote } from '@/components/case/ReloadedCaseNote';
 import { ControllerGlyph } from '@/components/sld/nodes/ControllerGlyph';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/cn';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
+import { useLayoutStore } from '@/store/layout';
 
 /**
  * ComponentLibrary: the palette of the left sidebar's Components tab.
@@ -44,7 +46,10 @@ import { useCaseStore } from '@/store/case';
  * under the search box says how to add, and says instead why nothing can be
  * added when that is so (``useAddComponent``). With no case open, a click
  * starts a blank system as a drop on the empty canvas does, and the line says
- * that too.
+ * that too. The saved cases are on the sidebar's other tab, which the palette
+ * hides, so with no case open a line above the search box leads there; and
+ * after a reload of the page, which closes the case, a note over that line
+ * names the case and reopens it (``ReloadedCaseNote``).
  *
  * Drag image: leaves the browser default (no ``dataTransfer.setDragImage``
  * call), which is a picture of the row.
@@ -65,6 +70,8 @@ export interface ComponentLibraryProps {
 export function ComponentLibrary({ className }: ComponentLibraryProps) {
   const { blockedReason, add } = useAddComponent();
   const caseOpen = useCaseStore((s) => s.selection !== null);
+  const caseLoading = useCaseStore((s) => s.loadingPath !== null);
+  const showLeftSidebarTab = useLayoutStore((s) => s.showLeftSidebarTab);
   const [query, setQuery] = useState('');
   const sections = useMemo(() => groupElementKinds(searchElementKinds(query)), [query]);
   const shownKinds = sections.flatMap((section) => section.kinds);
@@ -112,6 +119,34 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
     <div data-testid="component-library" className={cn('flex h-full min-h-0 flex-col', className)}>
       {/* The search box and the line under it stay put while the list scrolls. */}
       <div className="border-border flex shrink-0 flex-col gap-1.5 border-b px-2 pt-2 pb-2">
+        {/* With no case open: where the saved cases are, which this tab hides, and
+            after a reload the case it closed. Above the search box, so that Tab
+            still goes from the box straight into the rows. */}
+        {!caseOpen && !caseLoading ? (
+          <>
+            <ReloadedCaseNote placement="components" />
+            <p
+              data-testid="component-library-no-case"
+              className="text-muted-foreground px-0.5 text-[11px] leading-snug"
+            >
+              No case is open. To open a saved one, go to the{' '}
+              <button
+                type="button"
+                onClick={() => showLeftSidebarTab('project')}
+                data-testid="component-library-open-project"
+                className={cn(
+                  'text-foreground underline underline-offset-2',
+                  'hover:text-primary focus-visible:outline-none',
+                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  'rounded-[var(--radius-sm)]',
+                )}
+              >
+                Project tab
+              </button>
+              .
+            </p>
+          </>
+        ) : null}
         <div className="relative">
           <SearchGlyph />
           <Input
