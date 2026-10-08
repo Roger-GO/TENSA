@@ -22,6 +22,11 @@
  *   which puts it back -> delete it from the Drafts list -> delete the line
  *   from its right-click menu -> no drafts are left and the button is gone
  *
+ *   open a copy of IEEE 14 -> drag PQ load onto the lines that come down to
+ *   bus 5 side by side -> the draft stands on free ground and every line runs
+ *   as it ran -> drag the draft onto those lines by hand -> they go round it
+ *   -> delete it -> every line runs as it ran before
+ *
  *   no case open -> drag Bus onto the empty page -> a blank system, with the
  *   draft in the middle of its diagram and its form open -> fill it in, add
  *   -> the bus stands where the draft stood
@@ -39,6 +44,7 @@
 import { test, expect, type Page } from './fixtures';
 import {
   drawing,
+  dropInDiagram,
   onAFaceMiddle,
   onATap,
   openCase,
@@ -46,6 +52,7 @@ import {
   overlapsOnScreen,
   problems,
   settled,
+  type Drawing,
 } from './sldDrawing';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
@@ -269,6 +276,54 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
   await page.getByTestId('sld-context-delete-draft').click();
   await expect(indicator(page)).toHaveCount(0);
   expect((await drawing(page)).edges['draft-line-draft-3']).toBeUndefined();
+  expect(await overlapsOnScreen(page)).toEqual([]);
+});
+
+test('a draft leaves the lines of the system as they run: it is dropped beside them, and one it is dragged onto runs as before once it is gone', async ({
+  page,
+}) => {
+  await dismissCoach(page);
+  await page.goto('/');
+  await openCase(page, 'ieee14_full.xlsx');
+  await openCopy(page, `draft-lines-${Date.now()}`);
+  const first = await settled(page);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  /** How every line and transformer of the system runs. */
+  const lines = (shown: Drawing) =>
+    Object.fromEntries(
+      Object.entries(shown.edges)
+        .filter(([id]) => /^(line|transformer)-/.test(id))
+        .map(([id, edge]) => [id, edge.points]),
+    );
+  const bus5 = first.nodes['5']!;
+
+  // ---- Dropped where the lines run close together: beside them ---------------
+  await page.getByRole('tab', { name: 'Components' }).click();
+  await dropOnDiagram(page, 'Add PQ load', bus5.x + 54, bus5.y - 80);
+  await expect(
+    page
+      .locator('[data-sonner-toast]')
+      .filter({ hasText: 'Draft placed in the nearest free place' }),
+  ).toContainText('a draft leaves the lines as they are');
+  const draft = draftNode(page, 'draft-1');
+  await expect(draft).toBeVisible();
+  let now = await settled(page);
+  expect(lines(now)).toEqual(lines(first));
+  expect(await overlapsOnScreen(page)).toEqual([]);
+
+  // ---- Dragged onto them by hand: they go round it while it stands there -----
+  const stands = now.nodes['draft-1']!;
+  await dropInDiagram(page, 'draft-1', bus5.x + 6 - stands.x, bus5.y - 112 - stands.y);
+  now = await settled(page);
+  expect(lines(now)).not.toEqual(lines(first));
+  expect(await overlapsOnScreen(page)).toEqual([]);
+
+  // ---- Deleted: every line runs as it ran before -----------------------------
+  await draft.click();
+  await page.keyboard.press('Delete');
+  await expect(draft).toHaveCount(0);
+  now = await settled(page);
+  expect(lines(now)).toEqual(lines(first));
   expect(await overlapsOnScreen(page)).toEqual([]);
 });
 

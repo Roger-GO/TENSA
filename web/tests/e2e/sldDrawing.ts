@@ -40,6 +40,8 @@ export async function openCase(page: Page, caseFile: string): Promise<void> {
 
 /** Save the open case under `stem`, with its layout, and open the copy. */
 export async function openCopy(page: Page, stem: string): Promise<void> {
+  // A save writes the layout of the diagram as it is drawn: once it is.
+  await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 90_000 });
   await page.getByTestId('topbar-menu-workspace-trigger').click();
   await page.getByTestId('topbar-menu-workspace-save-system').click();
   await page.getByTestId('save-filename').fill(stem);
