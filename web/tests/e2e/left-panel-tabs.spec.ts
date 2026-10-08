@@ -19,6 +19,12 @@
  *   takes the keyboard focus and says a click starts a blank system -> click
  *   Bus -> a blank system, with the form on Bus
  *
+ *   open Kundur -> Components -> reload -> still on Components, with no case:
+ *   the palette and the empty diagram say that the reload closed Kundur, and
+ *   the palette leads to the Project tab -> its case card says the same ->
+ *   Reopen -> Kundur, its disturbance and the saved cases are back -> Change
+ *   case -> reload -> nothing is said of a case the user closed
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`).
  * The unit tests check the tabs and the palette each on their own; this one
  * checks that the tab survives a real reload, that a real drag reaches the
@@ -31,6 +37,8 @@ import { openCase } from './sldDrawing';
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 const CASE_FILE = 'ieee14_full.xlsx';
+/** A case whose file sets a disturbance, so the Disturbances section has a line to show. */
+const CASE_WITH_EVENT = 'kundur_full.xlsx';
 
 /** How many kinds the palette lists: `ELEMENT_KINDS` in `elementKinds.ts`. */
 const KINDS = 17;
@@ -215,4 +223,72 @@ test('with no case open, the case card leads to the palette, and a row starts a 
   await expect(page.getByRole('complementary', { name: 'Case navigation' })).toContainText(
     'New system',
   );
+});
+
+test('a reload says which case it closed, on whichever tab it opens, and reopens it in one click', async ({
+  page,
+}) => {
+  await dismissCoach(page);
+  await page.goto('/');
+  await openCase(page, CASE_WITH_EVENT);
+  const sidebar = page.getByRole('complementary', { name: 'Case navigation' });
+  const disturbances = page.getByTestId('left-sidebar-section-disturbances');
+  const reloadNotes = page.locator('[data-testid^="reloaded-case-note-"]');
+  await expect(disturbances).toContainText('Toggle Line Line_8');
+
+  await componentsTab(page).click();
+  // With a case open the palette says nothing about cases.
+  await expect(page.getByTestId('component-library-no-case')).toHaveCount(0);
+  await expect(reloadNotes).toHaveCount(0);
+
+  // ---- A reload: the tab is kept, the case is not, and the page says so -----
+  await page.reload();
+  await expect(componentsTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('reloaded-case-note-components')).toHaveText(
+    /A reload of the page closes the open case\. kundur_full\.xlsx was open\./,
+  );
+  await expect(page.getByTestId('reloaded-case-note-diagram')).toContainText(
+    'kundur_full.xlsx was open.',
+  );
+  await expect(page.getByTestId('component-library-no-case')).toHaveText(
+    'No case is open. To open a saved one, go to the Project tab.',
+  );
+  // The note over the empty diagram is whole: nothing of it is cut by its pane.
+  const pane = (await page.getByTestId('no-case-drop-zone').boundingBox())!;
+  const note = (await page.getByTestId('reloaded-case-note-diagram').boundingBox())!;
+  const title = (await page.getByText('No case loaded', { exact: true }).boundingBox())!;
+  expect(title.y).toBeGreaterThanOrEqual(pane.y);
+  expect(note.y + note.height).toBeLessThanOrEqual(pane.y + pane.height);
+  // The search box is still one Tab from the rows.
+  await page.getByRole('textbox', { name: 'Search components' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Add Bus' })).toBeFocused();
+
+  // ---- The palette leads to the Project tab, whose case card says the same --
+  await page.getByRole('button', { name: 'Project tab' }).press('Enter');
+  await expect(projectTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect(projectTab(page)).toBeFocused();
+  const card = page.getByTestId('case-nav-empty');
+  await expect(card).toContainText('kundur_full.xlsx was open.');
+  await expect(card).toContainText('No case loaded.');
+  await expect(disturbances).toHaveCount(0);
+
+  // ---- One click reopens it --------------------------------------------------
+  const reopen = card.getByRole('button', { name: `Reopen ${CASE_WITH_EVENT}` });
+  // The button waits for the session of the reloaded page.
+  await expect(reopen).toBeEnabled();
+  await reopen.click();
+  await expect(sidebar).toContainText(/Loaded case\s*kundur_full\.xlsx/, { timeout: 90_000 });
+  await expect(disturbances).toContainText('Toggle Line Line_8');
+  await expect(page.getByTestId(`saved-cases-recent-${CASE_WITH_EVENT}`)).toBeVisible();
+  await expect(reloadNotes).toHaveCount(0);
+
+  // ---- A case the user closed is not one a reload closed --------------------
+  await page.getByRole('button', { name: 'Change case' }).click();
+  await page.getByRole('button', { name: 'Discard & change case' }).click();
+  await expect(card).toContainText('No case loaded.');
+  await page.reload();
+  await expect(card).toContainText('No case loaded.');
+  await expect(page.getByTestId(`saved-cases-row-${CASE_WITH_EVENT}`)).toBeVisible();
+  await expect(reloadNotes).toHaveCount(0);
 });
