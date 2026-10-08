@@ -117,7 +117,6 @@ beforeEach(() => {
     addPanelOpen: true,
     addPanelKind: 'ESD1',
     addPanelDirty: false,
-    addPanelDropCoord: null,
     addPanelBus: '4',
   });
 });

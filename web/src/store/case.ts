@@ -155,20 +155,6 @@ export interface CaseState {
   /** True when any field in the AddElementPanel form has been touched. */
   addPanelDirty: boolean;
   /**
-   * Drop coordinate captured when the AddElementPanel was opened via a
-   * drag-and-drop interaction from the Component Library (v3 Unit 5).
-   *
-   * Set to a `{x, y}` flow-coordinate when the user drops a tile onto
-   * the canvas; null when the panel was opened any other way (the
-   * "+ Add element" button, the command palette, the SldEmptySystem
-   * CTA). Per the F-FEAS-5 resolution, AddElementPanel reads this
-   * field as an optional position seed for the Bus form (Bus is the
-   * only kind whose canvas position is user-controllable; non-Bus
-   * elements anchor to a parent bus). For non-Bus kinds the field is
-   * informational and the panel ignores it.
-   */
-  addPanelDropCoord: { x: number; y: number } | null;
-  /**
    * The bus the AddElementPanel was opened from: "Add element here" in the
    * diagram's right-click menu of a bus. The form of whichever kind is picked
    * opens with that bus chosen, and keeps doing so for the next element until
@@ -268,16 +254,8 @@ export interface CaseState {
    * live clone).
    */
   setCloneDepths: (undoDepth: number, redoDepth: number) => void;
-  /**
-   * Open the AddElementPanel.
-   *
-   * `dropCoord` is set when the panel opens via a Component Library
-   * drag-drop onto the canvas (v3 Unit 5). Other call sites omit it and
-   * the field stays null. Calling with no `dropCoord` argument resets a
-   * previously-stored coord so a stale drag from an earlier open doesn't
-   * leak into a fresh "+ Add element" click.
-   */
-  openAddPanel: (kind: string | null, dropCoord?: { x: number; y: number }) => void;
+  /** Open the AddElementPanel, on `kind` when one is given. */
+  openAddPanel: (kind: string | null) => void;
   /**
    * Open the AddElementPanel from a bus of the diagram: the bus goes to
    * `addPanelBus`, for the form to open on. No kind is picked yet, unless the
@@ -287,11 +265,6 @@ export interface CaseState {
   closeAddPanel: () => void;
   setAddPanelKind: (kind: string | null) => void;
   setAddPanelDirty: (dirty: boolean) => void;
-  /** Clear the drop coord WITHOUT closing the panel. Reserved for the
-   *  SldCanvas `onDragEnd` cleanup hook per F-DESIGN-1 (called on cancel
-   *  drop / out-of-bounds); a no-op in practice because the drop handler
-   *  is the only writer and `closeAddPanel` already clears the field. */
-  closeAddPanelDropCoord: () => void;
   clearCase: () => void;
 }
 
@@ -305,7 +278,6 @@ export const useCaseStore = create<CaseState>((set) => ({
   addPanelOpen: false,
   addPanelKind: null,
   addPanelDirty: false,
-  addPanelDropCoord: null,
   addPanelBus: null,
   dragOverrides: {},
   routeOverrides: {},
@@ -330,7 +302,6 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
-      addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
       routeOverrides: {},
@@ -367,16 +338,12 @@ export const useCaseStore = create<CaseState>((set) => ({
   setCloneInitialized: (initialized: boolean) => set({ cloneInitialized: initialized }),
   setCloneDepths: (undoDepth: number, redoDepth: number) =>
     set({ cloneUndoDepth: undoDepth, cloneRedoDepth: redoDepth, cloneInitialized: true }),
-  openAddPanel: (kind: string | null, dropCoord?: { x: number; y: number }) =>
+  openAddPanel: (kind: string | null) =>
     set({
       addPanelOpen: true,
       addPanelKind: kind,
       addPanelDirty: false,
-      // When called WITHOUT a dropCoord (e.g., from "+ Add element"
-      // button or palette), explicitly null the field so a stale coord
-      // from an earlier drag-and-drop open doesn't leak into the form.
-      addPanelDropCoord: dropCoord ?? null,
-      // Likewise the bus of an earlier "Add element here".
+      // Not on the bus of an earlier "Add element here".
       addPanelBus: null,
     }),
   openAddPanelOnBus: (busIdx: string) =>
@@ -385,7 +352,6 @@ export const useCaseStore = create<CaseState>((set) => ({
       // A panel that is open keeps the kind it shows: the same form, on this bus.
       addPanelKind: s.addPanelOpen ? s.addPanelKind : null,
       addPanelDirty: false,
-      addPanelDropCoord: null,
       addPanelBus: busIdx,
     })),
   closeAddPanel: () =>
@@ -393,12 +359,10 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
-      addPanelDropCoord: null,
       addPanelBus: null,
     }),
   setAddPanelKind: (kind: string | null) => set({ addPanelKind: kind, addPanelDirty: false }),
   setAddPanelDirty: (dirty: boolean) => set({ addPanelDirty: dirty }),
-  closeAddPanelDropCoord: () => set({ addPanelDropCoord: null }),
   clearCase: () =>
     set({
       selection: null,
@@ -409,7 +373,6 @@ export const useCaseStore = create<CaseState>((set) => ({
       addPanelOpen: false,
       addPanelKind: null,
       addPanelDirty: false,
-      addPanelDropCoord: null,
       addPanelBus: null,
       dragOverrides: {},
       routeOverrides: {},
