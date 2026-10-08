@@ -36,6 +36,18 @@
  *   tab strip: a click on the Lines tab opens it again, and a row picks
  *   its line
  *
+ *   open WSCC 9 -> pull a bend out of a line to two short of the line
+ *   beside it: it comes to stand a gap short of that line, and the bar
+ *   says why -> move the bend alone to one past that line: it goes on to
+ *   where its two runs cross the line clear of the bend -> nothing on the
+ *   diagram is drawn over anything else, with and without the values of a
+ *   power flow, and after a reload
+ *
+ *   open IEEE 14 in a short window -> drag the bottom drawer down: it is
+ *   its whole tab strip, and no lower -> the button at the end of the
+ *   strip opens it with rows that can be clicked, and a row picks its line
+ *   -> what the bar says about a move is read whole
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, and reads what React Flow drew (`sldDrawing.ts`). The
  * unit tests hold the moves and the check that goes with them; this one
@@ -165,13 +177,13 @@ test("IEEE 14: a line moved by hand is the user's, clear of everything, kept by 
 
   // ---- a click picks it ----
   await expect(page.getByTestId('sld-canvas-hint')).toContainText(
-    'Click a line, or its row in the Lines table, to move its route by hand.',
+    'Click a line or a device connector to move its route by hand',
   );
   await clickLine(page, id);
   const bar = page.getByTestId('sld-route-bar');
   await expect(bar).toBeVisible();
   await expect(page.getByTestId('sld-route-status')).toHaveText('Routed automatically');
-  await expect(page.getByTestId('sld-route-note')).toContainText('Drag a run of the blue line');
+  await expect(page.getByTestId('sld-route-note')).toContainText('Drag the line to slide it');
   await expect(page.getByTestId('sld-route-reset')).toHaveCount(0);
   // The bar takes the place of the hint, and the diagram does not move for it.
   await expect(page.getByTestId('sld-canvas-hint')).toHaveCount(0);
@@ -551,4 +563,134 @@ test('IEEE 14: every line is picked by a click on the middle of its element, a c
   await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_16');
   const drawer = (await page.getByTestId('bottom-drawer').boundingBox())!;
   expect(drawer.height).toBeGreaterThan(150);
+});
+
+test('WSCC 9: a bend of a line moved by hand is not put on the line beside it, short of it or just past it', async ({
+  page,
+}) => {
+  const stem = `route-e2e-bend-${Date.now()}`;
+
+  await page.goto('/');
+  await openCase(page, 'wscc9.xlsx');
+  await settled(page);
+  await openCopy(page, stem);
+  const opened = await settled(page);
+  const id = 'line-Line_8';
+  const before = opened.edges[id]!.points;
+  const beside = opened.edges['line-Line_3']!.points;
+  // Both drop square from one bar to the next, side by side.
+  expect(before).toHaveLength(2);
+  expect(beside).toHaveLength(2);
+  expect(beside[0]![0]).toBe(beside[1]![0]);
+  const x = beside[0]![0];
+  const y = Math.round((before[0]![1] + before[1]![1]) / 2);
+  /** How far the bend of the picked line is from the line beside it. */
+  const off = (route: Points): number => Math.abs(route[1]![0] - x);
+
+  // ---- pulled to two short of the line beside it ----
+  await clickLine(page, id);
+  const plus = (await page.locator('[data-testid="sld-route-add-0"] circle').boundingBox())!;
+  const short = await onScreen(page, [x + 2, y]);
+  await page.mouse.move(plus.x + plus.width / 2, plus.y + plus.height / 2);
+  await page.mouse.down();
+  await page.mouse.move((plus.x + short.x) / 2, (plus.y + short.y) / 2, { steps: 5 });
+  await page.mouse.move(short.x, short.y, { steps: 5 });
+  // Held there, it is shown where it is clear, and the bar says what is in the way.
+  const note = page.getByTestId('sld-route-note');
+  await expect(note).toHaveAttribute('data-tone', 'refused');
+  await expect(note).toContainText('a bend of it would be too close to line Line_3');
+  await expect(page.getByTestId('sld-route-refused')).toBeVisible();
+  await Promise.all([layoutWritten(page), page.mouse.up()]);
+  const pulled = (await settled(page)).edges[id]!.points;
+  expect(pulled).toHaveLength(3);
+  // As far short of it as two lines side by side keep: no corner on the line.
+  expect(off(pulled)).toBeGreaterThanOrEqual(12);
+  expect(pulled[1]![0]).toBeGreaterThan(x);
+  await expect(note).toContainText('Nearest clear place');
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  // The line beside it did not have to give way.
+  expect((await drawing(page)).edges['line-Line_3']!.points).toEqual(beside);
+
+  // ---- the bend moved alone to one past that line ----
+  await page.keyboard.down('Shift');
+  await Promise.all([layoutWritten(page), dragFrom(page, pulled[1]!, [x - 1 - pulled[1]![0], 0])]);
+  await page.keyboard.up('Shift');
+  const crossed = (await settled(page)).edges[id]!.points;
+  expect(crossed).toHaveLength(3);
+  expect(off(crossed)).toBeGreaterThanOrEqual(12);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  await page.getByTestId('sld-route-done').click();
+
+  // ---- with the values of a power flow on it, and after a reload ----
+  await runPowerFlow(page);
+  await settled(page);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(await labelProblems(page)).toEqual([]);
+  await page.reload();
+  await openCase(page, `${stem}.xlsx`);
+  expect((await settled(page)).edges[id]!.points).toEqual(crossed);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+});
+
+test.describe('in a short window', () => {
+  test.use({ viewport: { width: 1433, height: 485 } });
+
+  test('IEEE 14: the drawer goes down to its whole tab strip, opens with rows that can be clicked, and the bar of a line says what it says in full', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await openCase(page, 'ieee14_full.xlsx');
+    await settled(page);
+    const drawer = page.getByTestId('bottom-drawer');
+    const strip = page.getByRole('tablist', { name: 'Bottom drawer tabs' });
+    const viewport = page.viewportSize()!;
+
+    // ---- dragged down, it is the strip, all of it ----
+    const handle = (await page
+      .getByRole('separator', { name: 'Resize bottom drawer' })
+      .boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + handle.width / 2, viewport.height - 2, { steps: 8 });
+    await page.mouse.up();
+    await expect(drawer).toHaveAttribute('data-collapsed', 'true');
+    const shut = (await strip.boundingBox())!;
+    expect(shut.height).toBeGreaterThanOrEqual(30);
+    expect(shut.y + shut.height).toBeLessThanOrEqual(viewport.height);
+    expect((await drawer.boundingBox())!.height).toBeLessThan(40);
+
+    // ---- the button at the end of the strip opens it ----
+    const toggle = page.getByRole('button', { name: 'Open the drawer' });
+    await toggle.click();
+    await expect(drawer).toHaveAttribute('data-collapsed', 'false');
+    await expect(
+      page.getByRole('button', { name: 'Collapse the drawer to its tabs' }),
+    ).toBeVisible();
+    await page.getByRole('tab', { name: 'Lines' }).click();
+    // Two rows under the bar of the table, neither behind it nor off the window.
+    for (const line of ['Line_1', 'Line_2']) {
+      const cell = (await page.getByTestId(`lines-grid-cell-line-${line}-idx`).boundingBox())!;
+      expect(cell.y + cell.height).toBeLessThanOrEqual(viewport.height);
+      const filter = (await page.getByTestId('lines-grid-filter').boundingBox())!;
+      expect(cell.y).toBeGreaterThanOrEqual(filter.y + filter.height);
+    }
+    await page.getByTestId('lines-grid-cell-line-Line_1-idx').click();
+    const editor = page.getByTestId('sld-route-editor');
+    await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_1');
+
+    // ---- what the bar says about a move is not cut off ----
+    const note = page.getByTestId('sld-route-note');
+    await expect(note).toContainText('Esc to finish.');
+    await page.getByTestId('sld-route-add-bend').click();
+    await expect(note).toContainText('Bend added.');
+    const shown = await note.evaluate((el) => ({
+      cut: el.scrollWidth > el.clientWidth + 1,
+      lines: Math.round(el.getBoundingClientRect().height / 14),
+    }));
+    expect(shown.cut).toBe(false);
+    expect(shown.lines).toBeGreaterThan(1);
+    // Esc lets go of the line, as the bar says.
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+  });
 });
