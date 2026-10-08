@@ -3,9 +3,12 @@
  *
  *   open IEEE 14 -> the Export menu over the diagram says in its name that a
  *   figure is in it, and lists it -> the dialog shows a figure a browser can
- *   draw, black on white -> before a power flow the values cannot be chosen,
- *   and the reason stands over them -> run a power flow -> the figure has
- *   the voltages, the flows and the powers
+ *   draw, black on white -> before a power flow the values cannot be chosen:
+ *   their boxes are empty, each says what it needs, and what to do stands
+ *   over them -> run a power flow -> the figure has the voltages, the flows
+ *   and the powers, and an arrow on every line, clear of every other line
+ *   -> fitted to the dialog the figure is too small to read, the dialog
+ *   says so, and shows it at its own size when asked
  *
  *   the figure is the diagram as it is drawn: every line and connector on
  *   screen runs through the same points in the figure, every device stands
@@ -90,6 +93,8 @@ interface FigureShapes {
   boxes: { x: number; y: number; width: number; height: number }[];
   /** The middle of every dot. */
   dots: [number, number][];
+  /** The three corners of every arrow of a flow, the tip first. */
+  arrows: [number, number][][];
   /** Every colour anything is drawn in. */
   colours: string[];
   /** The names of the elements of the document. */
@@ -106,8 +111,19 @@ async function shapesOf(page: Page, svg: string): Promise<FigureShapes> {
     const root = doc.documentElement;
     const round = (value: number): number => Math.round(value * 2) / 2;
     const lines: string[] = [];
+    const arrows: [number, number][][] = [];
     for (const path of doc.querySelectorAll('path')) {
       const d = path.getAttribute('d') ?? '';
+      // The arrow of a flow: three corners, closed, filled and not stroked.
+      if (/^M[^MLCZ]+L[^MLCZ]+L[^MLCZ]+Z$/.test(d.trim()) && !path.hasAttribute('stroke')) {
+        const at = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+        arrows.push([
+          [at[0]!, at[1]!],
+          [at[2]!, at[3]!],
+          [at[4]!, at[5]!],
+        ]);
+        continue;
+      }
       // A conductor: straight runs, stroked and not filled, cut square at its
       // ends (the strokes of a symbol are rounded) and solid (a tether is dashed).
       if (path.getAttribute('fill') !== 'none' || /[CZ]/.test(d)) continue;
@@ -141,6 +157,7 @@ async function shapesOf(page: Page, svg: string): Promise<FigureShapes> {
           Number(el.getAttribute('cx')),
           Number(el.getAttribute('cy')),
         ]),
+      arrows,
       colours: [...colours].sort(),
       tags: [...new Set([...doc.querySelectorAll('*')].map((el) => el.tagName))].sort(),
       width: Number(root.getAttribute('width')),
@@ -162,6 +179,19 @@ async function download(
   await expect(page.getByTestId('sld-figure-status')).toContainText(`Saved ${name}`);
   return { name, bytes: readFileSync(await file.path()) };
 }
+
+/** How far `p` is from the run from `a` to `b`. */
+function offRun(p: [number, number], a: [number, number], b: [number, number]): number {
+  const [ux, uy] = [b[0] - a[0], b[1] - a[1]];
+  const length = ux * ux + uy * uy;
+  const t =
+    length === 0 ? 0 : Math.min(1, Math.max(0, ((p[0] - a[0]) * ux + (p[1] - a[1]) * uy) / length));
+  return Math.hypot(a[0] + t * ux - p[0], a[1] + t * uy - p[1]);
+}
+
+/** How near `p` comes to the line through `points`. */
+const offLine = (p: [number, number], points: readonly [number, number][]): number =>
+  Math.min(...points.slice(1).map((b, i) => offRun(p, points[i]!, b)));
 
 /** The points an edge on screen runs through, as `shapesOf` writes those of a line. */
 const onScreen = (points: readonly [number, number][]): string =>
@@ -205,9 +235,14 @@ test('the figure is the diagram as it is drawn, and each file is what it says', 
   expect(plain.colours).toEqual(['#000000', '#ffffff']);
   expect(plain.texts.filter((text) => /^BUS\d+$/.test(text))).toHaveLength(14);
 
-  // Before a power flow its values cannot be chosen, and the reason stands over them.
+  // Before a power flow its values cannot be chosen: each box is empty and
+  // says what it needs, and what to do about it stands over them.
   for (const id of ['voltages', 'angles', 'flows', 'powers', 'limit-marks']) {
     await expect(page.getByTestId(`sld-figure-${id}`)).toBeDisabled();
+    await expect(page.getByTestId(`sld-figure-${id}`)).not.toBeChecked();
+    await expect(page.getByTestId(`sld-figure-${id}-unavailable`)).toHaveText(
+      '(needs a power flow)',
+    );
   }
   await expect(page.getByTestId('sld-figure-no-pflow')).toContainText(
     'come from a power flow, and none has run yet. Close this, press Run PF',
@@ -226,8 +261,31 @@ test('the figure is the diagram as it is drawn, and each file is what it says', 
   const drawn = await settled(page);
   await openFigure(page);
   await expect(page.getByTestId('sld-figure-voltages')).toBeEnabled();
+  await expect(page.getByTestId('sld-figure-voltages')).toBeChecked();
+  await expect(page.getByTestId('sld-figure-voltages-unavailable')).toHaveCount(0);
   const svg = await previewSvg(page);
   const figure = await shapesOf(page, svg);
+
+  // Fitted to the dialog, a figure this tall is shown well under its size:
+  // the dialog says at what fraction, which is what the browser drew it at,
+  // and shows it at its own size when asked.
+  const note = page.getByTestId('sld-figure-fit-note');
+  await expect(note).toContainText('too small to read its text');
+  const percent = Number(/shown at (\d+)% of its size/.exec(await note.innerText())?.[1]);
+  const fitted = await preview.evaluate((img: HTMLImageElement) => {
+    const box = img.getBoundingClientRect();
+    return Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+  });
+  expect(Math.abs(fitted * 100 - percent)).toBeLessThanOrEqual(1);
+  expect(percent).toBeLessThan(80);
+  await page.getByTestId('sld-figure-fit-note-zoom').click();
+  await expect(page.getByTestId('sld-figure-zoom-100')).toHaveAttribute('aria-pressed', 'true');
+  await expect(note).toBeHidden();
+  expect(
+    await preview.evaluate((img: HTMLImageElement) => img.getBoundingClientRect().width),
+  ).toBeCloseTo(figure.width, 0);
+  await page.getByTestId('sld-figure-zoom-fit').click();
+  await expect(note).toBeVisible();
   expect(figure.texts.filter((text) => / pu$/.test(text)).length).toBeGreaterThan(10);
   expect(figure.texts.filter((text) => /^-?\d+\.\d\d MW$/.test(text)).length).toBeGreaterThan(10);
   // Five generators and eleven loads, less any the diagram has no place for.
@@ -243,6 +301,31 @@ test('the figure is the diagram as it is drawn, and each file is what it says', 
       onScreen(edge.points),
     );
   }
+  // Every line carries the arrow of its flow, on the line as it is on
+  // screen and clear of every other line, transformer and connector there:
+  // an arrow where two lines cross would point into the other one.
+  const branches = edges.filter(([id]) => id.startsWith('line-'));
+  expect(branches).toHaveLength(16);
+  expect(figure.arrows).toHaveLength(branches.length);
+  const carried = new Set<string>();
+  for (const corners of figure.arrows) {
+    const [tip, left, right] = corners as [[number, number], [number, number], [number, number]];
+    const middle: [number, number] = [
+      (2 * tip[0] + left[0] + right[0]) / 4,
+      (2 * tip[1] + left[1] + right[1]) / 4,
+    ];
+    const own = branches.filter(([, edge]) => offLine(middle, edge.points) < NEAR);
+    expect(own, `an arrow at ${middle[0]}, ${middle[1]} is on one line`).toHaveLength(1);
+    const [ownId] = own[0]!;
+    carried.add(ownId);
+    for (const [id, edge] of edges) {
+      if (id === ownId) continue;
+      const off = Math.min(...corners.map((corner) => offLine(corner, edge.points)));
+      expect(off, `the arrow of ${ownId} is clear of ${id}`).toBeGreaterThanOrEqual(6 - NEAR);
+    }
+  }
+  expect(carried.size).toBe(branches.length);
+
   // Every generator, load and shunt stands in the box the browser gave it.
   const devices = Object.entries(drawn.nodes).filter(([, node]) => node.type !== 'bus');
   expect(devices).toHaveLength(18);
