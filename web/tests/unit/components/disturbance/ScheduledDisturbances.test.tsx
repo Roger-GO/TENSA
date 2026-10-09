@@ -33,8 +33,11 @@ vi.mock('@/api/queries', async () => {
 });
 
 // The dialog's chunk is imported and transformed the first time a test opens
-// it, which on a loaded machine takes longer than the default wait.
+// it, which on a loaded machine takes longer than the default wait. The test
+// that waits for it needs as long itself, or it is ended at the default five
+// seconds with the wait still running.
 const COLD_LOAD_MS = 15_000;
+vi.setConfig({ testTimeout: 2 * COLD_LOAD_MS });
 
 function withQueryClient(ui: ReactNode) {
   const client = new QueryClient({

@@ -27,7 +27,10 @@ import { LIMITS_TOPOLOGY, limitsPflow } from '../../helpers/limitsCase';
 
 // A lazily loaded panel's chunk is imported and transformed the first time a
 // test shows it, which on a loaded machine takes longer than the default wait.
+// The test that waits for it needs as long itself, or it is ended at the
+// default five seconds with the wait still running.
 const COLD_LOAD_MS = 15_000;
+vi.setConfig({ testTimeout: 2 * COLD_LOAD_MS });
 
 // useCurrentTopology is read by the per-bucket grids that BottomDrawer
 // mounts. Stub it to a deterministic empty topology so the grids
