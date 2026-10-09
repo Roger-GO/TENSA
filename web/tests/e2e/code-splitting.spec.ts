@@ -7,7 +7,8 @@
  * - the first load fetches the entry chunk and React, and none of the panels
  *   that come later (the diagram, the Analysis tab, the Arrow decoder, the
  *   command palette);
- * - the diagram's chunk arrives when a case is loaded and the Analysis tab's
+ * - the diagram's chunk arrives when a case is loaded, with the chunk of the
+ *   library it draws with (React Flow), and the Analysis tab's
  *   when that tab is opened, and the views inside the tab (EIG, CPF, SE) wait
  *   for their own sub-tab;
  * - the element tables load as their drawer tab is shown: the Buses table is the
@@ -83,6 +84,7 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   expect([...assets.keys()]).toEqual(expect.arrayContaining(['index', 'vendor-react']));
   for (const later of [
     'SldCanvas',
+    'vendor-flow',
     'AnalysisTab',
     'AnalyzePanel',
     'arrow',
@@ -114,6 +116,8 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   }).toPass({ timeout: 30_000 });
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(BUS_COUNT, { timeout: 90_000 });
   expect(assets.has('SldCanvas')).toBe(true);
+  // React Flow is a chunk of its own, fetched with the diagram that draws with it.
+  expect(assets.has('vendor-flow')).toBe(true);
   expect(assets.has('AnalysisTab')).toBe(false);
 
   // ---- open another table: its chunk arrives ---------------------------------
@@ -142,7 +146,7 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
       'public, max-age=31536000, immutable',
     );
   }
-  for (const name of ['index', 'vendor-react', 'SldCanvas', 'AnalysisTab']) {
+  for (const name of ['index', 'vendor-react', 'SldCanvas', 'vendor-flow', 'AnalysisTab']) {
     expect(assets.get(name)?.contentEncoding, `${name} content-encoding`).toBe('gzip');
   }
 

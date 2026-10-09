@@ -64,6 +64,18 @@ export default defineConfig({
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) {
             return 'vendor-react';
           }
+          // React Flow, with the d3 modules it pans, zooms and drags by, is a
+          // third of what the diagram loads and changes as seldom as React. In
+          // a chunk of its own it stays cached across releases, and the chunk
+          // of the diagram itself is the app's code alone. Only the diagram
+          // imports it, so it is fetched with the diagram and not before. Its
+          // stylesheet stays with the diagram's.
+          if (
+            !id.endsWith('.css') &&
+            /[\\/]node_modules[\\/](@xyflow[\\/](react|system)|d3-[a-z]+|classcat)[\\/]/.test(id)
+          ) {
+            return 'vendor-flow';
+          }
           // html-to-image is only reached by a dynamic import (a PNG export).
           // Named here because its own entry file is called ``index.js``, and a
           // second chunk called ``index-<hash>.js`` next to the app's is
