@@ -3600,9 +3600,28 @@ function SldCanvasInner({
         setTidying(false);
         return true;
       };
+      // What the plan is made for: the diagram as it is arranged now. The
+      // plan comes back a moment later, and by then another case may be
+      // open, an element added or deleted, or a move taken back: a plan for
+      // another diagram is not put on this one.
+      const madeFor = arrangementOf(nodesRef.current, graph.edges);
       job.done.then(
         (plan) => {
-          if (finished()) applyTidy(plan, relayout);
+          if (!finished()) return;
+          const now = baseGraphRef.current;
+          if (
+            now === null ||
+            !sameArrangement(madeFor, arrangementOf(nodesRef.current, now.edges))
+          ) {
+            setTidyNote('Not tidied: the diagram changed meanwhile');
+            toast.info('The diagram changed while it was being tidied', {
+              description:
+                'Nothing was changed. Press Tidy diagram again to tidy the diagram as it is now.',
+              duration: 8_000,
+            });
+            return;
+          }
+          applyTidy(plan, relayout);
         },
         (err: unknown) => {
           if (!finished()) return;

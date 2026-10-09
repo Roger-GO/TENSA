@@ -1179,6 +1179,34 @@ describe('Tidy diagram on a large diagram', () => {
     expect(putSidecarSpy).not.toHaveBeenCalled();
   });
 
+  it('puts no plan on a diagram that changed while it was made, and says so', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await openUntidy();
+    const job = heldTidy();
+
+    run('tidy');
+    // A node is moved under the plan (an Undo, an alignment, another case).
+    const at = positionOf('3');
+    nudgeTo('3', { x: at.x + 48, y: at.y });
+    const moved = { picture: picture(), routes: routes(), steps: labels() };
+
+    await job.finish();
+    expect(info).toHaveBeenCalledWith(
+      'The diagram changed while it was being tidied',
+      expect.objectContaining({
+        description:
+          'Nothing was changed. Press Tidy diagram again to tidy the diagram as it is now.',
+      }),
+    );
+    expect(screen.getByTestId('sld-tidy-note')).toHaveTextContent(
+      'Not tidied: the diagram changed meanwhile',
+    );
+    expect(screen.getByTestId('sld-tidy')).toBeEnabled();
+    expect(picture()).toEqual(moved.picture);
+    expect(routes()).toEqual(moved.routes);
+    expect(labels()).toEqual(moved.steps);
+  });
+
   it('says so when the work fails, and changes nothing', async () => {
     const error = vi.spyOn(toast, 'error');
     await openUntidy();
