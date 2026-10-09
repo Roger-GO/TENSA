@@ -7,24 +7,32 @@ allow-list held only port-less origins and the SPA's
 ``serve`` now binds the socket first, builds the app from the real port, and
 hands uvicorn that same socket.
 
-uvicorn's ``Server`` is replaced by a fake that records what it was given, so
+The server ``serve`` runs is replaced by a fake that records what it was given, so
 the tests exercise ``serve``'s wiring without a listening server.
+
+The last section is about stopping: a server asked to stop (Ctrl+C, SIGTERM) used
+to wait without end for the page's job-event socket, and a SIGTERM ended the
+process before ``serve`` had stopped what it started.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import signal
 import socket
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import FrameType, SimpleNamespace
 from typing import Any
 from unittest import mock
 
 import pytest
 import typer.main
+import uvicorn
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
@@ -49,15 +57,17 @@ def _restore_logging() -> Iterator[None]:
 
 
 class _FakeServer:
-    """Stands in for ``uvicorn.Server``: records ``run(sockets=...)`` and, like
-    a server that came up, flips ``started`` unless told not to."""
+    """Stands in for the server ``serve`` runs: records ``run(sockets=...)`` and,
+    like a server that came up, flips ``started`` unless told not to."""
 
     instances: list[_FakeServer] = []
     start_ok = True
 
-    def __init__(self, config: Any) -> None:
+    def __init__(self, config: Any, *, app: Any = None) -> None:
         self.config = config
+        self.app = app
         self.started = False
+        self.should_exit = False
         self.sockets: list[socket.socket] | None = None
         self.bound_port_during_run: int | None = None
         _FakeServer.instances.append(self)
@@ -99,7 +109,7 @@ def fake_server(
 ) -> type[_FakeServer]:
     _FakeServer.instances = []
     _FakeServer.start_ok = True
-    monkeypatch.setattr(cli.uvicorn, "Server", _FakeServer)
+    monkeypatch.setattr(cli, "SessionsFirstServer", _FakeServer)
     # Seeding copies ANDES example files into the workspace; irrelevant here.
     monkeypatch.setattr(cli, "seed_example_cases", lambda _ws: [])
     return _FakeServer
@@ -755,3 +765,169 @@ def test_serve_reload_does_not_inherit_the_logging_options_of_an_earlier_run(
         assert os.environ["ANDES_APP_RELOAD_LOG_JSON"] == ""
         cli._reload_app_factory()
     assert not (tmp_path / "stale.log").exists()
+
+
+# ----------------------------------------------------------------- stopping
+
+
+def test_serve_bounds_the_wait_for_requests_at_shutdown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+) -> None:
+    """uvicorn waits for the requests it is answering without end unless told how
+    long, and the server is handed the app whose sessions it ends first."""
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    (server,) = fake_server.instances
+    assert server.config.timeout_graceful_shutdown == cli._GRACEFUL_SHUTDOWN_SECONDS
+    assert 0 < cli._GRACEFUL_SHUTDOWN_SECONDS <= 5
+    assert server.app is built_apps[0]["app"]
+
+    run_kwargs: dict[str, Any] = {}
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: run_kwargs.update(kw))
+    with mock.patch.dict(os.environ):
+        result = runner.invoke(
+            cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
+        )
+    assert result.exit_code == 0, result.output
+    assert run_kwargs["timeout_graceful_shutdown"] == cli._GRACEFUL_SHUTDOWN_SECONDS
+
+
+class _RecordingManager:
+    """Stands in for the session manager: notes its ``shutdown`` in ``order``."""
+
+    def __init__(self, order: list[str], *, fails: bool = False) -> None:
+        self._order = order
+        self._fails = fails
+
+    async def shutdown(self) -> None:
+        self._order.append("sessions")
+        if self._fails:
+            raise RuntimeError("a worker would not go")
+
+
+def _sessions_first_server(
+    monkeypatch: pytest.MonkeyPatch, order: list[str], manager: object | None
+) -> cli.SessionsFirstServer:
+    """A ``SessionsFirstServer`` whose uvicorn shutdown only notes that it ran."""
+
+    async def _uvicorn_shutdown(
+        self: uvicorn.Server, sockets: list[socket.socket] | None = None
+    ) -> None:
+        order.append("uvicorn")
+
+    monkeypatch.setattr(uvicorn.Server, "shutdown", _uvicorn_shutdown)
+    app = FastAPI()
+    if manager is not None:
+        app.state.session_manager = manager
+    return cli.SessionsFirstServer(uvicorn.Config(app), app=app)
+
+
+def test_the_server_ends_the_sessions_before_uvicorn_waits_for_the_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+    server = _sessions_first_server(monkeypatch, order, _RecordingManager(order))
+    asyncio.run(server.shutdown())
+    assert order == ["sessions", "uvicorn"]
+
+
+def test_the_server_still_shuts_down_when_the_sessions_cannot_be_ended(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    order: list[str] = []
+    server = _sessions_first_server(
+        monkeypatch, order, _RecordingManager(order, fails=True)
+    )
+    with caplog.at_level("WARNING", logger="tensa.serve"):
+        asyncio.run(server.shutdown())
+    assert order == ["sessions", "uvicorn"]
+    assert "could not end the sessions" in caplog.text
+
+
+def test_the_server_shuts_down_without_a_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lifespan makes the manager, so a server whose startup failed has none."""
+    order: list[str] = []
+    server = _sessions_first_server(monkeypatch, order, None)
+    asyncio.run(server.shutdown())
+    assert order == ["uvicorn"]
+
+
+@pytest.fixture
+def sigterm_noted() -> Iterator[list[int]]:
+    """A SIGTERM handler that notes the signal, in place of the default one, which
+    would end the test run. Yields what it noted."""
+    noted: list[int] = []
+
+    def _note(signum: int, _frame: FrameType | None) -> None:
+        noted.append(signum)
+
+    previous = signal.signal(signal.SIGTERM, _note)
+    try:
+        yield noted
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def test_a_stop_signal_is_held_while_the_block_runs(sigterm_noted: list[int]) -> None:
+    server = SimpleNamespace(should_exit=False)
+    received: list[int] = []
+    with cli._stop_signals_held(server, received):  # type: ignore[arg-type]
+        signal.raise_signal(signal.SIGTERM)
+        # Noted, and the server asked to exit: for one uvicorn is not listening for.
+        assert received == [signal.SIGTERM]
+        assert server.should_exit
+    # The handler that was there before did not see it, and is back.
+    assert sigterm_noted == []
+    signal.raise_signal(signal.SIGTERM)
+    assert sigterm_noted == [signal.SIGTERM]
+    assert received == [signal.SIGTERM]
+
+
+def test_stop_signals_are_left_alone_off_the_main_thread(sigterm_noted: list[int]) -> None:
+    """``signal.signal`` raises off the main thread; the block must still run."""
+    handler = signal.getsignal(signal.SIGTERM)
+    ran: list[bool] = []
+
+    def _block() -> None:
+        with cli._stop_signals_held(SimpleNamespace(), []):  # type: ignore[arg-type]
+            ran.append(signal.getsignal(signal.SIGTERM) is handler)
+
+    thread = threading.Thread(target=_block)
+    thread.start()
+    thread.join(5)
+    assert ran == [True]
+
+
+def test_sigterm_ends_the_process_only_after_serve_stopped_what_it_started(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    warm_starts: list[_FakeWarm],
+    sigterm_noted: list[int],
+) -> None:
+    """uvicorn raises the SIGTERM it shut down on again as it returns. With the
+    default handler that ended the process inside ``run``, and the background
+    code generation was left running."""
+    stopped_when_signalled: list[bool] = []
+
+    def _note_order(signum: int, _frame: FrameType | None) -> None:
+        sigterm_noted.append(signum)
+        stopped_when_signalled.extend(w.stopped for w in warm_starts)
+
+    signal.signal(signal.SIGTERM, _note_order)
+    run = fake_server.run
+
+    def _run(self: _FakeServer, sockets: list[socket.socket] | None = None) -> None:
+        run(self, sockets)
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr(fake_server, "run", _run)
+    result = runner.invoke(cli.app, ["serve", "--workspace", str(tmp_path / "ws")])
+    assert result.exit_code == 0, result.output
+    # The signal reached the handler ``serve`` found, once, after the warm-up's stop.
+    assert sigterm_noted == [signal.SIGTERM]
+    assert stopped_when_signalled == [True]
+    assert fake_server.instances[0].should_exit

@@ -255,3 +255,48 @@ def test_invoke_on_already_dead_session_does_not_500() -> None:
         assert "worker stopped unexpectedly" in str(excinfo.value)
 
     asyncio.run(_run())
+
+
+# --- a worker that a close ended is not a crash ------------------------------
+
+
+def test_a_worker_ended_by_a_close_is_logged_as_that_and_a_crash_as_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A close does not wait for the request in flight, and a server asked to stop
+    closes every session: the request then reads a torn pipe, which is no crash."""
+
+    class _EndedByClose(_DeadData):
+        def __init__(self, sess_ref: list[_Session]) -> None:
+            super().__init__(EOFError("worker gone"))
+            self._sess_ref = sess_ref
+
+        def recv(self) -> dict[str, Any]:
+            # What ``_close_session`` does before it ends the worker.
+            self._sess_ref[0].closed = True
+            return super().recv()
+
+    async def _run() -> None:
+        mgr = SessionManager()
+        holder: list[_Session] = []
+        closing = _Session(
+            session_id="closing",
+            process=_FakeProc(),
+            ctrl=_FakeCtrl(),
+            data=_EndedByClose(holder),
+            abort_event=None,
+        )
+        holder.append(closing)
+        mgr._sessions["closing"] = closing
+        mgr._sessions["crashed"] = _make_dead_session("crashed")
+        for session_id in ("closing", "crashed"):
+            with pytest.raises(WorkerDiedError):
+                await mgr.invoke(session_id, "reload")
+
+    with caplog.at_level("INFO", logger="tensa.session"):
+        asyncio.run(_run())
+
+    by_level = {r.levelname: r.getMessage() for r in caplog.records}
+    assert "session closing was closed while a request waited" in by_level["INFO"]
+    assert "session crashed worker died mid-RPC" in by_level["WARNING"]
+    assert len(caplog.records) == 2

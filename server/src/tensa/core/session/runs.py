@@ -129,6 +129,15 @@ class RunsMixin(RegistryMixin):
                 on_frame=_on_frame,
                 timeout=300.0,
             )
+        except asyncio.CancelledError:
+            # Only the manager's shutdown cancels a run. A client attached to it
+            # waits for the event that ends the stream, and its handler holds the
+            # server's shutdown up until it comes: finish the buffer before the
+            # task goes, as the sweep's driver does.
+            await self._finish_run_buffer(
+                run_buf, "error", error=("session-expired", "the server is shutting down")
+            )
+            raise
         except WorkerDiedError as exc:
             # The worker crashed mid-stream; ``invoke_streaming`` already marked
             # the session dead. Finish the buffer as a recoverable error carrying

@@ -171,8 +171,20 @@ class RegistryMixin(JobsMixin):
         with self._registry_lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
-        for sess in sessions:
-            await self._close_session(sess, reason="shutdown")
+        # All at once: a worker in the middle of a run is given two seconds before
+        # it is terminated, and a server asked to stop cannot spend that once for
+        # every session. A close that fails does not keep the others from theirs.
+        results = await asyncio.gather(
+            *(self._close_session(sess, reason="shutdown") for sess in sessions),
+            return_exceptions=True,
+        )
+        for sess, result in zip(sessions, results, strict=True):
+            if isinstance(result, BaseException):
+                log.warning(
+                    "could not close session %s at shutdown: %r",
+                    sess.session_id,
+                    result,
+                )
 
     async def create_session(self) -> str:
         """Spawn a new worker subprocess and register it. Returns the session_id.
@@ -298,14 +310,24 @@ class RegistryMixin(JobsMixin):
         tolerates an already-dead, already-popped session.
         """
         err = WorkerDiedError()
+        closed_on_purpose = sess.closed
         sess.closed = True
         sess.death_reason = err.detail
-        log.warning(
-            "session %s worker died mid-RPC (%s: %s); marking session dead",
-            sess.session_id,
-            type(exc).__name__,
-            exc,
-        )
+        if closed_on_purpose:
+            # A close does not wait for the request in flight (a server asked to
+            # stop ends every session this way): the worker was ended, it did not
+            # crash, and a warning for each would read as one.
+            log.info(
+                "session %s was closed while a request waited for its worker",
+                sess.session_id,
+            )
+        else:
+            log.warning(
+                "session %s worker died mid-RPC (%s: %s); marking session dead",
+                sess.session_id,
+                type(exc).__name__,
+                exc,
+            )
         # Drop from the registry so subsequent invoke() calls fast-fail with the
         # death-reason SessionExpiredError rather than racing on the dead pipe.
         with self._registry_lock:

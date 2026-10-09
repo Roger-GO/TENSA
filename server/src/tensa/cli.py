@@ -30,6 +30,7 @@ import enum
 import logging
 import multiprocessing
 import os
+import signal
 import socket
 import sys
 import threading
@@ -37,6 +38,7 @@ import time
 import webbrowser
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import FrameType
 from typing import Annotated
 from urllib.parse import urlparse
 
@@ -86,6 +88,18 @@ _WILDCARD_BINDS = frozenset({"0.0.0.0", "::", ""})
 # ``tensa desktop`` has no ``--bind``: its window is on this machine, so the
 # server listens on loopback and nowhere else.
 _DESKTOP_HOST = "127.0.0.1"
+
+# How long a server that was asked to stop (Ctrl+C, SIGTERM) waits for the
+# requests still being answered before it cancels them. uvicorn waits without
+# end unless told otherwise, and a terminal or a service manager wants its
+# answer within a few seconds.
+_GRACEFUL_SHUTDOWN_SECONDS = 3
+
+# The signals besides Ctrl+C that ask a server to stop: ``kill <pid>`` and a
+# service manager send SIGTERM, and Ctrl+Break on Windows is SIGBREAK.
+_STOP_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGBREAK") if hasattr(signal, name)
+)
 
 
 class LogLevel(enum.StrEnum):
@@ -270,6 +284,36 @@ def _root(
     flag."""
 
 
+class SessionsFirstServer(uvicorn.Server):
+    """uvicorn's server, which ends the sessions before it waits for the handlers.
+
+    Asked to stop, uvicorn waits for the requests it is answering and only then
+    runs the app's shutdown, which is where the sessions are closed. A request
+    that waits for a worker in the middle of a long run would hold that up for as
+    long as the run takes, with its worker still running. Ended first, the
+    sessions take their workers and scratch directories with them, each request
+    on one is answered at once (its session is gone), and what uvicorn is left to
+    wait for is short. ``tensa desktop`` does the same when its window closes
+    (``run_window``'s ``close``).
+    """
+
+    def __init__(self, config: uvicorn.Config, *, app: FastAPI) -> None:
+        super().__init__(config)
+        self._app = app
+
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        # The app's lifespan creates the manager once the server starts.
+        manager = getattr(self._app.state, "session_manager", None)
+        if manager is not None:
+            try:
+                await manager.shutdown()
+            except Exception:  # noqa: BLE001 - the server must still stop
+                logging.getLogger("tensa.serve").warning(
+                    "could not end the sessions before the shutdown", exc_info=True
+                )
+        await super().shutdown(sockets=sockets)
+
+
 @app.command()
 def serve(
     bind: str = typer.Option(
@@ -447,6 +491,7 @@ def serve(
                 port=reload_port,
                 log_level=log_level.value,
                 access_log=False,
+                timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_SECONDS,
             )
         return
 
@@ -478,8 +523,9 @@ def serve(
     # quiet while the UI polls. ``log_config=None`` keeps uvicorn from configuring
     # logging itself, so what it logs (an unhandled exception in a route, with its
     # traceback) goes through the handlers ``configure_logging`` installed, in their
-    # format and into the log file.
-    server = uvicorn.Server(
+    # format and into the log file. A server asked to stop ends the sessions,
+    # then gives the requests still being answered a few seconds and no more.
+    server = SessionsFirstServer(
         uvicorn.Config(
             fastapi_app,
             host=bind,
@@ -487,7 +533,9 @@ def serve(
             log_level=log_level.value,
             log_config=None,
             access_log=False,
-        )
+            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_SECONDS,
+        ),
+        app=fastapi_app,
     )
 
     # uvicorn stays quiet about the address when handed a ready-made socket,
@@ -506,16 +554,56 @@ def serve(
             log=log,
         )
 
+    stopped_by: list[int] = []
     try:
-        with _background_codegen_warmup(enabled=not no_warm_cache, log=log):
+        with (
+            _stop_signals_held(server, stopped_by),
+            _background_codegen_warmup(enabled=not no_warm_cache, log=log),
+        ):
             server.run(sockets=[sock])
     except KeyboardInterrupt:  # pragma: no cover - interactive Ctrl+C
         pass
     finally:
         sock.close()
+    if stopped_by:
+        # Everything this command started has been ended: the signal now ends the
+        # process the way it would have, so whoever sent it sees the same status.
+        signal.raise_signal(stopped_by[-1])
     if not server.started:
         # Mirror ``uvicorn.run``: a server that never came up is a failure.
         raise typer.Exit(code=_STARTUP_FAILURE)
+
+
+@contextlib.contextmanager
+def _stop_signals_held(server: uvicorn.Server, received: list[int]) -> Iterator[None]:
+    """Note a SIGTERM (or a Ctrl+Break) in ``received`` instead of letting it end
+    the process, for as long as the block runs.
+
+    uvicorn shuts the server down on these signals and then raises the signal
+    again with the handler it found, so that the process ends as it would have
+    without uvicorn. With the default handler that ends it on the spot, inside
+    ``server.run``: nothing after it runs, and the background code generation is
+    left running with its marker beside the cache. (Ctrl+C unwinds, as a
+    ``KeyboardInterrupt``.) The handler here only notes the signal, so the block
+    is left the ordinary way and the caller raises the signal once more when it
+    has ended what it started. It also asks the server to exit, for a signal that
+    comes before uvicorn listens for it.
+    """
+    # A handler can only be set from the main thread.
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _note(signum: int, _frame: FrameType | None) -> None:
+        received.append(signum)
+        server.should_exit = True
+
+    previous = {sig: signal.signal(sig, _note) for sig in _STOP_SIGNALS}
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 @contextlib.contextmanager

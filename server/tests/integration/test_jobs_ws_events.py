@@ -15,12 +15,17 @@ pass without spawning a subprocess.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocket
 
 from tensa.api.app import make_app
+from tensa.api.routes.jobs import ws_job_events
 from tensa.core.session import SessionManager, _Session
 
 
@@ -153,3 +158,59 @@ def test_multiple_subscribers_receive_same_broadcast() -> None:
                 assert ev["type"] == "job"
                 assert ev["job_id"] == job_id
                 assert ev["status"] == "cancelled"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("close_code", [1001, 1012], ids=["client-left", "server-stopping"])
+def test_ws_handler_ends_when_the_socket_closes(close_code: int) -> None:
+    """The feed waits on a queue that only a job or the end of the session wakes.
+
+    The handler used to wait there and nowhere else, so it outlived its socket:
+    uvicorn, which waits for every handler before it shuts the app down, could not
+    stop while a page was open (1012 is the close it sends each socket when asked
+    to), and the handler of a tab that was closed stayed until its session was
+    reaped. The handler is driven here without the test client, which cancels the
+    handler itself when its socket is closed.
+    """
+    mgr = SessionManager(max_sessions=4, idle_timeout=180.0)
+    sess = _Session(
+        session_id="s1",
+        process=_FakeProcess(),
+        ctrl=None,
+        data=None,
+        abort_event=None,
+    )
+    mgr._sessions["s1"] = sess
+    sent: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        incoming: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        incoming.put_nowait({"type": "websocket.connect"})
+
+        async def send(message: Any) -> None:
+            sent.append(dict(message))
+
+        scope = {
+            "type": "websocket",
+            "path": "/api/ws/s1/jobs/events",
+            "headers": [],
+            "app": SimpleNamespace(state=SimpleNamespace(session_manager=mgr)),
+        }
+        handler = asyncio.create_task(
+            ws_job_events(WebSocket(scope, incoming.get, send), "s1")
+        )
+        for _ in range(200):
+            if sess.job_event_subscribers:
+                break
+            await asyncio.sleep(0.01)
+        assert len(sess.job_event_subscribers) == 1, "the handler never subscribed"
+
+        incoming.put_nowait({"type": "websocket.disconnect", "code": close_code})
+        await asyncio.wait_for(handler, timeout=5)
+
+    asyncio.run(scenario())
+
+    # Its queue is off the session, and it sent nothing after the snapshot.
+    assert sess.job_event_subscribers == []
+    texts = [json.loads(m["text"]) for m in sent if m["type"] == "websocket.send"]
+    assert [t["type"] for t in texts] == ["ready", "snapshot"]

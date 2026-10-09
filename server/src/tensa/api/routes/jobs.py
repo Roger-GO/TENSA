@@ -30,6 +30,7 @@ only reads it and drives the cancel transition.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -271,7 +272,29 @@ async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
         )
     )
 
-    # Live phase: drain the per-session event stream.
+    # Live phase: drain the per-session event stream, until the session is closed
+    # or the socket is. The feed waits on a queue, where it hears nothing of the
+    # socket, so a second task reads the socket for the end of it: a client that
+    # went away, and the close uvicorn sends every socket when the server is asked
+    # to stop. Without it uvicorn waits for this handler for as long as the session
+    # lives, and the server cannot stop while a page is open.
+    feed = asyncio.create_task(_send_job_events(websocket, mgr, session_id))
+    gone = asyncio.create_task(_until_disconnected(websocket))
+    try:
+        await asyncio.wait({feed, gone}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in (feed, gone):
+            task.cancel()
+        # Both have caught what they raise; the wait is for the feed to take its
+        # queue off the session before the handler returns.
+        await asyncio.gather(feed, gone, return_exceptions=True)
+
+
+async def _send_job_events(
+    websocket: WebSocket, mgr: SessionManager, session_id: str
+) -> None:
+    """Send the socket one envelope per job transition of the session, and close
+    it when the session is closed."""
     try:
         async for envelope in mgr.subscribe_job_events(session_id):
             if websocket.client_state != WebSocketState.CONNECTED:
@@ -288,6 +311,16 @@ async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
             websocket, WS_CLOSE_INTERNAL_ERROR, f"internal error: {exc!s}"
         )
         return
+
+
+async def _until_disconnected(websocket: WebSocket) -> None:
+    """Return once the socket has closed. The client sends nothing on this feed,
+    and a frame it does send is read and dropped."""
+    with contextlib.suppress(Exception):
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
 
 
 async def _close_with_error(websocket: WebSocket, code: int, reason: str) -> None:
