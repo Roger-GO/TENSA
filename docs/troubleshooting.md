@@ -69,7 +69,7 @@ ANDES turns its model equations into Python code the first time it needs them, a
 
 ### A run says the case is locked, or the Add buttons are greyed out
 
-A power flow or a time-domain run builds the system, and ANDES takes no structural change after that. Press **Reset run** in the top bar (or in the bar of a table), which reloads the case from its file. The edits you made since opening it are discarded by that, so save the system first if you want to keep them. [Concepts](concepts.md#setup-and-the-reload-rule) has the details. In the API this is the 409 you get from `POST .../disturbances`, and `POST .../reload` is the way back.
+A power flow or a time-domain run builds the system, and ANDES takes no structural change after that. Press **Reset run** in the top bar, in the bar of a table, or beside any note that says a run has fixed the system. It reloads the case from its file and keeps the results of the run, in the Compare tab and the run history. The edits you made since opening the case are not in the file, so save the system first if you want to keep them; the note says so when there are any. [Concepts](concepts.md#setup-and-the-reload-rule) has the details. In the API this is the 409 you get from `POST .../disturbances`, and `POST .../reload` is the way back.
 
 ### The power flow does not run after an eigenvalue analysis
 

@@ -6,7 +6,7 @@ A few ideas explain most of how TENSA behaves: what a session is, where case fil
 
 A **session** is one ANDES system in a process of its own. The server starts that process when a session is created and ends it when the session closes, so a simulation never blocks the server and a crash in one cannot take it down.
 
-- The web UI opens a session when you open the page, and holds it while the tab is open. Every tab has its own session, with its own case and results. A reload of the page ends that session and starts a new one, with no case open: the page says which case the reload closed, and **Reopen** opens it again from its file.
+- The web UI opens a session when you open the page, and holds it while the tab is open. Every tab has its own session, with its own case and results. A reload of the page ends that session and starts a new one, and the page opens the case again in it, with the edits you made since you opened it. What a run had computed is not in the new session: the results the browser kept are in the run history.
 - A script creates a session with `POST /api/sessions` and closes it with `DELETE /api/sessions/{id}`.
 - The server keeps at most four sessions at once by default (`--max-sessions`). A fifth gets the status 429 until one closes.
 - A session with no activity for 180 seconds is closed (`--idle-timeout-seconds`). A browser tab with the UI open checks in every 30 seconds, so its session lasts until the tab closes. Any request to a session counts as activity for a script.
