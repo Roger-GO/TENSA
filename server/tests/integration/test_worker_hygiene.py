@@ -26,6 +26,7 @@ from tensa.core.session_dirs import (
     process_start_time,
     read_owner_marker,
 )
+from tests._crash import without_core_dump
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +107,9 @@ async def test_a_worker_that_crashes_natively_prints_its_stack(
 
     proc = manager._sessions[sid].process
     assert proc.pid is not None
+    # The signal is real and so would its core dump be: a crash report on the
+    # machine that runs the suite, of a crash that never happened.
+    without_core_dump(proc.pid)
     os.kill(proc.pid, signal.SIGSEGV)
     proc.join(30)
 

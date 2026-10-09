@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from tensa.core import worker
+from tests._crash import NO_CORE_DUMP_CODE
 
 # ---- the open() audit hook's path test --------------------------------------
 
@@ -270,6 +271,9 @@ def test_a_native_crash_prints_the_python_stack() -> None:
     code = (
         "import os, signal\n"
         "from tensa.core import worker\n"
+        # The signal is real: without this its core dump would be filed as a
+        # crash report on the machine that runs the suite.
+        f"{NO_CORE_DUMP_CODE}"
         "worker._enable_faulthandler()\n"
         "os.kill(os.getpid(), signal.SIGSEGV)\n"
     )
