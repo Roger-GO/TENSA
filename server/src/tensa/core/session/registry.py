@@ -65,6 +65,22 @@ def _absorb_log(sess: _Session, message: object) -> None:
         )
 
 
+def _answers_a_close(sess: _Session, message: object, seq: int) -> bool:
+    """Whether ``message`` is the worker's answer to the ``shutdown`` of a close,
+    read by the request ``seq`` in place of its own reply.
+
+    A close does not wait for the request a session has in flight: it marks the
+    session closed and sends ``shutdown`` at once (``_close_session``). A request
+    that found the session open a moment before can then reach the worker after
+    the ``shutdown``, and what it reads back is the worker's last word, the answer
+    to that (``seq`` -1, no payload). Handed on as the request's own reply it is a
+    result of ``None``, which a route fails on with a 500. The caller raises
+    ``SessionExpiredError`` for it, as for a request that came after the close. A
+    reply with the request's own ``seq`` is its own, closed session or not.
+    """
+    return sess.closed and isinstance(message, dict) and message.get("seq") != seq
+
+
 class RegistryMixin(JobsMixin):
     """Spawning, closing and reaping sessions, and the requests to a session's worker
     (``invoke`` for one reply, ``invoke_streaming`` for a stream of them)."""
@@ -328,7 +344,8 @@ class RegistryMixin(JobsMixin):
         request fails fast rather than queueing behind the in-flight op.
         Raises:
 
-        - ``SessionExpiredError`` if the session was reaped or never existed.
+        - ``SessionExpiredError`` if the session was reaped or never existed, or
+          was closed while this request was on its way to the worker.
         - ``SweepInProgressError`` if a sweep is holding the session lock
           (Unit 18). Skip this check by passing ``bypass_sweep_gate=True``
           — only the sweep's own background-task path uses this escape.
@@ -388,6 +405,8 @@ class RegistryMixin(JobsMixin):
                     # SessionExpiredError instead of re-bubbling a bare 500.
                     raise self._raise_worker_died(sess, exc) from exc
                 sess.last_active = time.monotonic()
+                if _answers_a_close(sess, response, seq):
+                    raise self._session_expired_error(session_id, sess)
                 return response
             finally:
                 sess.lock.release()
@@ -504,6 +523,8 @@ class RegistryMixin(JobsMixin):
                             await on_frame(bytes(payload))
                     continue
                 if msg_type == "result":
+                    if _answers_a_close(sess, msg, seq):
+                        raise self._session_expired_error(session_id, sess)
                     return msg.get("payload")
                 if msg_type == "error":
                     raise WorkerError(
