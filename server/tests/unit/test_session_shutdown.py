@@ -18,7 +18,7 @@ uvicorn gave up on it.
 from __future__ import annotations
 
 import asyncio
-import time
+import threading
 import weakref
 from typing import Any
 
@@ -98,16 +98,23 @@ def test_shutdown_twice_is_harmless() -> None:
 
 
 class _SlowProcess:
-    """A worker that takes ``seconds`` to go, or that cannot be waited for."""
+    """A worker that takes its time to go, or that cannot be waited for.
 
-    def __init__(self, seconds: float, *, fails: bool = False) -> None:
-        self._seconds = seconds
+    With ``together`` it goes only once every worker that shares the barrier is
+    being waited for, which is how a test sees that the waits overlap.
+    """
+
+    def __init__(
+        self, *, fails: bool = False, together: threading.Barrier | None = None
+    ) -> None:
         self._fails = fails
+        self._together = together
 
     def join(self, timeout: float | None = None) -> None:
         if self._fails:
             raise RuntimeError("the worker cannot be waited for")
-        time.sleep(self._seconds)
+        if self._together is not None:
+            self._together.wait()
 
     def is_alive(self) -> bool:
         return False
@@ -128,23 +135,28 @@ def _manager_with_slow_sessions(processes: list[_SlowProcess]) -> tuple[SessionM
     return mgr, pipes
 
 
-def test_shutdown_closes_the_sessions_at_the_same_time() -> None:
-    mgr, pipes = _manager_with_slow_sessions([_SlowProcess(0.4) for _ in range(4)])
+def test_shutdown_closes_the_sessions_at_the_same_time(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # No worker goes before all four are waited for. Closed one after the other,
+    # the first wait would never end: the barrier gives up, which fails that
+    # close, and no clock is read to tell the two apart.
+    together = threading.Barrier(4, timeout=30.0)
+    mgr, pipes = _manager_with_slow_sessions([_SlowProcess(together=together) for _ in range(4)])
 
-    started = time.monotonic()
-    asyncio.run(mgr.shutdown())
-    elapsed = time.monotonic() - started
+    with caplog.at_level("WARNING", logger="tensa.session"):
+        asyncio.run(mgr.shutdown())
 
     assert all(pipe.closed for pipe in pipes)
-    # One after the other they take 1.6 s.
-    assert elapsed < 1.2, f"four sessions took {elapsed:.2f} s to close"
+    assert not together.broken
+    assert "could not close session" not in caplog.text
 
 
 def test_a_session_that_cannot_be_closed_does_not_keep_the_others_open(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     mgr, pipes = _manager_with_slow_sessions(
-        [_SlowProcess(0.0, fails=True), _SlowProcess(0.0), _SlowProcess(0.0)]
+        [_SlowProcess(fails=True), _SlowProcess(), _SlowProcess()]
     )
 
     with caplog.at_level("WARNING", logger="tensa.session"):

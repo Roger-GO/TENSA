@@ -1240,6 +1240,9 @@ def test_desktop_has_no_option_that_would_expose_the_server() -> None:
 
 def _run_window(server: _FakeServer, webview: _FakeWebview, **kwargs: Any) -> None:
     with socket.socket() as sock:
+        # Bound, as the command hands it over: the stand-in server reads its port,
+        # and Windows refuses to name the address of a socket that has none.
+        sock.bind(("127.0.0.1", 0))
         desktop.run_window(
             webview,
             server,  # type: ignore[arg-type]
