@@ -14,7 +14,7 @@ The server logs the address it serves and the workspace it uses, and `--open` op
 2026-10-06 09:30:12,345 [INFO] tensa.serve: serving http://127.0.0.1:8000/ (workspace: /home/you/tensa-cases)
 ```
 
-The workspace is the directory the server reads case files from. If it is empty, the server fills it with three example cases the first time it starts: IEEE 14 (`ieee14_full.xlsx`), Kundur (`kundur_full.xlsx`) and WSCC 9-bus (`wscc9.xlsx`). Leave the server running. `Ctrl+C` in its terminal stops it.
+The workspace is the directory the server reads case files from. If it is empty, the server fills it with three example cases the first time it starts: IEEE 14 (`ieee14_full.xlsx`), Kundur (`kundur_full.xlsx`) and WSCC 9-bus (`wscc9.xlsx`). Leave the server running. `Ctrl+C` in its terminal stops it, as does a `kill` of its process: it ends the sessions and their workers first, and is gone within a few seconds even with a page still open.
 
 If you leave out `--open`, open the address in a browser yourself. Use `http://127.0.0.1:8000` or `http://localhost:8000`, the two spellings the server accepts by default.
 

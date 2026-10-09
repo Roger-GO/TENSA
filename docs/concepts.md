@@ -42,7 +42,7 @@ A case is in one of two states.
 
 To go back to **pre-setup**, reload the case: **Reset run** in the UI, or `POST /api/sessions/{id}/reload` in the API. A reload reads the case from its file again, which discards the edits you made since opening it (save the system first to keep them). The disturbances in the UI's list are kept by the page, which applies them again the next time you run a time-domain simulation. That is why you can run a power flow, add a fault and run the simulation without resetting anything by hand. The server itself forgets them: after a reload through the API, a script adds its disturbances again.
 
-An eigenvalue run changes the dynamic state in a way a later power flow cannot start from, so after one the case has to be reloaded before a power flow runs again. The UI says so beside the run button.
+An eigenvalue run changes the dynamic state in a way a later power flow cannot start from, so after one the case has to be reloaded before a power flow runs again. The UI says so before the run, in the entry of the Run menu and on the run button, and after it, with what the reload costs: it reads the case from its file again, so edits to the elements that were not saved are lost.
 
 ## Disturbances
 

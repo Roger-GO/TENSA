@@ -73,7 +73,7 @@ A power flow or a time-domain run builds the system, and ANDES takes no structur
 
 ### The power flow does not run after an eigenvalue analysis
 
-An eigenvalue run initialises the dynamic state, and a power flow cannot start from there. Reload the case (**Reload case** beside the run button), then run the power flow.
+An eigenvalue run initialises the dynamic state, and a power flow cannot start from there. Reload the case (**Reload case** beside the run button), then run the power flow. The reload reads the case from its file again, so save the system first if you have added, changed or deleted elements; the notice under the **EIG** tab says whether you have.
 
 ### The power flow does not converge
 
