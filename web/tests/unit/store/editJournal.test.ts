@@ -13,6 +13,7 @@ import {
   isWorkOp,
   readKeptJournal,
   useEditJournalStore,
+  withoutKeeping,
 } from '@/store/editJournal';
 import type { JournalEntry, JournalOp } from '@/store/editJournal';
 import { useCaseStore } from '@/store/case';
@@ -480,6 +481,46 @@ describe('kept for a reload of the page', () => {
     useEditJournalStore.getState().reset();
     expect(window.sessionStorage.getItem(JOURNAL_STORAGE_KEY)).toBeNull();
     expect(readKeptJournal()).toBeNull();
+  });
+
+  it('keeps the copy whole through a cut that is for this page alone', () => {
+    // A replay that got no answer: the page goes on with what was applied.
+    record(addBus(1), addBus(2), addBus(3));
+    withoutKeeping(() => useEditJournalStore.getState().truncateAfter(1));
+    expect(ops()).toEqual(['add']);
+    expect(readKeptJournal()?.entries).toHaveLength(3);
+    // The next change is kept as usual, and the copy is this page's again.
+    record(addBus(4));
+    expect(readKeptJournal()?.entries.map((e) => e.rev)).toEqual([1, 4]);
+  });
+
+  it('is kept as usual again after a change for this page alone that threw', () => {
+    record(addBus(1));
+    expect(() =>
+      withoutKeeping(() => {
+        throw new Error('no');
+      }),
+    ).toThrow('no');
+    record(addBus(2));
+    expect(readKeptJournal()?.entries).toHaveLength(2);
+  });
+
+  it('is left as it was by a page that is going away', () => {
+    record(addBus(1), addBus(2));
+    window.dispatchEvent(new Event('pagehide'));
+    try {
+      // What the requests the browser ended lead to: a replay cut short, a
+      // journal started over.
+      useEditJournalStore.getState().truncateAfter(1);
+      expect(readKeptJournal()?.entries).toHaveLength(2);
+      useEditJournalStore.getState().reset();
+      expect(readKeptJournal()?.entries).toHaveLength(2);
+    } finally {
+      // A page that is shown again goes on keeping it.
+      window.dispatchEvent(new Event('pageshow'));
+    }
+    record(addBus(3));
+    expect(readKeptJournal()?.entries.map((e) => e.rev)).toEqual([1]);
   });
 
   it('reads anything that is not a journal as none', () => {

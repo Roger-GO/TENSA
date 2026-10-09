@@ -28,9 +28,19 @@ import { parseSessionId } from '@/api/types';
 import { toast } from '@/lib/toast';
 import { __resetCascadeForTests, wireStoreCascade } from '@/store';
 import { useCaseStore } from '@/store/case';
-import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import {
+  JOURNAL_STORAGE_KEY,
+  hasUnsavedEdits,
+  readKeptJournal,
+  useEditJournalStore,
+} from '@/store/editJournal';
 import type { JournalEntry, KeptJournal } from '@/store/editJournal';
-import { OPEN_CASE_STORAGE_KEY, useReloadedCaseStore } from '@/store/reloadedCase';
+import {
+  BLANK_DRAFTS_STORAGE_KEY,
+  OPEN_CASE_STORAGE_KEY,
+  readOpenCaseMark,
+  useReloadedCaseStore,
+} from '@/store/reloadedCase';
 import type { OpenCaseMark } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
 
@@ -73,11 +83,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/** What `fetch` rejects with when a request got no answer. */
+const noAnswer = () => new TypeError('Failed to fetch');
+
+/** A request that stays under way until the test ends it without an answer. */
+function underWay(): { answer: () => Promise<Response>; end: () => void } {
+  let end!: () => void;
+  const request = new Promise<Response>((_resolve, reject) => {
+    end = () => reject(noAnswer());
+  });
+  return { answer: () => request, end };
+}
+
+/** Let what follows a request that ended run to its end. */
+const settled = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
 describe('useReopenAfterReload', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
   let calls: string[];
   let bodies: Record<string, unknown>;
-  let answers: Record<string, () => Response>;
+  let answers: Record<string, () => Response | Promise<Response>>;
   let success: MockInstance<typeof toast.success>;
   let warning: MockInstance<typeof toast.warning>;
   let error: MockInstance<typeof toast.error>;
@@ -120,6 +145,8 @@ describe('useReopenAfterReload', () => {
 
   afterEach(() => {
     cleanup();
+    // A test that let the page go shows it again.
+    window.dispatchEvent(new Event('pageshow'));
     fetchSpy.mockRestore();
     success.mockRestore();
     warning.mockRestore();
@@ -305,6 +332,126 @@ describe('useReopenAfterReload', () => {
       expect.objectContaining({ description: expect.stringContaining('Vn must be positive') }),
     );
     expect(useEditJournalStore.getState().entries).toEqual(BUILD.slice(0, 2));
+  });
+
+  describe('a request that ends without an answer', () => {
+    const CASE: OpenCaseMark = { primaryPath: 'ieee14.raw', addfiles: [] };
+    const DRAFTS = JSON.stringify([{ id: 'draft-1', kind: 'Bus', position: { x: 0, y: 0 } }]);
+
+    /** The page as it starts after a reload, with the edits of `BUILD` kept by the tab. */
+    function reloadedWithEdits(mark: OpenCaseMark): void {
+      kept.journal = journal(BUILD);
+      window.sessionStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(kept.journal));
+      if (mark.primaryPath === null) {
+        window.sessionStorage.setItem(BLANK_DRAFTS_STORAGE_KEY, DRAFTS);
+      }
+      reloaded(mark);
+    }
+
+    /** The page is reloaded again: it goes, and the browser ends its requests. */
+    async function reloadAgain(request: { end: () => void }): Promise<void> {
+      window.dispatchEvent(new Event('pagehide'));
+      request.end();
+      await settled();
+    }
+
+    it('leaves the case and its edits to the next page when the page is reloaded again while the case loads', async () => {
+      const load = underWay();
+      answers['POST /api/sessions/s-new/case'] = load.answer;
+      reloadedWithEdits(CASE);
+      await waitFor(() => expect(sent()).toEqual(['POST /api/sessions/s-new/case']));
+      await reloadAgain(load);
+      // The page that comes next finds what this one found.
+      expect(readOpenCaseMark()).toEqual(CASE);
+      expect(readKeptJournal()).toEqual(kept.journal);
+      // And this one, which no one sees any more, says nothing.
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it('leaves a system built from scratch, its build and its drafts to the next page as well', async () => {
+      const start = underWay();
+      answers['POST /api/sessions/s-new/blank'] = start.answer;
+      reloadedWithEdits(FROM_SCRATCH);
+      await waitFor(() => expect(sent()).toEqual(['POST /api/sessions/s-new/blank']));
+      await reloadAgain(start);
+      expect(readOpenCaseMark()).toEqual(FROM_SCRATCH);
+      expect(readKeptJournal()).toEqual(kept.journal);
+      expect(window.sessionStorage.getItem(BLANK_DRAFTS_STORAGE_KEY)).toBe(DRAFTS);
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it('leaves every edit to the next page when the page is reloaded again while they are replayed', async () => {
+      const edit = underWay();
+      answers['PUT /api/sessions/s-new/elements/Bus/1'] = edit.answer;
+      reloadedWithEdits(CASE);
+      await waitFor(() => expect(sent()).toHaveLength(4));
+      await reloadAgain(edit);
+      // Not cut back to the two that were applied before the page went.
+      expect(readKeptJournal()?.entries).toEqual(BUILD);
+      expect(readOpenCaseMark()).toEqual(CASE);
+      expect(warning).not.toHaveBeenCalled();
+    });
+
+    it('keeps the case for the next reload, and says so, when the server does not answer the load', async () => {
+      answers['POST /api/sessions/s-new/case'] = () => Promise.reject(noAnswer());
+      reloadedWithEdits(CASE);
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(error).toHaveBeenCalledWith(
+        'Could not reopen ieee14.raw',
+        expect.objectContaining({
+          description:
+            'The page was reloaded. The server did not answer. Reload the page to try again, or pick a case in the Project tab of the left sidebar.',
+        }),
+      );
+      // This page stops waiting, and is as on a first visit.
+      expect(useReloadedCaseStore.getState().closed).toBeNull();
+      expect(useCaseStore.getState()).toMatchObject({ selection: null, loadingPath: null });
+      // The tab keeps all of it: a lost connection says nothing about the case.
+      expect(readOpenCaseMark()).toEqual(CASE);
+      expect(readKeptJournal()).toEqual(kept.journal);
+    });
+
+    it('keeps a system built from scratch for the next reload when the server does not answer', async () => {
+      answers['POST /api/sessions/s-new/blank'] = () => Promise.reject(noAnswer());
+      reloadedWithEdits(FROM_SCRATCH);
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(error).toHaveBeenCalledWith(
+        'The system you were building could not be opened again',
+        expect.objectContaining({
+          description:
+            'The page was reloaded. The server did not answer. Reload the page to try again.',
+        }),
+      );
+      expect(useReloadedCaseStore.getState().closed).toBeNull();
+      expect(useCaseStore.getState().selection).toBeNull();
+      expect(readOpenCaseMark()).toEqual(FROM_SCRATCH);
+      expect(readKeptJournal()).toEqual(kept.journal);
+      expect(window.sessionStorage.getItem(BLANK_DRAFTS_STORAGE_KEY)).toBe(DRAFTS);
+    });
+
+    it('goes on with the edits that were applied, and keeps them all for a reload, when a replayed one gets no answer', async () => {
+      answers['PUT /api/sessions/s-new/elements/Bus/1'] = () => Promise.reject(noAnswer());
+      reloadedWithEdits(CASE);
+      await waitFor(() => expect(warning).toHaveBeenCalled());
+      expect(warning).toHaveBeenCalledWith(
+        'Some edits are not restored yet',
+        expect.objectContaining({
+          description:
+            'Restored 2 of 3 changes onto a fresh copy of the case before the server stopped answering. Reload the page now to restore them all.',
+        }),
+      );
+      // The page has what its session holds, and the tab what the user had.
+      expect(useEditJournalStore.getState().entries).toEqual(BUILD.slice(0, 2));
+      expect(readKeptJournal()?.entries).toEqual(BUILD);
+    });
+
+    it('forgets a mark that names no file of a workspace', async () => {
+      reloaded({ primaryPath: '../outside.raw', addfiles: [] });
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(sent()).toEqual([]);
+      expect(readOpenCaseMark()).toBeNull();
+      expect(useCaseStore.getState().loadingPath).toBeNull();
+    });
   });
 
   it('does nothing on a first visit', async () => {

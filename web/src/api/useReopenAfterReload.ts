@@ -28,15 +28,26 @@
  * not open. A case the user opens before the reopening has started wins: the
  * mark is answered and nothing is opened over it.
  *
+ * A request that ends without an answer is no refusal, and what the tab keeps
+ * is left as it is for the next reload. That is above all a second reload
+ * while the case is still on its way back: the browser ends the requests of
+ * the page that goes, which is no reason to give the case up
+ * (`lib/pageLeaving.ts`). A server that stopped answering is told apart from
+ * one that refused in the same way, and the notice then says that a reload
+ * tries again.
+ *
  * Mounted once from `App.tsx`, beside `useSessionRecovery`.
  */
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { ProblemDetailsError } from './client';
 import { useLoadCase } from './queries';
 import { retryWhileBusy } from './replayJournal';
 import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdits';
 import { parseWorkspacePath } from './types';
+import type { WorkspacePath } from './types';
 import { describeError } from '@/lib/describeError';
+import { pageIsLeaving } from '@/lib/pageLeaving';
 import { baseName } from '@/lib/paths';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
@@ -47,6 +58,23 @@ import { useSessionStore } from '@/store/session';
 
 /** What the notices of a reopening start with: why anything was opened at all. */
 const RELOADED = 'The page was reloaded.';
+
+/**
+ * Take a reopening that failed with `err`, and say why in the words of its
+ * notice. A refusal of the server ends it: the mark is dropped, and the page is
+ * as on a first visit. A request that got no answer (the connection, a timeout)
+ * says nothing about the case: the page stops waiting, and the mark, the edits
+ * and the drafts the tab keeps stay for the next reload.
+ */
+function giveUp(err: unknown): { why: string; kept: boolean } {
+  if (err instanceof ProblemDetailsError) {
+    useReloadedCaseStore.getState().forget();
+    return { why: describeError(err), kept: false };
+  }
+  useReloadedCaseStore.getState().postpone();
+  // The error of a request that failed names its address, which says nothing here.
+  return { why: 'The server did not answer.', kept: true };
+}
 
 /** Whether `journal` holds work that no save had written out. */
 function hadUnsavedWork(journal: KeptJournal): boolean {
@@ -100,9 +128,12 @@ export function useReopenAfterReload(): void {
         try {
           await recreateBlankSystem(sessionId, queryClient);
         } catch (err) {
-          useReloadedCaseStore.getState().forget();
+          // Ended by the page going away: what the tab keeps is for the next page.
+          if (pageIsLeaving()) return;
+          const { why, kept } = giveUp(err);
           toast.error('The system you were building could not be opened again', {
-            description: `${RELOADED} ${describeError(err)}`,
+            description: `${RELOADED} ${why}${kept ? ' Reload the page to try again.' : ''}`,
+            duration: 12_000,
           });
           return;
         }
@@ -120,9 +151,22 @@ export function useReopenAfterReload(): void {
       }
 
       const name = baseName(closed.primaryPath);
+      let primary: WorkspacePath;
+      let addfiles: WorkspacePath[];
       try {
-        const primary = parseWorkspacePath(closed.primaryPath);
-        const addfiles = closed.addfiles.map(parseWorkspacePath);
+        primary = parseWorkspacePath(closed.primaryPath);
+        addfiles = closed.addfiles.map(parseWorkspacePath);
+      } catch (err) {
+        // A mark that names no file of a workspace: no reload can open it.
+        useCaseStore.getState().setLoadingPath(null);
+        useReloadedCaseStore.getState().forget();
+        toast.error(`Could not reopen ${name}`, {
+          description: `${RELOADED} ${describeError(err)}. Pick a case in the Project tab of the left sidebar.`,
+          duration: 12_000,
+        });
+        return;
+      }
+      try {
         await retryWhileBusy(() =>
           loadCase.mutateAsync({
             sessionId,
@@ -131,10 +175,12 @@ export function useReopenAfterReload(): void {
         );
         useCaseStore.getState().setCase({ primaryPath: primary, addfiles });
       } catch (err) {
+        // Ended by the page going away: what the tab keeps is for the next page.
+        if (pageIsLeaving()) return;
         useCaseStore.getState().setLoadingPath(null);
-        useReloadedCaseStore.getState().forget();
+        const { why, kept } = giveUp(err);
         toast.error(`Could not reopen ${name}`, {
-          description: `${RELOADED} ${describeError(err)} Pick a case in the Project tab of the left sidebar.`,
+          description: `${RELOADED} ${why} ${kept ? 'Reload the page to try again, or pick' : 'Pick'} a case in the Project tab of the left sidebar.`,
           duration: 12_000,
         });
         return;

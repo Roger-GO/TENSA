@@ -449,6 +449,20 @@ describe('drafts store', () => {
       expect(window.sessionStorage.getItem(BLANK_KEY)).toBeNull();
     });
 
+    it('stay, in the tab too, when the page only stopped waiting for the system', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, JSON.stringify(HELD));
+      window.sessionStorage.setItem(
+        MARK,
+        JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+      );
+      const { useDraftsStore, BLANK_CASE_KEY } = await load();
+      const { useReloadedCaseStore } = await import('@/store/reloadedCase');
+      // The server gave no answer: the next reload of the page asks again.
+      useReloadedCaseStore.getState().postpone();
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toEqual(HELD);
+      expect(JSON.parse(window.sessionStorage.getItem(BLANK_KEY)!)).toEqual(HELD);
+    });
+
     it('drops what the tab holds that is no list of drafts', async () => {
       window.sessionStorage.setItem(BLANK_KEY, '{"not":"a list"}');
       window.sessionStorage.setItem(

@@ -44,10 +44,15 @@
  * the same way: every change is also written to the tab's ``sessionStorage``
  * (``JOURNAL_STORAGE_KEY``), and what was there when the page started
  * (``journalBeforeReload``) is what ``useReopenAfterReload`` replays onto the case
- * it opens again. The copy is the tab's, and ends with it.
+ * it opens again. The copy is the tab's, and ends with it. It is the user's edits
+ * as the last answer of the substrate left them: a page that is going away writes
+ * nothing more to it (``pageIsLeaving``), and a replay that broke off without an
+ * answer cuts the journal for its own page only (``withoutKeeping``), so the page
+ * that comes next still has them all to replay.
  */
 import { create } from 'zustand';
 import type { ParamValue } from '@/api/types';
+import { pageIsLeaving } from '@/lib/pageLeaving';
 import { useCaseStore } from './case';
 
 /** One recorded operation, in the terms of the endpoint that performed it. */
@@ -400,7 +405,32 @@ export function journalBeforeReload(): KeptJournal | null {
   return beforeReload;
 }
 
+/** True while a change of the journal is for this page alone (`withoutKeeping`). */
+let keptAsIs = false;
+
+/**
+ * Make `change` to the journal and leave the copy the tab keeps for a reload
+ * as it is.
+ *
+ * For what follows a request that got no answer: the page goes on with what
+ * the session holds, and the edits it could not put back are still the tab's,
+ * for the next reload to replay. The next change of the journal is kept as
+ * usual, and with it the copy says what this page has again.
+ */
+export function withoutKeeping(change: () => void): void {
+  keptAsIs = true;
+  try {
+    change();
+  } finally {
+    keptAsIs = false;
+  }
+}
+
 useEditJournalStore.subscribe((state) => {
+  // The requests of a page that is going away fail as it goes, and what
+  // that leads to here (a replay cut short, a journal started over) is not
+  // what the user had.
+  if (keptAsIs || pageIsLeaving()) return;
   writeKeptJournal({
     entries: state.entries,
     revision: state.revision,

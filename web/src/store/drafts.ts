@@ -620,10 +620,12 @@ useCaseStore.subscribe((state) => {
 });
 
 // The system a reload interrupted could not be built again (`forget`): the
-// drafts that were kept for it are of no other system.
+// drafts that were kept for it are of no other system. One the page only
+// stopped waiting for (`postpone`) still has its mark, and keeps its drafts
+// with it for the reload that asks again.
 useReloadedCaseStore.subscribe((state, before) => {
   const interrupted = before.closed !== null && before.closed.primaryPath === null;
-  if (interrupted && state.closed === null && useCaseStore.getState().selection === null) {
-    useDraftsStore.getState().removeAll(BLANK_CASE_KEY);
-  }
+  if (!interrupted || state.closed !== null) return;
+  if (useCaseStore.getState().selection !== null || readOpenCaseMark() !== null) return;
+  useDraftsStore.getState().removeAll(BLANK_CASE_KEY);
 });

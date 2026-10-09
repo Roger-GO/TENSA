@@ -11,8 +11,9 @@ import { replayJournal, retryWhileBusy } from './replayJournal';
 import type { ReplayOutcome } from './replayJournal';
 import type { BlankSystemResponse, SessionId } from './types';
 import { useCaseStore } from '@/store/case';
-import { isWorkOp, useEditJournalStore } from '@/store/editJournal';
+import { isWorkOp, useEditJournalStore, withoutKeeping } from '@/store/editJournal';
 import type { JournalEntry } from '@/store/editJournal';
+import { pageIsLeaving } from '@/lib/pageLeaving';
 import { toast } from '@/lib/toast';
 
 /**
@@ -40,6 +41,11 @@ export async function recreateBlankSystem(
  * were applied (a refused one ends the replay, and later entries would build on a
  * session that lacks it), the clone-on-write flags and stack depths come from the
  * last clone response, and the topology and clone-diff queries are refetched.
+ *
+ * A replay that ends without an answer (the connection, a timeout, a page that
+ * is going away) was not refused. The page goes on with what was applied, and
+ * the copy of the journal the tab keeps for a reload stays whole
+ * (``withoutKeeping``), so a reload of the page replays every edit again.
  */
 export async function replayEditsInto(
   sessionId: SessionId,
@@ -48,7 +54,9 @@ export async function replayEditsInto(
 ): Promise<ReplayOutcome> {
   const outcome = await replayJournal(sessionId, entries);
   if (outcome.error !== null) {
-    useEditJournalStore.getState().truncateAfter(outcome.appliedThroughRev ?? 0);
+    const cut = () => useEditJournalStore.getState().truncateAfter(outcome.appliedThroughRev ?? 0);
+    if (outcome.error instanceof ProblemDetailsError) cut();
+    else withoutKeeping(cut);
   }
   const clone = outcome.clone;
   useCaseStore.setState({
@@ -80,6 +88,10 @@ function changeCount(n: number): string {
  *
  * ``target`` completes "replayed onto ...", and ``why`` says what made a replay
  * necessary: the session expired, or the page was reloaded.
+ *
+ * A replay the server refused has lost the changes after the refusal. One that
+ * got no answer has not (``replayEditsInto``), and the notice says how to get
+ * them back. A page that is going away has no one to tell.
  */
 export function reportReplay(
   outcome: ReplayOutcome,
@@ -95,7 +107,15 @@ export function reportReplay(
     });
     return;
   }
+  if (pageIsLeaving()) return;
   const done = entries.slice(0, outcome.applied).filter(isWorkOp).length;
+  if (!(outcome.error instanceof ProblemDetailsError)) {
+    toast.warning('Some edits are not restored yet', {
+      description: `Restored ${done} of ${changeCount(total)} onto ${target} before the server stopped answering. Reload the page now to restore them all.`,
+      duration: 12_000,
+    });
+    return;
+  }
   toast.warning('Some edits could not be restored', {
     description: `Restored ${done} of ${changeCount(total)} onto ${target} before the server refused one: ${describeReplayError(outcome.error)}. The changes after it are gone.`,
   });

@@ -19,7 +19,9 @@
  * the user closes the case. So a mark found when the page starts names a case
  * that was open when the page went away. `closed` holds it from then until a
  * case is open again, or until it turns out that it cannot be opened
- * (`forget`).
+ * (`forget`). A request that got no answer says nothing about the case, so
+ * the page then only stops waiting for it (`postpone`): the mark stays, and
+ * the next reload asks again.
  *
  * A storage failure (private mode, quota) leaves the page starting empty, as
  * on a first visit, and nothing else changed.
@@ -122,6 +124,12 @@ export interface ReloadedCaseState {
   follow: (selection: CaseSelection | null) => void;
   /** Drop what the reload interrupted and its mark: it cannot be opened again. */
   forget: () => void;
+  /**
+   * Stop waiting for what the reload interrupted, and keep its mark and what
+   * the tab holds for it: the server gave no answer, and the next reload of
+   * the page asks again.
+   */
+  postpone: () => void;
 }
 
 export const useReloadedCaseStore = create<ReloadedCaseState>((set) => ({
@@ -142,4 +150,5 @@ export const useReloadedCaseStore = create<ReloadedCaseState>((set) => ({
     dropBlankDrafts();
     set({ closed: null });
   },
+  postpone: () => set({ closed: null }),
 }));

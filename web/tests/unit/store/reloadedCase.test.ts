@@ -163,6 +163,31 @@ describe('reloaded case store', () => {
     expect(mark()).toBeNull();
   });
 
+  it('keeps the mark of a case the server gave no answer about, and stops waiting for it', async () => {
+    window.sessionStorage.setItem(
+      KEY,
+      JSON.stringify({ primaryPath: 'kundur_full.xlsx', addfiles: [] }),
+    );
+    const { useReloadedCaseStore } = await import('@/store/reloadedCase');
+    useReloadedCaseStore.getState().postpone();
+    expect(useReloadedCaseStore.getState().closed).toBeNull();
+    // The next reload of the page asks again.
+    expect(mark()).toEqual({ primaryPath: 'kundur_full.xlsx', addfiles: [] });
+  });
+
+  it('keeps what the tab holds for a system built from scratch that it stops waiting for', async () => {
+    const BLANK_DRAFTS = 'tensa:sld-drafts-blank-v1';
+    window.sessionStorage.setItem(
+      KEY,
+      JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+    );
+    window.sessionStorage.setItem(BLANK_DRAFTS, '[]');
+    const { useReloadedCaseStore } = await import('@/store/reloadedCase');
+    useReloadedCaseStore.getState().postpone();
+    expect(mark()).toEqual({ primaryPath: null, addfiles: [], blank: true });
+    expect(window.sessionStorage.getItem(BLANK_DRAFTS)).toBe('[]');
+  });
+
   it('follows the open case through the store cascade', async () => {
     const { useCaseStore } = await import('@/store');
     useCaseStore
