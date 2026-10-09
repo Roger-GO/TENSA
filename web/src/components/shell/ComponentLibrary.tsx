@@ -7,9 +7,10 @@ import {
   searchElementKinds,
   type ElementKind,
 } from '@/components/elements/elementKinds';
-import { ReloadedCaseNote } from '@/components/case/ReloadedCaseNote';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { cn } from '@/lib/cn';
+import { requestResetRun } from '@/lib/resetRunRequest';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import { useLayoutStore } from '@/store/layout';
@@ -45,12 +46,11 @@ import { useSldStore } from '@/store/sld';
  * are one stop for the Tab key between them (the row the keyboard was last on,
  * or the first), so Tab leaves the list in one press. A line
  * under the search box says how to add, and says instead why nothing can be
- * added when that is so (``useAddComponent``). With no case open, a click
+ * added when that is so (``useAddComponent``), with a Reset run button in it
+ * when the reason is a run that has fixed the system. With no case open, a click
  * starts a blank system as a drop on the empty canvas does, and the line says
  * that too. The saved cases are on the sidebar's other tab, which the palette
- * hides, so with no case open a line above the search box leads there; and
- * after a reload of the page, which closes the case, a note over that line
- * names the case and reopens it (``ReloadedCaseNote``).
+ * hides, so with no case open a line above the search box leads there.
  *
  * Drag image: leaves the browser default (no ``dataTransfer.setDragImage``
  * call), which is a picture of the row.
@@ -59,9 +59,13 @@ import { useSldStore } from '@/store/sld';
 /** Custom DnD MIME — avoids collision with browser-default drag types. */
 export const COMPONENT_DND_MIME = 'application/andes-component-type';
 
-/** Shown under the search box while a row can add: to a case that is open, and with none. */
+/**
+ * Shown under the search box while a row can add: to a case that is open, and
+ * with none. One verb for the one thing a row does, and the two things a drop
+ * on a bus does, by what is dropped.
+ */
 const HINT =
-  'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.';
+  'Click a component to add it with a form, or drag it onto the diagram to add it as a draft. A device dropped on the bar or the name of a bus is connected to that bus. A line or transformer dropped on a bus starts there: click the bus it goes to.';
 const HINT_NO_CASE =
   'Click a component, or drag it onto the diagram, to start a blank system with it.';
 
@@ -70,7 +74,7 @@ export interface ComponentLibraryProps {
 }
 
 export function ComponentLibrary({ className }: ComponentLibraryProps) {
-  const { blockedReason, add } = useAddComponent();
+  const { blockedReason, lockedByRun, add } = useAddComponent();
   const caseOpen = useCaseStore((s) => s.selection !== null);
   const caseLoading = useCaseStore((s) => s.loadingPath !== null);
   const showLeftSidebarTab = useLayoutStore((s) => s.showLeftSidebarTab);
@@ -121,12 +125,11 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
     <div data-testid="component-library" className={cn('flex h-full min-h-0 flex-col', className)}>
       {/* The search box and the line under it stay put while the list scrolls. */}
       <div className="border-border flex shrink-0 flex-col gap-1.5 border-b px-2 pt-2 pb-2">
-        {/* With no case open: where the saved cases are, which this tab hides, and
-            after a reload the case it closed. Above the search box, so that Tab
-            still goes from the box straight into the rows. */}
+        {/* With no case open: where the saved cases are, which this tab hides.
+            Above the search box, so that Tab still goes from the box straight
+            into the rows. */}
         {!caseOpen && !caseLoading ? (
           <>
-            <ReloadedCaseNote placement="components" />
             <p
               data-testid="component-library-no-case"
               className="text-muted-foreground px-0.5 text-[11px] leading-snug"
@@ -189,18 +192,31 @@ export function ComponentLibrary({ className }: ComponentLibraryProps) {
             </button>
           ) : null}
         </div>
-        <p
-          id={hintId}
-          data-testid="component-library-hint"
+        <div
           className={cn(
-            'text-[11px] leading-snug',
+            'flex flex-col items-start gap-1.5 text-[11px] leading-snug',
             blockedReason === null
               ? 'text-muted-foreground px-0.5'
               : 'border-warning/50 bg-warning/20 text-foreground rounded-[var(--radius-sm)] border px-2 py-1',
           )}
         >
-          {blockedReason ?? (caseOpen ? HINT : HINT_NO_CASE)}
-        </p>
+          <p id={hintId} data-testid="component-library-hint">
+            {blockedReason ?? (caseOpen ? HINT : HINT_NO_CASE)}
+          </p>
+          {/* The way out of a run's lock, where the lock is said. */}
+          {lockedByRun ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void requestResetRun()}
+              data-testid="component-library-reset-run"
+              className="h-6 px-2 text-[11px]"
+            >
+              Reset run
+            </Button>
+          ) : null}
+        </div>
         {/* Always in the tree, so a screen reader hears the count change as it is typed. */}
         <p
           role="status"

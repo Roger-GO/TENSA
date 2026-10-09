@@ -22,6 +22,11 @@
  * and the journal says at which revision the newest edit that is still in
  * effect was made (`liveEditRevisions`).
  *
+ * A draft that is deleted is taken back the same way, though deleting it
+ * arranges nothing: its entry holds the drafts that went (`LayoutStep.drafts`)
+ * and no arrangement that counts, and the canvas puts the drafts back, or
+ * deletes them again for Redo, where it would apply an arrangement.
+ *
  * Lifecycle: in memory only. Cleared when the case selection changes, and
  * when a snapshot restore replaces the arrangement wholesale. A new edit to
  * the system empties the redo stack, as a new arrangement does.
@@ -31,6 +36,7 @@ import { useCaseStore } from './case';
 import type { DragOverrides, RouteOverrides } from './case';
 import { useEditJournalStore } from './editJournal';
 import type { JournalEntry } from './editJournal';
+import type { DraftElement } from './drafts';
 
 /** The arrangement of a diagram: enough to draw it again as it was. */
 export interface LayoutSnapshot {
@@ -57,6 +63,12 @@ export interface LayoutStep {
   editRevision: number;
   /** Set on a change that the next one of the same key, made soon after, is part of. */
   coalesce: string | null;
+  /**
+   * Set on the entry of drafts that were deleted: the case they were of and
+   * the drafts as they were. Taking the entry back puts them back, putting it
+   * back deletes them again, and its `snapshot` is not applied either way.
+   */
+  drafts?: { caseKey: string; deleted: DraftElement[] };
   /** When it was recorded (ms). */
   at: number;
 }
@@ -83,7 +95,12 @@ export interface LayoutHistoryState {
    * entry of the same name is taken to be part of it. Returns the id of the
    * entry that now stands for the change.
    */
-  record: (label: string, before: LayoutSnapshot, coalesce?: string | null) => number;
+  record: (
+    label: string,
+    before: LayoutSnapshot,
+    coalesce?: string | null,
+    drafts?: LayoutStep['drafts'],
+  ) => number;
   /**
    * Take the newest change back: hands out the entry to apply, and keeps
    * `current`, the arrangement as it is now, for Redo. `null` when there is
@@ -94,6 +111,14 @@ export interface LayoutHistoryState {
   redo: (current: LayoutSnapshot) => LayoutStep | null;
   /** Drop the entry `id` when it is the newest: its change was taken back some other way. */
   discard: (id: number) => void;
+  /** Drop the entry `id` wherever it is among the ones Undo goes back through. */
+  forget: (id: number) => void;
+  /**
+   * Say which drafts the entry Redo would put back next stands for: the ones
+   * an Undo has just brought back, which may have come back under other ids
+   * than they were deleted with.
+   */
+  redoDeletes: (drafts: DraftElement[]) => void;
   clear: () => void;
 }
 
@@ -102,7 +127,7 @@ let nextId = 1;
 export const useLayoutHistoryStore = create<LayoutHistoryState>((set, get) => ({
   past: [],
   future: [],
-  record: (label, before, coalesce = null) => {
+  record: (label, before, coalesce = null, drafts) => {
     const { past } = get();
     const now = Date.now();
     const last = past[past.length - 1];
@@ -123,6 +148,7 @@ export const useLayoutHistoryStore = create<LayoutHistoryState>((set, get) => ({
       editRevision: useEditJournalStore.getState().revision,
       coalesce,
       at: now,
+      ...(drafts === undefined ? {} : { drafts }),
     };
     nextId += 1;
     set({ past: [...past, step].slice(-MAX_LAYOUT_STEPS), future: [] });
@@ -157,6 +183,18 @@ export const useLayoutHistoryStore = create<LayoutHistoryState>((set, get) => ({
   discard: (id) => {
     const { past } = get();
     if (past[past.length - 1]?.id === id) set({ past: past.slice(0, -1) });
+  },
+  redoDeletes: (drafts) => {
+    const { future } = get();
+    const next = future[future.length - 1];
+    if (next?.drafts === undefined) return;
+    set({
+      future: [...future.slice(0, -1), { ...next, drafts: { ...next.drafts, deleted: drafts } }],
+    });
+  },
+  forget: (id) => {
+    const { past } = get();
+    if (past.some((step) => step.id === id)) set({ past: past.filter((step) => step.id !== id) });
   },
   clear: () => set({ past: [], future: [] }),
 }));

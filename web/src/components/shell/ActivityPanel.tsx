@@ -140,6 +140,16 @@ function ActivityRow({ job, actions }: { job: JobRecord; actions: RowActions }) 
         </span>
       </div>
 
+      {/* What the job did, where the caller said (an edit names what it changed). */}
+      {typeof job.request_summary?.detail === 'string' ? (
+        <p
+          data-testid={`activity-row-detail-${job.id}`}
+          className="text-muted-foreground text-xs break-words"
+        >
+          {job.request_summary.detail}
+        </p>
+      ) : null}
+
       {progressPct !== null && !isTerminalStatus(job.status) ? (
         <div
           data-testid={`activity-row-progress-${job.id}`}

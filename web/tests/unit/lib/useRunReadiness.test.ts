@@ -42,7 +42,7 @@ const TOPOLOGY_GENCLS_ONLY: TopologySummary = {
   controllers: [],
 };
 
-import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
+import { runReadinessNow, useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -585,5 +585,58 @@ describe('useRunReadiness — gate ordering', () => {
     useSweepStore.setState({ activeSweepId: 'sweep-1', sweeps: {} });
     const { result } = renderHook(() => useRunReadiness('pflow'));
     expect(result.current.disabledReason).toMatch(/Sweep sweep-1 in progress/);
+  });
+});
+
+describe('runReadinessNow', () => {
+  // What a command asks when it is chosen: the same answer the Run button of
+  // the routine shows, read off the stores at that moment.
+  it('answers what the hook answers, for every routine and in each state', () => {
+    const states: Array<() => void> = [
+      () => {},
+      seedReadyBaseline,
+      () => {
+        seedReadyBaseline();
+        useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+        usePflowStore.setState({
+          lastRun: { converged: true, iterations: 3 } as unknown as PflowResult,
+        });
+      },
+      () => {
+        seedReadyBaseline();
+        useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
+      },
+      () => {
+        seedReadyBaseline();
+        useRunsStore.setState({ activeRunId: 'run-1' });
+      },
+      () => {
+        seedReadyBaseline();
+        useCaseStore.setState({ loadingPath: parseWorkspacePath('kundur.xlsx') });
+      },
+    ];
+    for (const seed of states) {
+      resetStores();
+      seed();
+      for (const routine of ALL_ROUTINES) {
+        const { result, unmount } = renderHook(() => useRunReadiness(routine));
+        expect(runReadinessNow(routine), routine).toEqual(result.current);
+        unmount();
+      }
+    }
+  });
+
+  it('reads the stores as they are when it is called, with no component mounted', () => {
+    resetStores();
+    expect(runReadinessNow('pflow')).toMatchObject({
+      ready: false,
+      disabledReason: 'No case loaded.',
+    });
+    seedReadyBaseline();
+    expect(runReadinessNow('pflow').ready).toBe(true);
+    expect(runReadinessNow('cpf')).toMatchObject({
+      ready: false,
+      disabledReason: 'Run PFlow first; CPF requires a converged operating point.',
+    });
   });
 });

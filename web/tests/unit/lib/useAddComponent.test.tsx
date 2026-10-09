@@ -31,6 +31,7 @@ import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import { BLANK_CASE_KEY, useDraftsStore } from '@/store/drafts';
 import { usePflowStore } from '@/store/pflow';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
 import { useSldStore } from '@/store/sld';
 
@@ -116,12 +117,34 @@ describe('placing a draft where no diagram is drawn yet', () => {
     mockTopology = topology('committed');
     useCaseStore.setState({ selection: { primaryPath: parseWorkspacePath(CASE), addfiles: [] } });
     const { result } = renderHook(() => useAddComponent());
-    expect(result.current.blockedReason).toMatch(/A run has locked the system/);
+    expect(result.current.blockedReason).toMatch(/^A run has fixed the system\. Reset run lets/);
+    expect(result.current.lockedByRun).toBe(true);
     await act(async () => {
       result.current.place('PQ');
       await vi.dynamicImportSettled();
     });
     expect(useDraftsStore.getState().byCase).toEqual({});
+  });
+});
+
+describe('after a reload of the page, while the case it had open is on its way back', () => {
+  afterEach(() => useReloadedCaseStore.setState({ closed: null }));
+
+  it('starts no blank system in its way, and says why', async () => {
+    useReloadedCaseStore.setState({ closed: { primaryPath: CASE, addfiles: [] } });
+    const { result, rerender } = renderHook(() => useAddComponent());
+    expect(result.current.blockedReason).toBe('The case this page had open is being opened again.');
+    expect(result.current.lockedByRun).toBe(false);
+    act(() => result.current.add('Bus'));
+    await act(async () => {
+      result.current.place('Bus');
+      await vi.dynamicImportSettled();
+    });
+    expect(blankMutate).not.toHaveBeenCalled();
+    // Once the case is open, or could not be opened, adding is as ever.
+    act(() => useReloadedCaseStore.setState({ closed: null }));
+    rerender();
+    expect(result.current.blockedReason).toBeNull();
   });
 });
 

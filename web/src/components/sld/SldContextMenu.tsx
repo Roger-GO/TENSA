@@ -739,7 +739,7 @@ export function SldContextMenuBody({
               Save snapshot…
             </ContextMenuItem>
             <ContextMenuItem data-testid="sld-context-figure" onSelect={() => onFigure?.()}>
-              <span>Figure…</span>
+              <span>Figure for a paper…</span>
               <span className="text-muted-foreground ml-auto pl-3 text-xs">SVG, PDF or PNG</span>
             </ContextMenuItem>
           </>

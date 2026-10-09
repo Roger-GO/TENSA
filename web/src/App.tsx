@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
 import { LeftSidebar } from '@/components/shell/LeftSidebar';
@@ -7,9 +8,6 @@ import { LeftSidebar } from '@/components/shell/LeftSidebar';
 // editor has any disturbances.
 import { RunButton } from '@/components/tds/RunButton';
 import { RunStatusBadge } from '@/components/tds/RunStatusBadge';
-import { NumericalErrorBanner } from '@/components/tds/NumericalErrorBanner';
-import { ConvergenceErrorPanel } from '@/components/pflow/ConvergenceErrorPanel';
-import { RuntimeCrashModal } from '@/components/pflow/RuntimeCrashModal';
 import { HideLabelsToggle } from '@/components/pflow/HideLabelsToggle';
 import { UnitsToggle } from '@/components/shell/UnitsToggle';
 import { INLINE_FROM_NARROW } from '@/components/shell/topBarLayout';
@@ -22,10 +20,11 @@ import { BottomDrawer } from '@/components/shell/BottomDrawer';
 import { ResultsView } from '@/components/shell/ResultsView';
 import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { KeptResultsNote } from '@/components/history/KeptResultsNote';
-import { ReloadedCaseNote } from '@/components/case/ReloadedCaseNote';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
+import { useReopenAfterReload } from '@/api/useReopenAfterReload';
+import { ResetRunHost } from '@/components/shell/ResetRunHost';
 import { useSessionRelease } from '@/api/useSessionRelease';
 import { useSessionMessagesSync } from '@/api/useSessionMessages';
 import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
@@ -72,6 +71,24 @@ const LoadSnapshotDialog = lazyNamed(
   'LoadSnapshotDialog',
   'overlay',
 );
+// What a run that failed is answered with. Each draws nothing until a run of
+// the open case has failed, so they are fetched once a case is open and not
+// with the first screen.
+const ConvergenceErrorPanel = lazyNamed(
+  () => import('@/components/pflow/ConvergenceErrorPanel'),
+  'ConvergenceErrorPanel',
+  'overlay',
+);
+const NumericalErrorBanner = lazyNamed(
+  () => import('@/components/tds/NumericalErrorBanner'),
+  'NumericalErrorBanner',
+  'overlay',
+);
+const RuntimeCrashModal = lazyNamed(
+  () => import('@/components/pflow/RuntimeCrashModal'),
+  'RuntimeCrashModal',
+  'overlay',
+);
 
 /**
  * Root component. Wraps the AppShell with the cross-cutting providers
@@ -102,6 +119,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // unmount that would otherwise kill the recovery cycle once a case is
   // loaded (v0.1.y Unit 5 bug fix).
   useSessionRecovery();
+  // After a reload of the page: open the case the tab had open again, with
+  // the edits it kept.
+  useReopenAfterReload();
   // Check in with the substrate every 30 s so an idle tab keeps its session
   // (and a lost one is noticed before the user's next click).
   useSessionHeartbeat();
@@ -142,6 +162,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
       {/* a11y: announce background job outcomes (done/failed/cancelled) to
           assistive tech regardless of whether the Activity panel is open. */}
       <JobAnnouncer />
+      {/* Reset run for the places that say a run has fixed the system and have
+          no component of their own to make the request from. */}
+      <ResetRunHost />
       {/* Case files dropped anywhere on the window are added to the workspace. */}
       <WorkspaceDropTarget />
     </>
@@ -155,17 +178,17 @@ function AppInner({ children }: { children: React.ReactNode }) {
  *   ComponentDropZone — directs the user to the left sidebar AND accepts
  *   a row dragged from the Components palette, which spins up a blank system and
  *   places a draft of that kind on its diagram (the build-from-scratch entry the
- *   sidebar advertises but which previously did nothing on drop). After a reload that
- *   closed a case it says so instead, and reopens it (``ReloadedCaseNote``).
+ *   sidebar advertises but which previously did nothing on drop). After a reload the
+ *   case the tab had open is opened again (``useReopenAfterReload``), and the slot says
+ *   so while that is under way.
  * - case loaded → SldCanvas (which itself shows the layout-skeleton
  *   while ELK runs and the canvas once positions are known).
  */
 function CanvasSlot() {
   const caseSelection = useCaseStore((s) => s.selection);
   const loadingPath = useCaseStore((s) => s.loadingPath);
-  // After a reload that closed a case, the note that reopens it stands where
-  // the sentence for a first visit does, so the page is no taller for it.
-  const closedByReload = useReloadedCaseStore((s) => s.closed !== null);
+  // After a reload: the case the tab had open, while it is being opened again.
+  const reopening = useReloadedCaseStore((s) => s.closed);
   const { place: placeComponent } = useAddComponent();
   const [dropError, setDropError] = useState<string | null>(null);
 
@@ -200,8 +223,21 @@ function CanvasSlot() {
         <EmptyState
           icon={<FolderIcon />}
           title={`Loading ${loadingPath}…`}
-          description="Opening the case. The first load of a case can take a while."
+          description={
+            reopening !== null
+              ? 'The page was reloaded: the case it had open is opened again, with the edits made to it.'
+              : 'Opening the case. The first load of a case can take a while.'
+          }
           emptyStateKey="app-shell-case-loading"
+          aria-busy="true"
+        />
+      ) : reopening !== null ? (
+        // A system built from scratch has no file to load: it is built again.
+        <EmptyState
+          icon={<FolderIcon />}
+          title="Opening your system again…"
+          description="The page was reloaded: the system you were building is put back, element by element."
+          emptyStateKey="app-shell-case-reopening"
           aria-busy="true"
         />
       ) : (
@@ -210,20 +246,27 @@ function CanvasSlot() {
           title="No case loaded"
           description={
             dropError ??
-            (closedByReload
-              ? undefined
-              : 'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.')
+            'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.'
           }
           emptyStateKey="app-shell-no-case"
         >
-          {/* After a reload: the case it closed, with a button that reopens it. */}
-          <ReloadedCaseNote placement="diagram" />
           {/* What the browser kept from before a reload, which needs no case. */}
           <KeptResultsNote />
         </EmptyState>
       )}
     </ComponentDropZone>
   );
+}
+
+/**
+ * The surfaces that answer a failed run (a power flow that did not converge,
+ * a time-domain run that stopped, a server error). Each reads the stores and
+ * draws nothing until a run has failed, which takes a case to run on: they
+ * are mounted, and their code fetched, once a case is open.
+ */
+function RunErrorSurfaces({ children }: { children: ReactNode }) {
+  const caseOpen = useCaseStore((s) => s.selection !== null);
+  return <LazyMount when={caseOpen}>{children}</LazyMount>;
 }
 
 /**
@@ -308,13 +351,17 @@ export function App() {
           dockOverlay={
             <>
               <AddElementDock />
-              <ConvergenceErrorPanel />
-              <NumericalErrorBanner />
+              <RunErrorSurfaces>
+                <ConvergenceErrorPanel />
+                <NumericalErrorBanner />
+              </RunErrorSurfaces>
             </>
           }
           modal={
             <>
-              <RuntimeCrashModal />
+              <RunErrorSurfaces>
+                <RuntimeCrashModal />
+              </RunErrorSurfaces>
               {/* Snapshot save/load dialogs are store-driven (saveDialogOpen /
                   loadDialogOpen) and self-gate to null when closed. They were
                   previously mounted only inside SnapshotMenu, which a v3

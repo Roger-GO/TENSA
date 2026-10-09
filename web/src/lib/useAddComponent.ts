@@ -12,14 +12,22 @@
  */
 import { ProblemDetailsError } from '@/api/client';
 import { useBlankSystem, useCurrentTopology } from '@/api/queries';
+import { runLockNotice } from '@/lib/runLock';
 import { toast } from '@/lib/toast';
+import { useReloadDiscardsEdits } from '@/lib/useResetRunAction';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
+import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
+
+/** Why nothing can be added while the case a reload interrupted is being opened again. */
+const REOPENING = 'The case this page had open is being opened again.';
 
 export interface AddComponent {
   /** Why nothing can be added now, or `null` when it can. */
   blockedReason: string | null;
+  /** Whether that reason is a run that has fixed the system, which Reset run undoes. */
+  lockedByRun: boolean;
   /**
    * Open the Add element panel on `kind` (starting a blank system first when no case is
    * open). Does nothing while `blockedReason` is set. A failure to start the blank
@@ -42,15 +50,21 @@ export function useAddComponent(): AddComponent {
   const topology = useCurrentTopology();
   const pfRunning = usePflowStore((s) => s.isRunning);
   const blank = useBlankSystem();
+  const discardsEdits = useReloadDiscardsEdits();
+  const reopening = useReloadedCaseStore((s) => s.closed !== null);
 
   let blockedReason: string | null = null;
+  let lockedByRun = false;
   if (sessionId === null) blockedReason = 'The server session is not ready yet.';
   else if (blank.isPending) blockedReason = 'Starting a new system.';
+  // After a reload of the page: a blank system started now would be in the
+  // way of the case that is on its way back (`useReopenAfterReload`).
+  else if (selection === null && reopening) blockedReason = REOPENING;
   else if (selection !== null && topology === null) blockedReason = 'The case is still loading.';
-  else if (topology?.state === 'committed')
-    blockedReason =
-      'A run has locked the system. Select an element and use Reset run in the Inspector to add elements again.';
-  else if (pfRunning) blockedReason = 'Wait for the power flow to finish.';
+  else if (topology?.state === 'committed') {
+    blockedReason = runLockNotice(discardsEdits);
+    lockedByRun = true;
+  } else if (pfRunning) blockedReason = 'Wait for the power flow to finish.';
 
   // Start a blank system, then do `then` with it open.
   const onBlankSystem = (then: () => void, onError?: (message: string) => void) => {
@@ -91,5 +105,5 @@ export function useAddComponent(): AddComponent {
     else onBlankSystem(placeDraft, onError);
   };
 
-  return { blockedReason, add, place };
+  return { blockedReason, lockedByRun, add, place };
 }

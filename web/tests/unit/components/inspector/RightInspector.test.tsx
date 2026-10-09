@@ -183,7 +183,9 @@ describe('<RightInspector />', () => {
     render(withQueryClient(<RightInspector />));
     const button = screen.getByTestId('delete-element-button');
     expect(button).toHaveAttribute('aria-disabled', 'true');
-    expect(button.getAttribute('title')).toMatch(/Reset the run to delete this one/);
+    expect(button.getAttribute('title')).toBe(
+      'A run has fixed the system. Reset run, in the note below, lets you delete this element.',
+    );
     await user.click(button);
     expect(screen.queryByTestId('delete-element-dialog')).toBeNull();
   });
@@ -225,7 +227,7 @@ describe('<RightInspector />', () => {
     expect(screen.queryByTestId('delete-element-button')).toBeNull();
     await waitFor(() =>
       expect(success).toHaveBeenCalledWith('Deleted PV G1', {
-        description: 'Undo in the Edit menu brings it back.',
+        description: 'Undo (Ctrl+Z or Edit > Undo) brings it back.',
       }),
     );
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/sessions/sess-1/elements/PV/G1');

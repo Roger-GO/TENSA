@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 
 beforeEach(() => {
-  useShortcutCheatsheetStore.setState({ open: false });
+  useShortcutCheatsheetStore.setState({ open: false, section: null });
 });
 
 describe('useShortcutCheatsheetStore — initial state', () => {
@@ -54,5 +54,25 @@ describe('useShortcutCheatsheetStore — open / close / toggle', () => {
     const after = useShortcutCheatsheetStore.getState();
     expect(after.open).toBe(false);
     expect(after.open).toBe(before.open);
+  });
+});
+
+describe('useShortcutCheatsheetStore: the part a help entry asks for', () => {
+  it('opens at the part that is named, and at the top when none is', () => {
+    useShortcutCheatsheetStore.getState().openCheatsheet('diagram');
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: true, section: 'diagram' });
+    useShortcutCheatsheetStore.getState().openCheatsheet();
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: true, section: null });
+  });
+
+  it('forgets the part when it is closed, and when it is toggled', () => {
+    useShortcutCheatsheetStore.getState().openCheatsheet('connect');
+    useShortcutCheatsheetStore.getState().closeCheatsheet();
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: false, section: null });
+    useShortcutCheatsheetStore.getState().openCheatsheet('connect');
+    useShortcutCheatsheetStore.getState().toggleCheatsheet();
+    useShortcutCheatsheetStore.getState().toggleCheatsheet();
+    // The ? key opens the whole list, from its top.
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: true, section: null });
   });
 });

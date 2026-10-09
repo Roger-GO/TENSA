@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
@@ -12,7 +12,7 @@ import {
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
 import { AnalyzeSubModePicker } from './AnalyzeSubModePicker';
 import { CPFCurveChart } from './CPFCurveChart';
-import { CpfConfigPanel } from './CpfConfigPanel';
+import { CpfConfigPanel, type CpfRunHandle } from './CpfConfigPanel';
 import { CpfGeneratorPanel } from './CpfGeneratorPanel';
 import { CpfQLimitsSwitch } from './CpfQLimitsSwitch';
 import { CpfQvCurvePanel } from './CpfQvCurvePanel';
@@ -34,7 +34,8 @@ import { directionRows } from '@/lib/cpfOptions';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
-import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
+import { runReadinessNow, useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
+import { useRequestedRun } from '@/lib/useRequestedRun';
 import { ProblemDetailsError } from '@/api/client';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
 import type { RecoveryDescriptor } from '@/lib/recovery';
@@ -343,6 +344,10 @@ export function AnalyzeEigSubMode() {
     if (!sessionId) return;
     eigRun.mutate(sessionId);
   };
+  // "Run eigenvalue analysis (EIG)" in the Run menu and the palette.
+  useRequestedRun(['eig'], () => {
+    if (!eigRun.isPending && runReadinessNow('eig').ready) onRun();
+  });
 
   const eigError = eigRun.error;
 
@@ -500,10 +505,18 @@ export function AnalyzeCpfNoseSubMode() {
   const refused = cpfRun.error instanceof ProblemDetailsError && cpfRun.error.status === 409;
   const cpfError = refused && lastPf !== pfAtRun ? null : cpfRun.error;
 
+  // "Run continuation power flow (CPF)" in the Run menu and the palette: the
+  // run is made from the form as it stands, as by a click on Run CPF.
+  const form = useRef<CpfRunHandle | null>(null);
+  useRequestedRun(['cpf'], () => {
+    if (!cpfRun.isPending && runReadinessNow('cpf').ready) form.current?.run();
+  });
+
   return (
     <div className="flex flex-col gap-3">
       <CpfConfigPanel
         key={casePath ?? 'no-case'}
+        handle={form}
         runLabel={cpfRun.isPending ? 'Running CPF…' : 'Run CPF'}
         runButtonTestId="analyze-run-cpf"
         runNote={<RunReadinessNote routine="cpf" testId="analyze-run-cpf" />}
@@ -536,7 +549,16 @@ export function AnalyzeCpfNoseSubMode() {
         )}
         loads={devices.loads}
         generators={devices.generators}
-        limitsSwitch={<CpfQLimitsSwitch idPrefix="cpf-config" />}
+        limitsSwitch={
+          <CpfQLimitsSwitch
+            idPrefix="cpf-config"
+            thenRun={{
+              label: 'Run CPF (runs the power flow with Q limits first)',
+              // Once the power flow is in, the form is run as it stands.
+              run: () => form.current?.run(),
+            }}
+          />
+        }
         onRun={(overrides) => {
           if (!sessionId) return;
           setPfAtRun(lastPf);
@@ -633,6 +655,10 @@ export function AnalyzeSeSubMode() {
     if (!sessionId) return;
     seRun.mutate(sessionId);
   };
+  // "Run state estimation (SE)" in the Run menu and the palette.
+  useRequestedRun(['se'], () => {
+    if (!seRun.isPending && !seGenerate.isPending && runReadinessNow('se').ready) onRun();
+  });
 
   // The currently-active error (generate has priority — if it failed,
   // the run button is disabled and the error came from generate).

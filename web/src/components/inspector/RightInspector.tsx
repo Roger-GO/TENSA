@@ -11,6 +11,7 @@ import { DeleteElementButton } from '@/components/elements/DeleteElementButton';
 import { draftCaseKey, useDrafts } from '@/store/drafts';
 import { useSldStore } from '@/store/sld';
 import { cn } from '@/lib/cn';
+import { RUN_LOCK } from '@/lib/runLock';
 import { PropertiesAccordion } from './PropertiesAccordion';
 import { PlotsAccordion } from './PlotsAccordion';
 import { DisturbancesAccordion } from './DisturbancesAccordion';
@@ -48,8 +49,7 @@ import { DraftInspector } from './DraftInspector';
  * that the run has to be reset first.
  */
 
-const DELETE_LOCKED_BY_RUN =
-  'The case is set up for a run, which locks its elements. Reset the run to delete this one.';
+const DELETE_LOCKED_BY_RUN = `${RUN_LOCK} Reset run, in the note below, lets you delete this element.`;
 const DELETE_LOCKED_BY_PF = 'A power flow is running. Wait for it to end.';
 
 const STORAGE_PREFIX = 'tensa:layout-v1:rightInspector:openSections';

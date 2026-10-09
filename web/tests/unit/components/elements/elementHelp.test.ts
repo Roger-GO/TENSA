@@ -9,6 +9,7 @@ import {
   elementHelp,
   elementWarnings,
   namedAfterIdx,
+  systemBaseEquivalent,
 } from '@/components/elements/elementHelp';
 
 describe('elementHelp', () => {
@@ -99,8 +100,11 @@ describe('elementHelp', () => {
   it('says what the four numbers of a PV generator are, with no note above them', () => {
     const help = elementHelp('PV', { baseMva: 100 });
     expect(help!.note).toEqual([]);
-    expect(help!.fields.Sn).toContain('per unit of the system base (100 MVA), whatever Sn is');
+    // Sn does not scale the powers: said without setting the two side by side.
+    expect(help!.fields.Sn).toContain('It does not scale the powers below');
+    expect(help!.fields.Sn).toContain('per unit of the system base (100 MVA)');
     expect(help!.fields.Vn).toContain('the Vn of the bus it is on');
+    expect(help!.fields.Vn).toContain('the form fills in when the bus is picked');
     expect(help!.fields.p0).toContain('per unit of the system base (100 MVA): 0.4 is 40 MW');
     expect(help!.fields.p0).toContain('0 starts it idle');
     expect(help!.fields.v0).toContain('1 is the rated voltage');
@@ -229,12 +233,54 @@ describe('elementDefaults', () => {
 });
 
 describe('namedAfterIdx', () => {
-  it('names a battery and a static generator after the idx, and leaves other names to the user', () => {
-    for (const model of ['ESD1', 'PV', 'Slack']) {
+  it('names every model after the idx its form proposes', () => {
+    for (const model of ['ESD1', 'PV', 'Slack', 'Bus', 'Line', 'PQ', 'GENROU', 'TGOV1']) {
       expect(namedAfterIdx(model), model).toBe(true);
     }
-    for (const model of ['Bus', 'Line', 'GENROU', 'TGOV1']) {
-      expect(namedAfterIdx(model), model).toBe(false);
-    }
+  });
+});
+
+describe('the help of a load and of a line', () => {
+  it('says which base a load is on, and what a value is in MW', () => {
+    const help = elementHelp('PQ', { baseMva: 100 })!;
+    expect(help.note).toEqual([]);
+    expect(help.fields.p0).toBe(
+      'Active power the load draws, per unit of the system base (100 MVA): 0.9 is 90 MW.',
+    );
+    expect(help.fields.q0).toContain('0.3 is 30 MVAr');
+    expect(help.fields.Vn).toContain('the form fills in when the bus is picked');
+  });
+
+  it('gives no example in MW for a case that has no base', () => {
+    const help = elementHelp('PQ', { baseMva: null })!;
+    expect(help.fields.p0).toBe('Active power the load draws, per unit of the system base.');
+  });
+
+  it('says which base a line is on and what order of size its values have', () => {
+    const help = elementHelp('Line', { baseMva: 100 })!;
+    expect(help.fields.r).toContain('per unit of the system base (100 MVA)');
+    expect(help.fields.r).toContain('from about 0.01 to 0.22');
+    expect(help.fields.x).toContain('from about 0.04 to 0.35');
+    expect(help.fields.rate_a).toContain('not checked for overload');
+  });
+});
+
+describe('systemBaseEquivalent', () => {
+  const context = { baseMva: 100 };
+
+  it('says what a power per unit of the system base is in MW or MVAr', () => {
+    expect(systemBaseEquivalent('PQ', 'p0', '0.9', context)).toBe('= 90 MW');
+    expect(systemBaseEquivalent('PQ', 'q0', 0.3, context)).toBe('= 30 MVAr');
+    expect(systemBaseEquivalent('PV', 'qmax', '-0.25', { baseMva: 200 })).toBe('= -50 MVAr');
+  });
+
+  it('answers nothing for a field that holds no such power, an empty one, or no base', () => {
+    expect(systemBaseEquivalent('PQ', 'Vn', '138', context)).toBeNull();
+    expect(systemBaseEquivalent('Line', 'r', '0.01', context)).toBeNull();
+    // A machine's powers are per unit of its own rating, not of the system base.
+    expect(systemBaseEquivalent('GENROU', 'p0', '0.9', context)).toBeNull();
+    expect(systemBaseEquivalent('PQ', 'p0', '', context)).toBeNull();
+    expect(systemBaseEquivalent('PQ', 'p0', 'abc', context)).toBeNull();
+    expect(systemBaseEquivalent('PQ', 'p0', '0.9', { baseMva: null })).toBeNull();
   });
 });

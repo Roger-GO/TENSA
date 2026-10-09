@@ -6,14 +6,17 @@ import { cn } from '@/lib/cn';
 import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
 import { SynIdxSelect } from './SynIdxSelect';
-import { elementHelp, elementWarnings, namedAfterIdx } from './elementHelp';
+import { elementHelp, elementWarnings, namedAfterIdx, systemBaseEquivalent } from './elementHelp';
 import {
   checkElementValues,
   emptyValueFor,
   existingIdxSetFor,
+  busRatedVoltage,
   nextAvailableIdx,
   pickTargets,
+  ratedForBus,
   seedElementValues,
+  withBusRating,
   withHeldValues,
 } from './elementValues';
 import {
@@ -41,6 +44,11 @@ import {
  * A model whose parameters need more than a name (`elementHelp`) gets a note
  * above the fields, a line under the fields it explains, and a warning under a
  * field whose value is allowed but worth a second look.
+ *
+ * A device that is on a bus is rated for it: its `Vn` is taken from the bus
+ * that is picked (`withBusRating`), with a line that says so, and follows the
+ * bus until a rating is typed. The name opens as the idx, and follows it the
+ * same way (`namedAfterIdx`).
  *
  * A model that takes over a static generator has a `bus` and a `gen` that must
  * agree (`genLink`). Its bus list names the generator on each bus, picking one
@@ -120,6 +128,13 @@ export interface ElementFormProps {
   cancelLabel?: string;
   /** Why the form cannot be sent whatever it holds (a run has locked the system), or nothing. */
   blockedReason?: string | null;
+  /**
+   * A field to put the cursor in, asked for from outside the form (the Pick
+   * a bus button of a notice). An object, so the same field can be asked for
+   * again; `onFieldFocused` is called once the cursor is there.
+   */
+  focusField?: { name: string } | null;
+  onFieldFocused?: () => void;
   className?: string;
 }
 
@@ -178,6 +193,8 @@ export function ElementForm({
   submitLabel,
   cancelLabel,
   blockedReason = null,
+  focusField = null,
+  onFieldFocused,
   className,
 }: ElementFormProps) {
   const baseId = useId();
@@ -220,9 +237,13 @@ export function ElementForm({
     // A line has two bus fields: the bus it was opened on is where it starts.
     const busField = metas.find((m) => m.kind === 'bus_idx');
     const onCase = (topo?.buses ?? []).some((b) => String(b.idx) === seedBus);
-    const plain = { values: init, suggested: null, note: null };
-    if (!seedBus || busField === undefined || !onCase) return plain;
+    const rated = (values: Record<string, ParamValue>) =>
+      withBusRating(metas, values, heldValues ?? {}, topo);
+    if (!seedBus || busField === undefined || !onCase) {
+      return { values: rated(init), suggested: null, note: null };
+    }
     init[busField.name] = seedBus;
+    const plain = { values: rated(init), suggested: null, note: null };
     if (!linksGen || busField.name !== 'bus') return plain;
     // A seed is not a pick: the form opens like this again after each add, and
     // a second battery on the first one's generator is not a default. That
@@ -231,7 +252,7 @@ export function ElementForm({
     const linked = refetching ? null : freeGeneratorOn(seedBus, staticGenerators(topo));
     if (linked === null) return plain;
     init.gen = linked.gen;
-    return { values: init, suggested: linked.gen, note: linked.note };
+    return { values: rated(init), suggested: linked.gen, note: linked.note };
   };
 
   // One seed for both pieces of state: `useState` reads its argument once.
@@ -280,6 +301,21 @@ export function ElementForm({
     if (focusRequest === null) return;
     document.getElementById(`${baseId}-${focusRequest.name}`)?.focus();
   }, [focusRequest, baseId]);
+
+  // A field asked for from outside goes the same way, once the form has its
+  // fields: one among the advanced ones has those opened first.
+  const answered = useRef(onFieldFocused);
+  useEffect(() => {
+    answered.current = onFieldFocused;
+  }, [onFieldFocused]);
+  useEffect(() => {
+    if (focusField === null) return;
+    const meta = params.find((m) => m.name === focusField.name);
+    if (meta === undefined) return;
+    if (!meta.required) setShowAdvanced(true);
+    setFocusRequest({ name: meta.name });
+    answered.current?.();
+  }, [focusField, params]);
 
   const dirty = touched.size > 0;
 
@@ -332,6 +368,23 @@ export function ElementForm({
     setLinkNote(null);
     setSuggestedGen(null);
   }, [linksGen, refetching, genTouched, busValue, genValue, suggestedGen, staticGens]);
+
+  // The rated voltage goes with the bus until one is typed: picking another
+  // bus, or the case gaining the rating of the one that is picked, sets it.
+  const ratesFromBus = useMemo(() => ratedForBus(params), [params]);
+  const vnTouched = touched.has('Vn');
+  const busRating = ratesFromBus ? busRatedVoltage(topology, busValue) : null;
+  useEffect(() => {
+    if (vnTouched || busRating === null) return;
+    setValues((curr) =>
+      curr.Vn !== '' && Number(curr.Vn) === busRating ? curr : { ...curr, Vn: busRating },
+    );
+  }, [vnTouched, busRating]);
+  // Said under the field while the value there is the bus's and not the user's.
+  const ratedNote =
+    !vnTouched && busRating !== null && values.Vn !== '' && Number(values.Vn) === busRating
+      ? `Taken from bus ${busValue}, which is rated ${busRating} kV. Type another value for a device rated otherwise.`
+      : undefined;
 
   // A draft is checked while its form is closed, from the values it holds: the
   // generator the form chose goes to it like one that was picked, though the
@@ -473,8 +526,11 @@ export function ElementForm({
     const value = values[m.name] ?? emptyValueFor(m);
     const error = shownErrors[m.name];
     const fieldHelp = help?.fields[m.name];
-    const note = linkNote?.field === m.name ? linkNote.text : undefined;
+    const note =
+      linkNote?.field === m.name ? linkNote.text : m.name === 'Vn' ? ratedNote : undefined;
     const warning = warnings[m.name];
+    // A power per unit of the system base, in the unit a user thinks in.
+    const equivalent = systemBaseEquivalent(model, m.name, value, { baseMva });
     // Everything said about the field is read out with it.
     const describedBy =
       [
@@ -543,6 +599,14 @@ export function ElementForm({
               required={m.required}
               disabled={saving}
               onChange={(e) => setField(m.name, e.target.value)}
+              // A name that still only follows the idx is the form's own: it
+              // is picked whole when the field is entered, so that typing a
+              // name of one's own takes its place.
+              onFocus={
+                m.name === 'name' && namedAfterIdx(model) && !nameTouched
+                  ? (e) => e.currentTarget.select()
+                  : undefined
+              }
               aria-describedby={describedBy}
               aria-invalid={error ? true : undefined}
               className={cn(
@@ -552,6 +616,14 @@ export function ElementForm({
             />
           )}
           {m.unit ? <span className="text-muted-foreground text-[10px]">{m.unit}</span> : null}
+          {equivalent !== null ? (
+            <span
+              data-testid={`field-equivalent-${m.name}`}
+              className="text-muted-foreground font-mono text-[10px] whitespace-nowrap"
+            >
+              {equivalent}
+            </span>
+          ) : null}
         </span>
       </label>
     );

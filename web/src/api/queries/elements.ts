@@ -15,7 +15,9 @@ import type {
 import { useCaseStore } from '@/store/case';
 import { deletedElementKey, disturbancesActingOn, useDisturbanceStore } from '@/store/disturbance';
 import { useEditJournalStore } from '@/store/editJournal';
+import { describeChanged } from '@/lib/editSteps';
 import { elementsGone, findTopologyEntry } from '@/lib/topology';
+import { UNDO } from '@/lib/undoWording';
 import { queryKeys } from './keys';
 import { failJob, reconcileJobSuccess, registerJob } from './jobGlue';
 
@@ -77,7 +79,13 @@ export function useEditElement(): UseMutationResult<TopologyEntry, Error, EditEl
         { body, timeoutMs: TIMEOUTS.workspace },
       );
     },
-    onMutate: ({ model, idx }) => ({ jobId: registerJob('element-edit', { model, idx }) }),
+    onMutate: ({ model, idx, params }) => ({
+      jobId: registerJob('element-edit', {
+        model,
+        idx,
+        detail: `Changed ${describeChanged({ model, idx, params: Object.keys(params) })}`,
+      }),
+    }),
     onSuccess: (data, { sessionId, model, idx, params }, ctx) => {
       useEditJournalStore.getState().record({ op: 'edit', model, idx, params: { ...params } });
       void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
@@ -140,7 +148,7 @@ export function useEditElements(): UseMutationResult<TopologyEntry[], Error, Edi
         } catch {
           const why = err instanceof Error ? err.message : String(err);
           throw new Error(
-            `${why} ${left} of the ${edits.length} edits it takes were made before that and could not be taken back: Undo in the Edit menu takes them back.`,
+            `${why} ${left} of the ${edits.length} edits it takes were made before that and could not be taken back: ${UNDO} takes them back.`,
             { cause: err },
           );
         }
@@ -149,7 +157,17 @@ export function useEditElements(): UseMutationResult<TopologyEntry[], Error, Edi
       return made;
     },
     onMutate: ({ edits }) => ({
-      jobId: registerJob('element-edit', { model: edits[0]?.model, idx: edits[0]?.idx }),
+      jobId: registerJob('element-edit', {
+        model: edits[0]?.model,
+        idx: edits[0]?.idx,
+        // Every edit of the change, so that one the app made with it (the Vn
+        // that follows a device to another bus) is listed with it.
+        detail: `Changed ${edits
+          .map(({ model, idx, params }) =>
+            describeChanged({ model, idx, params: Object.keys(params) }),
+          )
+          .join('; ')}`,
+      }),
     }),
     onSuccess: (data, _vars, ctx) => {
       if (ctx) reconcileJobSuccess(ctx.jobId, data);

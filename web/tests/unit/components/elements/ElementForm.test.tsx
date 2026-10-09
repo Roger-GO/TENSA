@@ -86,6 +86,15 @@ const SCHEMA: TopologySchema = {
       { name: 'name', kind: 'string', required: true },
       { name: 'syn', kind: 'syn_idx', required: true },
     ],
+    PQ: [
+      { name: 'idx', kind: 'string', required: true },
+      { name: 'name', kind: 'string', required: true },
+      { name: 'bus', kind: 'bus_idx', required: true },
+      { name: 'Vn', kind: 'number', required: true, unit: 'kV' },
+      { name: 'p0', kind: 'number', required: true, unit: 'pu' },
+      { name: 'q0', kind: 'number', required: true, unit: 'pu' },
+      { name: 'owner', kind: 'string', required: false },
+    ],
   },
 };
 
@@ -277,7 +286,11 @@ describe('<ElementForm />', () => {
     const idxInput = screen.getByTestId('field-idx').querySelector('input') as HTMLInputElement;
     await user.clear(idxInput);
     await user.type(idxInput, '7');
-    await user.type(screen.getByTestId('field-name').querySelector('input')!, 'BUS7');
+    // The name opens as the idx: a name of one's own is typed over it.
+    const nameInput = screen.getByTestId('field-name').querySelector('input')!;
+    expect(nameInput.value).toBe('7');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'BUS7');
     await user.type(screen.getByTestId('field-Vn').querySelector('input')!, '230');
     await user.click(screen.getByRole('button', { name: /add bus/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
@@ -589,7 +602,7 @@ describe('<ElementForm /> names a battery after its idx', () => {
     });
   });
 
-  it('leaves the name of another model for the user to give', () => {
+  it('names every other model after its idx as well, so no name has to be typed', () => {
     render(
       withQueryClient(
         <ElementForm
@@ -602,7 +615,30 @@ describe('<ElementForm /> names a battery after its idx', () => {
       ),
     );
     expect(inputOf('idx').value).toBe('8');
-    expect(inputOf('name').value).toBe('');
+    expect(inputOf('name').value).toBe('8');
+  });
+
+  it('picks a name that only follows the idx whole when its field is entered', async () => {
+    const user = userEvent.setup();
+    render(
+      withQueryClient(
+        <ElementForm
+          model="Bus"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    const name = inputOf('name');
+    await user.tab();
+    await user.tab();
+    expect(document.activeElement).toBe(name);
+    expect([name.selectionStart, name.selectionEnd]).toEqual([0, name.value.length]);
+    // What is typed takes its place.
+    await user.keyboard('North');
+    expect(name.value).toBe('North');
   });
 });
 
@@ -1160,7 +1196,7 @@ describe('<ElementForm /> says what stopped a submit', () => {
     await user.type(inputOf('idx'), '99');
     await user.click(screen.getByRole('button', { name: /add bus/i }));
     expect(screen.getByTestId('form-problems')).toHaveTextContent(
-      'Nothing was added: name and Vn are required and empty, and idx holds a value that cannot be used.',
+      'Nothing was added: Vn is required and empty, and idx holds a value that cannot be used.',
     );
     // In the order of the form: the idx comes first.
     expect(document.activeElement).toBe(inputOf('idx'));
@@ -1192,7 +1228,7 @@ describe('<ElementForm /> says what stopped a submit', () => {
     renderForm('TGOV1');
     await user.click(screen.getByRole('button', { name: /add tgov1/i }));
     expect(screen.getByTestId('form-problems')).toHaveTextContent(
-      'Nothing was added: name and syn are required and empty.',
+      'Nothing was added: syn is required and empty.',
     );
     const machine = screen.getByTestId('syn-idx-select');
     expect(machine).toHaveAttribute('aria-invalid', 'true');
@@ -1333,6 +1369,7 @@ describe('<ElementForm /> opened on a bus', () => {
         />,
       ),
     );
+    await user.clear(inputOf('name'));
     await user.type(inputOf('name'), 'BUS6');
     await user.type(inputOf('Vn'), '69');
     await user.click(screen.getByRole('button', { name: /add bus/i }));
@@ -1540,8 +1577,10 @@ describe('<ElementForm /> checked as it is typed (the form of a draft)', () => {
     await user.type(screen.getByLabelText(/^idx/), 'x');
     expect(onFieldsChange).toHaveBeenLastCalledWith({ idx: 'PV_2x' });
     expect(screen.getByLabelText(/^name/)).toHaveValue('PV_2x');
+    // A name that only followed the idx is picked whole as its field is
+    // entered, so what is typed takes its place.
     await user.type(screen.getByLabelText(/^name/), 'y');
-    expect(onFieldsChange).toHaveBeenLastCalledWith({ name: 'PV_2xy' });
+    expect(onFieldsChange).toHaveBeenLastCalledWith({ name: 'y' });
   });
 
   it('reports the generator a pick of the bus brought along, and the one it gave up', async () => {
@@ -1626,5 +1665,141 @@ describe('<ElementForm /> checked as it is typed (the form of a draft)', () => {
     await user.click(screen.getByRole('button', { name: 'Delete draft' }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull();
+  });
+});
+
+describe('<ElementForm /> rates a device for the bus it is on', () => {
+  // The rating of each bus is in the case: asking for it again sent the user
+  // to the Buses table for a number the app holds.
+  beforeEach(() => {
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      base_mva: 100,
+      buses: [
+        { idx: 7, name: 'B7', kind: 'Bus', params: { Vn: 230 } },
+        { idx: 8, name: 'B8', kind: 'Bus', params: { Vn: 69 } },
+        { idx: 9, name: 'B9', kind: 'Bus', params: {} },
+      ],
+    };
+  });
+
+  function renderLoad(props: Partial<Parameters<typeof ElementForm>[0]> = {}) {
+    return render(
+      withQueryClient(
+        <ElementForm
+          model="PQ"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          {...props}
+        />,
+      ),
+    );
+  }
+  const bus = () => screen.getByTestId('bus-idx-select') as HTMLSelectElement;
+
+  it('fills Vn from the bus that is picked, says so, and follows the next pick', async () => {
+    const user = userEvent.setup();
+    renderLoad();
+    expect(inputOf('Vn').value).toBe('');
+    await user.selectOptions(bus(), '7');
+    expect(inputOf('Vn').value).toBe('230');
+    expect(screen.getByTestId('field-note-Vn')).toHaveTextContent(
+      'Taken from bus 7, which is rated 230 kV. Type another value for a device rated otherwise.',
+    );
+    // Read out with the field, not only shown under it.
+    expect(inputOf('Vn').getAttribute('aria-describedby')).toContain(
+      screen.getByTestId('field-note-Vn').id,
+    );
+    await user.selectOptions(bus(), '8');
+    expect(inputOf('Vn').value).toBe('69');
+    expect(screen.getByTestId('field-note-Vn')).toHaveTextContent('Taken from bus 8');
+  });
+
+  it('opens rated for the bus the form was opened on, and sends that rating', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderLoad({ seedBus: '8', onSubmit });
+    expect(inputOf('Vn').value).toBe('69');
+    await user.type(inputOf('p0'), '0.9');
+    await user.type(inputOf('q0'), '0.3');
+    await user.click(screen.getByRole('button', { name: /add pq/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ bus: '8', Vn: 69, p0: 0.9, q0: 0.3 });
+  });
+
+  it("keeps a rating that was typed, whatever bus is picked next, and says no more that it is the bus's", async () => {
+    const user = userEvent.setup();
+    renderLoad({ seedBus: '7' });
+    await user.clear(inputOf('Vn'));
+    await user.type(inputOf('Vn'), '13.8');
+    await user.selectOptions(bus(), '8');
+    expect(inputOf('Vn').value).toBe('13.8');
+    expect(screen.queryByTestId('field-note-Vn')).toBeNull();
+  });
+
+  it('leaves Vn to type on a bus the case gives no rating for', async () => {
+    const user = userEvent.setup();
+    renderLoad();
+    await user.selectOptions(bus(), '9');
+    expect(inputOf('Vn').value).toBe('');
+    expect(screen.queryByTestId('field-note-Vn')).toBeNull();
+  });
+
+  it('shows what a power per unit of the system base is in MW or MVAr, beside its field', async () => {
+    const user = userEvent.setup();
+    renderLoad();
+    expect(screen.queryByTestId('field-equivalent-p0')).toBeNull();
+    await user.type(inputOf('p0'), '0.9');
+    expect(screen.getByTestId('field-equivalent-p0')).toHaveTextContent('= 90 MW');
+    await user.type(inputOf('q0'), '-0.25');
+    expect(screen.getByTestId('field-equivalent-q0')).toHaveTextContent('= -25 MVAr');
+    // The help under the field says which base that is.
+    expect(screen.getByTestId('field-help-p0')).toHaveTextContent(
+      'per unit of the system base (100 MVA): 0.9 is 90 MW.',
+    );
+    // A rating in kV is no power, and has no such line.
+    expect(screen.queryByTestId('field-equivalent-Vn')).toBeNull();
+  });
+
+  it('puts the cursor in a field that is asked for from outside, and says when it is there', async () => {
+    const onFieldFocused = vi.fn();
+    const view = renderLoad();
+    expect(bus()).not.toHaveFocus();
+    view.rerender(
+      withQueryClient(
+        <ElementForm
+          model="PQ"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          focusField={{ name: 'bus' }}
+          onFieldFocused={onFieldFocused}
+        />,
+      ),
+    );
+    await waitFor(() => expect(bus()).toHaveFocus());
+    expect(onFieldFocused).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the advanced fields first for one of them that is asked for', async () => {
+    const view = renderLoad();
+    expect(screen.getByTestId('form-advanced-disclosure')).not.toHaveAttribute('open');
+    view.rerender(
+      withQueryClient(
+        <ElementForm
+          model="PQ"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+          focusField={{ name: 'owner' }}
+        />,
+      ),
+    );
+    await waitFor(() => expect(inputOf('owner')).toHaveFocus());
+    expect(screen.getByTestId('form-advanced-disclosure')).toHaveAttribute('open');
   });
 });

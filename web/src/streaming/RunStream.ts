@@ -222,6 +222,8 @@ export interface RunStreamOptions {
    * schedules nothing.
    */
   scenario?: string;
+  /** When the run first disturbs the system (s); recorded on the run for the response metrics. */
+  disturbedAt?: number;
   /**
    * The name of the case the run is computed on (``ieee14``); recorded on the
    * run so an export of it names its own case after another one is opened.
@@ -608,6 +610,7 @@ export class RunStream {
         columnNames,
         bases: this.opts.bases,
         ...(this.opts.scenario === undefined ? {} : { scenario: this.opts.scenario }),
+        ...(this.opts.disturbedAt === undefined ? {} : { disturbedAt: this.opts.disturbedAt }),
         ...(this.opts.caseName === undefined ? {} : { caseName: this.opts.caseName }),
       });
       this.opts.onStart?.({ runId, metadata });

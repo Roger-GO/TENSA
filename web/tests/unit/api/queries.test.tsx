@@ -98,6 +98,23 @@ describe('queries hooks', () => {
     expect(useSessionStore.getState().sessionId).toBe('sess-123');
   });
 
+  it('useCreateSession keeps the name the server gives its workspace, which the drafts are kept by', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        { session_id: 'sess-123', state: 'live', workspace_id: '0123456789abcdef' },
+        201,
+      ),
+    );
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useCreateSession(), { wrapper: Wrapper });
+
+    result.current.mutate();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(useSessionStore.getState().workspaceId).toBe('0123456789abcdef');
+    useSessionStore.getState().setWorkspaceId(null);
+  });
+
   it('useLoadCase seeds the topology cache on success', async () => {
     const topology = {
       state: 'pre-setup' as const,

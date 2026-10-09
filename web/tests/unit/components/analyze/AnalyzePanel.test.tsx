@@ -493,6 +493,84 @@ describe('<AnalyzePanel />', () => {
       expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent('Loads only');
     });
 
+    describe('a run asked for by a command', () => {
+      // "Run eigenvalue analysis (EIG)" and its like in the Run menu and the
+      // palette: the tab's own Run button starts the run, as by a click on it.
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      const posts = (path: string) =>
+        fetchSpy.mock.calls.filter(
+          ([url, init]) => String(url).endsWith(path) && (init as RequestInit)?.method === 'POST',
+        );
+
+      beforeEach(() => {
+        useRunModeStore.setState({ runRequest: null });
+        // A run that was started stays under way: what is checked is that it
+        // was sent, not what the tab draws of its answer.
+        fetchSpy.mockImplementation((...args: unknown[]) =>
+          (args[1] as RequestInit | undefined)?.method === 'POST'
+            ? new Promise<Response>(() => {})
+            : Promise.resolve(
+                json({ state: 'committed', buses: [], lines: [], generators: [], loads: [] }),
+              ),
+        );
+      });
+
+      it('runs EIG when it is asked for with the tab on screen', async () => {
+        useAnalyzeStore.getState().setSubMode('eig');
+        usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+        render(withQueryClient(<AnalyzePanel />));
+        expect(posts('/eig')).toHaveLength(0);
+        act(() => useRunModeStore.getState().requestRun('eig'));
+        await waitFor(() => expect(posts('/eig')).toHaveLength(1));
+        expect(useRunModeStore.getState().runRequest).toBeNull();
+      });
+
+      it('runs EIG when the tab comes on screen for the request', async () => {
+        // The drawer was at its tabs when the command was chosen.
+        usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+        useRunModeStore.getState().requestRun('eig');
+        useAnalyzeStore.getState().setSubMode('eig');
+        render(withQueryClient(<AnalyzePanel />));
+        await waitFor(() => expect(posts('/eig')).toHaveLength(1));
+      });
+
+      it('does not run EIG without a converged power flow, and takes the request', () => {
+        useAnalyzeStore.getState().setSubMode('eig');
+        render(withQueryClient(<AnalyzePanel />));
+        act(() => useRunModeStore.getState().requestRun('eig'));
+        expect(posts('/eig')).toHaveLength(0);
+        // Not left to start a run later, when the power flow is in.
+        expect(useRunModeStore.getState().runRequest).toBeNull();
+      });
+
+      it('runs CPF from the form as it stands', async () => {
+        useAnalyzeStore.getState().setSubMode('cpf');
+        usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+        render(withQueryClient(<AnalyzePanel />));
+        await userEvent.click(screen.getByTestId('cpf-config-direction-load-only'));
+        act(() => useRunModeStore.getState().requestRun('cpf'));
+        await waitFor(() => expect(posts('/cpf')).toHaveLength(1));
+        expect(JSON.parse(String((posts('/cpf')[0]![1] as RequestInit).body))).toMatchObject({
+          direction: 'load-only',
+        });
+      });
+
+      it('runs SE once measurements were generated, and not before', async () => {
+        useAnalyzeStore.getState().setSubMode('se');
+        usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+        render(withQueryClient(<AnalyzePanel />));
+        act(() => useRunModeStore.getState().requestRun('se'));
+        expect(posts('/se')).toHaveLength(0);
+        act(() => useAnalyzeStore.setState({ seMeasurementsCount: 12 }));
+        act(() => useRunModeStore.getState().requestRun('se'));
+        await waitFor(() => expect(posts('/se')).toHaveLength(1));
+      });
+    });
+
     it('a CPF that used up its steps says so by the Run button and runs again with more', async () => {
       const json = (body: unknown) =>
         new Response(JSON.stringify(body), {

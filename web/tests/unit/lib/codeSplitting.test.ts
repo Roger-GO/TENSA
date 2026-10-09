@@ -118,6 +118,12 @@ const LAZY_MODULES = [
   'components/case/SaveSystemDialog.tsx',
   'components/disturbance/AddEventDialog.tsx',
   'components/disturbance/DisturbanceForm.tsx',
+  // What answers a failed run, fetched once a case is open.
+  'components/pflow/ConvergenceErrorPanel.tsx',
+  'components/pflow/RuntimeCrashModal.tsx',
+  'components/tds/NumericalErrorBanner.tsx',
+  'components/error/ProblemDetailsErrorSurface.tsx',
+  'components/error/RecoveryActionButton.tsx',
   'streaming/arrow.ts',
 ];
 

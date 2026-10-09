@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useImperativeHandle, useState } from 'react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
@@ -67,9 +67,17 @@ export type { CpfDirection } from '@/lib/cpfOptions';
  */
 export type CpfRunOverrides = Omit<CpfRunOptions, 'enforceQLimits'>;
 
+/** What a parent can ask of the form from outside it (`CpfConfigPanelProps.handle`). */
+export interface CpfRunHandle {
+  /** Start a run with the form as it stands, as a click on Run CPF does. */
+  run: () => void;
+}
+
 export interface CpfConfigPanelProps {
   /** Fired with the validated overrides when the user clicks Run CPF. */
   onRun: (overrides: CpfRunOverrides) => void;
+  /** Set while the form is mounted: how a command starts a run from it. */
+  handle?: React.Ref<CpfRunHandle>;
   /** Disables the Run button (readiness gate + pending state). */
   runDisabled?: boolean;
   /** Run button label (swaps to a pending label while the run is in flight). */
@@ -139,6 +147,7 @@ export function validateCpfOverrides(
 
 export function CpfConfigPanel({
   onRun,
+  handle,
   runDisabled = false,
   runLabel,
   runButtonTestId,
@@ -202,6 +211,7 @@ export function CpfConfigPanel({
   };
 
   const handleRun = () => startRun(maxIterText);
+  useImperativeHandle(handle, () => ({ run: handleRun }));
 
   const runWithMaxSteps = (maxSteps: number) => {
     const maxIter = String(maxSteps);

@@ -1,6 +1,6 @@
 /**
  * The pieces ``useSessionRecovery`` uses to rebuild a lost session's edits in its
- * replacement: recreate a blank system, replay the edit journal, and fold the
+ * replacement, and ``useReopenAfterReload`` after a reload of the page: recreate a blank system, replay the edit journal, and fold the
  * result into the stores and the query cache. The journal and the replay are
  * documented in ``store/editJournal.ts`` and ``replayJournal.ts``.
  */
@@ -78,18 +78,20 @@ function changeCount(n: number): string {
  * or Edit mode being switched on is not a change), and a replay with none says
  * nothing: the user lost nothing, so there is nothing to report.
  *
- * ``target`` completes "replayed onto ...".
+ * ``target`` completes "replayed onto ...", and ``why`` says what made a replay
+ * necessary: the session expired, or the page was reloaded.
  */
 export function reportReplay(
   outcome: ReplayOutcome,
   entries: readonly JournalEntry[],
   target: string,
+  why = 'The session expired.',
 ): void {
   const total = entries.filter(isWorkOp).length;
   if (outcome.error === null) {
     if (total === 0) return;
     toast.success('Edits restored', {
-      description: `The session expired. ${changeCount(total)} replayed onto ${target}.`,
+      description: `${why} ${changeCount(total)} replayed onto ${target}.`,
     });
     return;
   }

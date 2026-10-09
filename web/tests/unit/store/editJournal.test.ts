@@ -5,10 +5,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   MAX_JOURNAL_ENTRIES,
+  JOURNAL_STORAGE_KEY,
   compactJournal,
+  editedParams,
   hasEditsNotInFile,
   hasUnsavedEdits,
   isWorkOp,
+  readKeptJournal,
   useEditJournalStore,
 } from '@/store/editJournal';
 import type { JournalEntry, JournalOp } from '@/store/editJournal';
@@ -401,5 +404,102 @@ describe('lifecycle', () => {
     useCaseStore.setState({ topology: null, cloneInitialized: false });
 
     expect(ops()).toEqual(['add']);
+  });
+});
+
+describe('editedParams', () => {
+  const edit = (idx: string, params: Record<string, number>, model = 'PQ'): JournalOp => ({
+    op: 'edit',
+    model,
+    idx,
+    params,
+  });
+
+  it('names what the edits of an element changed, each once', () => {
+    const entries = [
+      entry(edit('PQ_3', { bus: 7, Vn: 138 }), 1),
+      entry(edit('PQ_3', { p0: 0.5, Vn: 69 }), 2),
+      entry(edit('PQ_4', { q0: 0.1 }), 3),
+      // The same idx under another model is another element.
+      entry(edit('PQ_3', { u: 0 }, 'Shunt'), 4),
+    ];
+    expect(editedParams(entries, 'PQ', 'PQ_3')).toEqual(['bus', 'Vn', 'p0']);
+    expect(editedParams(entries, 'PQ', 'PQ_4')).toEqual(['q0']);
+    expect(editedParams(entries, 'PQ', 'PQ_9')).toEqual([]);
+  });
+
+  it('leaves out an edit that was taken back, and has it again once it is put back', () => {
+    const entries = [
+      entry(edit('PQ_3', { p0: 0.5 }), 1),
+      entry(edit('PQ_3', { bus: 7, Vn: 138 }), 2),
+      entry({ op: 'undo' }, 3),
+    ];
+    expect(editedParams(entries, 'PQ', 'PQ_3')).toEqual(['p0']);
+    expect(editedParams([...entries, entry({ op: 'redo' }, 4)], 'PQ', 'PQ_3')).toEqual([
+      'p0',
+      'bus',
+      'Vn',
+    ]);
+    // A new edit leaves nothing to put back.
+    const after = [...entries, entry(edit('PQ_4', { q0: 0.1 }), 4), entry({ op: 'redo' }, 5)];
+    expect(editedParams(after, 'PQ', 'PQ_3')).toEqual(['p0']);
+  });
+
+  it('follows an undo through an add or a delete, which are steps like an edit', () => {
+    const entries = [
+      entry(edit('PQ_3', { p0: 0.5 }), 1),
+      entry(addBus(15), 2),
+      entry({ op: 'undo' }, 3),
+      entry({ op: 'undo' }, 4),
+    ];
+    expect(editedParams(entries, 'PQ', 'PQ_3')).toEqual([]);
+  });
+});
+
+describe('kept for a reload of the page', () => {
+  afterEach(() => window.sessionStorage.clear());
+
+  it('is written to the tab with every change, and read back as it was', () => {
+    record(addBus(1), { op: 'edit', model: 'Bus', idx: '1', params: { Vn: 230 } });
+    const kept = readKeptJournal();
+    expect(kept?.entries.map((e) => e.op)).toEqual(['add', 'edit']);
+    expect(kept).toMatchObject({
+      revision: 2,
+      savedRevision: 0,
+      replayable: true,
+      replaced: false,
+    });
+    // What a save settles is kept too: a reload must not call saved work unsaved.
+    useEditJournalStore.getState().markSaved();
+    expect(readKeptJournal()?.savedRevision).toBe(2);
+  });
+
+  it('is gone from the tab once the journal is empty again', () => {
+    record(addBus(1));
+    expect(window.sessionStorage.getItem(JOURNAL_STORAGE_KEY)).not.toBeNull();
+    useEditJournalStore.getState().reset();
+    expect(window.sessionStorage.getItem(JOURNAL_STORAGE_KEY)).toBeNull();
+    expect(readKeptJournal()).toBeNull();
+  });
+
+  it('reads anything that is not a journal as none', () => {
+    for (const raw of [
+      'not json',
+      'null',
+      '{"entries":"no"}',
+      JSON.stringify({ entries: [{ op: 3, rev: 1 }], revision: 1 }),
+      JSON.stringify({
+        entries: [],
+        revision: -1,
+        savedRevision: 0,
+        fileSavedRevision: 0,
+        opaqueRevision: 0,
+        replayable: true,
+        replaced: false,
+      }),
+    ]) {
+      window.sessionStorage.setItem(JOURNAL_STORAGE_KEY, raw);
+      expect(readKeptJournal()).toBeNull();
+    }
   });
 });

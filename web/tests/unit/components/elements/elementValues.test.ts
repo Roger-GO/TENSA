@@ -11,7 +11,10 @@ import {
   existingIdxSetFor,
   nextAvailableIdx,
   pickTargets,
+  busRatedVoltage,
+  ratedForBus,
   seedElementValues,
+  withBusRating,
   withHeldValues,
 } from '@/components/elements/elementValues';
 
@@ -56,8 +59,8 @@ describe('the values a form opens with', () => {
       q0: 0.1,
       u: false,
     });
-    // A model that is not named after its idx opens with no name.
-    expect(seedElementValues('PQ', PV, TOPOLOGY).name).toBe('');
+    // Every model opens named after the idx it proposes.
+    expect(seedElementValues('PQ', PV, TOPOLOGY).name).toBe('PQ_1');
   });
 
   it('take the next idx from the elements of the same model', () => {
@@ -103,8 +106,8 @@ describe('the values that were kept, over what a form opens with', () => {
       idx: 'G9',
       name: 'North',
     });
-    // Not for a model that is not named after its idx.
-    expect(withHeldValues('PQ', seeded, { idx: 'L9' }).name).toBe('3');
+    // The same for any other model.
+    expect(withHeldValues('PQ', seeded, { idx: 'L9' }).name).toBe('L9');
   });
 
   it('leave out a field the model does not have', () => {
@@ -159,5 +162,60 @@ describe('the check of a set of values', () => {
     expect([...targets.gen_idx]).toEqual(['2']);
     expect([...targets.syn_idx]).toEqual(['GENROU_1']);
     expect(pickTargets(null).bus_idx.size).toBe(0);
+  });
+});
+
+describe('the rated voltage a device takes from its bus', () => {
+  const LOAD: TopologyParamMeta[] = [
+    { name: 'idx', kind: 'string', required: true },
+    { name: 'bus', kind: 'bus_idx', required: true },
+    { name: 'Vn', kind: 'number', required: true, unit: 'kV' },
+    { name: 'p0', kind: 'number', required: true, unit: 'pu' },
+  ];
+  const RATED: TopologySummary = {
+    ...TOPOLOGY,
+    buses: [
+      { idx: 1, name: 'BUS1', kind: 'Bus', params: { Vn: 69 } },
+      { idx: 2, name: 'BUS2', kind: 'Bus', params: { Vn: '138' } },
+      { idx: 3, name: 'BUS3', kind: 'Bus', params: {} },
+    ],
+  };
+
+  it('is asked of a model that has a bus and a Vn, and of no other', () => {
+    expect(ratedForBus(LOAD)).toBe(true);
+    // A PV of this fixture has no Vn, and a governor has no bus.
+    expect(ratedForBus(PV)).toBe(false);
+    expect(ratedForBus(TGOV1)).toBe(false);
+  });
+
+  it('is the Vn of the bus, as a number, and nothing for a bus without one', () => {
+    expect(busRatedVoltage(RATED, '1')).toBe(69);
+    expect(busRatedVoltage(RATED, '2')).toBe(138);
+    expect(busRatedVoltage(RATED, '3')).toBeNull();
+    expect(busRatedVoltage(RATED, '9')).toBeNull();
+    expect(busRatedVoltage(RATED, '')).toBeNull();
+    expect(busRatedVoltage(null, '1')).toBeNull();
+  });
+
+  it('fills an empty Vn from the bus that is picked', () => {
+    const values = { idx: 'PQ_1', bus: '2', Vn: '', p0: '' };
+    expect(withBusRating(LOAD, values, { bus: '2' }, RATED)).toEqual({ ...values, Vn: 138 });
+  });
+
+  it('follows the bus while no rating was kept, and leaves one that was', () => {
+    // The bus changed and the rating was the form's own: it goes along.
+    expect(withBusRating(LOAD, { bus: '1', Vn: 138 }, { bus: '1' }, RATED).Vn).toBe(69);
+    // A rating someone typed stays, whatever the bus.
+    expect(withBusRating(LOAD, { bus: '1', Vn: 13.8 }, { bus: '1', Vn: 13.8 }, RATED).Vn).toBe(
+      13.8,
+    );
+  });
+
+  it('leaves the field as it is with no bus, a bus that is gone, or one without a rating', () => {
+    expect(withBusRating(LOAD, { bus: '', Vn: '' }, {}, RATED).Vn).toBe('');
+    expect(withBusRating(LOAD, { bus: '9', Vn: '' }, { bus: '9' }, RATED).Vn).toBe('');
+    expect(withBusRating(LOAD, { bus: '3', Vn: '' }, { bus: '3' }, RATED).Vn).toBe('');
+    // A model with no such pair of fields is not touched.
+    expect(withBusRating(PV, { bus: '2' }, { bus: '2' }, RATED)).toEqual({ bus: '2' });
   });
 });

@@ -132,6 +132,43 @@ describe('<RunMenu /> — render', () => {
   });
 });
 
+describe('<RunMenu /> — what an entry says and does', () => {
+  it('heads the routines "Run now", and names each for what choosing it does', async () => {
+    const user = userEvent.setup();
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    const content = await screen.findByTestId('topbar-menu-run-content');
+    expect(within(content).getByText('Run now')).toBeInTheDocument();
+    expect(within(content).queryByText('Active routine')).toBeNull();
+    expect(screen.getByTestId('topbar-menu-run-pflow')).toHaveTextContent('Run power flow (PF)');
+    expect(screen.getByTestId('topbar-menu-run-tds')).toHaveTextContent(
+      'Run time-domain simulation (TDS)',
+    );
+    // The sweep needs its values chosen first: it does not say Run.
+    expect(screen.getByTestId('topbar-menu-run-sweep')).toHaveTextContent('Parameter sweep…');
+  });
+
+  it('an entry that says Run asks for the run, where it used to pick the routine and stop', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
+      topology: null,
+    });
+    useSessionStore.setState({ sessionId: parseSessionId('s1') });
+    useRunModeStore.setState({ activeRoutine: 'tds', runRequest: null });
+    try {
+      render(withProviders(<RunMenu />));
+      await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+      await user.click(await screen.findByTestId('topbar-menu-run-pflow'));
+      expect(useRunModeStore.getState().runRequest).toEqual({ routine: 'pflow' });
+    } finally {
+      useCaseStore.setState({ selection: null });
+      useSessionStore.setState({ sessionId: null });
+      useRunModeStore.setState({ runRequest: null });
+    }
+  });
+});
+
 describe('<RunMenu /> — selection effects', () => {
   it('selecting PFlow updates `activeRoutine` and opens the PF sub-tab', async () => {
     const user = userEvent.setup();

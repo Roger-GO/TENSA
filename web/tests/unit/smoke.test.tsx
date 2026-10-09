@@ -1,4 +1,4 @@
-import { render, screen, act, within } from '@testing-library/react';
+import { render, screen, act, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { App } from '@/App';
 import { useCaseStore } from '@/store/case';
@@ -84,25 +84,40 @@ describe('App scaffold', () => {
     expect(screen.getByRole('tab', { name: 'Components' })).toBeInTheDocument();
   });
 
-  it('says on the "No case loaded" page which case a reload closed, with a button that reopens it', () => {
-    // A reload starts an empty session. The page said nothing of the case that
-    // had been open, so it read as a first visit and the case as lost.
+  it('says after a reload that the case it had open is being opened again, not "No case loaded"', async () => {
+    // A reload starts an empty session, and the page opens the case the tab
+    // had open by itself. Until the session is there it says so.
     useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
-    render(<App />);
-    const page = screen
-      .getAllByTestId('empty-state')
-      .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-no-case')!;
-    expect(within(page).getByText('No case loaded')).toBeInTheDocument();
-    expect(within(page).getByTestId('reloaded-case-note-diagram')).toHaveTextContent(
-      'A reload of the page closes the open case. kundur_full.xlsx was open.',
-    );
-    expect(
-      within(page).getByRole('button', { name: 'Reopen kundur_full.xlsx' }),
-    ).toBeInTheDocument();
-    // The note stands where the sentence for a first visit does.
-    expect(page).not.toHaveTextContent('Pick a case file in the Project tab');
-    // The card of the sidebar says the same, where the case is looked for.
-    expect(screen.getByTestId('reloaded-case-note-project')).toBeInTheDocument();
+    try {
+      render(<App />);
+      const page = await waitFor(
+        () =>
+          screen
+            .getAllByTestId('empty-state')
+            .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-case-loading')!,
+      );
+      expect(page).toHaveTextContent('Loading kundur_full.xlsx');
+      expect(page).toHaveTextContent(
+        'The page was reloaded: the case it had open is opened again, with the edits made to it.',
+      );
+      expect(screen.queryByText('No case loaded')).not.toBeInTheDocument();
+    } finally {
+      useReloadedCaseStore.setState({ closed: null });
+      useCaseStore.getState().setLoadingPath(null);
+    }
+  });
+
+  it('says so for a system built from scratch too, which has no file to load', async () => {
+    useReloadedCaseStore.setState({ closed: { primaryPath: null, addfiles: [], blank: true } });
+    try {
+      render(<App />);
+      const page = screen
+        .getAllByTestId('empty-state')
+        .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-case-reopening')!;
+      expect(page).toHaveTextContent('Opening your system again');
+    } finally {
+      useReloadedCaseStore.setState({ closed: null });
+    }
   });
 
   it('wires the mark a reload reads: it follows the open case, and goes when the case is closed', () => {

@@ -289,15 +289,25 @@ export function subscribeUnitExpanded(listener: UnitListener): () => void {
 // same way, and asks for the route to be given back to the automatic routing.
 // ---------------------------------------------------------------------------
 
-/** What is asked of the route of a line: its handles, or the automatic routing again. */
-export type RouteRequest = 'edit' | 'reset';
+/**
+ * What is asked of the route of a line: its handles (`edit`), its handles with
+ * the keyboard focus on a run of it (`edit-focus`), or the automatic routing
+ * again (`reset`).
+ */
+export type RouteRequest = 'edit' | 'edit-focus' | 'reset';
 
 type RouteListener = (branchIdx: string, what: RouteRequest) => void;
 const routeListeners: Set<RouteListener> = new Set();
 
-/** Ask the mounted canvas to pick the line or transformer `branchIdx`, so that its route can be moved by hand. */
-export function __requestRouteEdit(branchIdx: string): void {
-  for (const l of routeListeners) l(branchIdx, 'edit');
+/**
+ * Ask the mounted canvas to pick the line or transformer `branchIdx`, so that
+ * its route can be moved by hand. With `focus` the keyboard focus goes to a
+ * run of the line that the arrow keys move: for a control that says it moves
+ * the route (Move route by hand), where a row of a table, which is also
+ * clicked to read a value, keeps the focus.
+ */
+export function __requestRouteEdit(branchIdx: string, options: { focus?: boolean } = {}): void {
+  for (const l of routeListeners) l(branchIdx, options.focus === true ? 'edit-focus' : 'edit');
 }
 
 /** Ask the mounted canvas to give the route of the line or transformer `branchIdx` back to the automatic routing. */

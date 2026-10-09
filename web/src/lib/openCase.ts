@@ -42,7 +42,8 @@ export interface OpenCase {
  *      segments).
  *   2. Same-file no-op guard: skip the load when it is the case already open,
  *      so a click does not tear down the PF results, snapshots and disturbance
- *      log just to land back at the same case.
+ *      log just to land back at the same case, and when that file is being
+ *      opened at this moment.
  *   3. Dispatch the load mutation and mirror the resolved selection into the
  *      case slice once it has loaded.
  *
@@ -76,6 +77,10 @@ export function useOpenCase(): OpenCase {
       ) {
         return;
       }
+      // The same file is being opened already (a second click on its row, or
+      // the reopening after a reload of the page): one load of it is enough,
+      // and a second would be refused by a session that is busy with the first.
+      if (useCaseStore.getState().loadingPath === primary) return;
       // ``mutateAsync``, not ``mutate`` with callbacks: those only run while the
       // component that called it is mounted, and the palette's Open case page,
       // which calls this, is gone the moment it closes. The load goes on without

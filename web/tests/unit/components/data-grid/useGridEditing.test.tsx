@@ -244,7 +244,7 @@ describe('useGridEditing: writing before a run', () => {
     expect(toastMock.success).toHaveBeenCalledTimes(1);
     expect(toastMock.success).toHaveBeenCalledWith(
       'Changed vmin of Bus 1',
-      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+      expect.objectContaining({ description: 'Undo (Ctrl+Z or Edit > Undo) takes it back.' }),
     );
   });
 
@@ -440,7 +440,10 @@ describe('useGridEditing: after a run', () => {
     const user = userEvent.setup();
     mount();
     expect(latest.canEdit(BUS1, column('vmin'))).toBe(false);
-    expect(latest.lockedReason).toMatch(/The case is set up for a run/);
+    // The sentence every place locked by a run has: why, the way out, what it keeps.
+    expect(latest.lockedReason).toBe(
+      'A run has fixed the system. Reset run lets you edit again; the result stays in Analysis > Compare and in Run history.',
+    );
     expect(latest.hint).toBe(latest.lockedReason);
     const reset = screen.getByTestId('grid-reset-run');
     expect(reset).toHaveTextContent('Reset run');
@@ -485,7 +488,7 @@ describe('useGridEditing: after a run', () => {
 
   it('says that a dynamic model reads on the system base once the case is set up, and a static table does not', () => {
     const { unmount } = mount({ ...TARGET, dynamic: true });
-    expect(latest.lockedReason).toMatch(/The case is set up for a run/);
+    expect(latest.lockedReason).toMatch(/^A run has fixed the system\./);
     expect(latest.lockedReason).toMatch(/shown on the system base/);
     unmount();
 
@@ -556,7 +559,9 @@ describe('useGridEditing: controllers', () => {
     mockTopology = topology('committed');
     mount(CONTROLLER_TARGET);
     expect(latest.canEdit(EXCITER, column('KA'))).toBe(false);
-    expect(latest.lockedReason).toMatch(/Turn on Edit mode/);
+    expect(latest.lockedReason).toMatch(
+      /^A run has fixed the system\. Edit mode changes controller values without a reset\. Reset run lets you edit again/,
+    );
     expect(screen.getByTestId('edit-mode-toggle')).toBeInTheDocument();
     expect(screen.getByTestId('grid-reset-run')).toBeInTheDocument();
   });

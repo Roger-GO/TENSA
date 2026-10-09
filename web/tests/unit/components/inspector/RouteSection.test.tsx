@@ -50,7 +50,8 @@ describe('<RouteSection />', () => {
       'The diagram drew this route, so there is nothing to reset.',
     );
     await user.click(screen.getByRole('button', { name: 'Move route by hand' }));
-    expect(asked).toHaveBeenCalledWith('Line_3', 'edit');
+    // With the keyboard focus on the line: the next press of an arrow moves it.
+    expect(asked).toHaveBeenCalledWith('Line_3', 'edit-focus');
     unsubscribe();
   });
 

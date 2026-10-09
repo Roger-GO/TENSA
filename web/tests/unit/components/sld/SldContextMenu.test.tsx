@@ -224,7 +224,7 @@ describe('menu for a bus', () => {
     const menu = await openMenu(BUS);
     const item = within(menu).getByTestId('sld-context-add-element');
     expect(item).toHaveAttribute('aria-disabled', 'true');
-    expect(item).toHaveTextContent('A run has locked the system.');
+    expect(item).toHaveTextContent('A run has fixed the system.');
     expect(item).toHaveTextContent('Reset run');
     // The other items of the bus do not depend on it.
     expect(within(menu).getByTestId('sld-context-fault')).not.toHaveAttribute('aria-disabled');
@@ -685,7 +685,7 @@ describe('menu for the canvas', () => {
   it('offers Figure, which says what it saves and opens the figure of the diagram', async () => {
     const menu = await openMenu({ kind: 'canvas' });
     const item = within(menu).getByTestId('sld-context-figure');
-    expect(item).toHaveTextContent('Figure…');
+    expect(item).toHaveTextContent('Figure for a paper…');
     expect(item).toHaveTextContent('SVG, PDF or PNG');
     await userEvent.click(item);
     expect(onFigure).toHaveBeenCalledTimes(1);

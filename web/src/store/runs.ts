@@ -121,6 +121,13 @@ export interface RunRecord {
    */
   scenario?: string;
   /**
+   * The time (s) at which the run first disturbs the system: the earliest of
+   * the disturbances scheduled when it started and of the case's own events.
+   * What came before it is the steady state, so the response metrics can be
+   * read from here on. Absent when nothing disturbs the run.
+   */
+  disturbedAt?: number;
+  /**
    * The case the run was computed on: its file name without directory or
    * extension (``ieee14``). Kept on the run for the same reason as ``bases``:
    * an export of a kept run must name its own case, not the one open now.
@@ -209,6 +216,8 @@ export interface StartRunPayload {
   bases?: UnitBases;
   /** What the run does to the system, in words; see ``RunRecord.scenario``. */
   scenario?: string;
+  /** When the run first disturbs the system; see ``RunRecord.disturbedAt``. */
+  disturbedAt?: number;
   /** The case the run is computed on; see ``RunRecord.caseName``. */
   caseName?: string;
 }
@@ -576,7 +585,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
   runCount: 0,
   retentionLimit: DEFAULT_RETENTION_LIMIT,
 
-  startRun: ({ runId, tf, columnNames, bases, scenario, caseName }) => {
+  startRun: ({ runId, tf, columnNames, bases, scenario, disturbedAt, caseName }) => {
     const columns: Record<string, Float64Array> = {};
     for (const name of columnNames) columns[name] = new Float64Array(0);
     const runCount = get().runCount + 1;
@@ -592,6 +601,7 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       ...(bases === undefined ? {} : { bases }),
       ordinal: runCount,
       ...(scenario === undefined ? {} : { scenario }),
+      ...(disturbedAt === undefined ? {} : { disturbedAt }),
       ...(caseName === undefined ? {} : { caseName }),
       state: 'starting',
       connection: 'connected',

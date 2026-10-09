@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { useCaseStore } from '@/store/case';
+import { useEditJournalStore } from '@/store/editJournal';
 import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useUnitsStore } from '@/store/units';
@@ -202,9 +203,12 @@ describe('<ElementFormFields />', () => {
       select('bus', '1');
       render(withQueryClient(<ElementFormFields />));
       const banner = screen.getByTestId('inspector-reset-banner');
-      expect(banner).toHaveTextContent('A run has locked this case.');
-      expect(banner).toHaveTextContent('Reset the run to edit values again');
-      expect(banner).toHaveTextContent('the edits you made so far are discarded');
+      // What every place locked by a run says. Nothing was edited since the
+      // case was opened, so it does not say that a reset loses anything.
+      expect(banner).toHaveTextContent(
+        'A run has fixed the system. Reset run lets you edit again; the result stays in Analysis > Compare and in Run history.',
+      );
+      expect(banner).not.toHaveTextContent('not saved yet');
       await user.click(within(banner).getByRole('button', { name: 'Reset run' }));
       // The reset the top bar and the tables make: it releases the run as well.
       expect(resetMutate).toHaveBeenCalledWith('test-session-id', expect.anything());
@@ -251,8 +255,10 @@ describe('<ElementFormFields />', () => {
     });
     render(withQueryClient(<ElementFormFields />));
     const banner = screen.getByTestId('inspector-reset-banner');
-    expect(banner).toHaveTextContent('Turn on Edit mode to change controller parameters');
-    expect(banner).toHaveTextContent('reset the run to edit other values');
+    expect(banner).toHaveTextContent(
+      'Edit mode, above, changes controller parameters without a reset.',
+    );
+    expect(banner).toHaveTextContent('Reset run lets you edit again');
   });
 
   it('confirms a controller value changed in Edit mode with a toast that names it', async () => {
@@ -279,7 +285,7 @@ describe('<ElementFormFields />', () => {
     await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1));
     expect(toastMock.success).toHaveBeenCalledWith(
       'Changed Ka of EXST1 EXST1_1',
-      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+      expect.objectContaining({ description: 'Undo (Ctrl+Z or Edit > Undo) takes it back.' }),
     );
   });
 
@@ -419,6 +425,44 @@ describe('<ElementFormFields />', () => {
       select('bus', '1');
       render(withQueryClient(<ElementFormFields />));
       expect(screen.queryByTestId('inspector-line-loading')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('a value changed since the case was opened', () => {
+    afterEach(() => useEditJournalStore.getState().reset());
+
+    it('is marked, so a change the app made with another is seen after its notice is gone', () => {
+      // A load moved to another bus on the diagram: its Vn went with the bus.
+      useEditJournalStore.getState().record({
+        op: 'edit',
+        model: 'PQ',
+        idx: 'PQ1',
+        params: { bus: 2 },
+      });
+      select('load', 'PQ1');
+      render(withQueryClient(<ElementFormFields />));
+      const mark = screen.getByTestId('inspector-edited-bus');
+      expect(mark).toHaveAccessibleName('changed since the case was opened');
+      expect(mark).toHaveAttribute(
+        'title',
+        'bus was changed since the case was opened. Undo (Ctrl+Z or Edit > Undo) takes the change back.',
+      );
+      // What was not changed has no mark.
+      expect(screen.queryByTestId('inspector-edited-p0')).not.toBeInTheDocument();
+    });
+
+    it('is not marked once the change is taken back, nor on another element', () => {
+      const journal = useEditJournalStore.getState();
+      journal.record({ op: 'edit', model: 'PQ', idx: 'PQ1', params: { p0: 0.7 } });
+      select('bus', '1');
+      const view = render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId(/^inspector-edited-/)).not.toBeInTheDocument();
+      view.unmount();
+      select('load', 'PQ1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-edited-p0')).toBeInTheDocument();
+      act(() => useEditJournalStore.getState().record({ op: 'undo' }));
+      expect(screen.queryByTestId('inspector-edited-p0')).not.toBeInTheDocument();
     });
   });
 

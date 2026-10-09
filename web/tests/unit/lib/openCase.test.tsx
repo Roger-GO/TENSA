@@ -103,6 +103,23 @@ describe('useOpenCase', () => {
     expect(mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it('loads nothing for a file that is being opened at this moment', () => {
+    // A second click on its row, or a click while the page opens it again
+    // after a reload: the session is busy with the first load and would
+    // refuse a second.
+    useCaseStore.setState({ loadingPath: parseWorkspacePath('ieee14.raw') });
+    try {
+      const { result } = renderHook(() => useOpenCase());
+      result.current.openCase('ieee14.raw');
+      expect(mutateAsync).not.toHaveBeenCalled();
+      // Another file is another matter.
+      result.current.openCase('kundur.xlsx');
+      expect(mutateAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      useCaseStore.setState({ loadingPath: null });
+    }
+  });
+
   it('refuses a dynamic file path that leaves the workspace, with a toast', () => {
     const error = vi.spyOn(toast, 'error').mockReturnValue('id');
     const { result } = renderHook(() => useOpenCase());

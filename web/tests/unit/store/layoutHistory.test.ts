@@ -97,6 +97,69 @@ describe('the two stacks', () => {
   });
 });
 
+describe('drafts that were deleted', () => {
+  const draft = (id: string) => ({
+    id,
+    kind: 'PQ',
+    position: { x: 1, y: 2 },
+    values: { bus: '4' },
+  });
+  const NOTHING: LayoutSnapshot = { positions: {}, routes: {} };
+
+  it('are one step of the history, which hands them back on undo and again on redo', () => {
+    history().record('move bus 1', at(0));
+    history().record('delete draft PQ load PQ_12', NOTHING, null, {
+      caseKey: 'ieee14.raw',
+      deleted: [draft('draft-1')],
+    });
+    const back = history().undo(at(10));
+    expect(back).toMatchObject({
+      label: 'delete draft PQ load PQ_12',
+      drafts: { caseKey: 'ieee14.raw', deleted: [draft('draft-1')] },
+    });
+    // The step Redo takes carries them too: it deletes them again.
+    expect(history().future.at(-1)?.drafts).toEqual(back?.drafts);
+    expect(history().redo(at(10))?.drafts).toEqual(back?.drafts);
+    // A move has none.
+    history().undo(at(10));
+    expect(history().undo(at(10))?.drafts).toBeUndefined();
+  });
+
+  it('are deleted again by Redo under the ids they came back with', () => {
+    history().record('delete draft PQ load PQ_12', NOTHING, null, {
+      caseKey: 'ieee14.raw',
+      deleted: [draft('draft-1')],
+    });
+    history().undo(NOTHING);
+    // A draft placed since had taken the id: it is back as another.
+    history().redoDeletes([draft('draft-2')]);
+    expect(history().redo(NOTHING)?.drafts?.deleted).toEqual([draft('draft-2')]);
+    // With no such step waiting, nothing is changed.
+    history().record('move bus 1', at(0));
+    history().undo(at(5));
+    const before = history().future;
+    history().redoDeletes([draft('draft-9')]);
+    expect(history().future).toBe(before);
+  });
+
+  it('leave no step once the notice of the delete has put them back, wherever the step is', () => {
+    const deleted = history().record('delete draft PQ load PQ_12', NOTHING, null, {
+      caseKey: 'ieee14.raw',
+      deleted: [draft('draft-1')],
+    });
+    history().record('move bus 1', at(0));
+    // Not the newest any more, which is all `discard` drops.
+    history().discard(deleted);
+    expect(history().past).toHaveLength(2);
+    history().forget(deleted);
+    expect(history().past.map((step) => step.label)).toEqual(['move bus 1']);
+    // One that is not there is no change.
+    const before = history().past;
+    history().forget(deleted);
+    expect(history().past).toBe(before);
+  });
+});
+
 describe('moves by the arrow keys', () => {
   it('takes presses on the same nodes in quick succession for one move', () => {
     const first = history().record('move bus 1', at(0), 'nudge:1');

@@ -53,7 +53,7 @@ export function RouteSection({ className }: { className?: string }) {
           disabled={locked}
           data-testid="route-section-edit"
           title={`Shows the handles of this ${what} on the diagram: drag a run to slide it, a square to move a bend, a + to add one.`}
-          onClick={() => __requestRouteEdit(idx)}
+          onClick={() => __requestRouteEdit(idx, { focus: true })}
           className="h-7 px-2 text-xs"
         >
           Move route by hand
@@ -81,6 +81,16 @@ export function RouteSection({ className }: { className?: string }) {
             ? `You drew this route. Tidy diagram leaves it as it is; Reset route hands it back to the diagram.`
             : `The diagram drew this route, so there is nothing to reset. Move route by hand makes it yours.`}
       </p>
+      {locked ? null : (
+        <p
+          data-testid="route-section-how"
+          className="text-muted-foreground text-[11px] leading-snug"
+        >
+          How: press Move route by hand, then drag a run of the blue line sideways, or pick a run
+          and press Shift+arrow (the arrows alone make small steps). Add bend, above the diagram,
+          makes a corner. Esc or Done lets go. Help has the whole list under Moving a line by hand.
+        </p>
+      )}
     </section>
   );
 }

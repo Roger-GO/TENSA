@@ -18,8 +18,10 @@ import {
 } from '@/components/sld/drafts';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { runLockNotice } from '@/lib/runLock';
+import { UNDO } from '@/lib/undoWording';
 import { toast } from '@/lib/toast';
-import { useResetRunAction } from '@/lib/useResetRunAction';
+import { useReloadDiscardsEdits, useResetRunAction } from '@/lib/useResetRunAction';
 import { useCaseStore } from '@/store/case';
 import { useDrafts, useDraftsStore, type DraftElement } from '@/store/drafts';
 import { usePflowStore } from '@/store/pflow';
@@ -48,8 +50,9 @@ import { useSldStore } from '@/store/sld';
  * says why, and offers the reset that undoes that.
  */
 
-const LOCKED_BY_RUN =
-  'A run has set the system up, which locks its elements. Reset the run to add this draft; it is kept meanwhile.';
+/** Why the draft cannot be added while a run has fixed the system; the draft itself is kept. */
+const lockedByRunText = (discardsEdits: boolean): string =>
+  `${runLockNotice(discardsEdits)} The draft is kept meanwhile.`;
 
 export interface DraftInspectorProps {
   draft: DraftElement;
@@ -65,6 +68,7 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
   const pfRunning = usePflowStore((s) => s.isRunning);
   const addMutation = useAddElement();
   const resetRun = useResetRunAction({ errorTitle: 'Reset run', confirm: true });
+  const lockedText = lockedByRunText(useReloadDiscardsEdits());
   const [serverError, setServerError] = useState<string | null>(null);
   const clearServerError = useCallback(() => setServerError(null), []);
 
@@ -82,7 +86,7 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
     sessionId === null
       ? 'The server session is not ready yet.'
       : lockedByRun
-        ? LOCKED_BY_RUN
+        ? lockedText
         : pfRunning
           ? 'Wait for the power flow to finish.'
           : null;
@@ -98,6 +102,11 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
     [caseKey, draftId],
   );
   const remove = () => deleteDraft(caseKey, draft.id, name);
+  // A field of this draft the cursor is wanted in (the Pick a bus button of
+  // the notice for a device that was dropped on no bus).
+  const asked = useDraftsStore((s) => s.fieldAsked);
+  const focusField = asked !== null && asked.id === draftId ? asked : null;
+  const onFieldFocused = useCallback(() => useDraftsStore.getState().askField(null), []);
 
   const header = (
     <header
@@ -178,14 +187,13 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
             if (nodeId !== null) useSldStore.getState().setSelectedNodeId(nodeId, 'diagram');
           }
           toast.success(`Added to the system: ${name}`, {
-            description:
-              'It is an element of the system now, selected in the Inspector. Undo in the Edit menu takes the add back.',
+            description: `It is an element of the system now, selected in the Inspector. ${UNDO} takes the add back.`,
           });
         },
         onError: (err) => {
           if (err instanceof ProblemDetailsError) {
             setServerError(
-              err.status === 409 ? LOCKED_BY_RUN : (err.detail ?? err.title ?? 'Add rejected'),
+              err.status === 409 ? lockedText : (err.detail ?? err.title ?? 'Add rejected'),
             );
           } else {
             setServerError(err.message ?? 'Add failed');
@@ -239,6 +247,8 @@ export function DraftInspector({ draft, caseKey, className }: DraftInspectorProp
           submitLabel="Add to system"
           cancelLabel="Delete draft"
           blockedReason={blockedReason}
+          focusField={focusField}
+          onFieldFocused={onFieldFocused}
           saving={addMutation.isPending}
           serverError={serverError}
           onSubmit={handleSubmit}

@@ -32,7 +32,7 @@ describe('announceEdit', () => {
     expect(toastMock.success).toHaveBeenCalledTimes(1);
     const [message, options] = toastMock.success.mock.calls[0] as [string, { description: string }];
     expect(message).toBe('Changed r of Line Line_1');
-    expect(options.description).toBe('Undo in the Edit menu takes it back.');
+    expect(options.description).toBe('Undo (Ctrl+Z or Edit > Undo) takes it back.');
   });
 
   it('uses the words the Undo command has for the same edit', () => {

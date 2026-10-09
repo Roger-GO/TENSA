@@ -87,7 +87,7 @@ import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
-import type { RunRoutine } from '@/lib/useRunReadiness';
+import { runReadinessNow, type RunRoutine } from '@/lib/useRunReadiness';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'view' | 'navigation' | 'help';
 
@@ -163,6 +163,13 @@ export interface Command {
    * stays open after running it; every other command closes the palette.
    */
   keepPaletteOpen?: boolean;
+  /**
+   * Where the keyboard focus goes once the palette has run the command and
+   * closed, for a command that shows something (a tab of the sidebar): the
+   * element to focus, or `null` when it is not on the page. Left out, the
+   * focus goes back to what had it before the palette opened.
+   */
+  focusAfter?: () => HTMLElement | null;
 }
 
 /** A command as a menu lists it: runnable, or greyed out with the reason it is not. */
@@ -376,6 +383,35 @@ function useCommandSets(): CommandSets {
       }
     };
 
+    // Select a routine and start it, which is what "Run ..." says. The run is
+    // started by the routine's own Run button (`useRequestedRun`), after the
+    // check that button makes: a routine that cannot run yet says why, in a
+    // notice, with its tab opened on the reason and the way out of it.
+    const runRoutine = (routine: RunRoutine, opts?: { cpfSubMode?: 'nose' | 'qv' }) => {
+      handleSelectRoutine(routine, opts);
+      const layout = useLayoutStore.getState();
+      // EIG, CPF and SE are run from their tab of the drawer, which is also
+      // where the result shows: a drawer at its tabs is opened for them. PF
+      // and TDS run from the top bar and leave the drawer as it is.
+      const inDrawer = routine === 'eig' || routine === 'cpf' || routine === 'se';
+      const showTab = () => {
+        if (!inDrawer || !layout.bottomDrawerCollapsed) return;
+        layout.setBottomDrawerCollapsed(false);
+        layout.clearDrawerUnread();
+      };
+      const readiness = runReadinessNow(routine);
+      if (!readiness.ready) {
+        showTab();
+        toast.warning(`${ROUTINE_NAME[routine]} was not started`, {
+          description: readiness.disabledReason ?? undefined,
+          duration: 8000,
+        });
+        return;
+      }
+      showTab();
+      useRunModeStore.getState().requestRun(routine);
+    };
+
     const all: Command[] = [
       // ---- workspace -----------------------------------------------------
       // Opens the palette's Open case page (the workspace's case files), from the
@@ -512,7 +548,7 @@ function useCommandSets(): CommandSets {
                 ? 'Undo: parameter edit'
                 : 'Undo',
         description:
-          'Takes back your last change: a bus or device moved on the diagram, a tidy or an alignment, an element added, changed or deleted before a run, or a controller parameter changed in Edit mode. A deleted element comes back with everything that was deleted with it.',
+          'Takes back your last change: a bus or device moved on the diagram, a tidy or an alignment, a draft deleted, an element added, changed or deleted before a run, or a controller parameter changed in Edit mode. A deleted element comes back with everything that was deleted with it.',
         group: 'edit',
         keywords: [
           'undo',
@@ -668,11 +704,10 @@ function useCommandSets(): CommandSets {
       // produce a noop in the substrate.
       // Per-routine sequence shortcuts: `r p` (Run PFlow), `r t` (Run
       // TDS), `r e` (Run EIG), `r c` (Run CPF), `r s` (Run SE),
-      // `r w` (Run sWeep — `w` since `s` is already taken). The
-      // active routine still gets a visual badge — we encode it by
-      // appending "  ✓" to the label so the palette + cheatsheet
-      // both surface the marker without overloading the `shortcut`
-      // field with a non-binding sentinel.
+      // `r w` (Run sWeep — `w` since `s` is already taken). Each one
+      // starts its routine (`runRoutine`); the sweep and the QV curve
+      // need something picked first, so theirs open the dialog and the
+      // tab, and their labels end in an ellipsis and do not say Run.
       ...(
         [
           ['pflow', 'r>p'],
@@ -684,10 +719,8 @@ function useCommandSets(): CommandSets {
         ] as const
       ).map<Command>(([routine, shortcut]) => ({
         id: `run.${routine}`,
-        label:
-          routine === activeRoutine
-            ? `Run ${routine.toUpperCase()}  ✓`
-            : `Run ${routine.toUpperCase()}`,
+        label: ROUTINE_COMMAND_LABEL[routine],
+        description: ROUTINE_COMMAND_HINT[routine],
         group: 'run',
         // ``run.cpf`` routes to the CPF nose-curve flow, whose form holds
         // the direction, the Q-limit switch and the lower branch, so we
@@ -708,10 +741,12 @@ function useCommandSets(): CommandSets {
               ]
             : keywordsForRoutine(routine),
         action: () => {
-          handleSelectRoutine(routine);
           if (routine === 'sweep') {
+            handleSelectRoutine(routine);
             __requestPaletteDialog('sweep');
+            return;
           }
+          runRoutine(routine);
         },
         when: routine === 'eig' ? () => pfConverged : undefined,
         shortcut,
@@ -719,14 +754,22 @@ function useCommandSets(): CommandSets {
       // v3.1 Unit 13 — CPF QV-curve command. Routes to the CPF sub-tab
       // and flips the CPF sub-mode to ``qv`` so the QV bus-picker +
       // chart mount. Shipped with the feature for palette
-      // discoverability (per the retired-Unit-17 note).
+      // discoverability (per the retired-Unit-17 note). It opens the tab
+      // and runs nothing: the curve is of a bus, which is picked there.
       {
         id: 'run.cpfQv',
-        label: 'Run CPF QV-curve',
+        label: 'CPF QV curve of a bus…',
+        description:
+          'Opens Analysis, then CPF, on the QV curve. Pick the bus there and press Run: nothing is run before that.',
         group: 'run',
         keywords: ['cpf', 'qv', 'qv curve', 'reactive', 'voltage stability', 'bus', 'q margin'],
         action: () => {
           handleSelectRoutine('cpf', { cpfSubMode: 'qv' });
+          const layout = useLayoutStore.getState();
+          if (layout.bottomDrawerCollapsed) {
+            layout.setBottomDrawerCollapsed(false);
+            layout.clearDrawerUnread();
+          }
         },
       },
       // Esc. Stops the streaming time-domain run the way the Abort button does.
@@ -788,9 +831,9 @@ function useCommandSets(): CommandSets {
       // the Figure button over the diagram and from its right-click menu.
       {
         id: 'export.figure',
-        label: 'Figure of the diagram…',
+        label: 'Figure for a paper…',
         description:
-          'The single-line diagram drawn for a paper: black and white or in colour, with the labels you choose, saved as SVG, PDF or PNG.',
+          'The publication look of the single-line diagram: drawn for print, black and white or in colour, with the labels you choose, saved as SVG, PDF or PNG.',
         group: 'export',
         keywords: [
           'figure',
@@ -805,6 +848,10 @@ function useCommandSets(): CommandSets {
           'picture',
           'paper',
           'publication',
+          'print',
+          'journal',
+          'black and white',
+          'monochrome',
           'vector',
           'dpi',
           'monochrome',
@@ -850,6 +897,7 @@ function useCommandSets(): CommandSets {
           layout.setResultsViewActive(false);
           layout.showLeftSidebarTab('project');
         },
+        focusAfter: () => document.querySelector('[data-testid="left-sidebar-tab-project"]'),
       },
       {
         id: 'view.openComponents',
@@ -863,6 +911,7 @@ function useCommandSets(): CommandSets {
           layout.setResultsViewActive(false);
           layout.showLeftSidebarTab('components');
         },
+        focusAfter: () => document.querySelector('[data-testid="left-sidebar-tab-components"]'),
       },
       {
         id: 'view.toggleBottomDrawer',
@@ -1256,18 +1305,25 @@ function useCommandSets(): CommandSets {
 
       // ---- run controls --------------------------------------------------
       // ⌘Enter / Ctrl+Enter — run whichever routine is currently
-      // marked active in the Run menu. Re-uses the same "select
-      // routine" path that the per-routine palette commands do, so
-      // the analyze sub-mode + right-dock panel align after the
-      // dispatch. Always surfaced — there is always SOME active
-      // routine (defaults to PFlow).
+      // marked active in the Run menu. Re-uses the same path that the
+      // per-routine commands do (`runRoutine`), so it starts the routine
+      // and the analyze sub-mode + drawer tab align after the dispatch.
+      // Always surfaced — there is always SOME active routine (defaults
+      // to PFlow).
       {
         id: 'run.active-routine',
-        label: `Run active routine (${activeRoutine.toUpperCase()})`,
+        label: `Run again: ${ROUTINE_NAME[activeRoutine]}`,
+        description:
+          'Starts the routine that was last chosen in the Run menu or the palette (the ticked one), as its own command does.',
         group: 'run',
-        keywords: ['run', 'active', 'go', activeRoutine],
+        keywords: ['run', 'active', 'go', 'again', 'repeat', activeRoutine],
         action: () => {
-          handleSelectRoutine(activeRoutine);
+          if (activeRoutine === 'sweep') {
+            handleSelectRoutine(activeRoutine);
+            __requestPaletteDialog('sweep');
+            return;
+          }
+          runRoutine(activeRoutine);
         },
         shortcut: 'meta+enter, ctrl+enter',
       },
@@ -1424,6 +1480,41 @@ function noteRefused(title: string, err: unknown): void {
         : undefined;
   toast.error(title, { description });
 }
+
+/** What a routine is called in a sentence about it. */
+export const ROUTINE_NAME: Record<RunRoutine, string> = {
+  pflow: 'Power flow (PF)',
+  tds: 'Time-domain simulation (TDS)',
+  eig: 'Eigenvalue analysis (EIG)',
+  cpf: 'Continuation power flow (CPF)',
+  se: 'State estimation (SE)',
+  sweep: 'Parameter sweep',
+};
+
+/**
+ * What the command of each routine is called in the Run menu and the palette.
+ * One that says Run starts the routine; the sweep opens its dialog first.
+ */
+const ROUTINE_COMMAND_LABEL: Record<RunRoutine, string> = {
+  pflow: 'Run power flow (PF)',
+  tds: 'Run time-domain simulation (TDS)',
+  eig: 'Run eigenvalue analysis (EIG)',
+  cpf: 'Run continuation power flow (CPF)',
+  se: 'Run state estimation (SE)',
+  sweep: 'Parameter sweep…',
+};
+
+/** The hover text of each: what choosing it does, and where the result shows. */
+const ROUTINE_COMMAND_HINT: Record<RunRoutine, string> = {
+  pflow:
+    'Solves the power flow now, as the Run button does in PF mode. The values show on the diagram and in the tables; the options are under Analysis, then PF.',
+  tds: 'Starts a time-domain run now, as the Run button does in TDS mode, with the settings under Analysis, then TDS, and the disturbances of the left sidebar. The plot opens under Analysis, then Plot.',
+  eig: 'Opens Analysis, then EIG, and runs the eigenvalue analysis of the solved operating point.',
+  cpf: 'Opens Analysis, then CPF, and runs the continuation power flow with the options that tab shows.',
+  se: 'Opens Analysis, then SE, and runs the state estimation on the measurements generated there.',
+  sweep:
+    'Opens the parameter sweep dialog, where the parameter and its values are chosen. Nothing is run before that.',
+};
 
 /**
  * Search-synonym buckets per routine. Kept beside the registry so

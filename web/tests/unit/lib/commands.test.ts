@@ -41,6 +41,7 @@ import { usePflowStore } from '@/store/pflow';
 import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useRunModeStore } from '@/store/runMode';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { EditStep, TopologySummary, PflowResult } from '@/api/types';
@@ -884,7 +885,24 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
     expect(layout.bottomDrawerCollapsed).toBe(false);
   });
 
-  it('with drawer COLLAPSED, drawerHasUnreadResults flips to true (no auto-expand)', () => {
+  it('with drawer COLLAPSED, a run from the top bar leaves it collapsed and flips the unread bit', () => {
+    withConvergedPf();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.tds');
+    act(() => cmd?.action());
+    const layout = useLayoutStore.getState();
+    expect(layout.activeBottomDrawerTab).toBe('analysis');
+    expect(layout.activeAnalysisSubTab).toBe('tds');
+    expect(layout.drawerHasUnreadResults).toBe(true);
+    // Critical: the drawer stays collapsed — the badge replaces the
+    // auto-expand per F-DESIGN-5.
+    expect(layout.bottomDrawerCollapsed).toBe(true);
+  });
+
+  it('with drawer COLLAPSED, a routine that runs from its tab of the drawer opens the drawer', () => {
+    // EIG, CPF and SE are started by the Run button of their tab, which is
+    // also where the result shows: a drawer at its tabs would show neither.
     withConvergedPf();
     useLayoutStore.setState({ bottomDrawerCollapsed: true });
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
@@ -893,10 +911,8 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
     const layout = useLayoutStore.getState();
     expect(layout.activeBottomDrawerTab).toBe('analysis');
     expect(layout.activeAnalysisSubTab).toBe('cpf');
-    expect(layout.drawerHasUnreadResults).toBe(true);
-    // Critical: the drawer stays collapsed — the badge replaces the
-    // auto-expand per F-DESIGN-5.
-    expect(layout.bottomDrawerCollapsed).toBe(true);
+    expect(layout.bottomDrawerCollapsed).toBe(false);
+    expect(layout.drawerHasUnreadResults).toBe(false);
   });
 
   it('Run PFlow sets activeBottomDrawerTab=analysis + activeAnalysisSubTab=pf', () => {
@@ -917,6 +933,124 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
     const cmd = result.current.find((c) => c.id === 'run.pflow');
     act(() => cmd?.action());
     expect(useAnalyzeStore.getState().subMode).toBe('eig');
+  });
+});
+
+describe('useCommandRegistry: the Run commands run', () => {
+  // The Run menu and the palette said "Run PFLOW" and only picked the routine
+  // for the Run button: nothing ran, and nothing said so.
+  const TOPOLOGY_DYNAMIC: TopologySummary = {
+    ...emptyTopology(),
+    generators: [{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }],
+  };
+  function convergedPf() {
+    usePflowStore.setState({
+      lastRun: { converged: true, iterations: 4, buses: [] } as unknown as PflowResult,
+      isRunning: false,
+      error: null,
+    });
+  }
+  const run = (id: string) => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === id);
+    expect(cmd, id).toBeDefined();
+    act(() => cmd!.action());
+  };
+
+  beforeEach(() => {
+    useRunModeStore.setState({ activeRoutine: 'pflow', runRequest: null });
+    useCaseStore.setState({ topology: TOPOLOGY_DYNAMIC });
+    useRunsStore.setState({ activeRunId: null });
+    useAnalyzeStore.setState({ eigResult: null, seMeasurementsCount: null });
+  });
+
+  it('names each command for what choosing it does', () => {
+    convergedPf();
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const label = (id: string) => result.current.find((c) => c.id === id)?.label;
+    expect(label('run.pflow')).toBe('Run power flow (PF)');
+    expect(label('run.tds')).toBe('Run time-domain simulation (TDS)');
+    expect(label('run.eig')).toBe('Run eigenvalue analysis (EIG)');
+    expect(label('run.cpf')).toBe('Run continuation power flow (CPF)');
+    expect(label('run.se')).toBe('Run state estimation (SE)');
+    // These two need something picked first, and do not say Run.
+    expect(label('run.sweep')).toBe('Parameter sweep…');
+    expect(label('run.cpfQv')).toBe('CPF QV curve of a bus…');
+    // No tick in a label: a routine that "ran" is not what it would mean now.
+    for (const cmd of result.current.filter((c) => c.group === 'run')) {
+      expect(cmd.label, cmd.id).not.toContain('✓');
+    }
+  });
+
+  it.each([
+    ['run.pflow', 'pflow'],
+    ['run.tds', 'tds'],
+  ] as const)('%s selects the routine and asks its Run button to start it', (id, routine) => {
+    run(id);
+    expect(useRunModeStore.getState().activeRoutine).toBe(routine);
+    expect(useRunModeStore.getState().runRequest).toEqual({ routine });
+  });
+
+  it.each([
+    ['run.eig', 'eig'],
+    ['run.cpf', 'cpf'],
+  ] as const)('%s opens its tab and asks the Run button there to start it', (id, routine) => {
+    convergedPf();
+    run(id);
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe(routine);
+    expect(useRunModeStore.getState().runRequest).toEqual({ routine });
+  });
+
+  it('does not start a routine that cannot run, and says why', () => {
+    // No converged power flow: CPF has no operating point to start from.
+    const warning = vi.spyOn(toast, 'warning').mockReturnValue('id');
+    useLayoutStore.setState({ bottomDrawerCollapsed: true });
+    run('run.cpf');
+    expect(useRunModeStore.getState().runRequest).toBeNull();
+    expect(warning).toHaveBeenCalledWith('Continuation power flow (CPF) was not started', {
+      description: 'Run PFlow first; CPF requires a converged operating point.',
+      duration: 8000,
+    });
+    // Its tab is opened all the same: the reason and the way out of it are there.
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(useLayoutStore.getState().activeAnalysisSubTab).toBe('cpf');
+  });
+
+  it('says why a power flow cannot start after a time-domain run, and asks for none', () => {
+    const warning = vi.spyOn(toast, 'warning').mockReturnValue('id');
+    useRunsStore.setState({ activeRunId: 'run-1' });
+    run('run.pflow');
+    expect(useRunModeStore.getState().runRequest).toBeNull();
+    expect(warning).toHaveBeenCalledWith(
+      'Power flow (PF) was not started',
+      expect.objectContaining({ description: expect.stringMatching(/^Reset the run first/) }),
+    );
+  });
+
+  it('opens the sweep dialog and the QV tab without asking for a run', () => {
+    convergedPf();
+    const seen: string[] = [];
+    const unsubscribe = subscribePaletteDialog((key) => seen.push(key));
+    try {
+      run('run.sweep');
+      expect(seen).toEqual(['sweep']);
+      expect(useRunModeStore.getState().runRequest).toBeNull();
+      run('run.cpfQv');
+      expect(useAnalyzeStore.getState().activeCpfSubMode).toBe('qv');
+      expect(useRunModeStore.getState().runRequest).toBeNull();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('Run again starts the routine that was chosen last', () => {
+    convergedPf();
+    useRunModeStore.setState({ activeRoutine: 'eig' });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const again = result.current.find((c) => c.id === 'run.active-routine');
+    expect(again?.label).toBe('Run again: Eigenvalue analysis (EIG)');
+    act(() => again!.action());
+    expect(useRunModeStore.getState().runRequest).toEqual({ routine: 'eig' });
   });
 });
 
@@ -1163,9 +1297,13 @@ describe('useCommandRegistry: Figure of the diagram', () => {
       const { result } = renderHook(() => useCommandRegistry(), { wrapper });
       const figure = find(result.current, 'export.figure');
       expect(figure?.group).toBe('export');
-      expect(figure?.label).toBe('Figure of the diagram…');
+      // Named for what a user looks for: the look for a publication.
+      expect(figure?.label).toBe('Figure for a paper…');
       // Found by what it saves as well as by what it is called.
-      expect(figure?.keywords).toEqual(expect.arrayContaining(['svg', 'pdf', 'png', 'paper']));
+      expect(figure?.keywords).toEqual(
+        expect.arrayContaining(['svg', 'pdf', 'png', 'paper', 'publication', 'print']),
+      );
+      expect(figure?.description).toMatch(/publication look/);
       expect(figure?.description).toMatch(/SVG, PDF or PNG/);
       act(() => figure?.action());
     } finally {

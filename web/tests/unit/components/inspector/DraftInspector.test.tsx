@@ -45,6 +45,8 @@ vi.mock('@/api/client', async () => {
 
 let mockTopology: TopologySummary | null = IEEE14;
 const resetSpy = vi.fn();
+// Whether a reset would lose edits that were not saved (`useReloadDiscardsEdits`).
+let discardsEdits = false;
 vi.mock('@/api/queries', async () => {
   const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
   return {
@@ -55,6 +57,7 @@ vi.mock('@/api/queries', async () => {
 });
 vi.mock('@/lib/useResetRunAction', () => ({
   useResetRunAction: () => ({ reset: resetSpy, isPending: false }),
+  useReloadDiscardsEdits: () => discardsEdits,
 }));
 
 import { DraftInspector } from '@/components/inspector/DraftInspector';
@@ -154,6 +157,21 @@ describe('<DraftInspector />', () => {
     // And what the form sets next goes on top of it, not of what it opened with.
     await user.type(screen.getByTestId('field-Vn').querySelector('input')!, '69');
     expect(held()).toEqual({ Sn: '100', bus: '9', Vn: '69' });
+  });
+
+  it('puts the cursor in the field that was asked for, once, and only for its own draft', async () => {
+    // The Pick a bus button of the notice for a device that was dropped on no bus.
+    renderDraft();
+    const bus = screen.getByTestId('bus-idx-select');
+    expect(bus).not.toHaveFocus();
+    // Asked of another draft: not this form's to answer.
+    act(() => useDraftsStore.getState().askField({ id: 'draft-9', name: 'bus' }));
+    expect(bus).not.toHaveFocus();
+    expect(useDraftsStore.getState().fieldAsked).toEqual({ id: 'draft-9', name: 'bus' });
+    act(() => useDraftsStore.getState().askField({ id: 'draft-1', name: 'bus' }));
+    await waitFor(() => expect(bus).toHaveFocus());
+    // Answered: the same press can ask again.
+    expect(useDraftsStore.getState().fieldAsked).toBeNull();
   });
 
   it('opens on what the draft was given before, and says Ready once nothing is missing', () => {
@@ -274,13 +292,27 @@ describe('<DraftInspector />', () => {
         values: { bus: '4', Sn: '100', Vn: '69', p0: '0.4', v0: '1.02' },
       },
     ]);
+    // The sentence every place locked by a run has, and what becomes of the draft.
     expect(screen.getByTestId('form-blocked')).toHaveTextContent(
-      'A run has set the system up, which locks its elements. Reset the run to add this draft; it is kept meanwhile.',
+      'A run has fixed the system. Reset run lets you edit again; the result stays in Analysis > Compare and in Run history. The draft is kept meanwhile.',
     );
     expect(screen.getByRole('button', { name: 'Add to system' })).toBeDisabled();
     await user.click(screen.getByTestId('draft-inspector-reset-run'));
     expect(resetSpy).toHaveBeenCalledTimes(1);
     expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('says what a reset would lose only while it would lose something', () => {
+    mockTopology = { ...IEEE14, state: 'committed' };
+    discardsEdits = true;
+    try {
+      renderDraft();
+      expect(screen.getByTestId('form-blocked')).toHaveTextContent(
+        /are not saved yet, and the reset reads the case from its file again: save the system first to keep them\. The draft is kept meanwhile\.$/,
+      );
+    } finally {
+      discardsEdits = false;
+    }
   });
 
   it('waits for a power flow that is running, and for the session', () => {
@@ -307,6 +339,11 @@ describe('<DraftInspector />', () => {
     expect(useSldStore.getState().selectedNodeId).toBeNull();
     const [title, options] = info.mock.calls[0]!;
     expect(title).toBe('Draft deleted: PV generator 6');
+    // Long enough to read, and the notice names the other way back.
+    expect(options).toMatchObject({
+      duration: 12_000,
+      description: expect.stringContaining('Undo (Ctrl+Z or Edit > Undo) brings it back'),
+    });
     act(() => (options as { action: { onClick: () => void } }).action.onClick());
     // Back with what it held, where it stood, and picked again.
     expect(useDraftsStore.getState().byCase[CASE]).toEqual([

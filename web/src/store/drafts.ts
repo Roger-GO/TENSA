@@ -12,9 +12,18 @@
  *
  * Persistence: `localStorage`, by the case file the drafts were made on, so
  * they are there again when the case is opened again: after a reload of the
- * page, which closes the case, and in a later visit. The drafts of a system
- * built from scratch are kept in memory only and go with the system: no file
- * holds it, so there is nothing to find them under. Once it is saved, the
+ * page and in a later visit. A case file is known by its workspace and its
+ * name (`draftCaseKey`): the server names its workspace folder
+ * (`workspaceId` of the session store), so a file of the same name in
+ * another workspace served on the same address has drafts of its own. The
+ * drafts that were already kept when the page was loaded are from an earlier
+ * visit, and the diagram says so once when their case is opened
+ * (`takeKept`); not for the case a reload of the page opens again, whose
+ * drafts were on screen a moment before. The drafts of a system
+ * built from scratch go with the system: no file holds it, so there is
+ * nothing to find them under in a later visit. They are kept in the tab's
+ * `sessionStorage` (`BLANK_DRAFTS_STORAGE_KEY` in `reloadedCase.ts`), so a reload of the page,
+ * which builds the system again, has them again. Once it is saved, the
  * file that was written has them too (`copy`, from the Save system dialog),
  * so they are there when that file is opened. A storage failure (private
  * mode, quota) leaves the drafts working for the tab.
@@ -22,6 +31,14 @@
  * `placements` is where an element that a draft was just added as comes to
  * stand, by the id of its node: the canvas draws it there and takes the entry
  * over (`SldCanvas`). In memory only.
+ *
+ * A draft that is deleted can be put back as it was (`restore`), under the
+ * id it had, or under the next free one when a draft placed since has taken
+ * that id: the answer says which, for what goes on keeping it by id.
+ *
+ * `fieldAsked` is a field of a draft that something outside its form wants
+ * the cursor in (the Pick a bus button of the notice for a device that was
+ * dropped on no bus): the Inspector hands it to the form and clears it.
  *
  * `connect` is how the diagram gives a draft a value: the bus it was dropped
  * on, or the bus the end of its connector was dragged to. A form that is
@@ -44,6 +61,8 @@ import { create } from 'zustand';
 import type { ParamValue } from '@/api/types';
 import { useCaseStore } from './case';
 import type { CaseSelection } from './case';
+import { BLANK_DRAFTS_STORAGE_KEY, readOpenCaseMark, useReloadedCaseStore } from './reloadedCase';
+import { useSessionStore } from './session';
 
 export const DRAFTS_STORAGE_KEY = 'tensa:sld-drafts-v1';
 
@@ -106,10 +125,20 @@ export interface KeptDraftRoutes {
   round: Record<string, KeptRoute & { from: string }>;
 }
 
+/**
+ * The key the drafts of the case file `path` are kept under: the workspace
+ * the server serves and the path in it. Before a server has named its
+ * workspace it is the path alone.
+ */
+export function draftKeyOfPath(path: string): string {
+  const workspace = useSessionStore.getState().workspaceId;
+  return workspace === null || workspace === '' ? path : `${workspace}:${path}`;
+}
+
 /** The key the drafts of the open case are kept under, or `null` with no case open. */
 export function draftCaseKey(selection: CaseSelection | null): string | null {
   if (selection === null) return null;
-  return selection.primaryPath ?? BLANK_CASE_KEY;
+  return selection.primaryPath === null ? BLANK_CASE_KEY : draftKeyOfPath(selection.primaryPath);
 }
 
 function isParamValue(value: unknown): value is ParamValue {
@@ -137,6 +166,19 @@ function isDraft(value: unknown): value is DraftElement {
   );
 }
 
+/** The drafts among `list`, each id once, no more than a case holds. */
+function draftsOfList(list: unknown): DraftElement[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  return list
+    .filter((d): d is DraftElement => {
+      if (!isDraft(d) || seen.has(d.id)) return false;
+      seen.add(d.id);
+      return true;
+    })
+    .slice(0, MAX_DRAFTS_PER_CASE);
+}
+
 /** Read the persisted drafts; anything missing, malformed or over the cap is dropped. */
 export function readPersistedDrafts(): Record<string, DraftElement[]> {
   try {
@@ -147,14 +189,9 @@ export function readPersistedDrafts(): Record<string, DraftElement[]> {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const out: Record<string, DraftElement[]> = {};
     for (const [key, list] of Object.entries(parsed)) {
-      if (key === BLANK_CASE_KEY || !Array.isArray(list)) continue;
-      const seen = new Set<string>();
-      const drafts = list.filter((d): d is DraftElement => {
-        if (!isDraft(d) || seen.has(d.id)) return false;
-        seen.add(d.id);
-        return true;
-      });
-      if (drafts.length > 0) out[key] = drafts.slice(0, MAX_DRAFTS_PER_CASE);
+      if (key === BLANK_CASE_KEY) continue;
+      const drafts = draftsOfList(list);
+      if (drafts.length > 0) out[key] = drafts;
     }
     return out;
   } catch {
@@ -162,8 +199,34 @@ export function readPersistedDrafts(): Record<string, DraftElement[]> {
   }
 }
 
-/** Persist the drafts of the cases that are files. Returns `false` if storage threw. */
+/**
+ * The drafts of a system built from scratch, as the tab kept them for a
+ * reload of the page (`BLANK_DRAFTS_STORAGE_KEY`); none when it kept none.
+ */
+export function readBlankDrafts(): DraftElement[] {
+  try {
+    if (typeof sessionStorage === 'undefined') return [];
+    const raw = sessionStorage.getItem(BLANK_DRAFTS_STORAGE_KEY);
+    return raw === null ? [] : draftsOfList(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persist the drafts of the cases that are files, and keep those of a system
+ * built from scratch for a reload of the page. Returns `false` if storage threw.
+ */
 export function writePersistedDrafts(byCase: Readonly<Record<string, DraftElement[]>>): boolean {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const blank = byCase[BLANK_CASE_KEY] ?? [];
+      if (blank.length === 0) sessionStorage.removeItem(BLANK_DRAFTS_STORAGE_KEY);
+      else sessionStorage.setItem(BLANK_DRAFTS_STORAGE_KEY, JSON.stringify(blank));
+    }
+  } catch {
+    // Private mode, or the quota: a reload then rebuilds the system without its drafts.
+  }
   try {
     if (typeof localStorage === 'undefined') return false;
     const kept = Object.fromEntries(
@@ -258,13 +321,16 @@ export function writePersistedDraftRoutes(
   }
 }
 
+/** The number in the id of a draft; 0 for an id that holds none. */
+function draftNumber(id: string): number {
+  const n = Number.parseInt(id.slice(DRAFT_ID_PREFIX.length), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** The next free id among `drafts`: one more than the highest number in use. */
 function nextDraftId(drafts: readonly DraftElement[]): string {
   let highest = 0;
-  for (const { id } of drafts) {
-    const n = Number.parseInt(id.slice(DRAFT_ID_PREFIX.length), 10);
-    if (Number.isFinite(n)) highest = Math.max(highest, n);
-  }
+  for (const { id } of drafts) highest = Math.max(highest, draftNumber(id));
   return `${DRAFT_ID_PREFIX}${highest + 1}`;
 }
 
@@ -309,6 +375,28 @@ export interface DraftsState {
   remove: (caseKey: string, id: string) => void;
   removeAll: (caseKey: string) => void;
   /**
+   * Put drafts that were deleted back as they were, each under the id it
+   * had, or under the next free one when a draft placed since has that id.
+   * One the case has no room for is left out. Answers the ones that are
+   * back, as they are back.
+   */
+  restore: (caseKey: string, drafts: readonly DraftElement[]) => DraftElement[];
+  /**
+   * The drafts each case had when the page was loaded, by case key and by
+   * id: the ones of an earlier visit, until `takeKept` has answered for them.
+   */
+  kept: Record<string, string[]>;
+  /**
+   * How many drafts of the case `caseKey` are from an earlier visit and
+   * still there. It answers once for a case: the diagram says it when the
+   * case is opened, and not again.
+   */
+  takeKept: (caseKey: string) => number;
+  /** The field of a draft the cursor is wanted in, or `null`. In memory only. */
+  fieldAsked: { id: string; name: string } | null;
+  /** Ask for the cursor in the field `name` of the draft `id`; `null` once it is there. */
+  askField: (asked: { id: string; name: string } | null) => void;
+  /**
    * Give the case `toKey` the drafts of `fromKey`, in the place of its own:
    * a copy of the system that is saved under another name takes them along,
    * as it takes the layout.
@@ -352,8 +440,34 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
     // With its last draft gone, no line of the case runs any way for one.
     if (drafts.length === 0 && get().routes[caseKey] !== undefined) putRoutes(caseKey, {});
   };
+  const atStart = readPersistedDrafts();
+  // The case file this tab had open when the page was reloaded: its drafts
+  // were on screen a moment ago, and are not from an earlier visit.
+  const mark = readOpenCaseMark();
+  const reloaded = mark?.primaryPath ?? null;
+  // A system built from scratch that the reload interrupted is built again
+  // (`useReopenAfterReload`), and its drafts are there for it.
+  if (mark !== null && mark.primaryPath === null) {
+    const blank = readBlankDrafts();
+    if (blank.length > 0) atStart[BLANK_CASE_KEY] = blank;
+  }
   return {
-    byCase: readPersistedDrafts(),
+    byCase: atStart,
+    kept: Object.fromEntries(
+      Object.entries(atStart)
+        .filter(([key]) => key !== BLANK_CASE_KEY)
+        .map(([key, drafts]) => [key, drafts.map((d) => d.id)]),
+    ),
+    takeKept: (caseKey) => {
+      const { [caseKey]: ids, ...others } = get().kept;
+      if (ids === undefined) return 0;
+      set({ kept: others });
+      if (reloaded !== null && caseKey === draftKeyOfPath(reloaded)) return 0;
+      const held = new Set((get().byCase[caseKey] ?? []).map((d) => d.id));
+      return ids.filter((id) => held.has(id)).length;
+    },
+    fieldAsked: null,
+    askField: (asked) => set({ fieldAsked: asked }),
     placements: {},
     connected: {},
     routes: readPersistedDraftRoutes(),
@@ -425,6 +539,24 @@ export const useDraftsStore = create<DraftsState>((set, get) => {
     removeAll: (caseKey) => {
       if ((get().byCase[caseKey] ?? []).length > 0) put(caseKey, []);
     },
+    restore: (caseKey, drafts) => {
+      const held = get().byCase[caseKey] ?? [];
+      const taken = new Set(held.map((d) => d.id));
+      const back: DraftElement[] = [];
+      for (const draft of drafts) {
+        if (held.length + back.length >= MAX_DRAFTS_PER_CASE) break;
+        const id = taken.has(draft.id) ? nextDraftId([...held, ...back]) : draft.id;
+        taken.add(id);
+        back.push({ ...draft, id, position: { ...draft.position }, values: { ...draft.values } });
+      }
+      if (back.length === 0) return back;
+      // In the order they were placed, which is the order of their numbers.
+      put(
+        caseKey,
+        [...held, ...back].sort((a, b) => draftNumber(a.id) - draftNumber(b.id)),
+      );
+      return back;
+    },
     copy: (fromKey, toKey) => {
       if (fromKey === toKey) return;
       const held = get().byCase[fromKey] ?? [];
@@ -478,8 +610,20 @@ useCaseStore.subscribe((state) => {
   const was = wiredSelection;
   wiredSelection = state.selection;
   const store = useDraftsStore.getState();
-  if (was !== null && was.primaryPath === null) store.removeAll(BLANK_CASE_KEY);
+  // Also when a case file is opened with none before it: the drafts a reload
+  // kept for a system built from scratch are not for another case.
+  const blankNow = state.selection !== null && state.selection.primaryPath === null;
+  if ((was !== null && was.primaryPath === null) || !blankNow) store.removeAll(BLANK_CASE_KEY);
   if (Object.keys(store.placements).length > 0) useDraftsStore.setState({ placements: {} });
   // A draft goes by a number that the drafts of the next case have as well.
   if (Object.keys(store.connected).length > 0) useDraftsStore.setState({ connected: {} });
+});
+
+// The system a reload interrupted could not be built again (`forget`): the
+// drafts that were kept for it are of no other system.
+useReloadedCaseStore.subscribe((state, before) => {
+  const interrupted = before.closed !== null && before.closed.primaryPath === null;
+  if (interrupted && state.closed === null && useCaseStore.getState().selection === null) {
+    useDraftsStore.getState().removeAll(BLANK_CASE_KEY);
+  }
 });

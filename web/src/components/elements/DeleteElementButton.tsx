@@ -29,6 +29,7 @@ import type {
 import { cn } from '@/lib/cn';
 import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
+import { UNDO } from '@/lib/undoWording';
 
 /**
  * DeleteElementButton — trash-icon button + Radix Dialog confirm cycle
@@ -359,7 +360,7 @@ function announceDeleted(data: DeleteElementResponse, model: string, idx: string
     disturbances > 0 ? `${count(disturbances, 'disturbance')} that acted on it` : null,
   ].filter((part) => part !== null);
   toast.success(`Deleted ${model} ${idx}`, {
-    description: `${went.length > 0 ? `With it: ${went.join(' and ')}. ` : ''}Undo in the Edit menu brings ${went.length > 0 ? 'them' : 'it'} back.`,
+    description: `${went.length > 0 ? `With it: ${went.join(' and ')}. ` : ''}${UNDO} brings ${went.length > 0 ? 'them' : 'it'} back.`,
   });
 }
 
@@ -505,7 +506,7 @@ function renderDialogBody({
           </>
         ) : null}
         <p className="text-muted-foreground mt-3 text-xs">
-          Deleting them together is one change, which Undo in the Edit menu brings back whole.
+          Deleting them together is one change, which {UNDO} brings back whole.
         </p>
         <DialogFooter className="mt-4">
           <Button
@@ -540,7 +541,7 @@ function renderDialogBody({
       <DialogTitle>
         Delete {kind} {idx}?
       </DialogTitle>
-      <DialogDescription className="mt-2">Undo in the Edit menu brings it back.</DialogDescription>
+      <DialogDescription className="mt-2">{UNDO} brings it back.</DialogDescription>
       {local.length > 0 ? (
         <div className="mt-3" data-testid="delete-timeline-warning">
           <p className="text-warning text-xs">

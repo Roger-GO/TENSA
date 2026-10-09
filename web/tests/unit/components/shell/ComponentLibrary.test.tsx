@@ -31,10 +31,10 @@ import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 import { ELEMENT_KINDS, groupElementKinds } from '@/components/elements/elementKinds';
 import { COMPONENT_DND_MIME, ComponentLibrary } from '@/components/shell/ComponentLibrary';
+import { provideResetRun } from '@/lib/resetRunRequest';
 import { useCaseStore } from '@/store/case';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { usePflowStore } from '@/store/pflow';
-import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
 import { useSldStore } from '@/store/sld';
 
@@ -119,7 +119,6 @@ beforeEach(() => {
   });
   usePflowStore.setState({ isRunning: false });
   useLayoutStore.setState({ ...DEFAULT_LAYOUT, leftSidebarTab: 'components' });
-  useReloadedCaseStore.setState({ closed: null });
 });
 
 afterEach(() => {
@@ -339,12 +338,24 @@ describe('<ComponentLibrary /> click to add', () => {
     expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'Line' });
   });
 
-  it('says that a row can be clicked or dragged, and that one dropped on a bus is connected to it', () => {
+  it('says that a row can be clicked or dragged, and what a drop on a bus does for a device and for a line', () => {
     openCase();
     render(<ComponentLibrary />);
-    expect(screen.getByTestId('component-library-hint')).toHaveTextContent(
-      'Click a component to add it, or drag it onto the diagram to place it as a draft. Dropped on a bus, it is connected to that bus.',
+    const hint = screen.getByTestId('component-library-hint');
+    // One verb for the one thing a row does, by a click or by a drag.
+    expect(hint).toHaveTextContent(
+      'Click a component to add it with a form, or drag it onto the diagram to add it as a draft.',
     );
+    // The bar or the name of the bus: both are that bus to a drop.
+    expect(hint).toHaveTextContent(
+      'A device dropped on the bar or the name of a bus is connected to that bus.',
+    );
+    // A line does not become a draft on the spot, and the hint says so.
+    expect(hint).toHaveTextContent(
+      'A line or transformer dropped on a bus starts there: click the bus it goes to.',
+    );
+    // No way out of a lock is offered while nothing is locked.
+    expect(screen.queryByTestId('component-library-reset-run')).not.toBeInTheDocument();
   });
 
   it('says that a click starts a blank system while no case is open', () => {
@@ -447,24 +458,6 @@ describe('<ComponentLibrary /> with no case open', () => {
     useCaseStore.setState({ loadingPath: 'kundur_full.xlsx' });
     render(<ComponentLibrary />);
     expect(noCaseLine()).not.toBeInTheDocument();
-  });
-
-  it('has no note about a reload on a first visit', () => {
-    render(<ComponentLibrary />);
-    expect(screen.queryByTestId('reloaded-case-note-components')).not.toBeInTheDocument();
-  });
-
-  it('names the case a reload of the page closed, and reopens it', async () => {
-    useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
-    render(<ComponentLibrary />);
-    expect(screen.getByTestId('reloaded-case-note-components')).toHaveTextContent(
-      'A reload of the page closes the open case. kundur_full.xlsx was open.',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Reopen kundur_full.xlsx' }));
-    expect(loadCaseMutate).toHaveBeenCalledWith({
-      sessionId: 'test-session-id',
-      request: { primary_path: 'kundur_full.xlsx', addfiles: null },
-    });
   });
 });
 
@@ -599,7 +592,18 @@ describe('<ComponentLibrary /> when nothing can be added', () => {
     });
     const user = userEvent.setup();
     render(<ComponentLibrary />);
-    expectBlocked(/A run has locked the system.*Reset run in the Inspector/);
+    expectBlocked(/A run has fixed the system\. Reset run lets you edit again/);
+    // The way out is a button in the message itself, not somewhere to go and find.
+    const reset = screen.getByTestId('component-library-reset-run');
+    expect(reset).toHaveTextContent('Reset run');
+    const resetRun = vi.fn();
+    provideResetRun(resetRun);
+    try {
+      await user.click(reset);
+      expect(resetRun).toHaveBeenCalledTimes(1);
+    } finally {
+      provideResetRun(null);
+    }
     await user.click(row('Bus'));
     await user.keyboard('{Enter}');
     expect(useCaseStore.getState().addPanelOpen).toBe(false);

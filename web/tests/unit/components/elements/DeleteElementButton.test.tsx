@@ -196,7 +196,7 @@ describe('DeleteElementButton', () => {
     expect(screen.getByTestId('delete-cancel')).toHaveTextContent('Cancel');
     expect(screen.getByText(/Delete bus 1\?/)).toBeInTheDocument();
     // A delete is one more edit, which Undo takes back.
-    expect(screen.getByText(/Undo in the Edit menu brings it back/)).toBeInTheDocument();
+    expect(screen.getByText(/Undo \(Ctrl\+Z or Edit > Undo\) brings it back/)).toBeInTheDocument();
     expect(screen.queryByText(/cannot be undone/i)).toBeNull();
     expect(screen.queryByTestId('delete-timeline-warning')).toBeNull();
   });
@@ -220,7 +220,7 @@ describe('DeleteElementButton', () => {
       expect(screen.queryByTestId('delete-element-dialog')).toBeNull();
     });
     expect(toastSuccess).toHaveBeenCalledWith('Deleted Bus 1', {
-      description: 'Undo in the Edit menu brings it back.',
+      description: 'Undo (Ctrl+Z or Edit > Undo) brings it back.',
     });
   });
 
@@ -292,7 +292,7 @@ describe('DeleteElementButton', () => {
     expect(deleteSpy.mock.calls.map((call) => call[1])).toEqual([false, true]);
     expect(toastSuccess).toHaveBeenCalledWith('Deleted Bus 1', {
       description:
-        'With it: 2 elements that depended on it and 1 disturbance that acted on it. Undo in the Edit menu brings them back.',
+        'With it: 2 elements that depended on it and 1 disturbance that acted on it. Undo (Ctrl+Z or Edit > Undo) brings them back.',
     });
   });
 
@@ -388,7 +388,7 @@ describe('DeleteElementButton', () => {
     expect(useDisturbanceStore.getState().disturbances).toEqual([kept]);
     expect(toastSuccess).toHaveBeenCalledWith('Deleted Bus 1', {
       description:
-        'With it: 1 disturbance that acted on it. Undo in the Edit menu brings them back.',
+        'With it: 1 disturbance that acted on it. Undo (Ctrl+Z or Edit > Undo) brings them back.',
     });
   });
 

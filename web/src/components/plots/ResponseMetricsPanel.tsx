@@ -29,6 +29,13 @@ import { primaryRunOf, resolveOverlayRuns, usePlotRunId } from './overlayRuns';
  * With both A/B cursors placed the metrics describe the stretch between them, so
  * a fault applied at 1 s and cleared at 1.1 s is analysed by putting A on the
  * fault and B at the end of the swing; otherwise they describe the whole run.
+ * The panel has the two windows a study most often wants as buttons of its own:
+ * from the first disturbance of the run to its end (the cursors go there, where
+ * the run knows when it was first disturbed), and the whole run again. Over the
+ * whole run a signal that only rises has its lowest value at the first sample,
+ * and one that only falls its highest: such a nadir or peak is the start value,
+ * not a dip or a rise, and the cell says so. What each column holds is listed
+ * under the table and is the tooltip of its heading.
  * They are computed once the run has finished (a streaming run's values are
  * still arriving) and again when the selection, the window or the unit mode
  * changes. The values are the ones the browser holds: the stream is thinned to
@@ -37,9 +44,85 @@ import { primaryRunOf, resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 
 const FINISHED: ReadonlySet<RunState> = new Set<RunState>(['done', 'aborted', 'error']);
 
-/** A value of the signal and the time it is reached, the time under the value. */
-function Extremum({ found }: { found: MetricExtremum | null | undefined }) {
+/**
+ * What each column holds, in a line: the tooltip of its heading and the list
+ * under the table. The definitions are the substrate's
+ * (``tensa.core.response_metrics``).
+ */
+const COLUMNS: ReadonlyArray<{ id: string; title: string; what: string }> = [
+  {
+    id: 'initial',
+    title: 'Initial',
+    what: 'The value at the start of the window, in the unit of the series.',
+  },
+  {
+    id: 'final',
+    title: 'Final',
+    what: 'The mean over the last tenth of the window: what the signal has settled to, if it has.',
+  },
+  {
+    id: 'nadir',
+    title: 'Nadir',
+    what: 'The lowest value in the window and the time it is reached. For a frequency dip this is the number that matters.',
+  },
+  {
+    id: 'peak',
+    title: 'Peak',
+    what: 'The highest value in the window and the time it is reached.',
+  },
+  {
+    id: 'deviation',
+    title: 'Max deviation',
+    what: 'The largest distance from the initial value, with its sign, and when.',
+  },
+  {
+    id: 'rocof',
+    title: 'Rate of change (per s)',
+    what: `The steepest slope over any ${ROCOF_WINDOW_S} s of the window, in the unit of the series per second, and where that stretch starts. For a frequency this is the RoCoF.`,
+  },
+  {
+    id: 'settling',
+    title: 'Settling (s)',
+    what: `Seconds from the start of the window until the signal stays within ${SETTLING_BAND * 100} % of its largest distance from the final value. "not settled": it is still outside that band at the end.`,
+  },
+  {
+    id: 'overshoot',
+    title: 'Overshoot (%)',
+    what: 'How far the signal went past its final value, in percent of the step from initial to final. A dash where there is no step: the signal comes back to where it started.',
+  },
+  {
+    id: 'damping',
+    title: 'Damping',
+    what: 'The damping ratio ζ of the oscillation (from the decay of successive swings; 0.05 is 5 %, negative for a swing that grows) and its frequency in Hz. A dash for a signal that does not oscillate.',
+  },
+];
+
+/**
+ * A value of the signal and the time it is reached, the time under the value.
+ * With `start`, the value the window starts at: an extreme that is that value,
+ * at the first instant, is no dip (or rise), and is said to be none (`none`).
+ */
+function Extremum({
+  found,
+  start,
+  none,
+}: {
+  found: MetricExtremum | null | undefined;
+  start?: number;
+  none?: string;
+}) {
   if (!found) return <>–</>;
+  if (start !== undefined && none !== undefined && found.value === start) {
+    return (
+      <>
+        <span data-none="true">{none}</span>
+        <span className="text-muted-foreground block text-[10px]">
+          stays at or {none === 'no dip' ? 'above' : 'below'} the start value,{' '}
+          {formatSignificant(found.value)}
+        </span>
+      </>
+    );
+  }
   return (
     <>
       {formatSignificant(found.value)}
@@ -53,6 +136,8 @@ function Extremum({ found }: { found: MetricExtremum | null | undefined }) {
 function MetricsRow({ result, unit }: { result: SeriesMetrics; unit: string }) {
   const id = result.name;
   const cell = 'px-2 py-1 text-right align-top font-mono';
+  // The value the window starts at: an extreme equal to it was never left.
+  const start = typeof result.initial === 'number' ? result.initial : undefined;
   if (result.error) {
     return (
       <tr data-testid={`response-metrics-row-${id}`}>
@@ -80,10 +165,10 @@ function MetricsRow({ result, unit }: { result: SeriesMetrics; unit: string }) {
         {formatSignificant(result.final)}
       </td>
       <td className={cell} data-testid={`response-metrics-nadir-${id}`}>
-        <Extremum found={result.nadir} />
+        <Extremum found={result.nadir} start={start} none="no dip" />
       </td>
       <td className={cell} data-testid={`response-metrics-peak-${id}`}>
-        <Extremum found={result.peak} />
+        <Extremum found={result.peak} start={start} none="no rise" />
       </td>
       <td className={cell} data-testid={`response-metrics-deviation-${id}`}>
         <Extremum found={result.max_deviation} />
@@ -201,6 +286,34 @@ export function ResponseMetricsPanel({ className }: { className?: string }) {
       ? 'the whole run'
       : `A to B, ${formatSignificant(window.tStart, 5)} to ${formatSignificant(window.tEnd, 5)} s`;
 
+  // When the run was first disturbed, and where it ends: the window a fault
+  // study reads the response over. Not offered for a run nothing disturbed,
+  // or one that was disturbed from its first instant, which is the whole run.
+  const disturbedAt = useRunsStore((s) =>
+    primaryRunId === null ? undefined : s.runs[primaryRunId]?.disturbedAt,
+  );
+  const runEnd = useRunsStore((s) =>
+    primaryRunId === null ? undefined : s.runs[primaryRunId]?.tCurrent,
+  );
+  const fromDisturbance =
+    plotRun !== null &&
+    finished &&
+    disturbedAt !== undefined &&
+    runEnd !== undefined &&
+    disturbedAt > 0 &&
+    disturbedAt < runEnd
+      ? { from: disturbedAt, to: runEnd }
+      : null;
+  const atDisturbance =
+    fromDisturbance !== null &&
+    window.tStart === fromDisturbance.from &&
+    window.tEnd === fromDisturbance.to;
+  const windowButton = cn(
+    'border-border text-foreground hover:bg-muted rounded border px-1.5 py-0.5 text-[11px]',
+    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+    'disabled:cursor-not-allowed disabled:opacity-50',
+  );
+
   return (
     <div
       data-testid="response-metrics-panel"
@@ -210,9 +323,45 @@ export function ResponseMetricsPanel({ className }: { className?: string }) {
         Over {windowText}. Settling within {SETTLING_BAND * 100} % of the largest distance from the
         final value; rate of change over {ROCOF_WINDOW_S} s.
         {window.tStart === null
-          ? ' Place cursors A and B on the plot to measure between them.'
+          ? ' To measure a stretch of the run, press Cursors over the plot and click the plot twice (A, then B).'
           : ''}
       </p>
+      {plotRun !== null && (fromDisturbance !== null || window.tStart !== null) ? (
+        <div
+          role="group"
+          aria-label="Window the metrics are read over"
+          data-testid="response-metrics-window-controls"
+          className="flex flex-wrap items-center gap-1.5"
+        >
+          {fromDisturbance !== null ? (
+            <button
+              type="button"
+              data-testid="response-metrics-from-disturbance"
+              aria-pressed={atDisturbance}
+              title="Puts cursor A on the first disturbance of the run and cursor B at its end, so the metrics describe the response and not the steady state before it."
+              onClick={() => {
+                const plot = usePlotStore.getState();
+                plot.setCursor(plotRun, 'a', fromDisturbance.from);
+                plot.setCursor(plotRun, 'b', fromDisturbance.to);
+              }}
+              className={cn(windowButton, atDisturbance ? 'bg-primary/15 border-primary/50' : '')}
+            >
+              From the first disturbance ({formatSignificant(fromDisturbance.from, 5)} s)
+            </button>
+          ) : null}
+          {window.tStart !== null ? (
+            <button
+              type="button"
+              data-testid="response-metrics-whole-run"
+              title="Takes the cursors off the plot: the metrics describe the whole run again."
+              onClick={() => usePlotStore.getState().clearCursors(plotRun)}
+              className={windowButton}
+            >
+              Whole run
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {overlayCount > 1 ? (
         <p
           data-testid="response-metrics-overlay-note"
@@ -234,16 +383,22 @@ export function ResponseMetricsPanel({ className }: { className?: string }) {
             <table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="text-muted-foreground">
-                  <th className="px-2 py-1 text-left font-medium">Series</th>
-                  <th className="px-2 py-1 text-right font-medium">Initial</th>
-                  <th className="px-2 py-1 text-right font-medium">Final</th>
-                  <th className="px-2 py-1 text-right font-medium">Nadir</th>
-                  <th className="px-2 py-1 text-right font-medium">Peak</th>
-                  <th className="px-2 py-1 text-right font-medium">Max deviation</th>
-                  <th className="px-2 py-1 text-right font-medium">Rate of change (per s)</th>
-                  <th className="px-2 py-1 text-right font-medium">Settling (s)</th>
-                  <th className="px-2 py-1 text-right font-medium">Overshoot (%)</th>
-                  <th className="px-2 py-1 text-right font-medium">Damping</th>
+                  <th
+                    className="px-2 py-1 text-left font-medium"
+                    title="The plotted series, and the unit its values are in."
+                  >
+                    Series
+                  </th>
+                  {COLUMNS.map((column) => (
+                    <th
+                      key={column.id}
+                      title={column.what}
+                      data-testid={`response-metrics-heading-${column.id}`}
+                      className="px-2 py-1 text-right font-medium"
+                    >
+                      {column.title}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -257,6 +412,20 @@ export function ResponseMetricsPanel({ className }: { className?: string }) {
               </tbody>
             </table>
           </div>
+          {/* What the columns hold, for a reader with no pointer to hover with. */}
+          <details data-testid="response-metrics-definitions" className="text-[11px]">
+            <summary className="text-muted-foreground hover:text-foreground cursor-pointer">
+              What the columns mean
+            </summary>
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+              {COLUMNS.map((column) => (
+                <div key={column.id} className="contents">
+                  <dt className="text-foreground font-medium whitespace-nowrap">{column.title}</dt>
+                  <dd className="text-muted-foreground leading-snug">{column.what}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
           {metrics.data.skipped > 0 ? (
             <p data-testid="response-metrics-skipped" className="text-muted-foreground text-[10px]">
               {metrics.data.skipped} more plotted series are left out: one request describes at most{' '}

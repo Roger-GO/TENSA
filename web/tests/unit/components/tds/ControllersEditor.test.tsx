@@ -402,7 +402,7 @@ describe('<ControllersEditor />', () => {
     const button = screen.getByTestId('tds-controllers-add-battery');
     expect(button).toBeDisabled();
     const reason = screen.getByTestId('tds-controllers-add-battery-blocked');
-    expect(reason).toHaveTextContent('A run has locked the system.');
+    expect(reason).toHaveTextContent('A run has fixed the system.');
     expect(reason).toHaveTextContent('Reset run');
     expect(button).toHaveAttribute('aria-describedby', reason.id);
     expect(useCaseStore.getState().addPanelOpen).toBe(false);

@@ -12,10 +12,21 @@
  * Why Radix Dialog (rather than a bare div + portal):
  *
  * - Focus trap inside the palette.
- * - Restore focus to the previously-focused element on close (so the
- *   user lands back on the topbar button they were near).
  * - Outside-click-to-close + Escape-to-close.
  * - `aria-modal` + label wiring for screen readers.
+ *
+ * Where the focus goes when it closes is the palette's own (`focusOnClose`).
+ * Radix hands the focus of a dialog back to its trigger, and the palette
+ * has none (it is opened by a key, a button of the top bar or a command), so
+ * every command and every Escape left the focus on `<body>`: the next Tab
+ * started from the top of the page, and a screen reader lost its place. On
+ * close the focus goes to what the command points at (`Command.focusAfter`,
+ * the tab a sidebar command opened), else back to what had it when the
+ * palette opened, else to the palette's button in the top bar, or to the
+ * More menu that holds it in a narrower window. What a command itself opened
+ * (a dialog, a form with the cursor in it) keeps the focus, and when such a
+ * dialog closes the focus goes where it would have gone without it: the
+ * dialog would hand it back to the palette, which is gone by then.
  *
  * Per AGENTS.md "When in doubt, ask whether the action is destructive
  * — palette = navigation, but is full-screen and benefits from focus
@@ -26,7 +37,7 @@
  * the dialog is open — cmdk does its own filter bookkeeping on every
  * render, and there's no point paying for it while closed.
  */
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { Command as CmdkCommand } from 'cmdk';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 
@@ -52,11 +63,74 @@ const GROUP_HEADINGS: Record<CommandGroup, string> = {
   help: 'Help',
 };
 
+/**
+ * Call `then` once the dialog `dialog` has left the page, if the focus has
+ * fallen to `<body>` by then: a dialog that a command opened hands the focus
+ * back to what had it as it opened, which was the palette.
+ */
+function whenGone(dialog: Element, then: () => void): void {
+  const observer = new MutationObserver(() => {
+    if (dialog.isConnected) return;
+    observer.disconnect();
+    // After the dialog's own hand-back, which Radix makes a tick later.
+    window.setTimeout(() => {
+      const active = document.activeElement;
+      if (active === null || active === document.body) then();
+    }, 0);
+  });
+  // A dialog is drawn in a portal, a child of the body.
+  observer.observe(document.body, { childList: true });
+  if (dialog.parentNode !== null && dialog.parentNode !== document.body) {
+    observer.observe(dialog.parentNode, { childList: true });
+  }
+}
+
 export function CommandPalette() {
   const open = useCommandPaletteStore((s) => s.open);
   const page = useCommandPaletteStore((s) => s.page);
   const closePalette = useCommandPaletteStore((s) => s.closePalette);
   const commands = useCommandRegistry();
+
+  // What had the keyboard focus when the palette opened, and the command it
+  // ran, for where the focus goes when it closes.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const ranRef = useRef<CommandDef | null>(null);
+  const focusOnClose = useCallback((event: Event) => {
+    // Not Radix's own answer, which is the trigger the palette does not have.
+    event.preventDefault();
+    const [ran, opener] = [ranRef.current, openerRef.current];
+    ranRef.current = null;
+    openerRef.current = null;
+    // The first of these that takes the focus. One that is not shown cannot:
+    // the palette's own button is in the More menu of a narrower top bar.
+    const back = () => {
+      for (const target of [
+        ran?.focusAfter?.() ?? null,
+        opener !== null && opener.isConnected ? opener : null,
+        document.querySelector<HTMLElement>('[data-testid="command-palette-hint"]'),
+        document.querySelector<HTMLElement>('[data-testid="topbar-menu-more-trigger"]'),
+      ]) {
+        if (target === null) continue;
+        target.focus();
+        if (document.activeElement === target) return;
+      }
+    };
+    // Something the command opened has the focus, or is about to take it.
+    const active = document.activeElement;
+    const palette = event.target instanceof Node ? event.target : null;
+    const taken =
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active.isConnected &&
+      !(palette?.contains(active) ?? false);
+    if (taken) {
+      const dialog = active.closest('[role="dialog"], [role="alertdialog"]');
+      if (dialog !== null) whenGone(dialog, back);
+      return;
+    }
+    if (document.querySelector('[role="dialog"][data-state="open"]') !== null) return;
+    back();
+  }, []);
 
   const handleSelect = useCallback(
     (command: CommandDef) => {
@@ -65,6 +139,7 @@ export function CommandPalette() {
       // first would race against the new dialog's mount inside the
       // same focus-trap teardown cycle on some browsers. A command that
       // moves the palette to another of its pages (Open case) leaves it open.
+      ranRef.current = command;
       try {
         command.action();
       } finally {
@@ -100,6 +175,14 @@ export function CommandPalette() {
         <DialogPrimitive.Content
           data-testid="command-palette"
           aria-label="Command palette"
+          onOpenAutoFocus={() => {
+            // Before the focus moves into the palette: what has it now.
+            const active = document.activeElement;
+            openerRef.current =
+              active instanceof HTMLElement && active !== document.body ? active : null;
+            ranRef.current = null;
+          }}
+          onCloseAutoFocus={focusOnClose}
           className={cn(
             // Pinned near the top so it doesn't fight the user's focal
             // line when typing — Linear's palette sits at ~15vh which

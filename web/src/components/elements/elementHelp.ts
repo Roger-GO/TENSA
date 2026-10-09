@@ -16,6 +16,12 @@ import type { ParamValue } from '@/api/types';
  * server refuses the values a run cannot use, so the text here explains and
  * the server enforces.
  *
+ * A PQ load and a line have lines under their numbers too: which base a
+ * per-unit value is on, what one such value is in MW, and what order of
+ * magnitude a line's impedance has (the lines of the bundled IEEE 14 case).
+ * `systemBaseEquivalent` is the same answer for the value that is typed: the
+ * form shows it in MW or MVAr beside the field.
+ *
  * The PV and Slack generators have lines under their four numbers and no
  * note. A battery needs a static generator on its bus first, so its form sends
  * a first-time user to theirs, where `Sn`, `Vn`, `p0` and `v0` are all the
@@ -86,8 +92,8 @@ function esd1Help(context: ElementHelpContext): ElementHelp {
 function staticGeneratorHelp(model: 'PV' | 'Slack', context: ElementHelpContext): ElementHelp {
   const base = baseText(context.baseMva);
   const fields: Record<string, string> = {
-    Sn: `Power rating of the generator. The powers in this form are per unit of the system base${base}, whatever Sn is.`,
-    Vn: 'Rated voltage: the Vn of the bus it is on, which the Buses table lists.',
+    Sn: `Power rating of the generator, in MVA. It does not scale the powers below: p0 and the limits are per unit of the system base${base}, and the form shows each in MW or MVAr beside its field.`,
+    Vn: 'Rated voltage: the Vn of the bus it is on, which the form fills in when the bus is picked.',
     v0: 'Voltage it holds at its bus, per unit of the rated voltage: 1 is the rated voltage.',
   };
   if (model === 'PV') {
@@ -118,12 +124,79 @@ const ZIP_HELP: ElementHelp = {
   },
 };
 
+/** `: 0.9 is 90 MW` for a base the case gives; nothing for one it does not. */
+function exampleText(pu: number, unit: string, baseMva: number | null): string {
+  return baseMva === null ? '' : `: ${pu} is ${formatMva(pu * baseMva)} ${unit}`;
+}
+
+function loadHelp(context: ElementHelpContext): ElementHelp {
+  const base = baseText(context.baseMva);
+  return {
+    note: [],
+    fields: {
+      Vn: 'Rated voltage: the Vn of the bus it is on, which the form fills in when the bus is picked.',
+      p0: `Active power the load draws, per unit of the system base${base}${exampleText(0.9, 'MW', context.baseMva)}.`,
+      q0: `Reactive power the load draws, per unit of the system base${base}${exampleText(0.3, 'MVAr', context.baseMva)}. Negative for a load that delivers reactive power.`,
+    },
+  };
+}
+
+/**
+ * A line or a transformer. The server takes the base of a branch from the
+ * system and from the buses it joins (`_inject_line_voltage_base`), so what
+ * is typed is on the system base. The orders of magnitude are those of the
+ * lines of the bundled IEEE 14 case, which is on a 100 MVA base.
+ */
+function lineHelp(context: ElementHelpContext): ElementHelp {
+  const base = baseText(context.baseMva);
+  return {
+    note: [],
+    fields: {
+      r: `Series resistance, per unit of the system base${base} at the rated voltage of its buses. The lines of the IEEE 14 example run from about 0.01 to 0.22.`,
+      x: 'Series reactance, on the same base; for a line it is usually a few times r. The lines of the IEEE 14 example run from about 0.04 to 0.35.',
+      b: 'Total charging susceptance of the line, on the same base. 0 for a short line or a transformer.',
+      tap: 'Turns ratio of a transformer off its nominal one: 1, or empty, for a line.',
+      rate_a:
+        'Long-term rating in MVA, which the loading of the branch is read against. Left empty or 0, it is not checked for overload.',
+      u: 'In service: 1. Set 0 to take the branch out without deleting it.',
+    },
+  };
+}
+
 /** The help for `model`, or `null` when the schema says all there is to say. */
 export function elementHelp(model: string, context: ElementHelpContext): ElementHelp | null {
   if (model === 'ESD1') return esd1Help(context);
   if (model === 'PV' || model === 'Slack') return staticGeneratorHelp(model, context);
   if (model === 'ZIP') return ZIP_HELP;
+  if (model === 'PQ') return loadHelp(context);
+  if (model === 'Line') return lineHelp(context);
   return null;
+}
+
+/** The fields that hold a power per unit of the system base, by model, and the unit of each. */
+const SYSTEM_BASE_POWERS: Readonly<Record<string, Readonly<Record<string, 'MW' | 'MVAr'>>>> = {
+  PQ: { p0: 'MW', q0: 'MVAr' },
+  PV: { p0: 'MW', pmax: 'MW', pmin: 'MW', qmax: 'MVAr', qmin: 'MVAr' },
+  Slack: { p0: 'MW', pmax: 'MW', pmin: 'MW', qmax: 'MVAr', qmin: 'MVAr' },
+};
+
+/**
+ * What the per-unit value typed into the field `name` of a `model` is in MW
+ * or MVAr (`= 90 MW`), for the fields that hold a power on the system base;
+ * `null` for any other field, an empty one, or a case that gives no base.
+ */
+export function systemBaseEquivalent(
+  model: string,
+  name: string,
+  value: ParamValue | undefined,
+  context: ElementHelpContext,
+): string | null {
+  const unit = SYSTEM_BASE_POWERS[model]?.[name];
+  if (unit === undefined || context.baseMva === null) return null;
+  if (value === undefined || value === '' || typeof value === 'boolean') return null;
+  const pu = Number(value);
+  if (!Number.isFinite(pu)) return null;
+  return `= ${formatMva(pu * context.baseMva)} ${unit}`;
 }
 
 function asNumber(value: ParamValue | undefined): number | null {
@@ -205,18 +278,14 @@ export function elementDefaults(
   return context.baseMva === null ? sized : { Sn: context.baseMva, ...sized, En: context.baseMva };
 }
 
-/** The models whose add form opens named after the idx it proposes. */
-const NAMED_AFTER_IDX: ReadonlySet<string> = new Set(['ESD1', 'PV', 'Slack']);
-
 /**
  * Whether the add form opens with the name set to the idx it proposes, and
- * keeps the two alike until the name is typed over. A battery is known by its
- * idx wherever it is shown, and ANDES's own cases name theirs after it
- * (`ESD1_1`), so an empty name is one more required field with nothing to ask.
- * The same holds for the static generator a battery or a machine needs first:
- * the bundled cases (IEEE 14, Kundur, WSCC 9) name their PV and Slack
- * generators after the idx (`2`), and the lists that offer one show both.
+ * keeps the two alike until the name is typed over. It does for every model:
+ * an element is known by its idx wherever it is shown, ANDES's own cases name
+ * most of theirs after it (`ESD1_1`, a generator `2`), and a name that is
+ * required and empty beside an idx that is already filled in is one more
+ * field with nothing to ask. A name of the user's own is typed over it.
  */
-export function namedAfterIdx(model: string): boolean {
-  return NAMED_AFTER_IDX.has(model);
+export function namedAfterIdx(_model: string): boolean {
+  return true;
 }

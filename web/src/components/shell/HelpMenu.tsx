@@ -1,5 +1,8 @@
 /**
  * HelpMenu: the top bar's "?" button. Its menu opens the keyboard shortcuts,
+ * and the two parts of that list that are about the diagram and no key
+ * (moving a line by hand, connecting by a drag), each under its own name,
+ * since nobody looks for a drag under "Keyboard shortcuts". It
  * links to the API reference this server serves, the API map for agents,
  * ANDES's model docs and the repository, and says which TENSA and ANDES
  * versions the server runs (read from the API, so it is the server's version
@@ -74,6 +77,7 @@ function AboutBlock() {
 
 export function HelpMenu() {
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
+  const openCheatsheet = useShortcutCheatsheetStore((s) => s.openCheatsheet);
   return (
     <TopBarMenu label="Help" icon={HelpGlyph} iconOnly alignEnd testId="topbar-menu-help">
       <TopBarMenuItem
@@ -82,6 +86,20 @@ export function HelpMenu() {
         onClick={toggleCheatsheet}
       >
         Keyboard shortcuts
+      </TopBarMenuItem>
+      <TopBarMenuItem
+        testId="topbar-menu-help-move-line"
+        title="How a line of the diagram is picked and moved, with the mouse and with the keys."
+        onClick={() => openCheatsheet('diagram')}
+      >
+        Moving a line by hand
+      </TopBarMenuItem>
+      <TopBarMenuItem
+        testId="topbar-menu-help-connect"
+        title="How a component is put on a bus, a line drawn and a device moved to another bus."
+        onClick={() => openCheatsheet('connect')}
+      >
+        Connecting on the diagram
       </TopBarMenuItem>
       <TopBarMenuSeparator />
       <TopBarMenuLabel>Documentation</TopBarMenuLabel>

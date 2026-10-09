@@ -20,6 +20,7 @@ import {
   MAX_DRAFTS_PER_CASE,
   useDraftsStore,
 } from '@/store/drafts';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useSldStore } from '@/store/sld';
 
 const CASE = 'ieee14.raw';
@@ -113,18 +114,43 @@ describe('deleting drafts', () => {
     expect(useSldStore.getState().selectedNodeId).toBeNull();
     const [title, options] = info.mock.calls[0]!;
     expect(title).toBe('Draft deleted: PV generator 6');
+    // Long enough to read and reach, and it names the way back that stays.
     expect(options).toMatchObject({
-      description: 'It was never added to the system, so nothing else changed.',
+      description:
+        'It was never added to the system, so nothing else changed. Undo (Ctrl+Z or Edit > Undo) brings it back as well.',
+      duration: 12_000,
       action: { label: 'Undo' },
     });
-    (options as { action: { onClick: () => void } }).action.onClick();
-    // Back under an id of its own, picked.
-    expect(drafts()[CASE]?.at(-1)).toMatchObject({
-      kind: 'PV',
-      position: { x: 1, y: 2 },
-      values: { bus: '4' },
+    // The delete is one step of the history Undo goes back through.
+    const step = useLayoutHistoryStore.getState().past.at(-1);
+    expect(step).toMatchObject({
+      label: 'delete draft PV generator 6',
+      drafts: { caseKey: CASE, deleted: [{ id: 'draft-1', kind: 'PV', values: { bus: '4' } }] },
     });
-    expect(useSldStore.getState().selectedNodeId).toBe(drafts()[CASE]?.at(-1)?.id);
+    (options as { action: { onClick: () => void } }).action.onClick();
+    // Back as it was, under the id it had and in its place, and picked.
+    expect(drafts()[CASE]).toEqual([
+      { id: 'draft-1', kind: 'PV', position: { x: 1, y: 2 }, values: { bus: '4' } },
+      { id: 'draft-2', kind: 'PQ', position: { x: 3, y: 4 }, values: {} },
+    ]);
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    // Taken back by the notice: Undo has no step left for it.
+    expect(useLayoutHistoryStore.getState().past).toEqual([]);
+  });
+
+  it('puts a deleted draft back under a free id when a draft placed since took its own', () => {
+    const info = vi.spyOn(toast, 'info');
+    const { add } = useDraftsStore.getState();
+    add(CASE, 'PV', { x: 1, y: 2 }, { bus: '4' });
+    deleteDraft(CASE, 'draft-1', 'PV generator 6');
+    // The next drop gets the number that was just freed.
+    expect(add(CASE, 'PQ', { x: 9, y: 9 })?.id).toBe('draft-1');
+    const [, options] = info.mock.calls[0]!;
+    (options as { action: { onClick: () => void } }).action.onClick();
+    expect(drafts()[CASE]?.map((d) => [d.id, d.kind])).toEqual([
+      ['draft-1', 'PQ'],
+      ['draft-2', 'PV'],
+    ]);
   });
 
   it('says nothing of a draft that is not there', () => {

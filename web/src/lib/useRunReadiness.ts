@@ -131,6 +131,23 @@ const PF_DEPENDENT: ReadonlySet<RunRoutine> = new Set(['eig', 'cpf', 'se']);
 const DYNAMIC_REQUIRED: ReadonlySet<RunRoutine> = new Set(['tds', 'eig']);
 
 /**
+ * What the readiness of a routine is worked out from: the slices of the stores
+ * `useRunReadiness` subscribes to, which `runReadinessNow` reads once.
+ */
+interface ReadinessInputs {
+  selection: ReturnType<typeof useCaseStore.getState>['selection'];
+  loadingPath: string | null;
+  sessionId: string | null;
+  pflowLastRun: ReturnType<typeof usePflowStore.getState>['lastRun'];
+  eigResult: ReturnType<typeof useAnalyzeStore.getState>['eigResult'];
+  seMeasurementsCount: number | null;
+  activeRunId: string | null;
+  activeSweepId: string | null;
+  sweeps: ReturnType<typeof useSweepStore.getState>['sweeps'];
+  topology: ReturnType<typeof useCaseStore.getState>['topology'];
+}
+
+/**
  * Compute the readiness of a Run button.
  *
  * The hook subscribes to the minimum slice of each store it needs so
@@ -155,6 +172,57 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // Store mirror of the topology query (kept in sync by `setTopology`), so the
   // readiness hook stays a pure store reader — no query side effects.
   const topology = useCaseStore((s) => s.topology);
+
+  return readinessFrom(routine, {
+    selection,
+    loadingPath,
+    sessionId,
+    pflowLastRun,
+    eigResult,
+    seMeasurementsCount,
+    activeRunId,
+    activeSweepId,
+    sweeps,
+    topology,
+  });
+}
+
+/**
+ * The readiness of a routine as the stores have it at the moment of the call,
+ * for a command that starts a run (the Run menu, the palette, Ctrl/Cmd+Enter):
+ * it asks when it is chosen, where a button asks at every render.
+ */
+export function runReadinessNow(routine: RunRoutine): RunReadiness {
+  const caseState = useCaseStore.getState();
+  const analyze = useAnalyzeStore.getState();
+  const sweep = useSweepStore.getState();
+  return readinessFrom(routine, {
+    selection: caseState.selection,
+    loadingPath: caseState.loadingPath,
+    sessionId: useSessionStore.getState().sessionId,
+    pflowLastRun: usePflowStore.getState().lastRun,
+    eigResult: analyze.eigResult,
+    seMeasurementsCount: analyze.seMeasurementsCount,
+    activeRunId: useRunsStore.getState().activeRunId,
+    activeSweepId: sweep.activeSweepId,
+    sweeps: sweep.sweeps,
+    topology: caseState.topology,
+  });
+}
+
+function readinessFrom(routine: RunRoutine, inputs: ReadinessInputs): RunReadiness {
+  const {
+    selection,
+    loadingPath,
+    sessionId,
+    pflowLastRun,
+    eigResult,
+    seMeasurementsCount,
+    activeRunId,
+    activeSweepId,
+    sweeps,
+    topology,
+  } = inputs;
 
   // Order matters: the most fundamental gate (no case) shadows every
   // subsequent reason, then session, then routine-specific

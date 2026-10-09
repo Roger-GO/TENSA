@@ -24,7 +24,7 @@ import {
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
-import { useDisturbanceStore } from '@/store/disturbance';
+import { disturbanceTime, useDisturbanceStore } from '@/store/disturbance';
 import { useLayoutStore } from '@/store/layout';
 import { useRunsStore } from '@/store/runs';
 import { MAX_TDS_DAE_VARS, useUiStore } from '@/store/ui';
@@ -32,6 +32,7 @@ import { RunStream } from '@/streaming/RunStream';
 import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
+import { useRequestedRun } from '@/lib/useRequestedRun';
 import { reportAbortError } from '@/lib/abortRun';
 import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
@@ -389,6 +390,13 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     };
 
     const scenario = describeScenario(disturbances.map((d) => d.spec));
+    // When the system is first disturbed, by what is scheduled here or by an
+    // event of the case's own: the response metrics offer to start there.
+    const eventTimes = [
+      ...disturbances.map((d) => disturbanceTime(d.spec)),
+      ...(useCaseStore.getState().topology?.events ?? []).map((e) => e.t),
+    ].filter((t) => Number.isFinite(t) && t >= 0);
+    const disturbedAt = eventTimes.length === 0 ? undefined : Math.min(...eventTimes);
     const casePath = useCaseStore.getState().selection?.primaryPath ?? null;
     const stream = new RunStream({
       sessionId,
@@ -400,6 +408,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       // What the run does to the system, so the legend and the history can
       // name it ("TDS #3 - fault bus 7") and not show its id.
       ...(scenario === undefined ? {} : { scenario }),
+      ...(disturbedAt === undefined ? {} : { disturbedAt }),
       // Which case the run is of, so an export of it says so after another
       // case is opened. A system with no file behind it has no name to keep.
       ...(casePath === null ? {} : { caseName: stemOf(casePath) }),
@@ -523,6 +532,38 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     }
     void startTds();
   };
+
+  // ---- a run asked for by a command ---------------------------------------
+
+  // "Run power flow (PF)" and "Run time-domain simulation (TDS)" in the Run
+  // menu and the palette: the button goes to that mode and the run starts as
+  // by a click on it. The command has checked that the routine can run; what
+  // only this button knows (a run under way, a finished run that holds the
+  // system) is said here.
+  useRequestedRun(['pflow', 'tds'], (routine) => {
+    if (isPfRunning || isTdsRunning || tdsStarting) {
+      toast.info('A run is already in progress', {
+        description: 'Wait for it to finish, or stop it with the Run button, and ask again.',
+      });
+      return;
+    }
+    if (routine === 'pflow') {
+      setManualMode('pf');
+      onClickPf();
+      return;
+    }
+    setManualMode('tds');
+    if (isTdsTerminal) {
+      toast.info('Reset the run first', {
+        description:
+          'The last time-domain run still holds the system. Reset run, on the Run button, reloads the case so that it can be run again; the results of that run stay in History.',
+        duration: 10000,
+        action: { label: 'Reset run', onClick: onReset },
+      });
+      return;
+    }
+    void startTds();
+  });
 
   // ---- label + state ------------------------------------------------------
 

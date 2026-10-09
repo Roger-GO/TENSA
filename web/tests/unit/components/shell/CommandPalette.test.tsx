@@ -11,6 +11,10 @@
  * - Edge: backdrop click closes.
  * - Integration: action from palette = action from menu (mock the
  *   underlying handler and confirm both paths invoke it once).
+ *
+ * And where the keyboard focus goes when the palette closes: it has no
+ * trigger for Radix to hand the focus back to, so it used to fall to
+ * `<body>` after every command and after Escape.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -19,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { CommandPalette } from '@/components/shell/CommandPalette';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { WorkspaceMenu } from '@/components/shell/WorkspaceMenu';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useSessionStore } from '@/store/session';
@@ -285,5 +290,128 @@ describe('<CommandPalette /> — integration with menus', () => {
     });
     await user.click(await screen.findByTestId('command-palette-item-workspace.save-snapshot'));
     expect(useSnapshotStore.getState().saveDialogOpen).toBe(true);
+  });
+});
+
+describe('<CommandPalette /> hands the keyboard focus back when it closes', () => {
+  /** The palette beside the things a command or a close can send the focus to. */
+  function page(extra?: ReactNode) {
+    return withProviders(
+      <>
+        <button type="button" data-testid="was-focused">
+          A row of a table
+        </button>
+        {extra}
+        <CommandPalette />
+      </>,
+    );
+  }
+  const open = async () => {
+    act(() => {
+      useCommandPaletteStore.getState().openPalette();
+    });
+    await screen.findByTestId('command-palette-input');
+    await waitFor(() => expect(screen.getByTestId('command-palette-input')).toHaveFocus());
+  };
+
+  it('gives it back to what had it, after Escape', async () => {
+    const user = userEvent.setup();
+    render(page());
+    screen.getByTestId('was-focused').focus();
+    await open();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.getByTestId('was-focused')).toHaveFocus());
+  });
+
+  it('gives it back to what had it, after a command', async () => {
+    const user = userEvent.setup();
+    render(page());
+    screen.getByTestId('was-focused').focus();
+    await open();
+    await user.click(screen.getByTestId('command-palette-item-view.toggleRightInspector'));
+    expect(useCommandPaletteStore.getState().open).toBe(false);
+    await waitFor(() => expect(screen.getByTestId('was-focused')).toHaveFocus());
+  });
+
+  it('gives it to the tab a sidebar command opened, not back to where it was', async () => {
+    const user = userEvent.setup();
+    render(
+      page(
+        <button type="button" data-testid="left-sidebar-tab-components">
+          Components
+        </button>,
+      ),
+    );
+    screen.getByTestId('was-focused').focus();
+    await open();
+    await user.click(screen.getByTestId('command-palette-item-view.openComponents'));
+    await waitFor(() => expect(screen.getByTestId('left-sidebar-tab-components')).toHaveFocus());
+  });
+
+  it('gives it to the button of the palette when nothing had it', async () => {
+    const user = userEvent.setup();
+    render(
+      page(
+        <button type="button" data-testid="command-palette-hint">
+          Search
+        </button>,
+      ),
+    );
+    await open();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.getByTestId('command-palette-hint')).toHaveFocus());
+  });
+
+  it('gives it to the More menu where that button is not shown', async () => {
+    const user = userEvent.setup();
+    render(
+      page(
+        <>
+          {/* As in a top bar narrower than it needs: there, and not drawn. */}
+          <button type="button" data-testid="command-palette-hint" hidden disabled>
+            Search
+          </button>
+          <button type="button" data-testid="topbar-menu-more-trigger">
+            More
+          </button>
+        </>,
+      ),
+    );
+    await open();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.getByTestId('topbar-menu-more-trigger')).toHaveFocus());
+  });
+
+  it('leaves it in a dialog the command opened, and gives it back when that dialog closes', async () => {
+    const user = userEvent.setup();
+    // A dialog as a command opens one: it takes the focus as it is shown.
+    function OpenedByCommand() {
+      const shown = useSnapshotStore((s) => s.saveDialogOpen);
+      return (
+        <Dialog
+          open={shown}
+          onOpenChange={(next) => useSnapshotStore.setState({ saveDialogOpen: next })}
+        >
+          <DialogContent data-testid="opened-by-command">
+            <DialogTitle>Save snapshot</DialogTitle>
+            <DialogDescription>Asks for a name.</DialogDescription>
+            <input data-testid="in-the-dialog" />
+          </DialogContent>
+        </Dialog>
+      );
+    }
+    render(page(<OpenedByCommand />));
+    screen.getByTestId('was-focused').focus();
+    await open();
+    await user.click(screen.getByTestId('command-palette-item-workspace.save-snapshot'));
+    const dialog = await screen.findByTestId('opened-by-command');
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    // The palette is gone, and did not take the focus out of the dialog.
+    await waitFor(() => expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument());
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('opened-by-command')).not.toBeInTheDocument());
+    // Not on <body>, which is where the dialog's own hand-back leaves it.
+    await waitFor(() => expect(screen.getByTestId('was-focused')).toHaveFocus());
   });
 });

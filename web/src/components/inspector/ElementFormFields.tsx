@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useCaseStore } from '@/store/case';
+import { editedParams, useEditJournalStore } from '@/store/editJournal';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
@@ -22,7 +23,9 @@ import { findTopologyEntry } from '@/lib/topology';
 import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
-import { useResetRunAction } from '@/lib/useResetRunAction';
+import { runLockNotice } from '@/lib/runLock';
+import { UNDO } from '@/lib/undoWording';
+import { useReloadDiscardsEdits, useResetRunAction } from '@/lib/useResetRunAction';
 import { assessVoltage, busVoltageLimits, voltageStatusText } from '@/components/sld/voltage';
 import { formatLoading, loadingCheckText } from '@/components/sld/loading';
 import { ModifiedFromOriginalDot } from './ModifiedFromOriginalDot';
@@ -305,6 +308,14 @@ function PropertiesBody({
     values: Readonly<Record<string, ParamValue>>;
   }>({ source: null, values: EMPTY_OVERRIDES });
   const unitMode = useUnitsStore((s) => s.mode);
+  // The params changed since the case was opened, by an edit of the user's or
+  // by one the app made with it (the Vn that goes with a device to another
+  // bus): each is marked, where a notice that said so is gone in seconds.
+  const journal = useEditJournalStore((s) => s.entries);
+  const edited = useMemo(
+    () => new Set(entry ? editedParams(journal, entry.kind, String(entry.idx)) : []),
+    [journal, entry],
+  );
 
   if (!entry) {
     return (
@@ -387,6 +398,15 @@ function PropertiesBody({
             <div key={key} className="contents">
               <dt className="text-muted-foreground flex items-center gap-1 font-mono text-xs">
                 {key}
+                {edited.has(key) ? (
+                  <span
+                    role="img"
+                    aria-label="changed since the case was opened"
+                    title={`${key} was changed since the case was opened. ${UNDO} takes the change back.`}
+                    data-testid={`inspector-edited-${key}`}
+                    className="bg-primary inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  />
+                ) : null}
               </dt>
               <dd className="text-foreground font-mono text-xs">
                 {canCloneEdit ? (
@@ -444,11 +464,13 @@ function PropertiesBody({
 interface ResetBannerProps {
   onReset: () => void;
   resetting: boolean;
+  /** Whether the reset would lose edits that were not saved (`useReloadDiscardsEdits`). */
+  discardsEdits: boolean;
   /** The selection is a controller, whose parameters Edit mode can change on a locked case. */
   controller: boolean;
 }
 
-function ResetBanner({ onReset, resetting, controller }: ResetBannerProps) {
+function ResetBanner({ onReset, resetting, discardsEdits, controller }: ResetBannerProps) {
   return (
     <div
       role="status"
@@ -460,9 +482,12 @@ function ResetBanner({ onReset, resetting, controller }: ResetBannerProps) {
       )}
     >
       <span>
-        {controller
-          ? 'A run has locked this case. Turn on Edit mode to change controller parameters, or reset the run to edit other values; resetting discards the edits you made so far.'
-          : 'A run has locked this case. Reset the run to edit values again; the edits you made so far are discarded.'}
+        {runLockNotice(
+          discardsEdits,
+          controller
+            ? 'Edit mode, above, changes controller parameters without a reset.'
+            : undefined,
+        )}
       </span>
       <Button
         type="button"
@@ -500,6 +525,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
   // The reset says what the top bar's does, and that it happened: the banner is
   // gone once the case is unlocked.
   const resetRun = useResetRunAction({ errorTitle: 'Reset run', confirm: true });
+  const discardsEdits = useReloadDiscardsEdits();
   const schema = useTopologySchema();
   const pflow = usePflowStore((s) => s.lastRun);
 
@@ -595,6 +621,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
         <ResetBanner
           onReset={resetRun.reset}
           resetting={resetRun.isPending}
+          discardsEdits={discardsEdits}
           controller={isController}
         />
       ) : null}

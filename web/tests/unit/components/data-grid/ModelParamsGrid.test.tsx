@@ -386,7 +386,7 @@ describe('<MachinesGrid />', () => {
     render(<MachinesGrid />);
     expect(cell('machines', 'GENROU-G1', 'xd1')).not.toHaveAttribute('data-editable');
     expect(screen.getByTestId('machines-grid-hint')).toHaveTextContent(
-      'The case is set up for a run',
+      'A run has fixed the system.',
     );
     expect(screen.getByTestId('grid-reset-run')).toBeInTheDocument();
     expect(screen.queryByTestId('edit-mode-toggle')).not.toBeInTheDocument();
@@ -486,7 +486,9 @@ describe('<ExcitersGrid />', () => {
     mockTopology = { ...TOPOLOGY, state: 'committed' };
     render(<ExcitersGrid />);
     expect(cell('exciters', 'IEEEX1-E1', 'KA')).not.toHaveAttribute('data-editable');
-    expect(screen.getByTestId('exciters-grid-hint')).toHaveTextContent('Turn on Edit mode');
+    expect(screen.getByTestId('exciters-grid-hint')).toHaveTextContent(
+      'Edit mode changes controller values without a reset.',
+    );
     // Reset run is the other way out.
     expect(screen.getByTestId('grid-reset-run')).toBeInTheDocument();
     await user.click(screen.getByTestId('edit-mode-toggle'));

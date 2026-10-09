@@ -40,13 +40,13 @@ beforeEach(() => {
   fetchSpy.mockImplementation(() =>
     Promise.resolve(jsonResponse({ tensa: '0.5.0', andes: '2.0.0' })),
   );
-  useShortcutCheatsheetStore.setState({ open: false });
+  useShortcutCheatsheetStore.setState({ open: false, section: null });
 });
 
 afterEach(() => {
   cleanup();
   fetchSpy.mockRestore();
-  useShortcutCheatsheetStore.setState({ open: false });
+  useShortcutCheatsheetStore.setState({ open: false, section: null });
 });
 
 async function openMenu() {
@@ -139,6 +139,18 @@ describe('<HelpMenu />', () => {
     await screen.findByTestId('topbar-menu-help-content');
     expect(screen.getByTestId('help-about-tensa')).toHaveTextContent('0.5.0');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('has an entry of its own for moving a line by hand and for connecting, which open that part of the list', async () => {
+    // Nobody looks for a drag under "Keyboard shortcuts".
+    const user = await openMenu();
+    await user.click(screen.getByRole('menuitem', { name: 'Moving a line by hand' }));
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: true, section: 'diagram' });
+
+    useShortcutCheatsheetStore.setState({ open: false, section: null });
+    await user.click(screen.getByTestId('topbar-menu-help-trigger'));
+    await user.click(await screen.findByRole('menuitem', { name: 'Connecting on the diagram' }));
+    expect(useShortcutCheatsheetStore.getState()).toMatchObject({ open: true, section: 'connect' });
   });
 
   it('opens the keyboard shortcuts, which the ? key opens too', async () => {

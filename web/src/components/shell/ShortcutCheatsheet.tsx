@@ -20,6 +20,7 @@
  * Close: Escape (Radix default), backdrop click. The `?` hotkey that
  * opens the cheatsheet is registered at AppShell, not here.
  */
+import { useCallback } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 
 import { cn } from '@/lib/cn';
@@ -162,7 +163,15 @@ function GestureRows({ gestures }: { gestures: typeof DIAGRAM_GESTURES }) {
 export function ShortcutCheatsheet() {
   const open = useShortcutCheatsheetStore((s) => s.open);
   const closeCheatsheet = useShortcutCheatsheetStore((s) => s.closeCheatsheet);
+  const section = useShortcutCheatsheetStore((s) => s.section);
   const commands = useCommandRegistry();
+  // The part a help entry asked for (Help, then Moving a line by hand): the
+  // list opens scrolled to it, with the focus on its heading.
+  const shownFirst = useCallback((heading: HTMLHeadingElement | null) => {
+    if (heading === null) return;
+    heading.scrollIntoView?.({ block: 'start' });
+    heading.focus({ preventScroll: true });
+  }, []);
 
   // Only commands that declare a shortcut get a row — a command
   // without a binding has nothing useful to show on a "keyboard
@@ -260,7 +269,11 @@ export function ShortcutCheatsheet() {
               data-testid="shortcut-cheatsheet-group-diagram"
               className="flex flex-col gap-1"
             >
-              <h3 className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase">
+              <h3
+                ref={section === 'diagram' ? shownFirst : undefined}
+                tabIndex={-1}
+                className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase focus:outline-none"
+              >
                 Diagram: moving a line by hand
               </h3>
               <GestureRows gestures={DIAGRAM_GESTURES} />
@@ -274,7 +287,11 @@ export function ShortcutCheatsheet() {
               data-testid="shortcut-cheatsheet-group-connect"
               className="flex flex-col gap-1"
             >
-              <h3 className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase">
+              <h3
+                ref={section === 'connect' ? shownFirst : undefined}
+                tabIndex={-1}
+                className="text-muted-foreground px-1 text-[10px] font-medium tracking-wide uppercase focus:outline-none"
+              >
                 Diagram: connecting by a drag
               </h3>
               <GestureRows gestures={CONNECT_GESTURES} />

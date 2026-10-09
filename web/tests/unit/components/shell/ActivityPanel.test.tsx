@@ -83,6 +83,7 @@ function seedJob(rec: {
   ended_at?: number;
   progress?: number;
   problem?: Record<string, unknown> | null;
+  request_summary?: Record<string, unknown>;
 }): void {
   const now = Date.now() / 1000;
   const full = {
@@ -92,7 +93,7 @@ function seedJob(rec: {
     started_at: rec.started_at ?? now,
     updated_at: now,
     can_cancel: rec.can_cancel ?? false,
-    request_summary: {},
+    request_summary: rec.request_summary ?? {},
     repeated_count: 1,
     ...(rec.ended_at !== undefined ? { ended_at: rec.ended_at } : {}),
     ...(rec.progress !== undefined ? { progress: rec.progress } : {}),
@@ -117,6 +118,25 @@ describe('<ActivityPanel />', () => {
     const row = screen.getByTestId('activity-row-j1');
     expect(within(row).getByText('Eigenvalue analysis')).toBeInTheDocument();
     expect(screen.getByTestId('activity-row-status-j1')).toHaveTextContent('Running');
+  });
+
+  it('says what an edit changed under its name, where the caller said', () => {
+    // A load moved to another bus takes its Vn along: the notice that said so
+    // is gone in seconds, and the list keeps it.
+    seedJob({
+      id: 'e1',
+      kind: 'element-edit',
+      status: 'running',
+      request_summary: { model: 'PQ', idx: 'PQ_3', detail: 'Changed bus, Vn of PQ PQ_3' },
+    });
+    seedJob({ id: 'j1', kind: 'pflow', status: 'running' });
+    render(<ActivityPanel />);
+    expect(within(screen.getByTestId('activity-row-e1')).getByText('Edit element')).toBeVisible();
+    expect(screen.getByTestId('activity-row-detail-e1')).toHaveTextContent(
+      'Changed bus, Vn of PQ PQ_3',
+    );
+    // A job with nothing to add has no such line.
+    expect(screen.queryByTestId('activity-row-detail-j1')).not.toBeInTheDocument();
   });
 
   it('shows Cancel on a cancellable in-flight row and fires DELETE', async () => {

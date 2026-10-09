@@ -107,15 +107,49 @@ describe('reloaded case store', () => {
     expect(mark()).toBeNull();
   });
 
-  it('keeps no mark for a system built from scratch, which no file holds', async () => {
+  it('marks a system built from scratch as one, since no file holds it', async () => {
     window.sessionStorage.setItem(
       KEY,
       JSON.stringify({ primaryPath: 'kundur_full.xlsx', addfiles: [] }),
     );
     const { useReloadedCaseStore } = await import('@/store/reloadedCase');
     useReloadedCaseStore.getState().follow({ primaryPath: null, addfiles: [], blank: true });
-    expect(mark()).toBeNull();
+    expect(mark()).toEqual({ primaryPath: null, addfiles: [], blank: true });
     expect(useReloadedCaseStore.getState().closed).toBeNull();
+  });
+
+  it('reads the mark of a system built from scratch back when the page starts', async () => {
+    window.sessionStorage.setItem(
+      KEY,
+      JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+    );
+    const { isOnFile, useReloadedCaseStore } = await import('@/store/reloadedCase');
+    const closed = useReloadedCaseStore.getState().closed;
+    expect(closed).toEqual({ primaryPath: null, addfiles: [], blank: true });
+    expect(closed !== null && isOnFile(closed)).toBe(false);
+  });
+
+  it('keeps what the tab holds for a system built from scratch only for that system', async () => {
+    // The drafts of such a system are kept in the tab for a reload of it.
+    const BLANK_DRAFTS = 'tensa:sld-drafts-blank-v1';
+    const hold = () => window.sessionStorage.setItem(BLANK_DRAFTS, '[]');
+    const held = () => window.sessionStorage.getItem(BLANK_DRAFTS) !== null;
+    const { BLANK_DRAFTS_STORAGE_KEY, useReloadedCaseStore } = await import('@/store/reloadedCase');
+    expect(BLANK_DRAFTS_STORAGE_KEY).toBe(BLANK_DRAFTS);
+    const { follow, forget } = useReloadedCaseStore.getState();
+    hold();
+    follow({ primaryPath: null, addfiles: [], blank: true });
+    expect(held()).toBe(true);
+    // Another case is opened in its place, or none: they are not for that one.
+    follow({ primaryPath: 'kundur_full.xlsx' as never, addfiles: [] });
+    expect(held()).toBe(false);
+    hold();
+    follow(null);
+    expect(held()).toBe(false);
+    // Nor for a later system, when the one they were kept for could not be built again.
+    hold();
+    forget();
+    expect(held()).toBe(false);
   });
 
   it('forgets a case whose file is gone', async () => {

@@ -73,12 +73,57 @@ describe('toast.success', () => {
     });
   });
 
-  it('forwards an action button object verbatim', () => {
+  it('forwards an action button: its label, and a press that runs what was given', () => {
     const onClick = vi.fn();
     toast.success('Saved', { action: { label: 'Undo', onClick } });
-    expect(successMock).toHaveBeenCalledWith('Saved', {
-      action: { label: 'Undo', onClick },
+    const sent = successMock.mock.calls[0]![1] as { action: { label: string; onClick(): void } };
+    expect(sent.action.label).toBe('Undo');
+    sent.action.onClick();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets go of the focus before a button acts, so that what it focuses keeps it', () => {
+    // Sonner gives the focus back to what had it when the focus leaves the
+    // notice: a button that moves the focus has to let go of it first.
+    const held = document.createElement('button');
+    const target = document.createElement('input');
+    document.body.append(held, target);
+    try {
+      held.focus();
+      let activeAtClick: Element | null = null;
+      toast.info('Not on a bus yet', {
+        action: {
+          label: 'Pick a bus',
+          onClick: () => {
+            activeAtClick = document.activeElement;
+            target.focus();
+          },
+        },
+      });
+      const sent = infoMock.mock.calls[0]![1] as { action: { onClick(): void } };
+      sent.action.onClick();
+      expect(activeAtClick).toBe(document.body);
+      expect(document.activeElement).toBe(target);
+    } finally {
+      held.remove();
+      target.remove();
+    }
+  });
+
+  it('forwards a second button as the one sonner draws beside the action', () => {
+    const [show, remove] = [vi.fn(), vi.fn()];
+    toast.info('3 drafts kept', {
+      action: { label: 'Show', onClick: show },
+      secondary: { label: 'Delete all', onClick: remove },
     });
+    const sent = infoMock.mock.calls[0]![1] as {
+      action: { label: string; onClick(): void };
+      cancel: { label: string; onClick(): void };
+    };
+    expect(sent.cancel.label).toBe('Delete all');
+    sent.cancel.onClick();
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
   });
 
   it('forwards an id of the caller, which is what dismiss takes', () => {
@@ -94,7 +139,7 @@ describe('toast.error', () => {
       action: { label: 'Retry', onClick: onRetry },
     });
     expect(errorMock).toHaveBeenCalledWith('Snapshot save failed: disk full', {
-      action: { label: 'Retry', onClick: onRetry },
+      action: { label: 'Retry', onClick: expect.any(Function) },
     });
     expect(id).toBe('sonner-id-2');
   });
@@ -151,7 +196,7 @@ describe('option mapping', () => {
     expect(successMock.mock.calls[0]![1]).toEqual({
       duration: 8000,
       description: 'with detail',
-      action: { label: 'Act', onClick },
+      action: { label: 'Act', onClick: expect.any(Function) },
     });
   });
 });

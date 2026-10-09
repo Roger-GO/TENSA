@@ -252,6 +252,15 @@ export interface LayoutState {
   sldSnapToGrid: boolean;
   setSldSnapToGrid: (snap: boolean) => void;
   toggleSldSnapToGrid: () => void;
+
+  /**
+   * Whether the app has lowered the bottom drawer to its tabs for a diagram
+   * that opened too small to read. It does that once in a browser, and says
+   * so: after that the drawer is as the user leaves it, so someone who wants
+   * the tables open over a small diagram is not overruled at every reload.
+   */
+  drawerLoweredForDiagram: boolean;
+  setDrawerLoweredForDiagram: (lowered: boolean) => void;
 }
 
 /**
@@ -279,6 +288,7 @@ export const DEFAULT_LAYOUT: Pick<
   | 'historyKindFilter'
   | 'resultsViewActive'
   | 'sldSnapToGrid'
+  | 'drawerLoweredForDiagram'
 > = {
   leftSidebarCollapsed: false,
   // Project first: a first-time user opens a case before adding to one.
@@ -299,6 +309,7 @@ export const DEFAULT_LAYOUT: Pick<
   historyKindFilter: 'runs',
   resultsViewActive: false,
   sldSnapToGrid: false,
+  drawerLoweredForDiagram: false,
 };
 
 export const LAYOUT_STORAGE_KEY = 'tensa:layout-v1';
@@ -347,6 +358,8 @@ export const useLayoutStore = create<LayoutState>()(
 
       setSldSnapToGrid: (snap) => set({ sldSnapToGrid: snap }),
       toggleSldSnapToGrid: () => set((state) => ({ sldSnapToGrid: !state.sldSnapToGrid })),
+
+      setDrawerLoweredForDiagram: (lowered) => set({ drawerLoweredForDiagram: lowered }),
     }),
     {
       name: LAYOUT_STORAGE_KEY,
@@ -382,6 +395,8 @@ export const useLayoutStore = create<LayoutState>()(
         resultsViewActive: state.resultsViewActive,
         // Snap to grid on the diagram: how the user likes to place things.
         sldSnapToGrid: state.sldSnapToGrid,
+        // That the drawer was lowered once for a small diagram: not again.
+        drawerLoweredForDiagram: state.drawerLoweredForDiagram,
       }),
     },
   ),

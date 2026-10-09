@@ -67,6 +67,7 @@ import { cn } from '@/lib/cn';
 import { toast } from '@/lib/toast';
 import { isEditableTarget, useHotkeys } from '@/lib/useHotkeys';
 import { Button } from '@/components/ui/button';
+import { ClampedText } from '@/components/ui/ClampedText';
 import { Input } from '@/components/ui/Input';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { recordsToCsv } from '@/components/export/exportToCsv';
@@ -923,13 +924,14 @@ export function DataGrid<Row>({
             </div>
           ) : null}
           {hintText !== undefined ? (
-            <p
-              data-testid={testId ? `${testId}-hint` : undefined}
-              title={hintText}
-              className="text-muted-foreground min-w-0 flex-1 truncate px-1 text-[11px]"
-            >
-              {hintText}
-            </p>
+            // One line, with the rest of a hint that does not fit behind More.
+            <ClampedText
+              testId={testId ? `${testId}-hint` : undefined}
+              text={hintText}
+              moreLabel="Show the whole note"
+              rowClassName="items-center"
+              className="text-muted-foreground truncate px-1 text-[11px]"
+            />
           ) : (
             <span className="flex-1" />
           )}

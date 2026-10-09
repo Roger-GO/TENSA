@@ -109,6 +109,25 @@ describe('useEditElements', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.topology(SESSION) });
   });
 
+  it('lists the change as one job that says what each of its edits changed', async () => {
+    fetchSpy.mockImplementation(async () => jsonResponse({ idx: 2, name: '2', kind: 'PV' }));
+
+    await run(MOVE);
+
+    // One row of the Activity panel, with the Vn that went with the bus in it.
+    const jobs = Object.values(useJobsStore.getState().jobs);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      kind: 'element-edit',
+      status: 'done',
+      request_summary: {
+        model: 'PV',
+        idx: '2',
+        detail: 'Changed bus of PV 2; bus, Vn of GENROU GENROU 2',
+      },
+    });
+  });
+
   it('takes back the edits it made when a later one is refused, so the change is whole or not made', async () => {
     fetchSpy.mockImplementation(async (url: unknown, init: unknown) => {
       if ((init as RequestInit).method === 'PUT' && String(url).includes('/GENROU/')) {
@@ -158,7 +177,7 @@ describe('useEditElements', () => {
 
     expect(error?.message).toMatch(/GENROU cannot be on bus 5/);
     expect(error?.message).toMatch(
-      /1 of the 2 edits it takes were made before that and could not be taken back: Undo in the Edit menu takes them back\.$/,
+      /1 of the 2 edits it takes were made before that and could not be taken back: Undo \(Ctrl\+Z or Edit > Undo\) takes them back\.$/,
     );
     expect(journalOps()).toEqual([{ op: 'edit', model: 'PV', idx: '2', params: { bus: 5 } }]);
   });

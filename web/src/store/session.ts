@@ -59,6 +59,15 @@ export const RECOVERY_STUCK_TIMEOUT_MS = 10_000;
 export interface SessionState {
   sessionId: SessionId | null;
   /**
+   * The server's name for the workspace folder it serves (`workspace_id` of a
+   * session), `null` until the first session has answered. It holds no path.
+   * What the browser keeps by case file name (the drafts of a diagram) is
+   * kept by this as well, so that a file of the same name in another
+   * workspace, served on the same address, is another case.
+   */
+  workspaceId: string | null;
+  setWorkspaceId: (id: string | null) => void;
+  /**
    * True while the session-recovery handler is running (id cleared, waiting
    * for ``useCreateSession`` to resolve). The RecoveryBadge in the top bar
    * watches this flag and renders the "Reconnecting..." pill while it is
@@ -180,6 +189,8 @@ export function resetHardResetImpl(): void {
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   sessionId: null,
+  workspaceId: null,
+  setWorkspaceId: (id) => set({ workspaceId: id }),
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],

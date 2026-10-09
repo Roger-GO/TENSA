@@ -139,6 +139,45 @@ export function withHeldValues(
   return out;
 }
 
+/** Whether a form with the fields `metas` has a rated voltage `Vn` that goes with its `bus`. */
+export function ratedForBus(metas: readonly TopologyParamMeta[]): boolean {
+  return (
+    metas.some((m) => m.name === 'bus' && m.kind === 'bus_idx') &&
+    metas.some((m) => m.name === 'Vn' && m.kind === 'number')
+  );
+}
+
+/** The rated voltage (kV) of the bus `bus` of the case, or `null` when it gives none. */
+export function busRatedVoltage(topology: TopologySummary | null, bus: string): number | null {
+  if (bus === '') return null;
+  const entry = (topology?.buses ?? []).find((b) => String(b.idx) === bus);
+  const rated = entry?.params?.Vn;
+  if (rated === undefined || rated === '' || typeof rated === 'boolean') return null;
+  const kv = Number(rated);
+  return Number.isFinite(kv) && kv > 0 ? kv : null;
+}
+
+/**
+ * `values` with the rated voltage taken from the bus the element is on: a
+ * load, a shunt or a generator is rated for its bus, the case already says
+ * what that is, and asking for it again sends the user to the Buses table
+ * for a number the app holds. Only where the model has both fields, the bus
+ * is one of the case with a rating, and no `Vn` was kept for the form
+ * (`held`): a rating someone typed stays, whatever the bus.
+ */
+export function withBusRating(
+  metas: readonly TopologyParamMeta[],
+  values: Readonly<Record<string, ParamValue>>,
+  held: Readonly<Record<string, ParamValue>>,
+  topology: TopologySummary | null,
+): Record<string, ParamValue> {
+  const out: Record<string, ParamValue> = { ...values };
+  if (!ratedForBus(metas) || 'Vn' in held) return out;
+  const rated = busRatedVoltage(topology, String(values.bus ?? ''));
+  if (rated !== null) out.Vn = rated;
+  return out;
+}
+
 /**
  * What the lists of a form offer, by the kind of field: the buses, the
  * static generators and the synchronous machines of the case, as the idx

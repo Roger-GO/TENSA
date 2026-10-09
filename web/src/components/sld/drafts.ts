@@ -41,6 +41,7 @@ import {
   nextAvailableIdx,
   pickTargets,
   seedElementValues,
+  withBusRating,
   withHeldValues,
 } from '@/components/elements/elementValues';
 import { subKindForControllerClass } from '@/lib/controllers';
@@ -182,10 +183,15 @@ export function draftStatus(
   if (kind === null || metas === null) return null;
   const model = kind.submitModel;
   const defaults = draftDefaults(kind, topology?.base_mva ?? null);
-  const values = withHeldValues(
-    model,
-    seedElementValues(model, metas, topology, defaults, reservedIdxs),
+  const values = withBusRating(
+    metas,
+    withHeldValues(
+      model,
+      seedElementValues(model, metas, topology, defaults, reservedIdxs),
+      draft.values,
+    ),
     draft.values,
+    topology,
   );
   const { errors, params } = checkElementValues(
     metas,

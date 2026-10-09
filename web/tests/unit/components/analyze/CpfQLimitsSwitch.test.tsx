@@ -6,16 +6,21 @@
  * past a limit and offers to solve it again with the limits on.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const runPflow = vi.fn();
 vi.mock('@/lib/usePflowRunAction', () => ({ usePflowRunAction: () => runPflow }));
 
-import { CpfQLimitsSwitch, generatorsPastLimits } from '@/components/analyze/CpfQLimitsSwitch';
+import {
+  CpfQLimitsSwitch,
+  generatorsPastLimits,
+  namedGenerators,
+} from '@/components/analyze/CpfQLimitsSwitch';
+import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
-import type { PflowResult } from '@/api/types';
+import type { PflowResult, TopologySummary } from '@/api/types';
 
 function pflow(outputs: Record<string, { q: number; q_min: number | null; q_max: number | null }>) {
   return {
@@ -40,10 +45,37 @@ const HELD = pflow({
   '4': { q: 10, q_min: -6, q_max: 10 },
 });
 
+// The generators of IEEE 14, as the case names them and where each is.
+const CASE = {
+  state: 'committed',
+  buses: [],
+  generators: [
+    { idx: 1, name: '1', kind: 'Slack', params: { bus: 1 } },
+    { idx: 2, name: '2', kind: 'PV', params: { bus: 2 } },
+    { idx: 3, name: '3', kind: 'PV', params: { bus: 3 } },
+    { idx: 4, name: '4', kind: 'PV', params: { bus: 6 } },
+    // The machine on generator 2 goes by another idx and is no static generator.
+    { idx: 'GENROU_2', name: 'GENROU_2', kind: 'GENROU', params: { bus: 2, gen: 2 } },
+  ],
+} as unknown as TopologySummary;
+
 beforeEach(() => {
   runPflow.mockReset();
   usePflowOptionsStore.getState().resetForNewCase();
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+  useCaseStore.setState({ topology: null });
+});
+
+describe('namedGenerators', () => {
+  it('names each generator as the table of a curve does: model, idx and bus', () => {
+    expect(namedGenerators(['2', '4'], CASE)).toBe('PV 2 (bus 2), PV 4 (bus 6)');
+    expect(namedGenerators(['1'], CASE)).toBe('Slack 1 (bus 1)');
+  });
+
+  it('goes by the idx alone for a generator the case does not list', () => {
+    expect(namedGenerators(['2', '9'], CASE)).toBe('PV 2 (bus 2), 9');
+    expect(namedGenerators(['2'], null)).toBe('2');
+  });
 });
 
 describe('generatorsPastLimits', () => {
@@ -117,12 +149,87 @@ describe('<CpfQLimitsSwitch />', () => {
 
     const note = screen.getByTestId('cpf-config-q-limits-pflow-note');
     expect(note).toHaveTextContent('The last power flow left generators 2, 4 past a Q limit.');
-    expect(note).toHaveTextContent('run the power flow again with the limits on first');
+    expect(note).toHaveTextContent('the power flow has to be run again with the limits on first.');
+    expect(screen.getByTestId('cpf-config-q-limits-run-pflow')).toHaveTextContent(
+      'Run power flow with Q limits',
+    );
 
     await user.click(screen.getByTestId('cpf-config-q-limits-run-pflow'));
     expect(runPflow).toHaveBeenCalledTimes(1);
     // The run it starts reads the option this box has just set.
     expect(usePflowOptionsStore.getState().options.enforceQLimits).toBe(true);
+  });
+
+  it('names the generators as the table under the curve names them', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ topology: CASE });
+    usePflowStore.setState({ lastRun: PAST });
+    render(<CpfQLimitsSwitch idPrefix="cpf-config" />);
+    await user.click(screen.getByTestId('cpf-config-enforce-q-limits'));
+    expect(screen.getByTestId('cpf-config-q-limits-pflow-note')).toHaveTextContent(
+      'The last power flow left generators PV 2 (bus 2), PV 4 (bus 6) past a Q limit.',
+    );
+  });
+
+  describe('with a run of the curve to go on to', () => {
+    const thenRun = { label: 'Run CPF (runs the power flow with Q limits first)', run: vi.fn() };
+    const press = async () => {
+      const user = userEvent.setup();
+      usePflowStore.setState({ lastRun: PAST });
+      render(<CpfQLimitsSwitch idPrefix="cpf-config" thenRun={thenRun} />);
+      await user.click(screen.getByTestId('cpf-config-enforce-q-limits'));
+      await user.click(screen.getByTestId('cpf-config-q-limits-run-pflow'));
+    };
+    // What the power flow the button started does to the store.
+    const powerFlow = (result: PflowResult | null) => {
+      act(() => usePflowStore.setState({ isRunning: true }));
+      act(() =>
+        usePflowStore.setState(
+          result === null ? { isRunning: false } : { lastRun: result, isRunning: false },
+        ),
+      );
+    };
+
+    beforeEach(() => thenRun.run.mockReset());
+
+    it('says that one press does both, and runs the curve once the power flow holds the limits', async () => {
+      await press();
+      expect(runPflow).toHaveBeenCalledTimes(1);
+      expect(thenRun.run).not.toHaveBeenCalled();
+      powerFlow(HELD);
+      expect(thenRun.run).toHaveBeenCalledTimes(1);
+      // Only that once: a later power flow is not followed by a curve.
+      powerFlow(pflow({ '2': { q: 15, q_min: -40, q_max: 15 } }));
+      expect(thenRun.run).toHaveBeenCalledTimes(1);
+    });
+
+    it('names the button and the note for both steps', async () => {
+      usePflowStore.setState({ lastRun: PAST });
+      const user = userEvent.setup();
+      render(<CpfQLimitsSwitch idPrefix="cpf-config" thenRun={thenRun} />);
+      await user.click(screen.getByTestId('cpf-config-enforce-q-limits'));
+      expect(screen.getByTestId('cpf-config-q-limits-run-pflow')).toHaveTextContent(
+        'Run CPF (runs the power flow with Q limits first)',
+      );
+      expect(screen.getByTestId('cpf-config-q-limits-pflow-note')).toHaveTextContent(
+        'with the limits on first: the button does both.',
+      );
+    });
+
+    it('does not run the curve after a power flow that failed', async () => {
+      await press();
+      powerFlow(null);
+      expect(thenRun.run).not.toHaveBeenCalled();
+      // Nor after one that was started some other way later on.
+      powerFlow(HELD);
+      expect(thenRun.run).not.toHaveBeenCalled();
+    });
+
+    it('does not run the curve from a power flow that still leaves a generator past a limit', async () => {
+      await press();
+      powerFlow({ ...PAST, run_id: 'pf-2' } as PflowResult);
+      expect(thenRun.run).not.toHaveBeenCalled();
+    });
   });
 
   it('has no note for a power flow that holds its generators on their limits', async () => {

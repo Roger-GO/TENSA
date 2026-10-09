@@ -37,9 +37,14 @@
  * does not settle (``fileSavedRevision``). A write over the open file also makes
  * that file the base the substrate rebuilds from (``markSavedInPlace``).
  *
- * Lifecycle: in memory only, like the session it belongs to. It is cleared when the
- * case selection changes (a new case, a discarded one). A session recovery keeps
- * the selection, so the journal survives it for ``replayJournal`` to read.
+ * Lifecycle: it belongs to the session and is cleared when the case selection
+ * changes (a new case, a discarded one). A session recovery keeps the selection,
+ * so the journal survives it for ``replayJournal`` to read. A reload of the page
+ * is the other way a session is lost with its edits, and the journal answers it
+ * the same way: every change is also written to the tab's ``sessionStorage``
+ * (``JOURNAL_STORAGE_KEY``), and what was there when the page started
+ * (``journalBeforeReload``) is what ``useReopenAfterReload`` replays onto the case
+ * it opens again. The copy is the tab's, and ends with it.
  */
 import { create } from 'zustand';
 import type { ParamValue } from '@/api/types';
@@ -133,6 +138,42 @@ export function compactJournal(
 /** True when ``op`` is the user's own work rather than bookkeeping. */
 export function isWorkOp(op: JournalOp): boolean {
   return WORK_OPS.has(op.op);
+}
+
+/**
+ * The params of the element ``idx`` of ``model`` that were changed since the
+ * case was opened and still are: the ones every ``edit`` of it names that no
+ * undo has taken back. Read off the journal the way the substrate keeps its two
+ * stacks (an undo takes the newest add, edit or delete off, a redo puts it
+ * back, a new one empties what could be redone). The Inspector marks them, so a
+ * change the app made with another (the ``Vn`` that follows a device to another
+ * bus) can still be seen once its notice is gone. Pure.
+ */
+export function editedParams(
+  entries: readonly JournalEntry[],
+  model: string,
+  idx: string,
+): string[] {
+  const done: JournalEntry[] = [];
+  let undone: JournalEntry[] = [];
+  for (const entry of entries) {
+    if (entry.op === 'add' || entry.op === 'edit' || entry.op === 'delete') {
+      done.push(entry);
+      undone = [];
+    } else if (entry.op === 'undo') {
+      const back = done.pop();
+      if (back !== undefined) undone.push(back);
+    } else if (entry.op === 'redo') {
+      const forth = undone.pop();
+      if (forth !== undefined) done.push(forth);
+    }
+  }
+  const names = new Set<string>();
+  for (const entry of done) {
+    if (entry.op !== 'edit' || entry.model !== model || String(entry.idx) !== idx) continue;
+    for (const name of Object.keys(entry.params)) names.add(name);
+  }
+  return [...names];
 }
 
 export interface EditJournalState {
@@ -281,6 +322,95 @@ function hasWorkAfter(revision: number): boolean {
   const { entries, opaqueRevision } = useEditJournalStore.getState();
   return opaqueRevision > revision || entries.some((e) => isWorkOp(e) && e.rev > revision);
 }
+
+// ---- kept across a reload of the page ----------------------------------------
+
+export const JOURNAL_STORAGE_KEY = 'tensa:edit-journal-v1';
+
+/** The journal as it is kept for a reload: everything of the state that is not a function. */
+export type KeptJournal = Pick<
+  EditJournalState,
+  | 'entries'
+  | 'revision'
+  | 'savedRevision'
+  | 'fileSavedRevision'
+  | 'replayable'
+  | 'opaqueRevision'
+  | 'replaced'
+>;
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
+/** What was kept reads as a journal: anything else is taken as none. */
+function isKeptJournal(value: unknown): value is KeptJournal {
+  if (value === null || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    Array.isArray(v.entries) &&
+    v.entries.length <= MAX_JOURNAL_ENTRIES &&
+    v.entries.every(
+      (e) =>
+        e !== null &&
+        typeof e === 'object' &&
+        typeof (e as { op?: unknown }).op === 'string' &&
+        isCount((e as { rev?: unknown }).rev),
+    ) &&
+    isCount(v.revision) &&
+    isCount(v.savedRevision) &&
+    isCount(v.fileSavedRevision) &&
+    isCount(v.opaqueRevision) &&
+    typeof v.replayable === 'boolean' &&
+    typeof v.replaced === 'boolean'
+  );
+}
+
+/** Read the journal the tab kept; missing, malformed or unreadable storage reads as none. */
+export function readKeptJournal(): KeptJournal | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const raw = sessionStorage.getItem(JOURNAL_STORAGE_KEY);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isKeptJournal(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep `journal` for a reload, or nothing for one with nothing in it. Never throws. */
+function writeKeptJournal(journal: KeptJournal): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    if (journal.revision === 0) sessionStorage.removeItem(JOURNAL_STORAGE_KEY);
+    else sessionStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(journal));
+  } catch {
+    // Private mode, or the quota: a reload then reopens the case without its edits.
+  }
+}
+
+/**
+ * The journal the page that was reloaded had, read once as this module loads:
+ * before the store below writes its own, empty one over it.
+ */
+const beforeReload = readKeptJournal();
+
+/** The journal of the page before a reload, or `null` on a first visit. */
+export function journalBeforeReload(): KeptJournal | null {
+  return beforeReload;
+}
+
+useEditJournalStore.subscribe((state) => {
+  writeKeptJournal({
+    entries: state.entries,
+    revision: state.revision,
+    savedRevision: state.savedRevision,
+    fileSavedRevision: state.fileSavedRevision,
+    replayable: state.replayable,
+    opaqueRevision: state.opaqueRevision,
+    replaced: state.replaced,
+  });
+});
 
 // A different case (or none) starts a fresh journal. Wired here, not in the store
 // cascade, so it holds wherever the journal is in use. A session recovery leaves the

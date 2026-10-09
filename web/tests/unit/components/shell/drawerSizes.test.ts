@@ -41,7 +41,30 @@ describe('bottomDrawerSizes', () => {
   });
 
   it('answers the sizes of a window of the usual height for a column that is not measured yet', () => {
-    expect(bottomDrawerSizes(0)).toEqual({ strip: 4, openMin: 15, open: 35 });
-    expect(bottomDrawerSizes(Number.NaN)).toEqual({ strip: 4, openMin: 15, open: 35 });
+    const unmeasured = { strip: 4, openMin: 15, open: 35, canvasMin: 25 };
+    expect(bottomDrawerSizes(0)).toEqual(unmeasured);
+    expect(bottomDrawerSizes(Number.NaN)).toEqual(unmeasured);
+  });
+
+  it('keeps the diagram a height in pixels it can be used at, whatever the window', () => {
+    // 280 px of a column 1000 high, and of one 700 high.
+    expect(bottomDrawerSizes(1000).canvasMin).toBe(28);
+    expect(bottomDrawerSizes(700).canvasMin).toBe(40);
+    for (const column of [300, 441, 500, 700, 1000, 1400]) {
+      const { openMin, open, canvasMin } = bottomDrawerSizes(column);
+      // Both fit: an open drawer at its least height, and the diagram over it.
+      expect(canvasMin + openMin, `${column}`).toBeLessThanOrEqual(100);
+      // What the drawer opens to leaves the diagram its least height too.
+      expect(open, `${column}`).toBeLessThanOrEqual(100 - canvasMin + 1e-9);
+      expect(open, `${column}`).toBeGreaterThanOrEqual(openMin);
+    }
+  });
+
+  it('lets the drawer open in a column too short for both, and the diagram have the rest', () => {
+    // 441 px: the column of a window 485 px high. The diagram would want
+    // 63 % of it and an open drawer needs 39 %.
+    const { openMin, canvasMin } = bottomDrawerSizes(441);
+    expect(openMin).toBeCloseTo(39, 0);
+    expect(canvasMin).toBeCloseTo(61, 0);
   });
 });

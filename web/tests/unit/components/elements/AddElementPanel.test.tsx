@@ -157,7 +157,10 @@ describe('<AddElementPanel />', () => {
     const idxInput = screen.getByTestId('field-idx').querySelector('input')!;
     await user.clear(idxInput);
     await user.type(idxInput, '1');
-    await user.type(screen.getByTestId('field-name').querySelector('input')!, 'BUS1');
+    // The name opens as the idx: a name of one's own is typed over it.
+    const nameInput = screen.getByTestId('field-name').querySelector('input')!;
+    await user.clear(nameInput);
+    await user.type(nameInput, 'BUS1');
     await user.type(screen.getByTestId('field-Vn').querySelector('input')!, '110');
     await user.click(screen.getByRole('button', { name: /add bus/i }));
     await waitFor(() => expect(postSpy).toHaveBeenCalled());
@@ -217,7 +220,7 @@ describe('<AddElementPanel />', () => {
     expect(errors.length).toBeGreaterThan(0);
     // And the line above the buttons names the fields.
     expect(screen.getByTestId('form-problems')).toHaveTextContent(
-      'Nothing was added: name and Vn are required and empty.',
+      'Nothing was added: Vn is required and empty.',
     );
   });
 

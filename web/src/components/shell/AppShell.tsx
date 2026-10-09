@@ -390,7 +390,9 @@ export function AppShell({
                   id="app-shell-top-row-panel"
                   order={1}
                   defaultSize={100 - bottomDrawerHeightPct}
-                  minSize={20}
+                  // The diagram keeps a height it can be used at, in pixels
+                  // (`CANVAS_MIN_PX`), whatever the drawer was left at.
+                  minSize={drawerSizes.canvasMin}
                   className="flex min-w-0 flex-col"
                 >
                   {/* Top-row horizontal split: Canvas | RightInspector */}
@@ -474,7 +476,8 @@ export function AppShell({
                   // bar, its heading and a row or two: dragged below
                   // that it snaps down to its tab strip.
                   minSize={drawerSizes.openMin}
-                  maxSize={75}
+                  // No higher than leaves the diagram its least height.
+                  maxSize={Math.min(75, 100 - drawerSizes.canvasMin)}
                   className="flex min-w-0 flex-col"
                 >
                   <section

@@ -291,7 +291,7 @@ describe('a table once a run has locked the case', () => {
     expect(cell('buses', '1', 'vmax')).not.toHaveAttribute('data-editable');
     await user.dblClick(cell('buses', '1', 'vmax'));
     expect(screen.queryByTestId('buses-grid-editor')).not.toBeInTheDocument();
-    expect(screen.getByTestId('buses-grid-hint')).toHaveTextContent('The case is set up for a run');
+    expect(screen.getByTestId('buses-grid-hint')).toHaveTextContent('A run has fixed the system.');
     client.post.mockResolvedValue({ ...TOPOLOGY, state: 'pre-setup' });
     await user.click(screen.getByTestId('grid-reset-run'));
     expect(client.post).toHaveBeenCalledWith('/sessions/s1/reload', expect.anything());
@@ -327,7 +327,7 @@ describe('a table once a run has locked the case', () => {
     });
     await waitFor(() =>
       expect(toastMock.info).toHaveBeenCalledWith(
-        expect.stringMatching(/^Nothing was pasted\. The case is set up for a run/),
+        expect.stringMatching(/^Nothing was pasted\. A run has fixed the system\./),
       ),
     );
     expect(client.put).not.toHaveBeenCalled();

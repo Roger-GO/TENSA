@@ -2,8 +2,8 @@
  * Tests for the drafts slice: the elements that were placed on the diagram
  * and are not in the system yet. They are kept by the case file they were made
  * on, in this browser (localStorage), so they are there again after a reload
- * of the page; the drafts of a system built from scratch are kept in memory
- * and go with that system; and a storage that is missing, broken or holding
+ * of the page; the drafts of a system built from scratch go with that system,
+ * and are kept in the tab for a reload of it; and a storage that is missing, broken or holding
  * something else leaves the drafts working for the tab. How the lines ran
  * among the drafts of a case is kept with them, by the system it was drawn
  * for.
@@ -85,6 +85,7 @@ describe('drafts store', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+    window.sessionStorage.clear();
   });
 
   it('places a draft with an id of its own, where it was dropped', async () => {
@@ -180,7 +181,7 @@ describe('drafts store', () => {
     expect(useDraftsStore.getState().byCase[CASE]).toBeUndefined();
   });
 
-  it('keeps the drafts of a system built from scratch in memory only', async () => {
+  it('keeps the drafts of a system built from scratch out of what the browser keeps for a later visit', async () => {
     const { useDraftsStore, BLANK_CASE_KEY } = await load();
     useDraftsStore.getState().add(BLANK_CASE_KEY, 'Bus', { x: 0, y: 0 });
     expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toHaveLength(1);
@@ -268,6 +269,195 @@ describe('drafts store', () => {
     expect(draftCaseKey(null)).toBeNull();
     expect(draftCaseKey({ primaryPath: parseWorkspacePath(CASE), addfiles: [] })).toBe(CASE);
     expect(draftCaseKey({ primaryPath: null, addfiles: [], blank: true })).toBe(BLANK_CASE_KEY);
+  });
+
+  it('keeps the drafts of a case file by the workspace the server serves as well as by its name', async () => {
+    // A file of the same name in another workspace, served on the same
+    // address, is another case: its drafts are not these.
+    const { draftCaseKey, draftKeyOfPath, useDraftsStore, BLANK_CASE_KEY } = await load();
+    const { useSessionStore } = await import('@/store/session');
+    const selection = { primaryPath: parseWorkspacePath(CASE), addfiles: [] };
+    useSessionStore.getState().setWorkspaceId('0123456789abcdef');
+    const here = draftCaseKey(selection)!;
+    expect(here).toBe(`0123456789abcdef:${CASE}`);
+    expect(draftKeyOfPath(CASE)).toBe(here);
+    useDraftsStore.getState().add(here, 'PV', { x: 0, y: 0 });
+    useSessionStore.getState().setWorkspaceId('fedcba9876543210');
+    const there = draftCaseKey(selection)!;
+    expect(there).not.toBe(here);
+    expect(useDraftsStore.getState().byCase[there]).toBeUndefined();
+    // A blank system is no file, in any workspace.
+    expect(draftCaseKey({ primaryPath: null, addfiles: [], blank: true })).toBe(BLANK_CASE_KEY);
+    useSessionStore.getState().setWorkspaceId(null);
+  });
+
+  it('puts deleted drafts back as they were, under the ids they had', async () => {
+    const { useDraftsStore } = await load();
+    const { add, remove, restore } = useDraftsStore.getState();
+    const first = add(CASE, 'PV', { x: 1, y: 2 }, { bus: '4' })!;
+    const second = add(CASE, 'PQ', { x: 3, y: 4 })!;
+    remove(CASE, first.id);
+    expect(restore(CASE, [first])).toEqual([first]);
+    // In the order they were placed, and written like any other change.
+    expect(useDraftsStore.getState().byCase[CASE]).toEqual([first, second]);
+    expect(stored()).toEqual({ [CASE]: [first, second] });
+  });
+
+  it('puts a deleted draft back under the next free id when a draft placed since has its own', async () => {
+    const { useDraftsStore } = await load();
+    const { add, remove, restore } = useDraftsStore.getState();
+    const first = add(CASE, 'PV', { x: 1, y: 2 }, { bus: '4' })!;
+    remove(CASE, first.id);
+    const since = add(CASE, 'PQ', { x: 9, y: 9 })!;
+    expect(since.id).toBe(first.id);
+    const back = restore(CASE, [first]);
+    expect(back).toEqual([{ ...first, id: 'draft-2' }]);
+    expect(useDraftsStore.getState().byCase[CASE]).toEqual([since, back[0]]);
+  });
+
+  it('puts back no more drafts than the case has room for, and says which', async () => {
+    const { useDraftsStore, MAX_DRAFTS_PER_CASE } = await load();
+    const { add, removeAll, restore } = useDraftsStore.getState();
+    for (let i = 0; i < MAX_DRAFTS_PER_CASE; i += 1) add(CASE, 'Bus', { x: i, y: 0 });
+    const all = [...useDraftsStore.getState().byCase[CASE]!];
+    removeAll(CASE);
+    add(CASE, 'PV', { x: 0, y: 0 });
+    const back = restore(CASE, all);
+    expect(back).toHaveLength(MAX_DRAFTS_PER_CASE - 1);
+    expect(useDraftsStore.getState().byCase[CASE]).toHaveLength(MAX_DRAFTS_PER_CASE);
+    expect(restore(CASE, all)).toEqual([]);
+  });
+
+  it('says once how many drafts of a case were kept from an earlier visit', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        [CASE]: [
+          { id: 'draft-1', kind: 'PV', position: { x: 0, y: 0 }, values: {} },
+          { id: 'draft-2', kind: 'PQ', position: { x: 0, y: 0 }, values: {} },
+        ],
+      }),
+    );
+    const { useDraftsStore } = await load();
+    const { takeKept, remove, add } = useDraftsStore.getState();
+    // One is gone by the time the case is opened: what is still there counts.
+    remove(CASE, 'draft-2');
+    expect(takeKept(CASE)).toBe(1);
+    expect(takeKept(CASE)).toBe(0);
+    // A case with none kept, and one whose drafts are of this visit.
+    expect(takeKept('other.raw')).toBe(0);
+    add('other.raw', 'PV', { x: 0, y: 0 });
+    expect(takeKept('other.raw')).toBe(0);
+  });
+
+  it('does not call the drafts of the case a reload opens again kept from an earlier visit', async () => {
+    // They were on screen a moment before the reload.
+    window.sessionStorage.setItem(
+      'tensa:open-case-v1',
+      JSON.stringify({ primaryPath: CASE, addfiles: [] }),
+    );
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        [CASE]: [{ id: 'draft-1', kind: 'PV', position: { x: 0, y: 0 }, values: {} }],
+        'other.raw': [{ id: 'draft-1', kind: 'PQ', position: { x: 0, y: 0 }, values: {} }],
+      }),
+    );
+    try {
+      const { useDraftsStore } = await load();
+      expect(useDraftsStore.getState().takeKept(CASE)).toBe(0);
+      expect(useDraftsStore.getState().takeKept('other.raw')).toBe(1);
+    } finally {
+      window.sessionStorage.clear();
+    }
+  });
+
+  it('holds the field of a draft the cursor is wanted in until it is there', async () => {
+    const { useDraftsStore } = await load();
+    expect(useDraftsStore.getState().fieldAsked).toBeNull();
+    useDraftsStore.getState().askField({ id: 'draft-1', name: 'bus' });
+    expect(useDraftsStore.getState().fieldAsked).toEqual({ id: 'draft-1', name: 'bus' });
+    useDraftsStore.getState().askField(null);
+    expect(useDraftsStore.getState().fieldAsked).toBeNull();
+    // In memory only.
+    expect(stored()).toBeNull();
+  });
+
+  describe('the drafts of a system built from scratch, over a reload of the page', () => {
+    const BLANK_KEY = 'tensa:sld-drafts-blank-v1';
+    const MARK = 'tensa:open-case-v1';
+    const HELD = [{ id: 'draft-1', kind: 'Bus', position: { x: 4, y: 8 }, values: { Vn: '110' } }];
+
+    afterEach(() => window.sessionStorage.clear());
+
+    it('are kept in the tab, which ends with it, and in no later visit', async () => {
+      const { useDraftsStore, useCaseStore, BLANK_CASE_KEY } = await load();
+      useCaseStore.getState().setCase({ primaryPath: null, addfiles: [], blank: true });
+      useDraftsStore.getState().add(BLANK_CASE_KEY, 'Bus', { x: 4, y: 8 }, { Vn: '110' });
+      expect(JSON.parse(window.sessionStorage.getItem(BLANK_KEY)!)).toEqual(HELD);
+      expect(stored()).toBeNull();
+      // Gone from the tab with the last of them.
+      useDraftsStore.getState().removeAll(BLANK_CASE_KEY);
+      expect(window.sessionStorage.getItem(BLANK_KEY)).toBeNull();
+    });
+
+    it('are there again for the system a reload interrupted, and are not called kept from an earlier visit', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, JSON.stringify(HELD));
+      window.sessionStorage.setItem(
+        MARK,
+        JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+      );
+      const { useDraftsStore, useCaseStore, BLANK_CASE_KEY } = await load();
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toEqual(HELD);
+      // The system is built again: its drafts stay.
+      useCaseStore.getState().setCase({ primaryPath: null, addfiles: [], blank: true });
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toEqual(HELD);
+      expect(useDraftsStore.getState().takeKept(BLANK_CASE_KEY)).toBe(0);
+    });
+
+    it('are not read for a tab that had a case file open, or none', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, JSON.stringify(HELD));
+      window.sessionStorage.setItem(MARK, JSON.stringify({ primaryPath: CASE, addfiles: [] }));
+      const { useDraftsStore, BLANK_CASE_KEY } = await load();
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toBeUndefined();
+    });
+
+    it('go when a case file is opened in the place of the system they were kept for', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, JSON.stringify(HELD));
+      window.sessionStorage.setItem(
+        MARK,
+        JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+      );
+      const { useDraftsStore, useCaseStore, BLANK_CASE_KEY } = await load();
+      // The user opened a case before the system was built again.
+      useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath(CASE), addfiles: [] });
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toBeUndefined();
+      expect(window.sessionStorage.getItem(BLANK_KEY)).toBeNull();
+    });
+
+    it('go when the system they were kept for could not be built again', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, JSON.stringify(HELD));
+      window.sessionStorage.setItem(
+        MARK,
+        JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+      );
+      const { useDraftsStore, BLANK_CASE_KEY } = await load();
+      const { useReloadedCaseStore } = await import('@/store/reloadedCase');
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toEqual(HELD);
+      useReloadedCaseStore.getState().forget();
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toBeUndefined();
+      expect(window.sessionStorage.getItem(BLANK_KEY)).toBeNull();
+    });
+
+    it('drops what the tab holds that is no list of drafts', async () => {
+      window.sessionStorage.setItem(BLANK_KEY, '{"not":"a list"}');
+      window.sessionStorage.setItem(
+        MARK,
+        JSON.stringify({ primaryPath: null, addfiles: [], blank: true }),
+      );
+      const { useDraftsStore, BLANK_CASE_KEY } = await load();
+      expect(useDraftsStore.getState().byCase[BLANK_CASE_KEY]).toBeUndefined();
+    });
   });
 
   it('lets the drafts of a blank system go with it, and keeps those of a case file', async () => {

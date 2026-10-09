@@ -38,6 +38,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useDisturbanceStore } from '@/store/disturbance';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
+import { useRunModeStore } from '@/store/runMode';
 import { runLabel } from '@/lib/runLabel';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { CaseEvent, FaultSpec } from '@/api/types';
@@ -582,8 +583,14 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-pflow-button'));
+    // Under the headline: that the result is kept, under which name, and that
+    // the run has fixed the system, which nothing said before it happened.
     await waitFor(() =>
-      expect(toastSuccessMock).toHaveBeenCalledWith('PF converged in 3 iterations.'),
+      expect(toastSuccessMock).toHaveBeenCalledWith('PF converged in 3 iterations.', {
+        description:
+          'Kept as PF #1 under Analysis > Compare. The run has fixed the system: elements cannot be added or changed until Reset run, which keeps this result.',
+        duration: 8000,
+      }),
     );
   });
 
@@ -613,6 +620,49 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
     await waitFor(() =>
       expect(toastSuccessMock).toHaveBeenCalledWith(
         'PF converged in 5 iterations (Q limits enforced).',
+        expect.objectContaining({ description: expect.stringContaining('Reset run') }),
+      ),
+    );
+  });
+
+  it('runs the power flow a command asked for, and goes to PF mode for it', async () => {
+    // "Run power flow (PF)" in the Run menu and the palette.
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: 1, tf: 1, tc: 1.1 } as unknown as FaultSpec },
+      ],
+      dirty: true,
+      committed: false,
+    });
+    const posted: string[] = [];
+    fetchSpy.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      posted.push(url);
+      return Promise.resolve(
+        jsonResponse({
+          run_id: 'run-asked',
+          converged: true,
+          iterations: 3,
+          mismatch: 1e-7,
+          bus_voltages: { '1': 1.0 },
+          bus_angles: { '1': 0 },
+          line_flows: {},
+        }),
+      );
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    // A disturbance is scheduled, so the button stands on TDS.
+    expect(screen.getByTestId('run-mode-tds')).toHaveAttribute('aria-checked', 'true');
+
+    act(() => useRunModeStore.getState().requestRun('pflow'));
+
+    await waitFor(() => expect(posted.some((url) => url.endsWith('/pflow'))).toBe(true));
+    expect(screen.getByTestId('run-mode-pf')).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() =>
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        'PF converged in 3 iterations.',
+        expect.anything(),
       ),
     );
   });
@@ -869,6 +919,91 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
     });
     // The file's name without its directory or extension, as an export names a case.
     expect(useRunsStore.getState().runs['run-of-kundur']?.caseName).toBe('kundur_full');
+  });
+
+  it("records when the run first disturbs the system: the earliest of its disturbances and the case's events", async () => {
+    seedReady({ withDisturbances: true });
+    const seeded = useCaseStore.getState().topology!;
+    // The case trips a line of its own at 0.5 s, before the fault of the sidebar.
+    useCaseStore.setState({
+      topology: {
+        ...seeded,
+        events: [{ kind: 'toggle', t: 0.5, label: 'Toggle Line_8' } as unknown as CaseEvent],
+      },
+    });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    serveShortRun(server, 'run-disturbed');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-disturbed']?.state).toBe('done');
+    });
+    expect(useRunsStore.getState().runs['run-disturbed']?.disturbedAt).toBe(0.5);
+  });
+
+  it('records no such time for a run that nothing disturbs', async () => {
+    seedReady();
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    serveShortRun(server, 'run-quiet');
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+
+    await waitFor(() => {
+      expect(useRunsStore.getState().runs['run-quiet']?.state).toBe('done');
+    });
+    expect(useRunsStore.getState().runs['run-quiet']).not.toHaveProperty('disturbedAt');
+  });
+
+  describe('a run asked for by a command', () => {
+    // "Run time-domain simulation (TDS)" in the Run menu and the palette: the
+    // button goes to that mode and starts, as by a click on it.
+    beforeEach(() => useRunModeStore.setState({ runRequest: null }));
+
+    it('goes to TDS mode and starts the run', async () => {
+      seedReady();
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+      serveShortRun(server, 'run-asked');
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      // PF mode until it is asked for.
+      expect(screen.getByTestId('run-mode-pf')).toHaveAttribute('aria-checked', 'true');
+
+      act(() => useRunModeStore.getState().requestRun('tds'));
+
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-asked']?.state).toBe('done');
+      });
+      expect(screen.getByTestId('run-mode-tds')).toHaveAttribute('aria-checked', 'true');
+      expect(useRunModeStore.getState().runRequest).toBeNull();
+    });
+
+    it('does not start over a finished run that holds the system, and offers the reset', async () => {
+      seedReady();
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+      serveShortRun(server, 'run-first');
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      act(() => useRunModeStore.getState().requestRun('tds'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-first']?.state).toBe('done');
+      });
+      toastInfoMock.mockClear();
+
+      act(() => useRunModeStore.getState().requestRun('tds'));
+
+      expect(toastInfoMock).toHaveBeenCalledWith(
+        'Reset the run first',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Reset run' }) }),
+      );
+      // Still the one run.
+      expect(Object.keys(useRunsStore.getState().runs)).toEqual(['run-first']);
+    });
   });
 
   it('records no case name for a system with no file behind it', async () => {

@@ -132,7 +132,7 @@ describe('EditElementButton', () => {
     await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1));
     expect(toastMock.success).toHaveBeenCalledWith(
       'Changed Vn of Bus 1',
-      expect.objectContaining({ description: 'Undo in the Edit menu takes it back.' }),
+      expect.objectContaining({ description: 'Undo (Ctrl+Z or Edit > Undo) takes it back.' }),
     );
   });
 

@@ -9,7 +9,6 @@ import {
 } from '@/components/ui/tooltip';
 import { ChangeCaseConfirmDialog } from './ChangeCaseConfirmDialog';
 import { DynamicContentBadge } from './DynamicContentBadge';
-import { ReloadedCaseNote } from './ReloadedCaseNote';
 import { AddElementButton } from '@/components/elements/AddElementButton';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
@@ -18,6 +17,7 @@ import { useLayoutStore } from '@/store/layout';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { baseName } from '@/lib/paths';
+import { requestResetRun } from '@/lib/resetRunRequest';
 import { useAddComponent } from '@/lib/useAddComponent';
 import type { CaseSelection } from '@/store/case';
 import type { TopologySummary } from '@/api/types';
@@ -77,7 +77,7 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
   );
 
   // Why nothing can be added now (a run has locked the system, say), or null.
-  const { blockedReason: addBlockedReason } = useAddComponent();
+  const { blockedReason: addBlockedReason, lockedByRun } = useAddComponent();
 
   const isBlank = selection.blank === true;
   return (
@@ -143,13 +143,28 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
         <AddElementButton blockedReason={addBlockedReason} describedBy="add-element-blocked" />
       </div>
       {addBlockedReason !== null ? (
-        <p
-          id="add-element-blocked"
-          data-testid="add-element-blocked"
-          className="text-muted-foreground text-[11px] leading-snug"
-        >
-          {addBlockedReason}
-        </p>
+        <div className="flex flex-col items-start gap-1.5">
+          <p
+            id="add-element-blocked"
+            data-testid="add-element-blocked"
+            className="text-muted-foreground text-[11px] leading-snug"
+          >
+            {addBlockedReason}
+          </p>
+          {/* The way out of a run's lock, where the lock is said. */}
+          {lockedByRun ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void requestResetRun()}
+              data-testid="case-nav-reset-run"
+              className="h-6 px-2 text-[11px]"
+            >
+              Reset run
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -234,8 +249,6 @@ export function CaseNav({ className }: CaseNavProps) {
             </>
           ) : (
             <>
-              {/* After a reload: which case it closed, and a button that reopens it. */}
-              <ReloadedCaseNote placement="project" className="mb-2" />
               <p>
                 No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
                 below, drop a case file anywhere in this window, or start a blank system with a

@@ -5,7 +5,10 @@
  * operating point exists.
  *
  * Success toasts the iteration count, and whatever the run used that is not
- * ANDES's default (flat start, enforced Q limits, a different tolerance). A
+ * ANDES's default (flat start, enforced Q limits, a different tolerance),
+ * and under it what a first-time user cannot know: that the result is kept
+ * for comparison, under which name, and that the run has fixed the system
+ * until Reset run. A
  * non-converged run is a 200 that the
  * ``ConvergenceErrorPanel`` shows from the pflow slice, so it gets no toast,
  * and a 5xx goes to ``RuntimeCrashModal`` through ``pflow.error`` the same way.
@@ -17,6 +20,17 @@ import { ProblemDetailsError, ServerError } from '@/api/client';
 import { useSessionStore } from '@/store/session';
 import { toast } from '@/lib/toast';
 import { pflowSuccessMessage } from '@/lib/pflowOptions';
+import { PFLOW_LOCKS_NOTE } from '@/lib/runLock';
+import { snapshotLabel, usePflowHistoryStore } from '@/store/pflowHistory';
+
+/** What the notice of a converged power flow says under its headline. */
+function convergedNote(runId: string | undefined): string {
+  // The hook that ran it has recorded it by now (`useRunPflow`).
+  const kept = usePflowHistoryStore.getState().snapshots.find((s) => s.id === runId);
+  const where =
+    kept === undefined ? '' : `Kept as ${snapshotLabel(kept)} under Analysis > Compare. `;
+  return `${where}${PFLOW_LOCKS_NOTE}`;
+}
 
 export function usePflowRunAction(reloadCase?: () => void): () => void {
   const sessionId = useSessionStore((s) => s.sessionId);
@@ -27,7 +41,10 @@ export function usePflowRunAction(reloadCase?: () => void): () => void {
     runPflow.mutate(sessionId, {
       onSuccess: (data) => {
         if (data.converged) {
-          toast.success(pflowSuccessMessage(data));
+          toast.success(pflowSuccessMessage(data), {
+            description: convergedNote(data.run_id),
+            duration: 8000,
+          });
         }
       },
       onError: (err) => {

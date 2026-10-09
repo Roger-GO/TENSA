@@ -16,6 +16,9 @@ export function useCreateSession(): UseMutationResult<SessionDescriptor, Error, 
       });
     },
     onSuccess: (data) => {
+      // The workspace first: what is kept by case is looked up under it as
+      // soon as a case is opened, which a session is needed for.
+      useSessionStore.getState().setWorkspaceId(data.workspace_id ?? null);
       useSessionStore.getState().setSessionId(parseSessionId(data.session_id));
     },
   });

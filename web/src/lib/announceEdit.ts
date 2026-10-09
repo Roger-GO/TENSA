@@ -12,6 +12,7 @@
  */
 import { describeChanged } from '@/lib/editSteps';
 import { toast } from '@/lib/toast';
+import { UNDO } from '@/lib/undoWording';
 
 /** How many of these toasts have gone up; the last one's id ends in it. */
 let sent = 0;
@@ -23,6 +24,6 @@ export function announceEdit(model: string, idx: string, params: readonly string
   sent += 1;
   toast.success(`Changed ${describeChanged({ model, idx, params: [...params] })}`, {
     id: toastId(sent),
-    description: 'Undo in the Edit menu takes it back.',
+    description: `${UNDO} takes it back.`,
   });
 }

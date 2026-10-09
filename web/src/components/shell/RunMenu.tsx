@@ -1,6 +1,11 @@
 /**
- * RunMenu — TopBar dropdown that picks the active routine for the
- * center Run button.
+ * RunMenu — TopBar dropdown that starts a routine.
+ *
+ * An entry that says Run runs: it selects the routine and starts it, by the
+ * check and the handler of that routine's own Run button (`runRoutine` in the
+ * command registry). One that cannot run yet says why in a notice. The two
+ * entries that end in an ellipsis (the parameter sweep, the QV curve of a
+ * bus) need something picked first and open the place where that is done.
  *
  * Unit 9 of the v2.0 polish plan refactored this file to derive its
  * items from the shared command registry (`useCommandRegistry()`).
@@ -78,7 +83,7 @@ export function RunMenu() {
   return (
     <>
       <TopBarMenu label="Run" testId="topbar-menu-run">
-        <TopBarMenuLabel>Active routine</TopBarMenuLabel>
+        <TopBarMenuLabel>Run now</TopBarMenuLabel>
         {orderedCommands.map((cmd, idx) => {
           const routine = routineFromId(cmd.id);
           const isActive = routine === activeRoutine;
@@ -87,6 +92,11 @@ export function RunMenu() {
               key={cmd.id}
               testId={`topbar-menu-run-${TESTID_SUFFIX_BY_ID[cmd.id] ?? routine}`}
               checked={isActive}
+              title={
+                isActive
+                  ? `${cmd.description ?? ''} Ticked: the routine chosen last, which ${RUN_AGAIN_KEYS} runs again.`
+                  : cmd.description
+              }
               onClick={cmd.action}
               data-routine-position={idx === 0 ? 'active' : 'alternative'}
             >
@@ -110,6 +120,9 @@ export function RunMenu() {
     </>
   );
 }
+
+/** The keys of "Run again", as the shortcut list writes them. */
+const RUN_AGAIN_KEYS = 'Ctrl+Enter (Cmd+Enter on a Mac)';
 
 function routineFromId(id: string): RunRoutine {
   // Registry ids are `run.<routine>`; strip the prefix.

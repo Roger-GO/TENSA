@@ -50,6 +50,8 @@ import { toast as sonnerToast } from 'sonner';
  * - `action`: a single button rendered to the right of the message.
  *   The label is the visible text; `onClick` fires when the user
  *   activates it. Sonner auto-dismisses on action click.
+ * - `secondary`: a second, quieter button beside it, for a notice that
+ *   offers two ways on (show what it is about, or be rid of it).
  * - `id`: a name of the caller's own for the toast, which is what
  *   `toast.dismiss` takes. Without one sonner numbers the toast, and
  *   the string a call returns for that number does not dismiss it.
@@ -66,6 +68,11 @@ export interface ToastOpts {
     label: string;
     onClick: () => void;
   };
+  /** A second button, drawn beside `action`. Sonner auto-dismisses on click. */
+  secondary?: {
+    label: string;
+    onClick: () => void;
+  };
 }
 
 /**
@@ -77,6 +84,29 @@ function toIdString(id: number | string): string {
   return typeof id === 'string' ? id : String(id);
 }
 
+/**
+ * A button of a notice, as sonner takes it. Sonner gives the keyboard focus
+ * back to what had it before the notice was used, when the focus leaves the
+ * notice and again when the last notice goes. A button that sends the focus
+ * somewhere (into a form, onto a list it opens) would have it taken back a
+ * moment later. So the button lets go of the focus first: sonner hands it
+ * back at once, and what the button then does with it stands.
+ */
+function button(of: { label: string; onClick: () => void }): {
+  label: string;
+  onClick: () => void;
+} {
+  return {
+    label: of.label,
+    onClick: () => {
+      if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      of.onClick();
+    },
+  };
+}
+
 /** Map our `ToastOpts` to sonner's options object. */
 function mapOpts(opts: ToastOpts | undefined): Record<string, unknown> {
   if (opts === undefined) return {};
@@ -85,7 +115,11 @@ function mapOpts(opts: ToastOpts | undefined): Record<string, unknown> {
   if (opts.duration !== undefined) out.duration = opts.duration;
   if (opts.description !== undefined) out.description = opts.description;
   if (opts.action !== undefined) {
-    out.action = { label: opts.action.label, onClick: opts.action.onClick };
+    out.action = button(opts.action);
+  }
+  if (opts.secondary !== undefined) {
+    // Sonner's name for the second button is `cancel`.
+    out.cancel = button(opts.secondary);
   }
   return out;
 }

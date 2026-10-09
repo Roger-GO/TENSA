@@ -10,7 +10,7 @@ import {
 import { useSaveCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
-import { draftCaseKey, useDraftsStore } from '@/store/drafts';
+import { draftCaseKey, draftKeyOfPath, useDraftsStore } from '@/store/drafts';
 import { useEditJournalStore } from '@/store/editJournal';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
@@ -138,7 +138,9 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
           // The drafts on the diagram go with the copy as well: the ones of a
           // system built from scratch have no other file to be found under.
           const draftsOf = draftCaseKey(useCaseStore.getState().selection);
-          if (draftsOf !== null) useDraftsStore.getState().copy(draftsOf, resp.filename);
+          if (draftsOf !== null) {
+            useDraftsStore.getState().copy(draftsOf, draftKeyOfPath(resp.filename));
+          }
           if (modalEpoch.current !== epoch) return;
           setSuccess(`Wrote ${resp.bytes_written} bytes to ${resp.filename}`);
           cancelAutoClose.current = schedule(() => setModalState(false), 1200);

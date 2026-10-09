@@ -2,11 +2,43 @@
  * What is done to a draft from more than one place: the diagram, the list of
  * drafts above it, the Inspector and the palette. Each reads and writes the
  * stores directly, so it can be called from a handler anywhere.
+ *
+ * A draft holds what was typed into it, so deleting one can be taken back in
+ * two ways: by the Undo of the notice, which stays long enough to be read,
+ * and by Undo in the Edit menu (Ctrl/Cmd+Z), which is where a user looks once
+ * the notice is gone. The second is the layout history's (`LayoutStep.drafts`):
+ * a delete is recorded there as one step, and the canvas takes it back.
  */
 import { toast } from '@/lib/toast';
+import { UNDO } from '@/lib/undoWording';
 import { useCaseStore } from '@/store/case';
 import { DRAFT_NODE_SIZE, draftCaseKey, useDraftsStore, type DraftElement } from '@/store/drafts';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useSldStore } from '@/store/sld';
+
+/** How long the notice of a deleted draft stays, with its Undo: long enough to read and reach. */
+export const DRAFT_DELETED_NOTICE_MS = 12_000;
+
+/** The Undo that is there after the notice has gone, said in the notice. */
+const UNDO_LATER = `${UNDO} brings it back as well.`;
+
+/**
+ * Record that `deleted` were deleted from the case `caseKey`, as one step of
+ * the history Undo goes back through. Answers the id of the step.
+ */
+function recordDeleted(caseKey: string, label: string, deleted: DraftElement[]): number {
+  // The arrangement is not changed by the delete, and is not put back with it.
+  return useLayoutHistoryStore
+    .getState()
+    .record(label, { positions: {}, routes: {} }, null, { caseKey, deleted });
+}
+
+/** Put `deleted` back by the Undo of their notice, and take the step for it out of the history. */
+function putBack(caseKey: string, deleted: DraftElement[], step: number): void {
+  const back = useDraftsStore.getState().restore(caseKey, deleted);
+  useLayoutHistoryStore.getState().forget(step);
+  if (back.length === 1) selectDraft(back[0]!.id);
+}
 
 /**
  * Pick the draft `id`: the Inspector shows its form, and the diagram marks
@@ -56,17 +88,11 @@ export function deleteDraft(caseKey: string, id: string, name: string): void {
   if (draft === undefined) return;
   store.remove(caseKey, id);
   deselectDraft(id);
+  const step = recordDeleted(caseKey, `delete draft ${name}`, [draft]);
   toast.info(`Draft deleted: ${name}`, {
-    description: 'It was never added to the system, so nothing else changed.',
-    action: {
-      label: 'Undo',
-      onClick: () => {
-        const back = useDraftsStore
-          .getState()
-          .add(caseKey, draft.kind, draft.position, draft.values);
-        if (back !== null) selectDraft(back.id);
-      },
-    },
+    description: `It was never added to the system, so nothing else changed. ${UNDO_LATER}`,
+    duration: DRAFT_DELETED_NOTICE_MS,
+    action: { label: 'Undo', onClick: () => putBack(caseKey, [draft], step) },
   });
 }
 
@@ -77,14 +103,10 @@ export function deleteAllDrafts(caseKey: string): void {
   if (drafts.length === 0) return;
   store.removeAll(caseKey);
   for (const draft of drafts) deselectDraft(draft.id);
+  const step = recordDeleted(caseKey, `delete ${drafts.length} drafts`, [...drafts]);
   toast.info(`${drafts.length} drafts deleted`, {
-    description: 'None of them was added to the system, so nothing else changed.',
-    action: {
-      label: 'Undo',
-      onClick: () => {
-        const add = useDraftsStore.getState().add;
-        for (const draft of drafts) add(caseKey, draft.kind, draft.position, draft.values);
-      },
-    },
+    description: `None of them was added to the system, so nothing else changed. ${UNDO_LATER}`,
+    duration: DRAFT_DELETED_NOTICE_MS,
+    action: { label: 'Undo', onClick: () => putBack(caseKey, [...drafts], step) },
   });
 }

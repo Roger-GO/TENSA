@@ -40,8 +40,9 @@ import type { ParamValue } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { EditModeToggle } from '@/components/inspector/EditModeToggle';
 import { announceEdit } from '@/lib/announceEdit';
+import { RESET_RUN_KEEPS, RESET_RUN_LOSES, runLockNotice } from '@/lib/runLock';
 import { toast } from '@/lib/toast';
-import { useResetRunAction } from '@/lib/useResetRunAction';
+import { useReloadDiscardsEdits, useResetRunAction } from '@/lib/useResetRunAction';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
@@ -91,11 +92,8 @@ const STREAMING_REASON = 'A run is streaming. Values can be changed when it ends
 
 const PFLOW_REASON = 'A power flow is running. Values can be changed when it ends.';
 
-const LOCKED_REASON =
-  'The case is set up for a run (a run or a change in Edit mode does that), which locks these values. Reset the run to change them again; the changes made so far are discarded.';
-
-const CONTROLLER_LOCKED_REASON =
-  'The case is set up for a run (a run or a change in Edit mode does that), which locks these values. Turn on Edit mode to change controller values, or reset the run to change them as before; resetting discards the changes made so far.';
+/** What the bar of a table of controllers offers besides the reset. */
+const CONTROLLER_EDIT_MODE = 'Edit mode changes controller values without a reset.';
 
 const BASE_NOTE =
   'The values of a case that is set up are shown on the system base, which can differ from the ones in the file.';
@@ -136,6 +134,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
   // The reset says what the top bar's does, and that it happened: this button
   // is gone once the case is unlocked.
   const resetRun = useResetRunAction({ errorTitle: 'Reset run', confirm: true });
+  const discardsEdits = useReloadDiscardsEdits();
 
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +157,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
     } else if (state === 'pre-setup') {
       route = 'element';
     } else {
-      lockedReason = controllers ? CONTROLLER_LOCKED_REASON : LOCKED_REASON;
+      lockedReason = runLockNotice(discardsEdits, controllers ? CONTROLLER_EDIT_MODE : undefined);
       if (dynamic) lockedReason = `${lockedReason} ${BASE_NOTE}`;
       lockedByRun = true;
     }
@@ -297,7 +296,7 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
             size="sm"
             disabled={resetRun.isPending || sessionId === null}
             onClick={resetRun.reset}
-            title="Reload the case from its file so the values can be changed. The run's results stay in History; the changes made so far are discarded."
+            title={discardsEdits ? `${RESET_RUN_KEEPS} ${RESET_RUN_LOSES}` : RESET_RUN_KEEPS}
             data-testid="grid-reset-run"
             className="h-6 px-2"
           >

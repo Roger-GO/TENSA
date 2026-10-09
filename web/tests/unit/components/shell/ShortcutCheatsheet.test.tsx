@@ -180,6 +180,38 @@ describe('<ShortcutCheatsheet /> — content', () => {
     expect(section).toHaveTextContent('Reset manual routes in the Arrange menu');
   });
 
+  it('opens on the part a help entry asked for, with the keyboard focus on its heading', async () => {
+    render(withProviders(<ShortcutCheatsheet />));
+    act(() => {
+      useShortcutCheatsheetStore.getState().openCheatsheet('diagram');
+    });
+    await screen.findByTestId('shortcut-cheatsheet');
+    const heading = screen.getByRole('heading', { name: 'Diagram: moving a line by hand' });
+    await waitFor(() => expect(heading).toHaveFocus());
+    act(() => {
+      useShortcutCheatsheetStore.getState().closeCheatsheet();
+    });
+    await waitFor(() => expect(screen.queryByTestId('shortcut-cheatsheet')).toBeNull());
+    act(() => {
+      useShortcutCheatsheetStore.getState().openCheatsheet('connect');
+    });
+    await screen.findByTestId('shortcut-cheatsheet');
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Diagram: connecting by a drag' })).toHaveFocus(),
+    );
+  });
+
+  it('opens at its top, with no heading focused, from the ? key and the palette', async () => {
+    render(withProviders(<ShortcutCheatsheet />));
+    act(() => {
+      useShortcutCheatsheetStore.getState().openCheatsheet();
+    });
+    await screen.findByTestId('shortcut-cheatsheet');
+    expect(
+      screen.getByRole('heading', { name: 'Diagram: moving a line by hand' }),
+    ).not.toHaveFocus();
+  });
+
   it('lists how things are connected on the diagram by a drag', async () => {
     render(withProviders(<ShortcutCheatsheet />));
     act(() => {

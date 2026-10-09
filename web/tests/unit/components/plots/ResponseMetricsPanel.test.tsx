@@ -5,7 +5,7 @@
  * is what the panel asks for, when, and how it shows the answer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { ResponseMetricsRequest, ResponseMetricsResponse, SeriesMetrics } from '@/api/types';
@@ -59,14 +59,17 @@ function seed(
   options: {
     finish?: boolean;
     bases?: { busKv: Record<string, number>; freqHz: number | null };
+    /** When the run first disturbs the system (s). */
+    disturbedAt?: number;
   } = {},
 ) {
-  const { finish = true, bases } = options;
+  const { finish = true, bases, disturbedAt } = options;
   useRunsStore.getState().startRun({
     runId,
     tf: 3,
     columnNames: Object.keys(columns),
     ...(bases === undefined ? {} : { bases }),
+    ...(disturbedAt === undefined ? {} : { disturbedAt }),
   });
   useRunsStore.getState().appendFrame(runId, {
     t: Float64Array.from({ length: 4 }, (_, i) => i),
@@ -224,8 +227,9 @@ describe('<ResponseMetricsPanel />: what it asks', () => {
     await screen.findByTestId('response-metrics-table');
 
     expect(requests[0]).not.toHaveProperty('t_start');
+    // Where the cursors are found, which the old line did not say.
     expect(screen.getByTestId('response-metrics-window')).toHaveTextContent(
-      'Place cursors A and B',
+      'press Cursors over the plot and click the plot twice (A, then B)',
     );
   });
 
@@ -335,6 +339,70 @@ describe('<ResponseMetricsPanel />: what it asks', () => {
   });
 });
 
+describe('<ResponseMetricsPanel />: the window a fault study reads', () => {
+  it('offers the stretch from the first disturbance to the end of the run, and puts the cursors there', async () => {
+    seed('r1', { Gen_1_omega: [1, 1, 1.01, 1.02] }, { disturbedAt: 1 });
+    usePlotStore.getState().setSelection('r1', new Set(['Gen_1_omega']));
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+    // The whole run at first, the steady state before the fault included.
+    expect(requests[0]).not.toHaveProperty('t_start');
+    const from = screen.getByRole('button', { name: 'From the first disturbance (1 s)' });
+    expect(from).toHaveAttribute('aria-pressed', 'false');
+    // No way back to the whole run is offered while that is what is shown.
+    expect(screen.queryByRole('button', { name: 'Whole run' })).not.toBeInTheDocument();
+
+    fireEvent.click(from);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).toMatchObject({ t_start: 1, t_end: 3 });
+    expect(usePlotStore.getState().cursorsByRun.r1).toMatchObject({ a: 1, b: 3 });
+    expect(screen.getByTestId('response-metrics-window')).toHaveTextContent(
+      'Over A to B, 1 to 3 s',
+    );
+    expect(from).toHaveAttribute('aria-pressed', 'true');
+
+    // And back: the cursors come off the plot.
+    fireEvent.click(screen.getByRole('button', { name: 'Whole run' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('response-metrics-window')).toHaveTextContent('Over the whole run'),
+    );
+    expect(usePlotStore.getState().cursorsByRun.r1 ?? {}).not.toMatchObject({ a: 1 });
+    expect(from).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('does not offer it for a run nothing disturbed, or one disturbed from its first instant', async () => {
+    seed('r1', { Gen_1_omega: [1, 1, 1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Gen_1_omega']));
+    const first = renderPanel();
+    await screen.findByTestId('response-metrics-table');
+    expect(screen.queryByTestId('response-metrics-window-controls')).not.toBeInTheDocument();
+    first.unmount();
+
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set(), runCount: 0 });
+    seed('r2', { Gen_1_omega: [1, 1, 1, 1] }, { disturbedAt: 0 });
+    usePlotStore.getState().setSelection('r2', new Set(['Gen_1_omega']));
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+    expect(screen.queryByTestId('response-metrics-from-disturbance')).not.toBeInTheDocument();
+  });
+
+  it('offers the whole run again for a window that was set with the cursors of the plot', async () => {
+    seed('r1', { Gen_1_omega: [1, 1, 1, 1] });
+    usePlotStore.getState().setSelection('r1', new Set(['Gen_1_omega']));
+    act(() => {
+      usePlotStore.getState().placeCursor('r1', 2);
+      usePlotStore.getState().placeCursor('r1', 0.5);
+    });
+    renderPanel();
+    await screen.findByTestId('response-metrics-table');
+    expect(screen.getByTestId('response-metrics-window')).toHaveTextContent('0.5 to 2 s');
+    fireEvent.click(screen.getByRole('button', { name: 'Whole run' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).not.toHaveProperty('t_start');
+    expect(screen.getByTestId('response-metrics-window')).toHaveTextContent('Over the whole run');
+  });
+});
+
 describe('<ResponseMetricsPanel />: what it shows', () => {
   async function shown(name = 'Gen_1_omega') {
     seed('r1', { [name]: [1, 0.99, 0.98, 0.97] });
@@ -371,6 +439,52 @@ describe('<ResponseMetricsPanel />: what it shows', () => {
     expect(screen.getByTestId('response-metrics-damping-Gen_1_omega')).toHaveTextContent(
       '0.612 Hz',
     );
+  });
+
+  it('says of a signal that only rises that it has no dip, not that its nadir is the start value', async () => {
+    // A speed that only rises after a fault: the lowest value of the run is
+    // the first sample, which read "Nadir 1 at 0 s" and said nothing.
+    answerWith((n) =>
+      metrics(n, { initial: 1, nadir: { value: 1, t: 0 }, peak: { value: 1.02, t: 3 } }),
+    );
+    await shown();
+    const nadir = screen.getByTestId('response-metrics-nadir-Gen_1_omega');
+    expect(nadir).toHaveTextContent('no dip');
+    expect(nadir).toHaveTextContent('stays at or above the start value, 1');
+    expect(nadir).not.toHaveTextContent('at 0 s');
+    // The peak is one, and reads as before.
+    expect(screen.getByTestId('response-metrics-peak-Gen_1_omega')).toHaveTextContent('1.02at 3 s');
+  });
+
+  it('says of a signal that only falls that it has no rise', async () => {
+    answerWith((n) =>
+      metrics(n, { initial: 1, peak: { value: 1, t: 0 }, nadir: { value: 0.97, t: 3 } }),
+    );
+    await shown();
+    const peak = screen.getByTestId('response-metrics-peak-Gen_1_omega');
+    expect(peak).toHaveTextContent('no rise');
+    expect(peak).toHaveTextContent('stays at or below the start value, 1');
+    expect(screen.getByTestId('response-metrics-nadir-Gen_1_omega')).toHaveTextContent(
+      '0.97at 3 s',
+    );
+  });
+
+  it('says what each column holds, in the heading and in a list for a reader with no pointer', async () => {
+    await shown();
+    expect(screen.getByTestId('response-metrics-heading-nadir')).toHaveAttribute(
+      'title',
+      expect.stringContaining('The lowest value in the window and the time it is reached.'),
+    );
+    expect(screen.getByTestId('response-metrics-heading-damping').getAttribute('title')).toMatch(
+      /damping ratio ζ.*0\.05 is 5 %.*frequency in Hz/,
+    );
+    const list = screen.getByTestId('response-metrics-definitions');
+    expect(within(list).getByText('What the columns mean')).toBeInTheDocument();
+    for (const title of ['Initial', 'Final', 'Nadir', 'Peak', 'Overshoot (%)', 'Settling (s)']) {
+      expect(within(list).getByText(title)).toBeInTheDocument();
+    }
+    expect(list).toHaveTextContent('"not settled": it is still outside that band at the end.');
+    expect(list).toHaveTextContent('in percent of the step from initial to final');
   });
 
   it('shows a signal that never settled as not settled, and the metrics it lacks as dashes', async () => {

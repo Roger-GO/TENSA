@@ -25,6 +25,7 @@ import {
 import { buildGraph } from '@/components/sld/graph';
 import { captureLayout } from '@/components/sld/sidecar';
 import { GRID_STEP } from '@/components/sld/tidy';
+import type { TopologySummary } from '@/api/types';
 import type { DraftElement } from '@/store/drafts';
 import { IEEE14 } from '../../helpers/exampleCases';
 import { TOPOLOGY_SCHEMA } from '../../helpers/topologySchema';
@@ -84,10 +85,11 @@ describe('what a draft still lacks', () => {
       TOPOLOGY_SCHEMA,
       IEEE14,
     );
-    expect(status?.missing).toEqual(['name', 'p0', 'q0']);
+    // The name is the idx until one is given, so it is not among what is missing.
+    expect(status?.missing).toEqual(['p0', 'q0']);
     // An idx the case has, a bus it does not, a number that is not one.
     expect(status?.refused).toEqual(['idx', 'bus', 'Vn']);
-    expect(draftSummary(status)).toBe('Missing name, p0 and q0; check idx, bus and Vn');
+    expect(draftSummary(status)).toBe('Missing p0 and q0; check idx, bus and Vn');
   });
 
   it('sends what the kind itself sets: a transformer keeps its tap', () => {
@@ -160,6 +162,35 @@ describe('the idx each draft opens with', () => {
   });
 });
 
+describe('a draft that was given its bus', () => {
+  // The case with the rating of each bus, which the cut-down example leaves out.
+  const busVn = (idx: string): number => (Number(idx) <= 5 ? 69 : 138);
+  const RATED: TopologySummary = {
+    ...IEEE14,
+    buses: IEEE14.buses.map((bus) => ({ ...bus, params: { Vn: busVn(String(bus.idx)) } })),
+  };
+
+  it('takes its rated voltage from that bus, so the bus is all a load on the diagram needs besides its power', () => {
+    // The rating of bus 9 had to be looked up in the Buses table and typed.
+    const status = draftStatus(draft('PQ', { bus: '9' }), TOPOLOGY_SCHEMA, RATED);
+    expect(status?.values.Vn).toBe(138);
+    expect(status?.missing).toEqual(['p0', 'q0']);
+    // It goes with the bus the draft is put on next.
+    const moved = draftStatus(draft('PQ', { bus: '2' }), TOPOLOGY_SCHEMA, RATED);
+    expect(moved?.values.Vn).toBe(69);
+  });
+
+  it('keeps a rating that was typed, whatever the bus', () => {
+    const status = draftStatus(draft('PQ', { bus: '9', Vn: '13.8' }), TOPOLOGY_SCHEMA, RATED);
+    expect(status?.values.Vn).toBe('13.8');
+  });
+
+  it('still asks for the rating on a bus the case gives none for', () => {
+    const status = draftStatus(draft('PQ', { bus: '9' }), TOPOLOGY_SCHEMA, IEEE14);
+    expect(status?.missing).toEqual(['Vn', 'p0', 'q0']);
+  });
+});
+
 describe('the rows of the list of drafts', () => {
   it('say of each draft what it is, whether it can be added, and what it lacks', () => {
     const rows = draftRows(
@@ -172,7 +203,7 @@ describe('the rows of the list of drafts', () => {
     );
     expect(rows).toEqual([
       { id: 'draft-1', kind: 'PV', name: 'PV generator 6', ready: true, summary: 'Ready to add' },
-      { id: 'draft-2', kind: 'Bus', name: 'Bus 15', ready: false, summary: 'Missing name and Vn' },
+      { id: 'draft-2', kind: 'Bus', name: 'Bus 15', ready: false, summary: 'Missing Vn' },
     ]);
   });
 
