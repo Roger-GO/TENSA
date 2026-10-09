@@ -213,11 +213,15 @@ test('the figure is the diagram as it is drawn, and each file is what it says', 
 
   // The way to it is the Export menu over the diagram, and says so before it is opened.
   const way = page.getByTestId('sld-canvas').getByTestId('export-menu-trigger');
+  await expect(way).toHaveText(/Export figure/);
   await expect(way).toHaveAccessibleName(
-    'Export: a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view',
+    'Export figure: a figure of the diagram for a paper, in the publication look (SVG, PDF or PNG), or a PNG of this view',
   );
   await way.click();
-  await expect(page.getByTestId('export-menu-figure')).toHaveText('Figure for a paper…');
+  // Named as in the Export menu of the top bar, with what it is under the name.
+  await expect(page.getByTestId('export-menu-figure')).toHaveText(
+    'Figure for a paper…The publication look: SVG, PDF or PNG',
+  );
   await page.getByTestId('export-menu-figure').click();
   const dialog = page.getByRole('dialog', { name: 'Figure for a paper' });
   await expect(dialog).toBeVisible();

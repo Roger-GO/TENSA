@@ -8,7 +8,8 @@
  *
  * Export bundle and Save snapshot open their dialogs; Export HTML report
  * saves a file straight away (`lib/saveHtmlReport.ts`); Figure for a paper
- * opens the figure dialog of the canvas (`SldFigureDialog`). Reports, which opens
+ * opens the figure dialog of the canvas (`SldFigureDialog`), and says under its
+ * name that it is the publication look (`lib/figureWording.ts`). Reports, which opens
  * the dialog with ANDES's plain-text reports, is a Workspace command and is
  * listed here as well, under the HTML report: a report is something to take
  * out of the app, and this is the menu a first-time user opens to find one.
@@ -20,6 +21,7 @@
  */
 import { TopBarMenu, TopBarMenuItem, TopBarMenuSeparator } from './TopBarMenu';
 import { useMenuCommands } from '@/lib/commands';
+import { FIGURE_LOOK } from '@/lib/figureWording';
 
 const TESTID_BY_ID: Record<string, string> = {
   'export.bundle': 'topbar-menu-export-bundle',
@@ -53,6 +55,8 @@ export function ExportMenu() {
           testId={TESTID_BY_ID[cmd.id] ?? `topbar-menu-export-${cmd.id}`}
           title={cmd.description}
           unavailableReason={cmd.unavailable ?? undefined}
+          // The word someone after "the publication look" scans the menu for.
+          note={cmd.id === 'export.figure' ? FIGURE_LOOK : undefined}
           onClick={cmd.action}
         >
           {cmd.label}

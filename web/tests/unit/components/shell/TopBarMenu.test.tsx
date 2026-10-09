@@ -396,6 +396,39 @@ describe('<TopBarMenu /> item hover text', () => {
   });
 });
 
+describe('<TopBarMenu /> an item with a note', () => {
+  it('shows the note under the label, and the reason in its place while unavailable', async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-figure" note="The publication look" onClick={onClick}>
+          Figure for a paper…
+        </TopBarMenuItem>
+        <TopBarMenuItem
+          testId="item-off"
+          note="The publication look"
+          unavailableReason="No diagram."
+        >
+          Figure for a paper…
+        </TopBarMenuItem>
+        <TopBarMenuItem testId="item-plain">Plain</TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const item = await screen.findByTestId('item-figure');
+    expect(within(item).getByTestId('item-figure-note')).toHaveTextContent('The publication look');
+    // Part of what the item reads as, so a search of the page for the word finds it.
+    expect(item).toHaveTextContent('Figure for a paper…The publication look');
+    expect(screen.queryByTestId('item-off-note')).toBeNull();
+    expect(screen.getByTestId('item-off-reason')).toHaveTextContent('No diagram.');
+    expect(screen.queryByTestId('item-plain-note')).toBeNull();
+    // It still runs as any item.
+    await user.click(item);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('<TopBarMenu /> unavailable items', () => {
   function renderUnavailable(onClickLocked = vi.fn()) {
     render(

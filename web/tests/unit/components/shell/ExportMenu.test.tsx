@@ -219,6 +219,8 @@ describe('<ExportMenu />', () => {
     expect(await screen.findByTestId('topbar-menu-export-figure')).toHaveTextContent(
       'The diagram is hidden by the results view. Show the diagram first.',
     );
+    // The line under the name is the reason then, not what the entry leads to.
+    expect(screen.queryByTestId('topbar-menu-export-figure-note')).toBeNull();
     unsubscribe();
   });
 

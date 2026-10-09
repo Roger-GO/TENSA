@@ -129,6 +129,29 @@ describe('<ExportMenu />', () => {
     await waitFor(() => expect(screen.queryByTestId('export-menu')).not.toBeInTheDocument());
   });
 
+  it('puts a few words under such an entry on what it leads to', async () => {
+    const user = userEvent.setup();
+    render(
+      <ExportMenu
+        formats={['png']}
+        panel="sld"
+        label="Export figure"
+        extraActions={[
+          {
+            id: 'figure',
+            label: 'Figure for a paper…',
+            hint: 'The publication look: SVG, PDF or PNG',
+            onSelect: () => undefined,
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Export figure' }));
+    const entry = await screen.findByTestId('export-menu-figure');
+    expect(entry).toHaveTextContent('Figure for a paper…');
+    expect(entry).toHaveTextContent('The publication look: SVG, PDF or PNG');
+  });
+
   it('lists nothing more than its formats for a panel that gives it no other way out', async () => {
     const user = userEvent.setup();
     render(<ExportMenu formats={['csv', 'png']} panel="time-series" onExportCsv={() => null} />);

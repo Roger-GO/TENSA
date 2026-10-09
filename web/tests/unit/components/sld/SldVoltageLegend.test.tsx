@@ -122,4 +122,17 @@ describe('SldVoltageLegend', () => {
     render(<SldVoltageLegend className="absolute top-2 left-2" />);
     expect(screen.getByTestId('sld-voltage-legend').className).toContain('absolute');
   });
+
+  it('leaves the sentence under its rows out when it is asked to be compact', () => {
+    // In a short pane the two legends, whole, reached past the bottom of it.
+    usePflowStore.setState({ lastRun: pflow(true) });
+    const { rerender } = render(<SldVoltageLegend />);
+    const legend = screen.getByTestId('sld-voltage-legend');
+    expect(legend).toHaveTextContent('Each bus uses its own limits');
+    rerender(<SldVoltageLegend compact />);
+    expect(legend).not.toHaveTextContent('Each bus uses its own limits');
+    // The rows, which are the key, stay.
+    expect(legend).toHaveTextContent('Within limits');
+    expect(legend).toHaveTextContent('Beyond a limit');
+  });
 });

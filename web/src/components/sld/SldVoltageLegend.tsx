@@ -44,8 +44,18 @@ function useHasBusVoltages(): boolean {
  * filled beyond), so the key shows both and says which limits are meant.
  * Sits inside the canvas surface, so a PNG export of the diagram includes
  * it. Draws nothing until the diagram has voltages to colour.
+ *
+ * `compact` leaves the sentence under the rows out, for a pane too short to
+ * hold the legends whole: the rows are the key, and the sentence is what the
+ * Inspector says of a bus that is selected.
  */
-export function SldVoltageLegend({ className }: { className?: string }) {
+export function SldVoltageLegend({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const visible = useHasBusVoltages();
   if (!visible) return null;
   return (
@@ -86,11 +96,13 @@ export function SldVoltageLegend({ className }: { className?: string }) {
           </li>
         ))}
       </ul>
-      <p className="text-muted-foreground mt-1">
-        Up: above vmax. Down: below vmin. Each bus uses its own limits,{' '}
-        {DEFAULT_VOLTAGE_LIMITS.vmin} and {DEFAULT_VOLTAGE_LIMITS.vmax} pu if it has none. Select a
-        bus to see its limits and how to change them.
-      </p>
+      {compact ? null : (
+        <p className="text-muted-foreground mt-1" data-testid="sld-voltage-legend-note">
+          Up: above vmax. Down: below vmin. Each bus uses its own limits,{' '}
+          {DEFAULT_VOLTAGE_LIMITS.vmin} and {DEFAULT_VOLTAGE_LIMITS.vmax} pu if it has none. Select
+          a bus to see its limits and how to change them.
+        </p>
+      )}
     </div>
   );
 }

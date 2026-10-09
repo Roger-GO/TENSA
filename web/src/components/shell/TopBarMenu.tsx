@@ -284,6 +284,12 @@ export interface TopBarMenuItemProps extends Omit<
    * a screen reader reads the reason. Use `disabled` for an item that is not worth showing.
    */
   unavailableReason?: string;
+  /**
+   * A few words under the label on what the entry leads to, for one whose name
+   * does not carry the word a user would look for. Left out while the entry is
+   * unavailable, where the line under the label is the reason.
+   */
+  note?: string;
   /** Stable testid. */
   testId?: string;
   /**
@@ -303,6 +309,7 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
       disabled = false,
       preventCloseOnSelect = false,
       unavailableReason,
+      note,
       onClick,
       testId,
       className,
@@ -381,6 +388,13 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
               className="text-muted-foreground text-[10px] leading-snug"
             >
               {unavailableReason}
+            </span>
+          ) : note !== undefined ? (
+            <span
+              data-testid={testId ? `${testId}-note` : undefined}
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              {note}
             </span>
           ) : null}
         </span>

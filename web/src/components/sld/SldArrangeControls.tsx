@@ -33,6 +33,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/cn';
+import { TIDY_KEEP_RULE } from '@/lib/tidyWording';
 import type { SldCommand } from '@/store/sld';
 import { ALIGN_LABEL, DISTRIBUTE_LABEL, type AlignMode, type DistributeAxis } from './arrange';
 import { GRID_STEP } from './tidy';
@@ -48,8 +49,7 @@ export type ArrangeCommand = Extract<
 >;
 
 /** What Tidy diagram does, for its tooltip and the menu. */
-export const TIDY_DESCRIPTION =
-  'Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. A line keeps the route it has unless a shorter one with no more bends and crossings is found. Nothing is moved.';
+export const TIDY_DESCRIPTION = `Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. ${TIDY_KEEP_RULE} Nothing is moved.`;
 
 /**
  * What the Tidy diagram button says while lines are drawn through a symbol or

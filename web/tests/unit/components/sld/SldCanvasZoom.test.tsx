@@ -89,10 +89,11 @@ import { FULL_ZOOM, LEGIBLE_ZOOM, middleOfDiagram } from '@/components/sld/zoom'
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useLayoutStore } from '@/store/layout';
+import { usePflowStore } from '@/store/pflow';
 import { useSessionStore } from '@/store/session';
 import { useSldStore } from '@/store/sld';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
+import type { PflowResult, SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
 
 let mockTopology: TopologySummary | null = null;
 let mockSidecar: SidecarLayout | null = null;
@@ -396,19 +397,37 @@ describe('a diagram that opens too small to read under the bottom drawer', () =>
       disconnect(): void {}
     }
     vi.stubGlobal('ResizeObserver', Measured);
+    // A solved power flow, so the legend of the bus colours is drawn.
+    const solved = {
+      run_id: 'pf-1',
+      converged: true,
+      iterations: 3,
+      mismatch: 1e-9,
+      bus_voltages: { '1': 1.0 },
+      bus_angles: { '1': 0 },
+      line_flows: {},
+    } as unknown as PflowResult;
     try {
       useLayoutStore.setState({ drawerLoweredForDiagram: true });
       await open();
+      act(() => usePflowStore.setState({ lastRun: solved }));
       const over = screen.getByTestId('sld-draw-line').closest('[data-short-pane]');
       expect(over).toHaveAttribute('data-short-pane', 'true');
       expect(over).toHaveClass('left-14');
+      // The legend has its rows and not the sentence under them: whole, the
+      // legends reached past the bottom of a pane this short.
+      expect(await screen.findByTestId('sld-voltage-legend')).toHaveTextContent('Within limits');
+      expect(screen.queryByTestId('sld-voltage-legend-note')).toBeNull();
       cleanup();
       useCaseStore.getState().clearCase();
-      // With room for both, it stands in the corner.
+      // With room for both, it stands in the corner, and the legend is whole.
       sizes.pane = { width: 1100, height: 600 };
       await open();
+      act(() => usePflowStore.setState({ lastRun: solved }));
       expect(screen.getByTestId('sld-draw-line').closest('[data-short-pane]')).toBeNull();
+      expect(await screen.findByTestId('sld-voltage-legend-note')).toBeInTheDocument();
     } finally {
+      usePflowStore.setState({ lastRun: null });
       vi.unstubAllGlobals();
     }
   });

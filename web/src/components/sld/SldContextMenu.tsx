@@ -72,6 +72,7 @@ import {
   ContextMenuSeparator,
 } from '@/components/ui/context-menu';
 import { toast } from '@/lib/toast';
+import { FIGURE_FOR_A_PAPER } from '@/lib/figureWording';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
@@ -739,7 +740,7 @@ export function SldContextMenuBody({
               Save snapshot…
             </ContextMenuItem>
             <ContextMenuItem data-testid="sld-context-figure" onSelect={() => onFigure?.()}>
-              <span>Figure for a paper…</span>
+              <span>{FIGURE_FOR_A_PAPER}</span>
               <span className="text-muted-foreground ml-auto pl-3 text-xs">SVG, PDF or PNG</span>
             </ContextMenuItem>
           </>

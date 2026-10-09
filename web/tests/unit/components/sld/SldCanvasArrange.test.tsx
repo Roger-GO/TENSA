@@ -674,7 +674,7 @@ describe('Tidy diagram', () => {
       'Diagram tidied',
       expect.objectContaining({
         description: expect.stringContaining(
-          '1 line or transformer re-routed, 3 left as they were. Nothing was moved. A line keeps its route unless a shorter one with no more bends and crossings is found.',
+          '1 line or transformer re-routed, 3 left as they were. Nothing was moved. A line keeps the route it has unless a better one is found: no longer, with no more bends, crossed in no more places, and less of one of the three.',
         ),
       }),
     );
@@ -904,7 +904,7 @@ describe('Tidy diagram that cannot route every branch', () => {
       'Diagram tidied',
       expect.objectContaining({
         description:
-          '1 line or transformer re-routed, 2 left as they were. Nothing was moved. A line keeps its route unless a shorter one with no more bends and crossings is found. No way was found for 1: it keeps the route it had. Saved with the layout.',
+          '1 line or transformer re-routed, 2 left as they were. Nothing was moved. A line keeps the route it has unless a better one is found: no longer, with no more bends, crossed in no more places, and less of one of the three. No way was found for 1: it keeps the route it had. Saved with the layout.',
       }),
     );
     // And the file holds the route it kept.

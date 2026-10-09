@@ -138,6 +138,12 @@ export interface ExportMenuProps {
    */
   label?: string;
   /**
+   * What the PNG entry is called, for a panel whose menu has another picture
+   * in it (the diagram's: "PNG" beside a figure that can also be a PNG does
+   * not say which is which). Defaults to "PNG".
+   */
+  pngLabel?: string;
+  /**
    * What the menu holds, in a few words, for a panel whose menu has more in
    * it than its label says (the diagram's: a figure, or a picture of the
    * view). It is the trigger's tooltip, and follows the label in its
@@ -152,6 +158,8 @@ export interface ExportExtraAction {
   /** Kebab-case; the entry's test id is `export-menu-${id}`. */
   id: string;
   label: string;
+  /** A few words under the label on what the entry leads to. */
+  hint?: string;
   onSelect: () => void;
 }
 
@@ -186,6 +194,7 @@ export function ExportMenu({
   extraActions = [],
   className,
   label = 'Export',
+  pngLabel = FORMAT_LABEL.png,
   description,
 }: ExportMenuProps) {
   const [busy, setBusy] = useState(false);
@@ -330,7 +339,7 @@ export function ExportMenu({
               className="justify-start"
               data-testid="export-menu-png"
             >
-              {FORMAT_LABEL.png}
+              {pngLabel}
             </Button>
           )}
           {formats.includes('mat') && (
@@ -394,7 +403,16 @@ export function ExportMenu({
                   className="h-auto min-h-8 justify-start py-1 text-left whitespace-normal"
                   data-testid={`export-menu-${action.id}`}
                 >
-                  {action.label}
+                  {action.hint === undefined ? (
+                    action.label
+                  ) : (
+                    <span className="flex flex-col gap-0.5">
+                      <span>{action.label}</span>
+                      <span className="text-muted-foreground text-[10px] leading-snug font-normal">
+                        {action.hint}
+                      </span>
+                    </span>
+                  )}
                 </Button>
               ))}
             </div>

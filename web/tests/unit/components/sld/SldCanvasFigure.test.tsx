@@ -204,20 +204,23 @@ describe('the ways to the figure of the diagram', () => {
     await draw();
 
     const trigger = within(screen.getByTestId('sld-canvas')).getByTestId('export-menu-trigger');
-    // What is shown is the word a user looks for; what it is called says what is behind it.
-    expect(trigger).toHaveTextContent('Export');
+    // What is shown tells it from the Export menu of the top bar and has the
+    // word a user looks for; what it is called says what is behind it.
+    expect(trigger).toHaveTextContent('Export figure');
     expect(trigger).toHaveAccessibleName(
-      'Export: a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view',
+      'Export figure: a figure of the diagram for a paper, in the publication look (SVG, PDF or PNG), or a PNG of this view',
     );
     // Nothing of the figure is on the page, or fetched, before it is asked for.
     expect(screen.queryByTestId('sld-figure-dialog')).toBeNull();
 
     await user.click(trigger);
     const menu = await screen.findByTestId('export-menu');
-    expect(within(menu).getByTestId('export-menu-png')).toHaveTextContent('PNG');
+    // Two pictures in one menu: each says which it is.
+    expect(within(menu).getByTestId('export-menu-png')).toHaveTextContent(/^PNG of this view$/);
     const entry = within(menu).getByTestId('export-menu-figure');
-    // The same words as the entry of the top bar's Export menu.
-    expect(entry).toHaveTextContent(/^Figure for a paper…$/);
+    // The same words as the entry of the top bar's Export menu, with the word
+    // someone after "the publication look" scans a menu for under them.
+    expect(entry).toHaveTextContent(/^Figure for a paper…The publication look: SVG, PDF or PNG$/);
 
     await user.click(entry);
 

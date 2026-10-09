@@ -83,6 +83,8 @@ import {
 } from '@/api/queries';
 import type { BusCoord, TopologySummary, SidecarLayout } from '@/api/types';
 import { ExportMenu } from '@/components/export/ExportMenu';
+import { FIGURE_FOR_A_PAPER, FIGURE_LOOK } from '@/lib/figureWording';
+import { TIDY_KEEP_RULE, TIDY_NONE_BETTER } from '@/lib/tidyWording';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { elementToPng } from '@/components/export/exportToPng';
 
@@ -3523,7 +3525,7 @@ function SldCanvasInner({
         toast.info('The diagram is already tidy.', {
           description: relayout
             ? `Every bus is on the grid, every device beside its bus, and no line would be routed differently. Nothing was changed.${handNote}`
-            : `Every line and transformer keeps its route: none has a shorter one with no more bends and crossings. Nothing was changed.${handNote}`,
+            : `Every line and transformer keeps its route: ${TIDY_NONE_BETTER}. Nothing was changed.${handNote}`,
           duration: 8_000,
         });
         return;
@@ -3539,10 +3541,7 @@ function SldCanvasInner({
         `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed` +
         (stayed === 0 ? '' : `, ${stayed} left as ${stayed === 1 ? 'it was' : 'they were'}`);
       // Why some were left: said once, where the toast has the room.
-      const whyLeft =
-        stayed === 0
-          ? ''
-          : ' A line keeps its route unless a shorter one with no more bends and crossings is found.';
+      const whyLeft = stayed === 0 ? '' : ` ${TIDY_KEEP_RULE}`;
       // What became of the routes that were drawn by hand.
       const hand =
         (keptByHand === 0
@@ -3779,8 +3778,10 @@ function SldCanvasInner({
   // The way to it over the diagram is the export menu there, which also saves
   // a PNG of the pane as it is shown. The row has no room for a button of its
   // own: with the note of a tidy in it, it is full in a window 1280 px wide.
+  // So the button of that menu says "figure", which also tells it from the
+  // Export menu of the top bar, and the entry is named as it is there.
   const figureAction = useMemo(
-    () => [{ id: 'figure', label: 'Figure for a paper…', onSelect: openFigure }],
+    () => [{ id: 'figure', label: FIGURE_FOR_A_PAPER, hint: FIGURE_LOOK, onSelect: openFigure }],
     [openFigure],
   );
   // A draft is not part of the system, so it is not in a figure of it.
@@ -4044,7 +4045,9 @@ function SldCanvasInner({
           caseName={caseName}
           onExportPng={onExportPng}
           extraActions={figureAction}
-          description="a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view"
+          label="Export figure"
+          pngLabel="PNG of this view"
+          description="a figure of the diagram for a paper, in the publication look (SVG, PDF or PNG), or a PNG of this view"
         />
       </div>
       <LazyMount when={figureOpen} onLoadFailed={() => setFigureOpen(false)}>
@@ -4196,9 +4199,11 @@ function SldCanvasInner({
                 onDraw={startDraw}
                 onCancel={cancelWiring}
               />
+              {/* Without the sentences under their rows where the pane is
+                  short: whole, the lower one was cut off by the bottom of it. */}
               <div className="flex w-[200px] flex-col gap-1.5">
-                <SldVoltageLegend />
-                <SldLimitsLegend />
+                <SldVoltageLegend compact={shortPane} />
+                <SldLimitsLegend compact={shortPane} />
               </div>
             </div>
             {/* The drafts of the diagram, counted and listed, while it has

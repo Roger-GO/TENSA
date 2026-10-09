@@ -95,4 +95,17 @@ describe('SldLimitsLegend', () => {
     });
     expect(screen.queryByTestId('sld-limits-legend')).not.toBeInTheDocument();
   });
+
+  it('leaves the sentences under its rows out when it is asked to be compact', () => {
+    usePflowStore.setState({ lastRun: pflow({ line_flows: RATED, generator_outputs: AT_LIMIT }) });
+    const { rerender } = render(<SldLimitsLegend />);
+    const legend = screen.getByTestId('sld-limits-legend');
+    expect(legend).toHaveTextContent('A line with no rating is not coloured.');
+    expect(legend).toHaveTextContent('Up: Qmax. Down: Qmin.');
+    rerender(<SldLimitsLegend compact />);
+    expect(legend).not.toHaveTextContent('A line with no rating is not coloured.');
+    expect(legend).not.toHaveTextContent('Up: Qmax. Down: Qmin.');
+    expect(legend).toHaveTextContent('Over the rating');
+    expect(legend).toHaveTextContent('Past a Q limit');
+  });
 });

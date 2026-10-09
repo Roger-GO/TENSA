@@ -37,9 +37,16 @@ function useLimitsOnDiagram(): { loading: boolean; reactive: boolean } {
  * does (up at `qmax`, down at `qmin`; empty on the limit, filled past it).
  * Each part draws only when the diagram shows what it explains, so a case with
  * no ratings and no generator at a limit gets no legend at all. Sits inside
- * the canvas surface, so a PNG export of the diagram includes it.
+ * the canvas surface, so a PNG export of the diagram includes it. `compact`
+ * leaves the sentences under the rows out, as for the voltage legend.
  */
-export function SldLimitsLegend({ className }: { className?: string }) {
+export function SldLimitsLegend({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const { loading, reactive } = useLimitsOnDiagram();
   if (!loading && !reactive) return null;
   return (
@@ -68,9 +75,11 @@ export function SldLimitsLegend({ className }: { className?: string }) {
               <span>Over the rating</span>
             </li>
           </ul>
-          <p className="text-muted-foreground mt-1">
-            Percent of the rating is on each line. A line with no rating is not coloured.
-          </p>
+          {compact ? null : (
+            <p className="text-muted-foreground mt-1">
+              Percent of the rating is on each line. A line with no rating is not coloured.
+            </p>
+          )}
         </div>
       ) : null}
       {reactive ? (
@@ -92,7 +101,7 @@ export function SldLimitsLegend({ className }: { className?: string }) {
               <span>Past a Q limit</span>
             </li>
           </ul>
-          <p className="text-muted-foreground mt-1">Up: Qmax. Down: Qmin.</p>
+          {compact ? null : <p className="text-muted-foreground mt-1">Up: Qmax. Down: Qmin.</p>}
         </div>
       ) : null}
     </div>
