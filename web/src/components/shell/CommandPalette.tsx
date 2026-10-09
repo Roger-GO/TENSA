@@ -3,11 +3,18 @@
  * v2.0 polish plan).
  *
  * Linear-style overlay: a Radix Dialog hosts cmdk's `<Command>`
- * primitive; an input row sits at the top, a grouped list of every
- * active command from `useCommandRegistry()` sits below. Typing
+ * primitive; an input row sits at the top, a grouped list of the
+ * commands from `useMenuCommands()` sits below. Typing
  * filters via cmdk's built-in fuzzy matcher (with synonym keywords
  * forwarded per command), arrow keys move selection, Enter activates,
  * Escape / backdrop-click closes.
+ *
+ * The list is the one the top bar menus draw: every command that can
+ * run, and the ones that cannot run yet but say why
+ * (`Command.unavailableReason`). Such a row is greyed out with the
+ * reason under its name, and the arrow keys and Enter pass it over. A
+ * search for "eigenvalue" before a power flow has converged used to
+ * answer "No commands match", which says the app has no such command.
  *
  * Why Radix Dialog (rather than a bare div + portal):
  *
@@ -44,9 +51,10 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cn } from '@/lib/cn';
 import {
   COMMAND_GROUP_ORDER,
-  useCommandRegistry,
+  useMenuCommands,
   type Command as CommandDef,
   type CommandGroup,
+  type MenuCommand,
 } from '@/lib/commands';
 import { formatShortcut } from '@/lib/shortcutFormatter';
 import { useCommandPaletteStore } from '@/store/commandPalette';
@@ -97,7 +105,7 @@ export function CommandPalette() {
   const open = useCommandPaletteStore((s) => s.open);
   const page = useCommandPaletteStore((s) => s.page);
   const closePalette = useCommandPaletteStore((s) => s.closePalette);
-  const commands = useCommandRegistry();
+  const commands = useMenuCommands();
 
   // What had the keyboard focus when the palette opened, and the command it
   // ran, for where the focus goes when it closes.
@@ -260,15 +268,20 @@ export function CommandPalette() {
                           // visible text). Synonyms come in via `keywords`.
                           value={`${cmd.id} ${cmd.label}`}
                           keywords={cmd.keywords}
+                          // cmdk passes a disabled row over: no selection
+                          // by the arrow keys, nothing on Enter or a click.
+                          disabled={cmd.unavailable !== null}
                           onSelect={() => handleSelect(cmd)}
                           title={cmd.description}
                           data-testid={`command-palette-item-${cmd.id}`}
+                          data-unavailable={cmd.unavailable !== null ? 'true' : undefined}
                           className={cn(
                             'flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-sm',
                             // cmdk uses `data-selected="true"` on the
                             // active item; reuse the menu's hover token.
                             'data-[selected=true]:bg-muted aria-selected:bg-muted',
                             'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            'data-[disabled=true]:cursor-not-allowed',
                           )}
                         >
                           {cmd.icon ? (
@@ -281,7 +294,19 @@ export function CommandPalette() {
                           ) : (
                             <span aria-hidden="true" className="h-4 w-4 shrink-0" />
                           )}
-                          <span className="flex-1 truncate">{cmd.label}</span>
+                          {cmd.unavailable === null ? (
+                            <span className="flex-1 truncate">{cmd.label}</span>
+                          ) : (
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <span className="truncate opacity-60">{cmd.label}</span>
+                              <span
+                                data-testid={`command-palette-item-${cmd.id}-reason`}
+                                className="text-muted-foreground text-[11px] leading-snug"
+                              >
+                                {cmd.unavailable}
+                              </span>
+                            </span>
+                          )}
                           {cmd.shortcut ? <PaletteShortcutHint binding={cmd.shortcut} /> : null}
                         </CmdkCommand.Item>
                       ))}
@@ -329,8 +354,8 @@ function PaletteShortcutHint({ binding }: { binding: string }) {
   );
 }
 
-function bucketByGroup(commands: readonly CommandDef[]): Record<CommandGroup, CommandDef[]> {
-  const out: Record<CommandGroup, CommandDef[]> = {
+function bucketByGroup(commands: readonly MenuCommand[]): Record<CommandGroup, MenuCommand[]> {
+  const out: Record<CommandGroup, MenuCommand[]> = {
     workspace: [],
     edit: [],
     run: [],

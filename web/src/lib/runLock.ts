@@ -38,6 +38,40 @@ export function runLockNotice(discardsEdits: boolean, first?: string): string {
     .join(' ');
 }
 
+/**
+ * The notice for a time-domain run asked for while the last one still holds the
+ * system: the run it is waiting on, then the same words about the reset as
+ * every other place a run has locked.
+ */
+export function runHeldNotice(discardsEdits: boolean): string {
+  return [
+    'The last time-domain run still holds the system, so the next cannot start until it is reset: Reset run, here or on the Run button.',
+    RESET_RUN_KEEPS,
+    discardsEdits ? RESET_RUN_LOSES : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(' ');
+}
+
 /** What a converged power flow says of the lock it has just put on, once. */
 export const PFLOW_LOCKS_NOTE =
   'The run has fixed the system: elements cannot be added or changed until Reset run, which keeps this result.';
+
+/**
+ * What an eigenvalue analysis leaves behind, said before it is run: the entry
+ * of the Run menu, the row of the palette and the Run EIG button all carry it.
+ * The analysis initialises the dynamic state, and ANDES solves no power flow
+ * from there, so the case has to be read again first.
+ */
+export const EIG_THEN_RELOAD =
+  'After it, a power flow cannot run again until Reload case. A reload reads the case from its file again, so save the system first if you have added, changed or deleted elements.';
+
+/**
+ * What Reload case costs once the analysis has run, for the notice that says a
+ * reload is needed: the edits that are not saved, or nothing but the results.
+ */
+export function reloadAfterEigNote(discardsEdits: boolean): string {
+  return discardsEdits
+    ? 'The reload reads the case from its file again: the elements you added, changed or deleted since it was opened are not saved yet and would be lost. Save the system first to keep them.'
+    : 'The reload loses none of your edits (there are none unsaved); it clears the power flow result and these eigenvalues.';
+}

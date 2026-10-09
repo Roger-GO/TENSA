@@ -22,6 +22,9 @@ import React from 'react';
 
 import {
   COMMAND_GROUP_ORDER,
+  EIG_NEEDS_A_CASE,
+  EIG_NEEDS_A_POWER_FLOW,
+  EIG_NEEDS_DYNAMIC_DATA,
   useCommandRegistry,
   useMenuCommands,
   subscribePaletteDialog,
@@ -86,6 +89,14 @@ function emptyTopology(state: TopologySummary['state'] = 'pre-setup'): TopologyS
     generators: [],
     loads: [],
     shunts: [],
+  };
+}
+
+/** A system the dynamic routines (TDS, EIG) can run on: it has a machine. */
+function dynamicTopology(state: TopologySummary['state'] = 'pre-setup'): TopologySummary {
+  return {
+    ...emptyTopology(state),
+    generators: [{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }],
   };
 }
 
@@ -444,8 +455,9 @@ describe('useCommandRegistry — when() filter', () => {
     expect(ids).not.toContain('export.snapshot');
   });
 
-  it('hides "Run EIG" until PF has converged', () => {
-    // No PF result — EIG hidden.
+  it('has no "Run EIG" to run until a power flow of a dynamic case has converged', () => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    // No PF result: nothing to run, so no shortcut either.
     const first = renderHook(() => useCommandRegistry(), { wrapper });
     expect(first.result.current.map((c) => c.id)).not.toContain('run.eig');
     first.unmount();
@@ -460,6 +472,88 @@ describe('useCommandRegistry — when() filter', () => {
     usePflowStore.setState({ lastRun: convergedRun, isRunning: false, error: null });
     const second = renderHook(() => useCommandRegistry(), { wrapper });
     expect(second.result.current.map((c) => c.id)).toContain('run.eig');
+  });
+});
+
+describe('useMenuCommands: Run eigenvalue analysis is always listed', () => {
+  // The entry was left out of the Run menu and the palette until a power flow
+  // had converged, while the badge of the case said "TDS / EIG available".
+  const eig = () => {
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'run.eig');
+    expect(cmd, 'run.eig is listed').toBeDefined();
+    return cmd!;
+  };
+  const converge = (converged: boolean) =>
+    usePflowStore.setState({
+      lastRun: { converged, iterations: 4, buses: [] } as unknown as PflowResult,
+      isRunning: false,
+      error: null,
+    });
+
+  it('says to run a power flow first before one has converged', () => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    expect(eig().unavailable).toBe(EIG_NEEDS_A_POWER_FLOW);
+    expect(EIG_NEEDS_A_POWER_FLOW).toBe(
+      'Run a power flow first: eigenvalues are of the solved operating point.',
+    );
+    // One that did not converge solved no operating point.
+    converge(false);
+    expect(eig().unavailable).toBe(EIG_NEEDS_A_POWER_FLOW);
+  });
+
+  it('can run once a power flow has converged', () => {
+    MOCK_TOPOLOGY = dynamicTopology('committed');
+    converge(true);
+    const cmd = eig();
+    expect(cmd.unavailable).toBeNull();
+    expect(cmd.when?.()).toBe(true);
+  });
+
+  it('says a static-only case needs dynamic-model data, power flow or not', () => {
+    MOCK_TOPOLOGY = emptyTopology();
+    expect(eig().unavailable).toBe(EIG_NEEDS_DYNAMIC_DATA);
+    expect(EIG_NEEDS_DYNAMIC_DATA).toMatch(/dynamic-model data.*\.dyr.*GENROU or GENCLS/);
+    converge(true);
+    const cmd = eig();
+    expect(cmd.unavailable).toBe(EIG_NEEDS_DYNAMIC_DATA);
+    expect(cmd.when?.()).toBe(false);
+  });
+
+  it('takes a controller, or a classical machine, for dynamic-model data', () => {
+    converge(true);
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      generators: [{ idx: 1, name: 'G1', kind: 'GENCLS', params: {} }],
+    };
+    expect(eig().unavailable).toBeNull();
+    MOCK_TOPOLOGY = {
+      ...emptyTopology(),
+      controllers: [
+        { idx: 'ESST3A_1', name: 'ESST3A_1', kind: 'ESST3A', params: {}, sub_kind: 'exciter' },
+      ] as unknown as TopologySummary['controllers'],
+    };
+    expect(eig().unavailable).toBeNull();
+  });
+
+  it('says to open a case first with none open', () => {
+    MOCK_TOPOLOGY = null;
+    act(() => useCaseStore.setState({ selection: null }));
+    expect(eig().unavailable).toBe(EIG_NEEDS_A_CASE);
+  });
+
+  it('says what the analysis leaves behind in its description', () => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    expect(eig().description).toMatch(
+      /After it, a power flow cannot run again until Reload case\. A reload reads the case from its file again/,
+    );
+  });
+
+  it('lists the other routines as they were: runnable, with their reason on a press', () => {
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
+    for (const id of ['run.pflow', 'run.tds', 'run.cpf', 'run.se', 'run.sweep', 'run.cpfQv']) {
+      expect(result.current.find((c) => c.id === id)?.unavailable, id).toBeNull();
+    }
   });
 });
 
@@ -839,6 +933,7 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
   // (gated by `pfConverged`); the EIG path is the most useful auto-route
   // assertion since EIG is the default Run target after PFlow.
   function withConvergedPf() {
+    MOCK_TOPOLOGY = dynamicTopology('committed');
     usePflowStore.setState({
       lastRun: {
         converged: true,
@@ -939,10 +1034,7 @@ describe('useCommandRegistry — v3 Unit 14 auto-route on Run', () => {
 describe('useCommandRegistry: the Run commands run', () => {
   // The Run menu and the palette said "Run PFLOW" and only picked the routine
   // for the Run button: nothing ran, and nothing said so.
-  const TOPOLOGY_DYNAMIC: TopologySummary = {
-    ...emptyTopology(),
-    generators: [{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }],
-  };
+  const TOPOLOGY_DYNAMIC = dynamicTopology();
   function convergedPf() {
     usePflowStore.setState({
       lastRun: { converged: true, iterations: 4, buses: [] } as unknown as PflowResult,
@@ -959,6 +1051,7 @@ describe('useCommandRegistry: the Run commands run', () => {
 
   beforeEach(() => {
     useRunModeStore.setState({ activeRoutine: 'pflow', runRequest: null });
+    MOCK_TOPOLOGY = TOPOLOGY_DYNAMIC;
     useCaseStore.setState({ topology: TOPOLOGY_DYNAMIC });
     useRunsStore.setState({ activeRunId: null });
     useAnalyzeStore.setState({ eigResult: null, seMeasurementsCount: null });

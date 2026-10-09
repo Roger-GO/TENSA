@@ -16,6 +16,7 @@ import {
 } from '@/api/queries';
 import { ProblemDetailsError } from '@/api/client';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
+import { runHeldNotice } from '@/lib/runLock';
 import {
   EDITS_DISCARDED,
   useReloadDiscardsEdits,
@@ -555,9 +556,10 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     setManualMode('tds');
     if (isTdsTerminal) {
       toast.info('Reset the run first', {
-        description:
-          'The last time-domain run still holds the system. Reset run, on the Run button, reloads the case so that it can be run again; the results of that run stay in History.',
-        duration: 10000,
+        // The words every place has for a run's lock (`lib/runLock.ts`): where
+        // the result stays, and the edits a reset would lose, while it would.
+        description: runHeldNotice(reloadDiscardsEdits),
+        duration: 12000,
         action: { label: 'Reset run', onClick: onReset },
       });
       return;

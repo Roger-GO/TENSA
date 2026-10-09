@@ -153,6 +153,46 @@ describe('<AnalyzePanel />', () => {
     expect(screen.getByTestId('eig-info-tds-initialized')).toBeInTheDocument();
   });
 
+  it('says in that banner what Reload case costs: nothing while no edit is unsaved', () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult(RESULT_WITH_TDS_INIT);
+    render(withQueryClient(<AnalyzePanel />));
+    const banner = screen.getByTestId('eig-info-tds-initialized');
+    expect(banner).toHaveTextContent('To run power flow again, reload the case first');
+    expect(banner).toHaveTextContent(
+      'The reload loses none of your edits (there are none unsaved); it clears the power flow result and these eigenvalues.',
+    );
+  });
+
+  it('says in that banner which edits Reload case would lose, while it would lose some', () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult(RESULT_WITH_TDS_INIT);
+    // An element was changed since the case file was opened, and not saved.
+    const before = useCaseStore.getState();
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      topology: {
+        state: 'committed',
+        buses: [],
+        lines: [],
+        transformers: [],
+        generators: [{ idx: 'G1', name: 'G1', kind: 'GENROU', params: {} }],
+        loads: [],
+        undo: { op: 'edit', model: 'PQ', idx: 'PQ_0', params: ['p0'], also: 0 },
+      },
+    });
+    try {
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('eig-info-tds-initialized')).toHaveTextContent(
+        'The reload reads the case from its file again: the elements you added, changed or deleted since it was opened are not saved yet and would be lost. Save the system first to keep them.',
+      );
+    } finally {
+      useCaseStore.setState({ selection: before.selection, topology: before.topology });
+    }
+  });
+
   it('does NOT auto-run EIG on tab open (gated until user clicks Run EIG)', () => {
     useAnalyzeStore.getState().setSubMode('eig');
     render(withQueryClient(<AnalyzePanel />));
@@ -255,6 +295,24 @@ describe('<AnalyzePanel />', () => {
     usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
     render(withQueryClient(<AnalyzePanel />));
     expect(screen.getByTestId('analyze-run-eig')).toBeEnabled();
+  });
+
+  it('Run EIG says before the press that a power flow then needs Reload case', async () => {
+    // The lock was only said after the run, in the banner.
+    useAnalyzeStore.getState().setSubMode('eig');
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    render(withQueryClient(<AnalyzePanel />));
+    const button = screen.getByTestId('analyze-run-eig');
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute(
+      'aria-description',
+      expect.stringMatching(
+        /^After it, a power flow cannot run again until Reload case\. A reload reads the case from its file again/,
+      ),
+    );
+    await userEvent.hover(button);
+    const shown = await screen.findAllByText(/After it, a power flow cannot run again/);
+    expect(shown.length).toBeGreaterThan(0);
   });
 
   it('Run EIG / CPF / SE all show the sweep-in-progress tooltip when an active sweep is running', async () => {

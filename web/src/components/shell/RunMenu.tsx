@@ -7,8 +7,13 @@
  * entries that end in an ellipsis (the parameter sweep, the QV curve of a
  * bus) need something picked first and open the place where that is done.
  *
+ * Every routine is listed whatever the case holds. The eigenvalue analysis,
+ * which needs a converged power flow of a case with dynamic-model data, is
+ * greyed out until it has one, with the reason under its name: left out of
+ * the menu, as it was, it read as a feature the app does not have.
+ *
  * Unit 9 of the v2.0 polish plan refactored this file to derive its
- * items from the shared command registry (`useCommandRegistry()`).
+ * items from the shared command registry (`useMenuCommands()`).
  * Each `run.*` command in the registry maps to one routine entry.
  *
  * UX preserved from Unit 8:
@@ -32,7 +37,7 @@ import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { useRunModeStore } from '@/store/runMode';
 import type { RunRoutine } from '@/lib/useRunReadiness';
-import { useCommandRegistry, subscribePaletteDialog } from '@/lib/commands';
+import { useMenuCommands, subscribePaletteDialog } from '@/lib/commands';
 import {
   NO_RUNS_YET,
   RUN_HISTORY_HINT,
@@ -58,7 +63,7 @@ const TESTID_SUFFIX_BY_ID: Record<string, string> = {
 };
 
 export function RunMenu() {
-  const commands = useCommandRegistry();
+  const commands = useMenuCommands();
   // Abort run (Esc) is a run command but not a routine to pick.
   const runCommands = commands.filter((c) => c.group === 'run' && c.id !== 'run.abort');
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
@@ -97,6 +102,7 @@ export function RunMenu() {
                   ? `${cmd.description ?? ''} Ticked: the routine chosen last, which ${RUN_AGAIN_KEYS} runs again.`
                   : cmd.description
               }
+              unavailableReason={cmd.unavailable ?? undefined}
               onClick={cmd.action}
               data-routine-position={idx === 0 ? 'active' : 'alternative'}
             >

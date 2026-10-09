@@ -25,18 +25,16 @@
  *
  * Gating: each command may declare a `when()` predicate. Commands
  * whose `when()` returns `false` are filtered out by
- * `useCommandRegistry()` BEFORE the palette / menu sees them — the
- * palette never renders a "disabled" command, it just doesn't surface
- * it. This matches Linear / Raycast convention; the disabled-state
- * affordance lives on the topbar menus (where users have visual
- * context for "why is this greyed out?") and not on a search-driven
- * surface where invisibility is the right answer.
+ * `useCommandRegistry()`, which is what the shortcuts are bound from:
+ * a command that cannot run has no key.
  *
  * A command a first-time user would look for before it can run (Save
- * parameter edits as case, until a controller parameter has been edited)
- * may also give an `unavailableReason`. The registry still leaves it out,
- * but `useMenuCommands()` keeps it, with the reason, for the menus to draw
- * greyed out and say what to do first.
+ * parameter edits as case, until a controller parameter has been edited;
+ * Run eigenvalue analysis, until a power flow has converged) may also
+ * give an `unavailableReason`. The registry still leaves it out, but
+ * `useMenuCommands()` keeps it, with the reason, for the menus and the
+ * palette to draw greyed out and say what to do first: a feature that
+ * is not listed reads as a feature the app does not have.
  */
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
@@ -87,7 +85,10 @@ import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
-import { runReadinessNow, type RunRoutine } from '@/lib/useRunReadiness';
+import { hasDynamicModels, runReadinessNow, type RunRoutine } from '@/lib/useRunReadiness';
+import { EIG_THEN_RELOAD } from '@/lib/runLock';
+import { FIGURE_FOR_A_PAPER } from '@/lib/figureWording';
+import { TIDY_KEEP_RULE } from '@/lib/tidyWording';
 
 export type CommandGroup = 'workspace' | 'edit' | 'run' | 'export' | 'view' | 'navigation' | 'help';
 
@@ -137,7 +138,7 @@ export interface Command {
    * For a command the menus keep in view while its `when()` is false: why it cannot
    * run yet, in a sentence that says what to do first, or `null` when it should
    * simply not be listed (the case it makes no sense in). Read only while `when()`
-   * is false. The palette ignores it and still hides the command.
+   * is false. The palette lists it the same way, greyed out with the reason.
    */
   unavailableReason?: () => string | null;
   /**
@@ -194,9 +195,9 @@ export function useCommandRegistry(): readonly Command[] {
 }
 
 /**
- * Like `useCommandRegistry()`, for the top bar menus: the same commands in the same
- * order, plus the ones that cannot run yet but give an `unavailableReason`, each marked
- * with it, in the place the command is declared in.
+ * Like `useCommandRegistry()`, for the top bar menus and the palette: the same commands
+ * in the same order, plus the ones that cannot run yet but give an `unavailableReason`,
+ * each marked with it, in the place the command is declared in.
  */
 export function useMenuCommands(): readonly MenuCommand[] {
   return useCommandSets().menu;
@@ -310,6 +311,17 @@ function useCommandSets(): CommandSets {
     cloneUndoMutation.isPending ||
     cloneRedoMutation.isPending;
   const pfConverged = lastPfRun?.converged === true;
+  // Why the eigenvalue analysis cannot be asked for yet, or `null` when it can.
+  // What only a click can tell (a run that holds the system, a sweep under way)
+  // is left to `runRoutine`, which says it in a notice, as for the other routines.
+  const eigBlocked =
+    topology !== null && !hasDynamicModels(topology)
+      ? EIG_NEEDS_DYNAMIC_DATA
+      : pfConverged
+        ? null
+        : caseSelection === null
+          ? EIG_NEEDS_A_CASE
+          : EIG_NEEDS_A_POWER_FLOW;
   const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
 
   // ---- the arrangement of the diagram -----------------------------------
@@ -689,19 +701,14 @@ function useCommandSets(): CommandSets {
       },
 
       // ---- run -----------------------------------------------------------
-      // Run commands always surface (the topbar menu has shown every
-      // routine since Unit 8 regardless of session — selecting one
-      // just flips the active routine + analyze sub-mode). Only EIG
-      // carries an extra gate, mirroring `useRunReadiness('eig')`:
-      // hide "Run EIG" from the PALETTE until PF has converged. The
-      // menu still wants the EIG entry visible at all times so users
-      // can preview the analyze panel before running PF; for menu
-      // purposes the gate is loose. We resolve this by keeping the
-      // gate strict (palette-style) here, and letting the menu
-      // override by reading the unfiltered set in a future iteration
-      // if needed. For Unit 9 the strict gate is the right behaviour:
-      // a user clicking "Run EIG" with no converged PF would just
-      // produce a noop in the substrate.
+      // Run commands always surface: the Run menu and the palette list
+      // every routine whatever the session holds, and one that cannot
+      // run yet says why when it is chosen (`runRoutine`). EIG is the
+      // one that is greyed out instead, with the reason under its name
+      // (`eigBlocked`): it has a prerequisite the others do not share,
+      // a converged power flow of a case with dynamic-model data, and
+      // it used to be left out of both lists until then, which read as
+      // the app having no eigenvalue analysis.
       // Per-routine sequence shortcuts: `r p` (Run PFlow), `r t` (Run
       // TDS), `r e` (Run EIG), `r c` (Run CPF), `r s` (Run SE),
       // `r w` (Run sWeep — `w` since `s` is already taken). Each one
@@ -748,7 +755,8 @@ function useCommandSets(): CommandSets {
           }
           runRoutine(routine);
         },
-        when: routine === 'eig' ? () => pfConverged : undefined,
+        when: routine === 'eig' ? () => eigBlocked === null : undefined,
+        unavailableReason: routine === 'eig' ? () => eigBlocked : undefined,
         shortcut,
       })),
       // v3.1 Unit 13 — CPF QV-curve command. Routes to the CPF sub-tab
@@ -831,7 +839,7 @@ function useCommandSets(): CommandSets {
       // the Figure button over the diagram and from its right-click menu.
       {
         id: 'export.figure',
-        label: 'Figure for a paper…',
+        label: FIGURE_FOR_A_PAPER,
         description:
           'The publication look of the single-line diagram: drawn for print, black and white or in colour, with the labels you choose, saved as SVG, PDF or PNG.',
         group: 'export',
@@ -1047,8 +1055,7 @@ function useCommandSets(): CommandSets {
       {
         id: 'view.tidy',
         label: 'Tidy diagram',
-        description:
-          'Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. A line keeps the route it has unless a shorter one with no more bends and crossings is found. Nothing is moved, and Undo takes it back in one step.',
+        description: `Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. ${TIDY_KEEP_RULE} Nothing is moved, and Undo takes it back in one step.`,
         group: 'view',
         keywords: [
           'tidy',
@@ -1400,7 +1407,7 @@ function useCommandSets(): CommandSets {
     }
     return { available, menu };
     // `caseSelection`, `isPfRunning`, `lastPfRun` aren't listed
-    // directly — they feed the derived `*Disabled` / `pfConverged`
+    // directly — they feed the derived `*Disabled` / `eigBlocked`
     // gates which ARE in the deps. Re-listing the upstream sources
     // would be redundant; ESLint's exhaustive-deps rule flags them
     // as unnecessary, hence the narrower list below.
@@ -1442,7 +1449,7 @@ function useCommandSets(): CommandSets {
     sessionScopeDisabled,
     reportDisabled,
     reloadDisabled,
-    pfConverged,
+    eigBlocked,
     hasPflowHistory,
     hasReportContent,
     abortableRun,
@@ -1504,12 +1511,23 @@ const ROUTINE_COMMAND_LABEL: Record<RunRoutine, string> = {
   sweep: 'Parameter sweep…',
 };
 
+/**
+ * Why Run eigenvalue analysis is greyed out in the Run menu and the palette, each
+ * with what to do first.
+ */
+export const EIG_NEEDS_A_CASE =
+  'Open a case first. Eigenvalues are of a solved operating point, so a power flow comes before them.';
+export const EIG_NEEDS_A_POWER_FLOW =
+  'Run a power flow first: eigenvalues are of the solved operating point.';
+export const EIG_NEEDS_DYNAMIC_DATA =
+  'Needs dynamic-model data, and this case has none. Open it with a .dyr file, or add a GENROU or GENCLS generator.';
+
 /** The hover text of each: what choosing it does, and where the result shows. */
 const ROUTINE_COMMAND_HINT: Record<RunRoutine, string> = {
   pflow:
     'Solves the power flow now, as the Run button does in PF mode. The values show on the diagram and in the tables; the options are under Analysis, then PF.',
   tds: 'Starts a time-domain run now, as the Run button does in TDS mode, with the settings under Analysis, then TDS, and the disturbances of the left sidebar. The plot opens under Analysis, then Plot.',
-  eig: 'Opens Analysis, then EIG, and runs the eigenvalue analysis of the solved operating point.',
+  eig: `Opens Analysis, then EIG, and runs the eigenvalue analysis of the solved operating point. ${EIG_THEN_RELOAD}`,
   cpf: 'Opens Analysis, then CPF, and runs the continuation power flow with the options that tab shows.',
   se: 'Opens Analysis, then SE, and runs the state estimation on the measurements generated there.',
   sweep:

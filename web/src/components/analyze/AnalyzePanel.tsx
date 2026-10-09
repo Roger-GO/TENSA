@@ -36,6 +36,8 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { runReadinessNow, useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useRequestedRun } from '@/lib/useRequestedRun';
+import { EIG_THEN_RELOAD, reloadAfterEigNote } from '@/lib/runLock';
+import { useReloadDiscardsEdits } from '@/lib/useResetRunAction';
 import { ProblemDetailsError } from '@/api/client';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
 import type { RecoveryDescriptor } from '@/lib/recovery';
@@ -121,6 +123,7 @@ function AnalyzeRunButton({
   onClick,
   testId,
   disabledOverride,
+  hint,
 }: {
   routine: RunRoutine;
   label: string;
@@ -128,6 +131,12 @@ function AnalyzeRunButton({
   isPending: boolean;
   onClick: () => void;
   testId: string;
+  /**
+   * What a press leaves behind, for a routine whose run changes what can be
+   * run after it (EIG): the hover text of the button while it can be pressed,
+   * and its description for a screen reader.
+   */
+  hint?: string;
   /**
    * Sub-mode-specific extra disabled gate. SE for example also gates
    * "Run SE" on a measurement count — the readiness hook covers that
@@ -152,6 +161,7 @@ function AnalyzeRunButton({
       aria-describedby={
         readiness.disabledReason !== null && !isPending ? `${testId}-hint` : undefined
       }
+      aria-description={hint}
     >
       {isPending ? pendingLabel : label}
     </Button>
@@ -169,6 +179,20 @@ function AnalyzeRunButton({
           <TooltipPortal>
             <TooltipContent data-testid={`${testId}-disabled-reason`}>
               {readiness.disabledReason}
+            </TooltipContent>
+          </TooltipPortal>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+  if (hint !== undefined && !disabled) {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent data-testid={`${testId}-press-hint`} className="max-w-xs">
+              {hint}
             </TooltipContent>
           </TooltipPortal>
         </Tooltip>
@@ -331,6 +355,7 @@ export function AnalyzeEigSubMode() {
   const lastPf = usePflowStore((s) => s.lastRun);
   const eigResult = useAnalyzeStore((s) => s.eigResult);
   const eigRun = useEigRun();
+  const reloadDiscardsEdits = useReloadDiscardsEdits();
 
   // When the case changes (PF cleared on case-load via cross-slice
   // cascade), drop the stale EIG result so the empty-state shows.
@@ -361,6 +386,7 @@ export function AnalyzeEigSubMode() {
           isPending={eigRun.isPending}
           onClick={onRun}
           testId="analyze-run-eig"
+          hint={EIG_THEN_RELOAD}
         />
         {eigResult !== null && eigResult.tds_initialized ? (
           <span
@@ -372,7 +398,7 @@ export function AnalyzeEigSubMode() {
             )}
           >
             Running EIG initialised the dynamic state. To run power flow again, reload the case
-            first (Reload case, in the top bar).
+            first (Reload case, in the top bar). {reloadAfterEigNote(reloadDiscardsEdits)}
           </span>
         ) : null}
       </div>

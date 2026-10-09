@@ -534,16 +534,54 @@ describe('<EIGScatter /> — "All modes" filter toggle', () => {
     expect(useAnalyzeStore.getState().filter).toEqual(DEFAULT_EIG_FILTER);
   });
 
-  it('empty-by-filter note points at the All modes control', () => {
-    useAnalyzeStore.setState({
-      eigResult: {
-        ...RESULT,
-        // Every mode well damped → default filter hides everything.
-        damping_ratios: [0.9, 1.0, 0.995, 0.8],
-      },
-    });
+  // Every mode well damped: the default filter hides all of them.
+  const WELL_DAMPED = { ...RESULT, damping_ratios: [0.9, 1.0, 0.995, 0.8] };
+
+  it('opens a result with no poorly damped mode on all its modes, and says why', () => {
+    useAnalyzeStore.setState({ eigResult: WELL_DAMPED });
     render(<EIGScatter />);
+
+    expect(screen.getByText(/4 of 4 visible/)).toBeInTheDocument();
+    expect(screen.getByTestId('eig-scatter-none-poorly-damped')).toHaveTextContent(
+      'No poorly damped modes: none of the 4 has a damping ratio under 0.05 with |Re| under 5. All modes are shown.',
+    );
+    expect(screen.getByTestId('eig-scatter-filter-toggle')).toHaveAttribute('aria-pressed', 'true');
+    for (const idx of [0, 1, 2, 3]) {
+      expect(screen.getByTestId(`eig-scatter-point-${idx}`)).toBeInTheDocument();
+    }
+    // The filter of the store is left as it was: the next result is judged by it.
+    expect(useAnalyzeStore.getState().filter).toEqual(DEFAULT_EIG_FILTER);
+  });
+
+  it('shows the filtered view of such a result when asked, with the way back', async () => {
+    const user = userEvent.setup();
+    useAnalyzeStore.setState({ eigResult: WELL_DAMPED });
+    render(<EIGScatter />);
+
+    await user.click(screen.getByTestId('eig-scatter-filter-toggle'));
     expect(screen.getByText(/0 of 4 visible/)).toBeInTheDocument();
     expect(screen.getByText(/use “All modes” to show them/)).toBeInTheDocument();
+    expect(screen.queryByTestId('eig-scatter-none-poorly-damped')).toBeNull();
+
+    await user.click(screen.getByTestId('eig-scatter-filter-toggle'));
+    expect(screen.getByText(/4 of 4 visible/)).toBeInTheDocument();
+    // Asked for by the button this time, so back to the filter is one press.
+    await user.click(screen.getByTestId('eig-scatter-filter-toggle'));
+    expect(screen.getByText(/0 of 4 visible/)).toBeInTheDocument();
+  });
+
+  it('opens the next result on all modes again, and leaves one with poorly damped modes filtered', () => {
+    useAnalyzeStore.setState({ eigResult: WELL_DAMPED });
+    const { rerender } = render(<EIGScatter />);
+    expect(screen.getByTestId('eig-scatter-none-poorly-damped')).toBeInTheDocument();
+
+    act(() => useAnalyzeStore.setState({ eigResult: RESULT }));
+    rerender(<EIGScatter />);
+    expect(screen.getByText(/2 of 4 visible/)).toBeInTheDocument();
+    expect(screen.queryByTestId('eig-scatter-none-poorly-damped')).toBeNull();
+
+    act(() => useAnalyzeStore.setState({ eigResult: { ...WELL_DAMPED } }));
+    rerender(<EIGScatter />);
+    expect(screen.getByText(/4 of 4 visible/)).toBeInTheDocument();
   });
 });

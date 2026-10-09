@@ -4,8 +4,9 @@
  * Scenarios from the plan:
  *
  * - Happy: typing "snapshot" surfaces Save / Load snapshot commands.
- * - Edge: when() returns false → command hidden (Run EIG until PF
- *   converged).
+ * - Edge: a command that cannot run yet but says why (Run EIG until PF
+ *   has converged) is listed greyed out with the reason, and is passed
+ *   over by a click and by Enter.
  * - Edge: keyboard navigation (arrows + Enter).
  * - Edge: Escape closes.
  * - Edge: backdrop click closes.
@@ -30,6 +31,8 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useSnapshotStore } from '@/store/snapshot';
 import { usePflowStore } from '@/store/pflow';
+import { useRunModeStore } from '@/store/runMode';
+import { EIG_NEEDS_A_POWER_FLOW, EIG_NEEDS_DYNAMIC_DATA } from '@/lib/commands';
 import type { TopologySummary, PflowResult } from '@/api/types';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
@@ -201,19 +204,58 @@ describe('<CommandPalette /> — search', () => {
   });
 });
 
-describe('<CommandPalette /> — when() gating', () => {
-  it('hides "Run EIG" until PF has converged', async () => {
+describe('<CommandPalette /> — commands that cannot run yet', () => {
+  // A system with a machine: the dynamic routines can run on it.
+  const dynamicTopology = (): TopologySummary => ({
+    ...emptyTopology(),
+    generators: [{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }],
+  });
+  const searchFor = async (text: string) => {
     const user = userEvent.setup();
     render(withProviders(<CommandPalette />));
     act(() => {
       useCommandPaletteStore.getState().openPalette();
     });
-    const input = await screen.findByTestId('command-palette-input');
-    await user.type(input, 'eig');
-    expect(screen.queryByTestId('command-palette-item-run.eig')).not.toBeInTheDocument();
+    await user.type(await screen.findByTestId('command-palette-input'), text);
+    return user;
+  };
+
+  beforeEach(() => {
+    useRunModeStore.setState({ activeRoutine: 'pflow', runRequest: null });
   });
 
-  it('surfaces "Run EIG" once PF has converged', async () => {
+  it('lists "Run EIG" greyed out, with what to do first, until PF has converged', async () => {
+    // It used to be left out, and "eigenvalue" answered "No commands match".
+    MOCK_TOPOLOGY = dynamicTopology();
+    const user = await searchFor('eigenvalue');
+    const row = await screen.findByTestId('command-palette-item-run.eig');
+    expect(row).toHaveTextContent('Run eigenvalue analysis (EIG)');
+    expect(row).toHaveAttribute('aria-disabled', 'true');
+    expect(row).toHaveAttribute('data-unavailable', 'true');
+    expect(screen.getByTestId('command-palette-item-run.eig-reason')).toHaveTextContent(
+      EIG_NEEDS_A_POWER_FLOW,
+    );
+    expect(screen.queryByTestId('command-palette-empty')).not.toBeInTheDocument();
+
+    // A click runs nothing and leaves the palette open on the reason, and the
+    // row Enter would run is another one.
+    await user.click(row);
+    expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
+    expect(useRunModeStore.getState().runRequest).toBeNull();
+    expect(useCommandPaletteStore.getState().open).toBe(true);
+    expect(row).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('tells a static-only case that the analysis needs dynamic-model data', async () => {
+    MOCK_TOPOLOGY = emptyTopology();
+    await searchFor('eig');
+    expect(await screen.findByTestId('command-palette-item-run.eig-reason')).toHaveTextContent(
+      EIG_NEEDS_DYNAMIC_DATA,
+    );
+  });
+
+  it('surfaces "Run EIG" as a row that runs once PF has converged', async () => {
+    MOCK_TOPOLOGY = dynamicTopology();
     const convergedRun = {
       converged: true,
       iterations: 4,
@@ -221,14 +263,29 @@ describe('<CommandPalette /> — when() gating', () => {
       buses: [],
     } as unknown as PflowResult;
     usePflowStore.setState({ lastRun: convergedRun, isRunning: false, error: null });
-    const user = userEvent.setup();
-    render(withProviders(<CommandPalette />));
-    act(() => {
-      useCommandPaletteStore.getState().openPalette();
-    });
-    const input = await screen.findByTestId('command-palette-input');
-    await user.type(input, 'eig');
-    expect(await screen.findByTestId('command-palette-item-run.eig')).toBeInTheDocument();
+    await searchFor('eig');
+    const row = await screen.findByTestId('command-palette-item-run.eig');
+    expect(row).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('command-palette-item-run.eig-reason')).not.toBeInTheDocument();
+  });
+
+  it('lists what the menus list greyed out, each with its reason', async () => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    await searchFor('undo');
+    const undo = await screen.findByTestId('command-palette-item-edit.undo');
+    expect(undo).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('command-palette-item-edit.undo-reason')).toHaveTextContent(
+      'Nothing to undo yet.',
+    );
+  });
+
+  it('starts on a row that can run, not on a greyed one', async () => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    await searchFor('run e');
+    await screen.findByTestId('command-palette-item-run.eig');
+    const selected = document.querySelectorAll('[aria-selected="true"]');
+    expect(selected.length).toBe(1);
+    expect(selected[0]).not.toHaveAttribute('aria-disabled', 'true');
   });
 });
 

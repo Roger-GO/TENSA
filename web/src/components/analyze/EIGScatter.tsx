@@ -36,8 +36,10 @@ import type { EigResult } from '@/api/types';
  *
  * - ``mode_count === 0`` → "No dynamic states" message (stock IEEE
  *   14 case; ``data-testid="eig-empty"``).
- * - ``mode_count > 0`` but the filter hides everything → smaller
- *   inline note inviting the user to widen the filter.
+ * - ``mode_count > 0`` but the filter hides everything → the result
+ *   opens on all its modes, with a sentence that says none is poorly
+ *   damped; the filtered view, when the user asks for it, has a
+ *   smaller inline note inviting them to widen the filter.
  *
  * --------------------------------------------------------------------
  * Unit 15 — interactivity
@@ -223,6 +225,9 @@ function formatTick(v: number): string {
   return String(Number(v.toPrecision(3)));
 }
 
+/** The filter that hides nothing. */
+const ALL_MODES = { dampingMax: Number.POSITIVE_INFINITY, realAbsMax: Number.POSITIVE_INFINITY };
+
 export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const storeResult = useAnalyzeStore((s) => s.eigResult);
   const filter = useAnalyzeStore((s) => s.filter);
@@ -231,24 +236,36 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const selectedModeId = useAnalyzeStore((s) => s.selectedModeId);
   const setSelectedModeId = useAnalyzeStore((s) => s.setSelectedModeId);
 
-  // "All modes" widens the display filter to show every computed mode —
-  // without this, a healthy well-damped system renders an empty scatter
-  // (the default filter keeps only poorly-damped modes) with no recourse.
-  const showingAll = !Number.isFinite(filter.dampingMax) && !Number.isFinite(filter.realAbsMax);
-  const toggleShowAll = () => {
-    if (showingAll) resetFilter();
-    else
-      setFilter({
-        dampingMax: Number.POSITIVE_INFINITY,
-        realAbsMax: Number.POSITIVE_INFINITY,
-      });
-  };
-
   const result = resultProp !== undefined ? resultProp : storeResult;
 
-  const visibleIndices = useMemo(
-    () => (result === null ? [] : applyEigFilter(result, filter)),
+  // "All modes" widens the display filter to show every computed mode.
+  const allByFilter = !Number.isFinite(filter.dampingMax) && !Number.isFinite(filter.realAbsMax);
+  // A result with no poorly damped mode is the good one, and the filter that
+  // keeps only those left its plot empty, which read as a failed run. Such a
+  // result opens on all its modes instead, with a sentence that says why, until
+  // the user asks for the filtered view of it.
+  const [filteredByChoice, setFilteredByChoice] = useState<EigResult | null>(null);
+  const noneByFilter = useMemo(
+    () => result !== null && result.mode_count > 0 && applyEigFilter(result, filter).length === 0,
     [result, filter],
+  );
+  const nonePoorlyDamped = noneByFilter && !allByFilter && filteredByChoice !== result;
+  const showingAll = allByFilter || nonePoorlyDamped;
+  const toggleShowAll = () => {
+    if (allByFilter) {
+      // Back to the filter, and to its view even where it leaves nothing.
+      setFilteredByChoice(result);
+      resetFilter();
+    } else if (nonePoorlyDamped) {
+      setFilteredByChoice(result);
+    } else {
+      setFilter(ALL_MODES);
+    }
+  };
+
+  const visibleIndices = useMemo(
+    () => (result === null ? [] : applyEigFilter(result, showingAll ? ALL_MODES : filter)),
+    [result, filter, showingAll],
   );
   const points = useMemo(
     () => (result === null ? [] : computeScatterPoints(result, visibleIndices)),
@@ -673,6 +690,16 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
           />
         </div>
       </div>
+      {nonePoorlyDamped ? (
+        <p
+          role="status"
+          data-testid="eig-scatter-none-poorly-damped"
+          className="border-border text-foreground border-b px-2.5 py-1 text-[11px]"
+        >
+          No poorly damped modes: none of the {result.mode_count} has a damping ratio under{' '}
+          {filter.dampingMax} with |Re| under {filter.realAbsMax}. All modes are shown.
+        </p>
+      ) : null}
       {/* Damping-band legend — mirrors the per-point colour coding. */}
       <div
         data-testid="eig-scatter-legend"

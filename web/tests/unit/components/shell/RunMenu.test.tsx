@@ -13,8 +13,10 @@
  * - Escape closes the menu.
  * - Run history, under the routines, opens the History drawer on its runs,
  *   and says what to do first while there is nothing to list.
+ * - The eigenvalue analysis is listed before a power flow has converged,
+ *   greyed out with the reason, where it used to be left out.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -31,7 +33,30 @@ import { useCaseStore } from '@/store/case';
 import { useHistoryStore } from '@/store/history';
 import { useSessionStore } from '@/store/session';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { PflowResult } from '@/api/types';
+import type { PflowResult, TopologySummary } from '@/api/types';
+
+// The topology the registry reads, which says whether a case has dynamic-model
+// data. `null`, as while a case is still being read, unless a test sets one.
+let MOCK_TOPOLOGY: TopologySummary | null = null;
+vi.mock('@/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('@/api/queries')>('@/api/queries');
+  return {
+    ...actual,
+    useCurrentTopology: () => MOCK_TOPOLOGY,
+  };
+});
+
+function topologyWith(generators: TopologySummary['generators']): TopologySummary {
+  return {
+    state: 'pre-setup',
+    buses: [],
+    lines: [],
+    transformers: [],
+    generators,
+    loads: [],
+    shunts: [],
+  };
+}
 
 function withProviders(ui: ReactElement) {
   const client = new QueryClient({
@@ -41,6 +66,7 @@ function withProviders(ui: ReactElement) {
 }
 
 beforeEach(() => {
+  MOCK_TOPOLOGY = null;
   useRunModeStore.setState({ activeRoutine: 'pflow' });
   useAnalyzeStore.setState({
     subMode: 'pflow',
@@ -54,10 +80,9 @@ beforeEach(() => {
     hideLabels: false,
     tdsConfig: { ...DEFAULT_TDS_CONFIG },
   });
-  // Unit 9: the registry gates "Run EIG" on PF having converged. Seed
-  // a converged PF result so every routine surfaces in the menu by
-  // default; the EIG-gating contract itself is exercised in
-  // `tests/unit/components/shell/CommandPalette.test.tsx`.
+  // The registry gates "Run EIG" on PF having converged. Seed a converged
+  // PF result so every routine can be chosen by default; what the menu
+  // shows without one is in the "eigenvalue entry" block below.
   usePflowStore.setState({
     lastRun: {
       converged: true,
@@ -222,6 +247,82 @@ describe('<RunMenu /> — selection effects', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
     expect(useRunModeStore.getState().activeRoutine).toBe('sweep');
+  });
+});
+
+describe('<RunMenu /> — the eigenvalue entry before it can run', () => {
+  // The entry was left out until a power flow had converged, so the menu of a
+  // freshly opened dynamic case had no eigenvalue analysis in it at all.
+  const DYNAMIC = topologyWith([{ idx: 'GENROU_1', name: 'G1', kind: 'GENROU', params: {} }]);
+  const openMenu = async () => {
+    const user = userEvent.setup();
+    render(withProviders(<RunMenu />));
+    await user.click(screen.getByTestId('topbar-menu-run-trigger'));
+    await screen.findByTestId('topbar-menu-run-content');
+    return user;
+  };
+
+  beforeEach(() => {
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+    });
+  });
+  afterEach(() => {
+    useCaseStore.setState({ selection: null });
+  });
+
+  it('lists it greyed out with the reason before a power flow has converged', async () => {
+    MOCK_TOPOLOGY = DYNAMIC;
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    const user = await openMenu();
+
+    const item = screen.getByTestId('topbar-menu-run-eig');
+    expect(item).toHaveTextContent('Run eigenvalue analysis (EIG)');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('topbar-menu-run-eig-reason')).toHaveTextContent(
+      'Run a power flow first: eigenvalues are of the solved operating point.',
+    );
+    // It keeps its place among the routines, and a press does nothing.
+    const order = [...screen.getByTestId('topbar-menu-run-content').querySelectorAll('button')].map(
+      (button) => button.getAttribute('data-testid'),
+    );
+    expect(order.slice(0, 3)).toEqual([
+      'topbar-menu-run-pflow',
+      'topbar-menu-run-tds',
+      'topbar-menu-run-eig',
+    ]);
+    await user.click(item);
+    expect(useRunModeStore.getState().activeRoutine).toBe('pflow');
+    expect(screen.getByTestId('topbar-menu-run-content')).toBeInTheDocument();
+    // The other routines say why on a press, as before: they are not greyed.
+    for (const id of ['pflow', 'tds', 'cpf', 'se', 'sweep']) {
+      expect(screen.getByTestId(`topbar-menu-run-${id}`)).not.toHaveAttribute('aria-disabled');
+    }
+  });
+
+  it('can be chosen once a power flow has converged', async () => {
+    MOCK_TOPOLOGY = DYNAMIC;
+    await openMenu();
+    expect(screen.getByTestId('topbar-menu-run-eig')).not.toHaveAttribute('aria-disabled');
+    expect(screen.queryByTestId('topbar-menu-run-eig-reason')).not.toBeInTheDocument();
+  });
+
+  it('tells a static-only case that it needs dynamic-model data, power flow or not', async () => {
+    MOCK_TOPOLOGY = topologyWith([{ idx: 1, name: 'PV 1', kind: 'PV', params: {} }]);
+    await openMenu();
+    expect(screen.getByTestId('topbar-menu-run-eig')).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('topbar-menu-run-eig-reason')).toHaveTextContent(
+      'Needs dynamic-model data, and this case has none. Open it with a .dyr file, or add a GENROU or GENCLS generator.',
+    );
+  });
+
+  it('says to open a case first with none open', async () => {
+    useCaseStore.setState({ selection: null });
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    await openMenu();
+    expect(screen.getByTestId('topbar-menu-run-eig-reason')).toHaveTextContent(
+      'Open a case first.',
+    );
   });
 });
 

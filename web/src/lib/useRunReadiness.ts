@@ -131,6 +131,20 @@ const PF_DEPENDENT: ReadonlySet<RunRoutine> = new Set(['eig', 'cpf', 'se']);
 const DYNAMIC_REQUIRED: ReadonlySet<RunRoutine> = new Set(['tds', 'eig']);
 
 /**
+ * Whether a system has dynamic-model data: a synchronous-machine generator
+ * (GENROU / GENCLS), which carries the rotor DAE states, or a controller
+ * (exciter, governor, PSS) on top. A GENCLS-only system is dynamic.
+ */
+export function hasDynamicModels(
+  topology: NonNullable<ReturnType<typeof useCaseStore.getState>['topology']>,
+): boolean {
+  const hasDynamicGenerator = (topology.generators ?? []).some(
+    (g) => g.kind === 'GENROU' || g.kind === 'GENCLS',
+  );
+  return hasDynamicGenerator || (topology.controllers ?? []).length > 0;
+}
+
+/**
  * What the readiness of a routine is worked out from: the slices of the stores
  * `useRunReadiness` subscribes to, which `runReadinessNow` reads once.
  */
@@ -254,24 +268,15 @@ function readinessFrom(routine: RunRoutine, inputs: ReadinessInputs): RunReadine
     return ready(false, `Sweep ${activeSweepId} in progress${progress}; wait or abort.`, null);
   }
 
-  // Dynamic-content prerequisite (R18): TDS/EIG need dynamic-model data —
-  // either a synchronous-machine generator (GENROU/GENCLS), which carries the
-  // rotor DAE states, OR a controller (exciter/governor/PSS) on top. A
-  // GENCLS-only system IS dynamic, so don't gate it. Only fires once the
-  // topology has resolved; while loading, fall through so the button isn't
-  // flicker-disabled.
-  if (DYNAMIC_REQUIRED.has(routine) && topology !== null) {
-    const hasDynamicGenerator = (topology.generators ?? []).some(
-      (g) => g.kind === 'GENROU' || g.kind === 'GENCLS',
+  // Dynamic-content prerequisite (R18): TDS/EIG need dynamic-model data
+  // (`hasDynamicModels`). Only fires once the topology has resolved; while
+  // loading, fall through so the button isn't flicker-disabled.
+  if (DYNAMIC_REQUIRED.has(routine) && topology !== null && !hasDynamicModels(topology)) {
+    return ready(
+      false,
+      `${routineLabel(routine)} requires dynamic-model data. Load a .dyr addfile (or add a GENROU/GENCLS generator) to enable.`,
+      null,
     );
-    const hasController = (topology.controllers ?? []).length > 0;
-    if (!hasDynamicGenerator && !hasController) {
-      return ready(
-        false,
-        `${routineLabel(routine)} requires dynamic-model data. Load a .dyr addfile (or add a GENROU/GENCLS generator) to enable.`,
-        null,
-      );
-    }
   }
 
   // PF after EIG needs a reload — EIG.run() sets ``TDS.initialized=True``

@@ -40,6 +40,7 @@ import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { useRunModeStore } from '@/store/runMode';
 import { runLabel } from '@/lib/runLabel';
+import { runHeldNotice } from '@/lib/runLock';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { CaseEvent, FaultSpec } from '@/api/types';
 import { arrowFrame } from '../../helpers/frames';
@@ -1001,8 +1002,36 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
         'Reset the run first',
         expect.objectContaining({ action: expect.objectContaining({ label: 'Reset run' }) }),
       );
+      // In the words every place has for a run's lock: where the result stays,
+      // and nothing about edits while a reset would lose none.
+      const said = toastInfoMock.mock.calls.at(-1)?.[1] as { description: string };
+      expect(said.description).toBe(runHeldNotice(false));
+      expect(said.description).toContain(
+        'the result stays in Analysis > Compare and in Run history.',
+      );
+      expect(said.description).not.toContain('not saved yet');
       // Still the one run.
       expect(Object.keys(useRunsStore.getState().runs)).toEqual(['run-first']);
+    });
+
+    it('says which edits the reset would lose, while it would lose some', async () => {
+      // An element was changed since the case file was opened, and not saved.
+      seedReady({ edited: true });
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+      serveShortRun(server, 'run-first');
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      act(() => useRunModeStore.getState().requestRun('tds'));
+      await waitFor(() => {
+        expect(useRunsStore.getState().runs['run-first']?.state).toBe('done');
+      });
+      toastInfoMock.mockClear();
+
+      act(() => useRunModeStore.getState().requestRun('tds'));
+
+      const said = toastInfoMock.mock.calls.at(-1)?.[1] as { description: string };
+      expect(said.description).toBe(runHeldNotice(true));
+      expect(said.description).toContain('save the system first to keep them.');
     });
   });
 
