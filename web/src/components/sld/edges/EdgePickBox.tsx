@@ -15,8 +15,9 @@ export const EdgePickBox = memo(function EdgePickBox({
   points,
   fromBar,
   avoid,
+  values,
 }: { id: string; points: readonly Point[] } & PickOptions) {
-  const at = pickPoint(points, { fromBar, avoid });
+  const at = pickPoint(points, { fromBar, avoid, values });
   return (
     <rect
       data-testid={`edge-pick-box-${id}`}

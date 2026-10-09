@@ -22,6 +22,12 @@ import { routeMidpoint, type Point } from '../connections';
  */
 export const PICK_OFF_BAR = 26;
 
+/**
+ * The same under a bar while the values of a power flow show: the box of
+ * the bus node is taller by the voltage and the angle its label then holds.
+ */
+export const PICK_OFF_BAR_WITH_VALUES = 48;
+
 /** How far the point keeps from what is drawn on the line and takes its own clicks (the symbol of a transformer). */
 export const PICK_OFF_SYMBOL = 20;
 
@@ -33,6 +39,8 @@ export interface PickOptions {
   fromBar: boolean;
   /** A place on the line that takes its own clicks, which the point keeps off. */
   avoid?: { x: number; y: number };
+  /** Whether the values of a power flow show, and the box under each bar is the taller one. */
+  values?: boolean;
 }
 
 /**
@@ -48,8 +56,12 @@ export function pickPoint(points: readonly Point[], options: PickOptions): Point
     const [a, b] = [points[k]!, points[k + 1]!];
     const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (length < 1e-6) continue;
-    const from = k === 0 && options.fromBar ? PICK_OFF_BAR : 0;
-    const to = length - (k === last - 1 ? PICK_OFF_BAR : 0);
+    // How far the point keeps from an end on a bar: further where the run
+    // hangs under the bar and the box of the bus is the taller one.
+    const offBar = (end: Point, other: Point): number =>
+      options.values === true && other[1] > end[1] + 1e-6 ? PICK_OFF_BAR_WITH_VALUES : PICK_OFF_BAR;
+    const from = k === 0 && options.fromBar ? offBar(a, b) : 0;
+    const to = length - (k === last - 1 ? offBar(b, a) : 0);
     // The stretches of the run that are clear, as lengths along it.
     let stretches: [number, number][] = [[from, to]];
     if (options.avoid !== undefined) {

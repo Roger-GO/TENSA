@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { BaseEdge } from '@xyflow/react';
 import type { EdgeProps } from '@xyflow/react';
+import { usePflowStore } from '@/store/pflow';
+import { useUiStore } from '@/store/ui';
 import { routePath, type ConnectorRoute, type Point } from '../connections';
 import { draftStrokeStyle } from '../drafts';
 import { lineStrokeStyle } from '../overlay';
@@ -50,6 +52,10 @@ export const StubEdge = memo(function StubEdge({
   targetY,
   data,
 }: EdgeProps) {
+  // Whether the labels of the buses hold the values of a power flow: the
+  // box under a bar is then the taller one, which the pick box keeps off.
+  const solved = usePflowStore((s) => s.lastRun !== null);
+  const hideLabels = useUiStore((s) => s.hideLabels);
   const stub = data as StubData | undefined;
   const route = stub?.route;
   // Without a route (the pass has not placed this connector) fall back to
@@ -70,7 +76,7 @@ export const StubEdge = memo(function StubEdge({
               : STROKE
         }
       />
-      <EdgePickBox id={id} points={points} fromBar={false} />
+      <EdgePickBox id={id} points={points} fromBar={false} values={solved && !hideLabels} />
     </>
   );
 });

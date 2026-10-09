@@ -104,7 +104,7 @@ export const TopologyEdge = memo(function TopologyEdge({
   return (
     <>
       <BaseEdge path={routePath(points)} markerEnd={markerEnd} style={style} />
-      <EdgePickBox id={id} points={points} fromBar />
+      <EdgePickBox id={id} points={points} fromBar values={pflowResult !== null && !hideLabels} />
       {overlay && overlay.has_data && overlay.direction !== 'neutral' ? (
         <LineFlowArrow
           x={mid.x}

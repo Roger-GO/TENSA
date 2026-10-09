@@ -91,7 +91,13 @@ export const TransformerEdge = memo(function TransformerEdge({
     <>
       <BaseEdge path={path} markerEnd={markerEnd} style={style} />
       {/* Off the icon, which is drawn over the line and takes its own clicks. */}
-      <EdgePickBox id={id} points={points} fromBar avoid={mid} />
+      <EdgePickBox
+        id={id}
+        points={points}
+        fromBar
+        avoid={mid}
+        values={pflowResult !== null && !hideLabels}
+      />
       <EdgeLabelRenderer>
         <div
           data-testid={`transformer-edge-icon-${id}`}

@@ -9,6 +9,7 @@ import type { Point } from '@/components/sld/connections';
 import {
   PICK_MIN_HALF,
   PICK_OFF_BAR,
+  PICK_OFF_BAR_WITH_VALUES,
   PICK_OFF_SYMBOL,
   pickBox,
   pickPoint,
@@ -61,6 +62,30 @@ describe('pickPoint', () => {
     const [, y] = pickPoint(fromBelow, { fromBar: false });
     expect(y).toBeGreaterThanOrEqual(3 + PICK_OFF_BAR);
     expect(y).toBeLessThan(60);
+  });
+
+  it('keeps further off under a bar while the values of a power flow show, where the box of the bus is taller', () => {
+    // Down from one bar to the top of the next, 80 apart: the box of the
+    // upper bus hangs over the first 46 of it with a voltage and an angle
+    // in its label.
+    const down: Point[] = [
+      [40, 3],
+      [40, 83],
+    ];
+    expect(pickPoint(down, { fromBar: true })[1]).toBeLessThan(3 + PICK_OFF_BAR_WITH_VALUES);
+    const [, y] = pickPoint(down, { fromBar: true, values: true });
+    expect(y).toBeGreaterThanOrEqual(3 + PICK_OFF_BAR_WITH_VALUES);
+    // Only under a bar: the end that comes to the top of the lower bar
+    // keeps the room it kept.
+    expect(y).toBeLessThanOrEqual(83 - PICK_OFF_BAR);
+    // The connector of a device under its bar, the same from the other end.
+    const fromBelow: Point[] = [
+      [40, 90],
+      [40, 3],
+    ];
+    const [, up] = pickPoint(fromBelow, { fromBar: false, values: true });
+    expect(up).toBeGreaterThanOrEqual(3 + PICK_OFF_BAR_WITH_VALUES);
+    expect(up).toBeLessThan(90);
   });
 
   it('keeps off the symbol of a transformer, which takes its own clicks', () => {
