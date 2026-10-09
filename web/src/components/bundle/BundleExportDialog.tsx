@@ -45,7 +45,7 @@ import { useRunsStore } from '@/store/runs';
 import { useUiStore } from '@/store/ui';
 import { ProblemDetailsError } from '@/api/client';
 import type { SidecarLayout } from '@/api/types';
-import { hasSavedPositions } from '@/components/sld/sidecar';
+import { hasSavedPositions } from '@/components/sld/sidecarCore';
 import { cn } from '@/lib/cn';
 import { diagramLayoutForSave } from '@/lib/diagramLayout';
 import { baseName } from '@/lib/paths';

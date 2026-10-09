@@ -90,6 +90,9 @@ const LAZY_MODULES = [
   'components/plots/TimeSeriesPlot.tsx',
   'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',
+  // Reading, fitting and capturing a layout, which only the diagram does:
+  // what the first screen reads of one is in `sidecarCore.ts`.
+  'components/sld/sidecar.ts',
   'components/snapshot/SaveSnapshotDialog.tsx',
   'components/snapshot/LoadSnapshotDialog.tsx',
   'components/bundle/BundleExportDialog.tsx',

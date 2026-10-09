@@ -1,7 +1,8 @@
 """The web UI's copy of the layout schema keeps up with the server's.
 
 The UI validates and writes layouts with a schema of its own
-(``web/src/components/sld/sidecar.ts``), since it must read a curated layout and
+(``web/src/components/sld/sidecar.ts``, and ``sidecarCore.ts`` beside it for the
+part the first screen loads), since it must read a curated layout and
 build a document before any request is made. Two things hold the copies
 together. The constants a write depends on are checked here against
 ``tensa.core.layout``. And one fixture, ``web/tests/fixtures/layout-v2.json``, is
@@ -32,21 +33,26 @@ from tests._repo import WEB_DIR
 
 pytestmark = pytest.mark.unit
 
+# The modules of the web UI that hold its copy of the schema.
+WEB_LAYOUT_MODULES = ("sidecar.ts", "sidecarCore.ts")
+
 
 def _web_constant(text: str, name: str) -> str:
-    declared = re.search(rf"export const {name} = '?(\d+)'?;", text)
-    assert declared is not None, f"sidecar.ts no longer declares {name}"
-    return declared.group(1)
+    declared = re.findall(rf"export const {name} = '?(\d+)'?;", text)
+    assert len(declared) == 1, f"the layout modules declare {name} {len(declared)} times"
+    value: str = declared[0]
+    return value
 
 
 def test_the_web_ui_writes_the_version_and_keeps_the_caps_the_server_has() -> None:
     """The UI validates and writes layouts with its own copy of the schema
-    (``sidecar.ts``). A copy that fell behind would write a version the server
+    (``sidecar.ts`` and ``sidecarCore.ts``, which declare each constant once
+    between them). A copy that fell behind would write a version the server
     upgrades on every read, or a route or a figure the server refuses to store."""
-    source = WEB_DIR / "src" / "components" / "sld" / "sidecar.ts"
-    if not source.is_file():
+    sources = [WEB_DIR / "src" / "components" / "sld" / name for name in WEB_LAYOUT_MODULES]
+    if not all(source.is_file() for source in sources):
         pytest.skip("web/src/components/sld/sidecar.ts is not next to the tests")
-    text = source.read_text(encoding="utf-8")
+    text = "\n".join(source.read_text(encoding="utf-8") for source in sources)
     assert _web_constant(text, "SIDECAR_SCHEMA_VERSION") == LAYOUT_SCHEMA_VERSION
     assert int(_web_constant(text, "MAX_BEND_POINTS")) == MAX_BEND_POINTS
     assert int(_web_constant(text, "MAX_FIGURE_SETTINGS")) == MAX_FIGURE_SETTINGS

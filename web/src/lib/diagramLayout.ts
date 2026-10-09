@@ -10,7 +10,7 @@
  * snapshot mutation) and the save hooks built on `@/api/queries` need it.
  */
 import type { SidecarLayout } from '@/api/types';
-import { hasSavedPositions } from '@/components/sld/sidecar';
+import { hasSavedPositions } from '@/components/sld/sidecarCore';
 import { useCaseStore } from '@/store/case';
 
 /**

@@ -10,7 +10,7 @@ import {
   routeOverridesFromLayout,
   samePlacement,
   unitStatesOf,
-} from '@/components/sld/sidecar';
+} from '@/components/sld/sidecarCore';
 import { diagramLayoutForSave } from '@/lib/diagramLayout';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';

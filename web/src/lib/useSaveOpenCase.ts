@@ -14,7 +14,7 @@ import { useCallback, useMemo } from 'react';
 
 import { SAVE_CASE_MUTATION_KEY, usePutSidecar, useSaveCase } from '@/api/queries';
 import { parseWorkspacePath } from '@/api/types';
-import { layoutForRenumberedCopy } from '@/components/sld/sidecar';
+import { layoutForRenumberedCopy } from '@/components/sld/sidecarCore';
 import { diagramLayoutForSave } from '@/lib/diagramLayout';
 import { extensionOf } from '@/lib/paths';
 import { saveInPlaceTarget, type SaveInPlaceTarget } from '@/lib/saveInPlace';
