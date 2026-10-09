@@ -66,6 +66,28 @@ describe('<DataGrid /> — rendering', () => {
   });
 });
 
+describe('<DataGrid /> — the heading row over scrolled rows', () => {
+  it('has an opaque background, with its tint laid over that', () => {
+    // The row sticks at the top while the rows scroll under it. Its only
+    // background was a 40 % tint, so a scrolled row was drawn through the names.
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={[{ id: '1', name: 'Bus1', v: 1.025 }]}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+      />,
+    );
+    const heading = screen.getByRole('columnheader', { name: /idx/ }).closest('[role="row"]');
+    const classes = (heading?.className ?? '').split(/\s+/);
+    expect(classes).toContain('sticky');
+    expect(classes).toContain('bg-background');
+    // No see-through colour as the row's own background: the tint is a layer.
+    expect(classes.filter((name) => /^bg-.*\/\d+$/.test(name))).toEqual([]);
+    expect(classes).toContain('before:bg-muted/40');
+  });
+});
+
 describe('<DataGrid /> — accessible name', () => {
   it('is a table named by ariaLabel, with rows and the heading row inside it', () => {
     render(

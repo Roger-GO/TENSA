@@ -159,8 +159,9 @@ export function SweepProgressPanel() {
         className="border-border max-h-32 overflow-y-auto rounded border text-xs"
       >
         <table className="w-full">
-          <thead className="bg-muted/40 text-muted-foreground sticky top-0">
-            <tr>
+          {/* Opaque, with the tint on the row: a scrolled row must not show through. */}
+          <thead className="bg-background text-muted-foreground sticky top-0">
+            <tr className="bg-muted/40">
               <th className="px-2 py-1 text-left">#</th>
               <th className="px-2 py-1 text-left">Value</th>
               <th className="px-2 py-1 text-left">Converged</th>

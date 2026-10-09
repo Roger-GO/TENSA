@@ -425,8 +425,9 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
       ) : (
         <div className="overflow-auto">
           <table className="w-full text-xs">
-            <thead className="bg-muted/40 text-muted-foreground sticky top-0">
-              <tr>
+            {/* Opaque, with the tint on the row: a scrolled row must not show through. */}
+            <thead className="bg-background text-muted-foreground sticky top-0">
+              <tr className="bg-muted/40">
                 <th
                   scope="col"
                   className="px-0 py-0 text-left font-medium"

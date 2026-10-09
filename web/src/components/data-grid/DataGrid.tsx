@@ -1085,7 +1085,11 @@ function Header<Row>({ columns, sort, onHeaderClick, testId }: HeaderProps<Row>)
     <div
       role="row"
       className={cn(
-        'border-border bg-muted/40 text-muted-foreground sticky top-0 z-10',
+        // The row stays put while the rows under it scroll, so it has to hide
+        // them: the surface colour, with the tint of a header laid over it. The
+        // tint alone is see-through, and a scrolled row showed through the names.
+        'border-border bg-background text-muted-foreground sticky top-0 z-10',
+        'before:bg-muted/40 before:pointer-events-none before:absolute before:inset-0 before:-z-10',
         'flex items-center border-b text-[11px] font-medium',
       )}
     >
