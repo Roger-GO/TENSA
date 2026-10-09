@@ -272,10 +272,14 @@ export function useGridEditing<Row>(target: GridEditTarget<Row>): GridEditing<Ro
   // param the request carried (``settle`` sends M).
   const confirmTyped = useCallback(
     (edit: CellEdit<Row>) =>
-      announceEdit(modelOf(edit.row), idxOf(edit.row), [
-        edit.column.edit?.param ?? edit.column.key,
-      ]),
-    [modelOf, idxOf],
+      announceEdit(
+        modelOf(edit.row),
+        idxOf(edit.row),
+        [edit.column.edit?.param ?? edit.column.key],
+        // Edit mode writes a controller's parameter to the copy of the case.
+        route === 'clone' ? 'copy' : 'system',
+      ),
+    [modelOf, idxOf, route],
   );
 
   const dismissError = useCallback(() => setError(null), []);

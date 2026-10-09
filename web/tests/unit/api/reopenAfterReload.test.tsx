@@ -193,8 +193,11 @@ describe('useReopenAfterReload', () => {
       'POST /api/sessions/s-new/elements',
       'PUT /api/sessions/s-new/elements/Bus/1',
     ]);
+    // By the name of the case, and with what else came back: the layout.
     expect(success).toHaveBeenCalledWith('Edits restored', {
-      description: 'The page was reloaded. 3 changes replayed onto a fresh copy of the case.',
+      description:
+        'The page was reloaded. 3 changes replayed onto ieee14.raw. The diagram is as you arranged it: its layout saves by itself beside the case file.',
+      duration: 10_000,
     });
     // The journal is the one the tab had: Undo, the unsaved-work guard and a
     // later loss of the session go on from it.
@@ -437,7 +440,7 @@ describe('useReopenAfterReload', () => {
         'Some edits are not restored yet',
         expect.objectContaining({
           description:
-            'Restored 2 of 3 changes onto a fresh copy of the case before the server stopped answering. Reload the page now to restore them all.',
+            'Restored 2 of 3 changes onto ieee14.raw before the server stopped answering. Reload the page now to restore them all.',
         }),
       );
       // The page has what its session holds, and the tab what the user had.

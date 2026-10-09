@@ -87,7 +87,8 @@ function changeCount(n: number): string {
  * nothing: the user lost nothing, so there is nothing to report.
  *
  * ``target`` completes "replayed onto ...", and ``why`` says what made a replay
- * necessary: the session expired, or the page was reloaded.
+ * necessary: the session expired, or the page was reloaded. ``also`` is a sentence
+ * about what else came back, said only when every edit did.
  *
  * A replay the server refused has lost the changes after the refusal. One that
  * got no answer has not (``replayEditsInto``), and the notice says how to get
@@ -98,13 +99,19 @@ export function reportReplay(
   entries: readonly JournalEntry[],
   target: string,
   why = 'The session expired.',
+  also?: string,
 ): void {
   const total = entries.filter(isWorkOp).length;
   if (outcome.error === null) {
     if (total === 0) return;
-    toast.success('Edits restored', {
-      description: `${why} ${changeCount(total)} replayed onto ${target}.`,
-    });
+    const replayed = `${why} ${changeCount(total)} replayed onto ${target}.`;
+    toast.success(
+      'Edits restored',
+      also === undefined
+        ? { description: replayed }
+        : // Three sentences: more than the default time to read.
+          { description: `${replayed} ${also}`, duration: 10_000 },
+    );
     return;
   }
   if (pageIsLeaving()) return;

@@ -21,6 +21,11 @@
  * them as what they are, per-unit set-points on the system base: labelled MW
  * they read 9.670 where the diagram showed 967.0 MW (Kundur). They can be
  * changed in the table, before the case has been run.
+ *
+ * The headings say which is which ("set-point", "solved"). With the display
+ * units on Actual the only active power that can be typed is still ``p0`` in
+ * per unit, beside a "P (MW)" that reads a dash before a run, and a user who
+ * meant to set the active power had to guess which of the two to edit.
  */
 import { useMemo } from 'react';
 import { DataGrid, type ColumnConfig } from './DataGrid';
@@ -60,9 +65,9 @@ const COLUMNS: ColumnConfig<LoadRow>[] = [
   { key: 'bus', label: 'bus', minWidth: 56, accessor: (r) => r.bus },
   {
     key: 'p0',
-    label: 'p0 (pu)',
+    label: 'p0 set-point (pu)',
     title: `Active power set-point. ${SET_POINT_TITLE}`,
-    minWidth: 84,
+    minWidth: 148,
     numeric: true,
     format: formatParamValue,
     accessor: (r) => r.p0,
@@ -70,9 +75,9 @@ const COLUMNS: ColumnConfig<LoadRow>[] = [
   },
   {
     key: 'q0',
-    label: 'q0 (pu)',
+    label: 'q0 set-point (pu)',
     title: `Reactive power set-point. ${SET_POINT_TITLE}`,
-    minWidth: 84,
+    minWidth: 148,
     numeric: true,
     format: formatParamValue,
     accessor: (r) => r.q0,
@@ -80,17 +85,17 @@ const COLUMNS: ColumnConfig<LoadRow>[] = [
   },
   {
     key: 'p',
-    label: 'P (MW)',
+    label: 'P solved (MW)',
     title: CONSUMPTION_TITLE,
-    minWidth: 84,
+    minWidth: 124,
     numeric: true,
     accessor: (r) => r.p,
   },
   {
     key: 'q',
-    label: 'Q (MVAr)',
+    label: 'Q solved (MVAr)',
     title: CONSUMPTION_TITLE,
-    minWidth: 92,
+    minWidth: 136,
     numeric: true,
     accessor: (r) => r.q,
   },

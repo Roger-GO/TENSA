@@ -12,6 +12,9 @@
  *   it is drawn.
  * - the modal closes itself a beat after a save, and that beat never
  *   closes a modal opened since.
+ * - it opens on a name made from the open case's, Enter in the name saves,
+ *   and a save says which file is still being edited, with a button that
+ *   opens the copy.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -27,6 +30,8 @@ import { useCaseStore } from '@/store/case';
 import { BLANK_CASE_KEY, useDraftsStore } from '@/store/drafts';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { ProblemDetails, TopologySummary } from '@/api/types';
+import { stillEditing, suggestedCopyName } from '@/lib/savedCopy';
+import { toast } from '@/lib/toast';
 import { startBeatClock } from '../../helpers/beatClock';
 
 const postSpy = vi.fn();
@@ -101,6 +106,7 @@ beforeEach(() => {
     diagramLayout: null,
     pendingDependents: [],
     cloneInitialized: false,
+    savedCopy: null,
   });
 });
 
@@ -119,6 +125,165 @@ function Owner() {
     </>
   );
 }
+
+describe('<SaveSystemDialog /> — the name, Enter, and which file is edited after', () => {
+  const WSCC9 = { primaryPath: parseWorkspacePath('cases/wscc9.xlsx'), addfiles: [] };
+  const successSpy = () => vi.spyOn(toast, 'success').mockReturnValue('id');
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('opens on a name made from the open case, selected, so typing replaces it', async () => {
+    // It opened on "my-system" whatever was open.
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    const name = screen.getByTestId('save-filename') as HTMLInputElement;
+    expect(name).toHaveValue('wscc9-copy');
+    expect(screen.getByText(/wscc9-copy\.xlsx/)).toBeInTheDocument();
+    // The focus is on the name, with all of it selected.
+    expect(name).toHaveFocus();
+    expect([name.selectionStart, name.selectionEnd]).toEqual([0, 'wscc9-copy'.length]);
+    await user.keyboard('walk');
+    expect(name).toHaveValue('walk');
+  });
+
+  it('starts each opening on the name of the case open then', async () => {
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.clear(screen.getByTestId('save-filename'));
+    await user.type(screen.getByTestId('save-filename'), 'something-else');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    act(() =>
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] },
+      }),
+    );
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(screen.getByTestId('save-filename')).toHaveValue('kundur_full-copy');
+  });
+
+  it('names a system that has no file "my-system"', () => {
+    expect(suggestedCopyName(null)).toBe('my-system');
+    expect(suggestedCopyName({ primaryPath: null, addfiles: [], blank: true })).toBe('my-system');
+    expect(suggestedCopyName(WSCC9)).toBe('wscc9-copy');
+  });
+
+  it('saves on Enter in the name', async () => {
+    // Enter did nothing: the dialog had no form.
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    nextPost = () => Promise.resolve({ filename: 'wscc9-ux-walk.xlsx', bytes_written: 1024 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.keyboard('wscc9-ux-walk{Enter}');
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy.mock.calls[0]).toEqual([
+      '/sessions/test-session-id/save',
+      { filename: 'wscc9-ux-walk.xlsx', format: 'xlsx', overwrite: false },
+    ]);
+    await screen.findByText(/Wrote 1024 bytes/);
+    // And says so beside the name, since nothing else on a form does.
+    expect(screen.getByText(/Enter saves\./)).toBeInTheDocument();
+  });
+
+  it('says after a save which file is still being edited, and opens the copy when asked', async () => {
+    // The app goes on with the case it had open, and said nothing of it: a
+    // user who took Save as for a move to the new file could not tell.
+    const success = successSpy();
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    nextPost = () => Promise.resolve({ filename: 'wscc9-ux-walk.xlsx', bytes_written: 1024 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+    const [title, said] = success.mock.calls[0] as [
+      string,
+      { description: string; duration: number; action: { label: string; onClick: () => void } },
+    ];
+    expect(title).toBe('Saved as wscc9-ux-walk.xlsx');
+    expect(said.description).toBe(
+      'You are still editing wscc9.xlsx: what you change next goes there, not into the copy.',
+    );
+    // Long enough to read and to reach the button.
+    expect(said.duration).toBeGreaterThanOrEqual(10_000);
+    expect(said.action.label).toBe('Open the copy');
+    // The Project tab goes on saying it once the notice is gone.
+    expect(useCaseStore.getState().savedCopy).toBe('wscc9-ux-walk.xlsx');
+
+    postSpy.mockClear();
+    nextPost = () => Promise.resolve({});
+    act(() => said.action.onClick());
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy.mock.calls[0]).toEqual([
+      '/sessions/test-session-id/case',
+      { primary_path: 'wscc9-ux-walk.xlsx', addfiles: null },
+    ]);
+    await waitFor(() =>
+      expect(useCaseStore.getState().selection?.primaryPath).toBe('wscc9-ux-walk.xlsx'),
+    );
+    expect(useCaseStore.getState().savedCopy).toBeNull();
+  });
+
+  it('takes the notice down when another case is opened, where it no longer holds', async () => {
+    successSpy();
+    const dismiss = vi.spyOn(toast, 'dismiss');
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(useCaseStore.getState().savedCopy).toBe('my-system.xlsx'));
+    dismiss.mockClear();
+
+    act(() =>
+      useCaseStore
+        .getState()
+        .setCase({ primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] }),
+    );
+    expect(dismiss).toHaveBeenCalledWith('saved-copy');
+  });
+
+  it('tells a system built here that it has no file of its own', () => {
+    expect(stillEditing(null)).toBe(
+      'The system you built is still the one open here, with no file of its own: what you change next is not in the copy unless you save again.',
+    );
+  });
+
+  it('says nothing of a copy when the save was over the open file itself', async () => {
+    const success = successSpy();
+    const user = userEvent.setup();
+    useCaseStore.setState({ selection: WSCC9 });
+    nextPost = () => Promise.resolve({ filename: 'cases/wscc9.xlsx', bytes_written: 2048 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-confirm'));
+    await screen.findByText(/Wrote 2048 bytes/);
+    expect(success).not.toHaveBeenCalled();
+    expect(useCaseStore.getState().savedCopy).toBeNull();
+  });
+
+  it('says the case file is not changed and that its layout saves by itself', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(
+      'The case file you opened is not changed, and it stays the one you are editing',
+    );
+    expect(dialog).toHaveTextContent(
+      'the layout of the case you have open saves by itself as you move things',
+    );
+  });
+});
 
 describe('<SaveSystemDialog />', () => {
   it('clicking the trigger opens the modal with the xlsx default + filename preview', async () => {

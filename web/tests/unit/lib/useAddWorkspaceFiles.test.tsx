@@ -498,7 +498,8 @@ describe('useAddWorkspaceFiles', () => {
         actionLabelled(warning, 'Replace')?.onClick();
         await Promise.resolve();
       });
-      expect(success).toHaveBeenLastCalledWith('Replaced 2 files in the workspace.', {
+      // (The notice after it, once the pair has loaded, is that the case is open.)
+      expect(success).toHaveBeenCalledWith('Replaced 2 files in the workspace.', {
         description: 'x.raw and x.dyr',
       });
       expect(loadCase.mock.calls[0]?.[0]).toEqual({ sessionId: 's1', request: pair });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -16,6 +16,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useLayoutStore } from '@/store/layout';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
+import { useOpenCase } from '@/lib/openCase';
 import { baseName } from '@/lib/paths';
 import { requestResetRun } from '@/lib/resetRunRequest';
 import { useAddComponent } from '@/lib/useAddComponent';
@@ -34,7 +35,10 @@ import type { TopologySummary } from '@/api/types';
  *   `ChangeCaseConfirmDialog` (R18: this is the appropriate use of a
  *   modal — destructive confirmation). Add element opens the Add element
  *   panel; while nothing can be added, it is greyed out and the card says
- *   why under it.
+ *   why under it. After Save system as wrote a copy, the card says which
+ *   file is still being edited and has a button that opens the copy; and
+ *   whenever another case is opened the card is scrolled back into view,
+ *   since the row that opened it may be far down the list under it.
  *
  * "Change case" is disabled while `pflow.isRunning === true` (avoids
  * tearing down a session mid-RPC). A tooltip explains the disabled
@@ -80,15 +84,57 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
   const { blockedReason: addBlockedReason, lockedByRun } = useAddComponent();
 
   const isBlank = selection.blank === true;
+  const openName = isBlank || !selection.primaryPath ? null : baseName(selection.primaryPath);
+  // The copy Save system as wrote, while this is still the case it was made of.
+  const savedCopy = useCaseStore((s) => s.savedCopy);
+  const { openCase, isPending: opening } = useOpenCase();
+  // A case opened from a row far down the Project tab leaves this card, which
+  // is the one place that names the loaded case, scrolled out of view.
+  const header = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    header.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [selection.primaryPath, isBlank]);
   return (
     <div className={cn('flex flex-col gap-3 p-3')}>
-      <div className="flex flex-col gap-1.5">
+      <div ref={header} className="flex flex-col gap-1.5">
         <p className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
           {isBlank ? 'New system' : 'Loaded case'}
         </p>
-        <p className="text-foreground truncate font-mono text-sm font-medium">
-          {isBlank ? '— blank —' : selection.primaryPath ? baseName(selection.primaryPath) : ''}
+        <p
+          className="text-foreground truncate font-mono text-sm font-medium"
+          data-testid="case-nav-loaded-name"
+        >
+          {isBlank ? '— blank —' : (openName ?? '')}
         </p>
+        {savedCopy !== null ? (
+          <div
+            role="status"
+            data-testid="case-nav-saved-copy"
+            className="border-border bg-muted/30 flex flex-col items-start gap-1.5 rounded-[var(--radius-sm)] border p-2"
+          >
+            <p className="text-foreground text-[11px] leading-snug">
+              A copy was saved as <span className="font-mono">{baseName(savedCopy)}</span>. You are
+              still editing{' '}
+              {openName === null ? (
+                'the system you built here'
+              ) : (
+                <span className="font-mono">{openName}</span>
+              )}
+              .
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={opening}
+              onClick={() => openCase(savedCopy)}
+              data-testid="case-nav-open-saved-copy"
+              className="h-6 max-w-full px-2 text-[11px]"
+            >
+              <span className="truncate">Open {baseName(savedCopy)}</span>
+            </Button>
+          </div>
+        ) : null}
         {selection.addfiles.length > 0 ? (
           <div className="flex flex-col gap-0.5">
             <p className="text-muted-foreground text-xs">Addfiles</p>

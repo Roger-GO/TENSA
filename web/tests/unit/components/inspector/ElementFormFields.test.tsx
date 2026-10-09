@@ -285,7 +285,12 @@ describe('<ElementFormFields />', () => {
     await waitFor(() => expect(toastMock.success).toHaveBeenCalledTimes(1));
     expect(toastMock.success).toHaveBeenCalledWith(
       'Changed Ka of EXST1 EXST1_1',
-      expect.objectContaining({ description: 'Undo (Ctrl+Z or Edit > Undo) takes it back.' }),
+      expect.objectContaining({
+        // Edit mode writes to the copy of the case, and the notice says so.
+        description: expect.stringMatching(
+          /^Undo \(Ctrl\+Z or Edit > Undo\) takes it back\. It is kept in a copy of the case, .* the file you opened is not changed\./,
+        ),
+      }),
     );
   });
 
@@ -512,6 +517,37 @@ describe('<ElementFormFields />', () => {
       });
       await waitFor(() => expect(screen.queryByText('1.05')).not.toBeInTheDocument());
       expect(screen.getByText('0.92')).toBeInTheDocument();
+    });
+  });
+
+  describe('a power set in per unit of the system base', () => {
+    // With the display units on Actual the Inspector still edits p0 in per
+    // unit, and showed what that is in MW only in the form that adds a load.
+    it('shows what p0 comes to in MW beside it, at rest, whatever the display units', () => {
+      mockTopology = { ...topology(), base_mva: 100 };
+      useUnitsStore.setState({ mode: 'actual' });
+      select('load', 'PQ1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.getByTestId('inspector-equivalent-p0')).toHaveTextContent('= 50 MW');
+      // The bus the load is on is no power, and has no such line.
+      expect(screen.queryByTestId('inspector-equivalent-bus')).toBeNull();
+      // And the hint says which unit is typed.
+      expect(screen.getByTestId('inspector-edit-hint')).toHaveTextContent(
+        'set in per unit of the system base, whatever the display units',
+      );
+    });
+
+    it('has no MW to show for a case that gives no system base, or for another element', () => {
+      select('load', 'PQ1');
+      const view = render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId('inspector-equivalent-p0')).toBeNull();
+      view.unmount();
+
+      mockTopology = { ...topology(), base_mva: 100 };
+      select('bus', '1');
+      render(withQueryClient(<ElementFormFields />));
+      expect(screen.queryByTestId(/^inspector-equivalent-/)).toBeNull();
+      expect(screen.getByTestId('inspector-edit-hint')).not.toHaveTextContent('system base');
     });
   });
 });

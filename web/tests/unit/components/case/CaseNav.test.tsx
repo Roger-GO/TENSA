@@ -9,7 +9,7 @@
  * slices are reset between tests to avoid cross-test contamination.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -308,5 +308,68 @@ describe('<CaseNav />', () => {
     expect(screen.getByTestId('add-element-blocked')).toHaveTextContent(
       'The case is still loading.',
     );
+  });
+
+  describe('the case that is being edited', () => {
+    it('says which file is still edited after a copy was saved, and opens the copy', async () => {
+      // Save system as writes a copy and stays on the open case, which only
+      // the notice of the save said, for a few seconds.
+      const user = userEvent.setup();
+      seedLoadedCase();
+      useCaseStore.setState({ savedCopy: 'ieee14-walk.xlsx' });
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({})));
+      const { Wrapper } = makeWrapper();
+      render(<CaseNav />, { wrapper: Wrapper });
+
+      const note = screen.getByTestId('case-nav-saved-copy');
+      expect(note).toHaveTextContent(
+        'A copy was saved as ieee14-walk.xlsx. You are still editing ieee14.raw.',
+      );
+      await user.click(within(note).getByRole('button', { name: 'Open ieee14-walk.xlsx' }));
+
+      await waitFor(() =>
+        expect(useCaseStore.getState().selection?.primaryPath).toBe('ieee14-walk.xlsx'),
+      );
+      const load = fetchSpy.mock.calls.find(([url]) => String(url).endsWith('/case'));
+      expect(load).toBeDefined();
+      // It is the loaded case now, and no longer a copy of it.
+      expect(screen.getByTestId('case-nav-loaded-name')).toHaveTextContent('ieee14-walk.xlsx');
+      expect(screen.queryByTestId('case-nav-saved-copy')).toBeNull();
+    });
+
+    it('has no such note for a case no copy was saved of', () => {
+      seedLoadedCase();
+      fetchSpy.mockImplementation(() => new Promise(() => {}));
+      const { Wrapper } = makeWrapper();
+      render(<CaseNav />, { wrapper: Wrapper });
+      expect(screen.queryByTestId('case-nav-saved-copy')).toBeNull();
+    });
+
+    it('scrolls the name of the loaded case into view when another case is opened', () => {
+      // A case opened from a row far down the Project tab left the one place
+      // that names the loaded case scrolled out of view.
+      const scrolled = vi.fn();
+      const before = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrolled;
+      try {
+        seedLoadedCase();
+        fetchSpy.mockImplementation(() => new Promise(() => {}));
+        const { Wrapper } = makeWrapper();
+        render(<CaseNav />, { wrapper: Wrapper });
+        scrolled.mockClear();
+
+        act(() =>
+          useCaseStore
+            .getState()
+            .setCase({ primaryPath: parseWorkspacePath('kundur_full.xlsx'), addfiles: [] }),
+        );
+        expect(scrolled).toHaveBeenCalledTimes(1);
+        expect(scrolled.mock.instances[0]).toContainElement(
+          screen.getByTestId('case-nav-loaded-name'),
+        );
+      } finally {
+        Element.prototype.scrollIntoView = before;
+      }
+    });
   });
 });

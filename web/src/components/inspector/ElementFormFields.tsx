@@ -23,6 +23,7 @@ import { findTopologyEntry } from '@/lib/topology';
 import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
+import { systemBaseEquivalent } from '@/components/elements/elementHelp';
 import { runLockNotice } from '@/lib/runLock';
 import { UNDO } from '@/lib/undoWording';
 import { useReloadDiscardsEdits, useResetRunAction } from '@/lib/useResetRunAction';
@@ -139,7 +140,7 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
           const applied = resp.new_value ?? next;
           setCommitted(applied);
           setDraft(String(applied));
-          announceEdit(model, idx, [param]);
+          announceEdit(model, idx, [param], 'copy');
         },
         onError: (err) => {
           // Revert the draft to the last committed value + surface the banner.
@@ -251,6 +252,10 @@ function isIdentifierParam(key: string, meta: TopologyParamMeta | undefined): bo
 const EMPTY_OVERRIDES: Readonly<Record<string, ParamValue>> = {};
 
 const EDIT_HINT = 'Click the pencil beside a value to change it.';
+const POWER_EDIT_HINT =
+  'The powers here (p0, q0, the limits) are set in per unit of the system base, whatever the display units; the line under each is what it comes to in MW or MVAr. Click the pencil beside a value to change it.';
+/** The models whose set-points are powers on the system base (`systemBaseEquivalent`). */
+const SET_IN_SYSTEM_PU: ReadonlySet<string> = new Set(['PQ', 'PV', 'Slack']);
 const BUS_EDIT_HINT =
   'vmin and vmax are the limits this bus is judged on. Click the pencil beside one to change it.';
 const LINE_EDIT_HINT =
@@ -260,6 +265,7 @@ const LINE_EDIT_HINT =
 function editHint(kind: string): string {
   if (kind === 'Bus') return BUS_EDIT_HINT;
   if (kind === 'Line') return LINE_EDIT_HINT;
+  if (SET_IN_SYSTEM_PU.has(kind)) return POWER_EDIT_HINT;
   return EDIT_HINT;
 }
 
@@ -284,6 +290,8 @@ interface PropertiesBodyProps {
   busReading: BusReading | null;
   /** A line's solved loading against its rating, after a power flow. */
   branchReading: BranchReading | null;
+  /** The system base in MVA, for what a per-unit power is in MW; `null` when the case gives none. */
+  baseMva: number | null;
 }
 
 function PropertiesBody({
@@ -296,6 +304,7 @@ function PropertiesBody({
   diffByParam,
   busReading,
   branchReading,
+  baseMva,
 }: PropertiesBodyProps) {
   // Local optimistic mirror so an edited value is reflected immediately
   // without waiting for the topology re-fetch round-trip. It belongs to the
@@ -394,6 +403,9 @@ function PropertiesBody({
           const canCloneEdit = cloneEditable && !isIdentifierField;
           // Static-element edit path (unchanged): per-field EditElementButton.
           const canEditThisField = editable && meta !== undefined && !isIdentifierField;
+          // A power per unit of the system base, in the unit a user thinks in:
+          // at rest too, since the value is typed in pu whatever the display units.
+          const equivalent = systemBaseEquivalent(entry.kind, key, value, { baseMva });
           return (
             <div key={key} className="contents">
               <dt className="text-muted-foreground flex items-center gap-1 font-mono text-xs">
@@ -452,6 +464,14 @@ function PropertiesBody({
                     ) : null}
                   </span>
                 )}
+                {equivalent !== null ? (
+                  <span
+                    data-testid={`inspector-equivalent-${key}`}
+                    className="text-muted-foreground block text-[10px]"
+                  >
+                    {equivalent}
+                  </span>
+                ) : null}
               </dd>
             </div>
           );
@@ -640,6 +660,7 @@ export function ElementFormFields({ className }: ElementFormFieldsProps) {
         diffByParam={diffByParam}
         busReading={busReading}
         branchReading={branchReading}
+        baseMva={topology?.base_mva ?? null}
       />
     </div>
   );

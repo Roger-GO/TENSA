@@ -428,11 +428,22 @@ describe('<LoadsGrid /> editing', () => {
 
   it('labels the set-points per unit, not MW', () => {
     render(<LoadsGrid />);
-    expect(screen.getByTestId('loads-grid-header-p0')).toHaveTextContent('p0 (pu)');
+    expect(screen.getByTestId('loads-grid-header-p0')).toHaveTextContent('p0 set-point (pu)');
     expect(screen.getByTestId('loads-grid-header-p0')).toHaveAttribute(
       'title',
       expect.stringContaining('per unit on the system base'),
     );
+  });
+
+  it('says in the headings which power is typed and which the power flow solved', () => {
+    // With the display units on Actual the only active power that can be typed
+    // is still p0 in per unit, beside a "P (MW)" that reads a dash before a run.
+    render(<LoadsGrid />);
+    const heading = (key: string) => screen.getByTestId(`loads-grid-header-${key}`);
+    expect(heading('p0')).toHaveTextContent('p0 set-point (pu)');
+    expect(heading('q0')).toHaveTextContent('q0 set-point (pu)');
+    expect(heading('p')).toHaveTextContent('P solved (MW)');
+    expect(heading('q')).toHaveTextContent('Q solved (MVAr)');
   });
 });
 

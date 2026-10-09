@@ -253,6 +253,10 @@ test('a reload opens the case again, on whichever tab the sidebar is, with the e
   await editor.press('Enter');
   await expect(limit).toHaveText('1.07');
   await expect(limit).not.toHaveAttribute('data-pending', 'true');
+  // The edit is confirmed with where it is kept: through a reload, not in the file.
+  await expect(toast('Changed vmax of Bus 1')).toContainText(
+    `A reload of the page keeps it, but it is not in ${CASE_WITH_EVENT} until you save the system`,
+  );
 
   await componentsTab(page).click();
   // With a case open the palette says nothing about cases.
@@ -267,7 +271,7 @@ test('a reload opens the case again, on whichever tab the sidebar is, with the e
   await expect(page.getByRole('button', { name: /^Reopen / })).toHaveCount(0);
   // The edit was put back on the case, and the page says so.
   await expect(toast('Edits restored')).toContainText(
-    'The page was reloaded. 1 change replayed onto a fresh copy of the case.',
+    `The page was reloaded. 1 change replayed onto ${CASE_WITH_EVENT}. The diagram is as you arranged it`,
     { timeout: 30_000 },
   );
   await expect(limit).toHaveText('1.07');

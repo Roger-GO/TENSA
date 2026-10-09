@@ -131,6 +131,12 @@ export interface CaseState {
    * (selection-driven side effects) can read the topology synchronously.
    */
   topology: TopologySummary | null;
+  /**
+   * The workspace file Save system as last wrote a copy of this system to, or
+   * `null`. The session goes on editing what it had open, so the Project tab
+   * says so until another case is opened (`setCase` and `clearCase` drop it).
+   */
+  savedCopy: string | null;
   /** Last sidecar layout read, if any. `null` if no sidecar exists yet. */
   layoutSidecar: SidecarLayout | null;
   /**
@@ -219,6 +225,7 @@ export interface CaseState {
   /** Number of undone clone edits re-appliable via redo. */
   cloneRedoDepth: number;
   setCase: (selection: CaseSelection) => void;
+  setSavedCopy: (filename: string | null) => void;
   setLoadingPath: (path: string | null) => void;
   setDragOverrides: (next: DragOverrides) => void;
   clearDragOverrides: () => void;
@@ -272,6 +279,7 @@ export const useCaseStore = create<CaseState>((set) => ({
   selection: null,
   loadingPath: null,
   topology: null,
+  savedCopy: null,
   layoutSidecar: null,
   diagramLayout: null,
   selectedElement: null,
@@ -296,6 +304,7 @@ export const useCaseStore = create<CaseState>((set) => ({
     set({
       selection,
       topology: null,
+      savedCopy: null,
       layoutSidecar: null,
       diagramLayout: null,
       selectedElement: null,
@@ -314,6 +323,7 @@ export const useCaseStore = create<CaseState>((set) => ({
       cloneUndoDepth: 0,
       cloneRedoDepth: 0,
     }),
+  setSavedCopy: (filename: string | null) => set({ savedCopy: filename }),
   setLoadingPath: (path: string | null) => set({ loadingPath: path }),
   setDragOverrides: (next: DragOverrides) => set({ dragOverrides: next }),
   clearDragOverrides: () => set({ dragOverrides: {} }),
@@ -367,6 +377,7 @@ export const useCaseStore = create<CaseState>((set) => ({
     set({
       selection: null,
       topology: null,
+      savedCopy: null,
       layoutSidecar: null,
       diagramLayout: null,
       selectedElement: null,

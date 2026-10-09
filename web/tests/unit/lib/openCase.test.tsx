@@ -72,6 +72,35 @@ describe('useOpenCase', () => {
     );
   });
 
+  it('says which file was opened once it has loaded, and nothing before', async () => {
+    // A copy of the open case draws the same diagram, and the header that
+    // names the loaded case may be scrolled out of view where the row was
+    // clicked: nothing on screen said the click had taken.
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    let finish: (value: unknown) => void = () => {};
+    mutateAsync.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { result } = renderHook(() => useOpenCase());
+    result.current.openCase('cases/wscc9-ux-walk.xlsx');
+    expect(success).not.toHaveBeenCalled();
+    finish({});
+    await waitFor(() => expect(success).toHaveBeenCalledTimes(1));
+    expect(success).toHaveBeenCalledWith('Opened wscc9-ux-walk.xlsx', {
+      // One notice at a time: the next case opened replaces it.
+      id: 'case-opened',
+      description: 'It is the loaded case now, named at the top of the Project tab.',
+    });
+  });
+
+  it('does not say a case was opened when the load failed', async () => {
+    const success = vi.spyOn(toast, 'success').mockReturnValue('id');
+    const error = vi.spyOn(toast, 'error').mockReturnValue('id');
+    mutateAsync.mockRejectedValue(new Error('no such file'));
+    const { result } = renderHook(() => useOpenCase());
+    result.current.openCase('gone.xlsx');
+    await waitFor(() => expect(error).toHaveBeenCalled());
+    expect(success).not.toHaveBeenCalled();
+  });
+
   it('loads the case with the dynamic files it is given, and records them', async () => {
     const { result } = renderHook(() => useOpenCase());
     result.current.openCase('ieee14.raw', ['ieee14.dyr']);

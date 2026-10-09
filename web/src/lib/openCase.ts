@@ -11,6 +11,7 @@ import type { WorkspaceFile, WorkspacePath } from '@/api/types';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { describeError } from '@/lib/describeError';
+import { baseName } from '@/lib/paths';
 import { toast } from '@/lib/toast';
 
 type PrimaryFormat = 'xlsx' | 'raw' | 'json' | 'm';
@@ -25,6 +26,9 @@ export function isPrimaryCase(file: WorkspaceFile): file is WorkspaceFile & {
   if (file.name.endsWith('.layout.json')) return false;
   return true;
 }
+
+/** One notice at a time: a second case opened replaces the first one's. */
+const OPENED_TOAST_ID = 'case-opened';
 
 export interface OpenCase {
   /**
@@ -46,6 +50,10 @@ export interface OpenCase {
  *      opened at this moment.
  *   3. Dispatch the load mutation and mirror the resolved selection into the
  *      case slice once it has loaded.
+ *   4. Say which file was opened. A copy of the open case draws the same
+ *      diagram, and the header that names the loaded case can be scrolled out
+ *      of view in the list the row was clicked in, so nothing else on screen
+ *      says the click took.
  *
  * A click on a file in the saved-cases list or the palette passes no addfiles, so
  * a `.raw` opens without its `.dyr`; a recent case, or files dropped together,
@@ -94,6 +102,10 @@ export function useOpenCase(): OpenCase {
         .then(
           () => {
             setCase({ primaryPath: primary, addfiles });
+            toast.success(`Opened ${baseName(primary)}`, {
+              id: OPENED_TOAST_ID,
+              description: 'It is the loaded case now, named at the top of the Project tab.',
+            });
           },
           (err: unknown) => {
             toast.error(`Load failed: ${describeError(err)}`);

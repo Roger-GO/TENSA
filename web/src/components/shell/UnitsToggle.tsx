@@ -47,7 +47,7 @@ export function UnitsToggle({ className }: UnitsToggleProps) {
       <ToggleGroupItem
         value="actual"
         aria-label="Actual units"
-        title="Actual units: bus voltage in kV where the case gives its rated voltage, generator speed in Hz of the case's base frequency (60 when the case sets none)"
+        title="Actual units: bus voltage in kV where the case gives its rated voltage, generator speed in Hz of the case's base frequency (60 when the case sets none). It changes what is read, not what is typed: a set-point such as p0 or q0 is still edited in per unit of the system base, with its MW or MVAr shown beside it."
       >
         Actual
       </ToggleGroupItem>

@@ -60,6 +60,15 @@ import { useSessionStore } from '@/store/session';
 const RELOADED = 'The page was reloaded.';
 
 /**
+ * What else a reload of the page keeps of a case file, said with the edits that
+ * were put back: the layout is written beside the file at every move, so the
+ * diagram comes back as it was arranged, and a user who has just placed things
+ * should not have to look to find out.
+ */
+const LAYOUT_KEPT =
+  'The diagram is as you arranged it: its layout saves by itself beside the case file.';
+
+/**
  * Take a reopening that failed with `err`, and say why in the words of its
  * notice. A refusal of the server ends it: the mark is dropped, and the page is
  * as on a first visit. A request that got no answer (the connection, a timeout)
@@ -116,11 +125,11 @@ export function useReopenAfterReload(): void {
     const lost =
       journal !== null && !journal.replayable && (journal.replaced || hadUnsavedWork(journal));
     // Put the journal back as the tab kept it, and its edits into the session.
-    const restoreEdits = async (target: string): Promise<void> => {
+    const restoreEdits = async (target: string, also?: string): Promise<void> => {
       if (journal === null || entries.length === 0) return;
       useEditJournalStore.setState({ ...journal, entries: [...entries] });
       const outcome = await replayEditsInto(sessionId, queryClient, entries);
-      reportReplay(outcome, entries, target, RELOADED);
+      reportReplay(outcome, entries, target, RELOADED, also);
     };
 
     void (async () => {
@@ -192,7 +201,9 @@ export function useReopenAfterReload(): void {
         });
         return;
       }
-      await restoreEdits('a fresh copy of the case');
+      // By name: a copy saved under another name may sit beside it, and the
+      // edits went into the case that was open, not into the copy.
+      await restoreEdits(name, LAYOUT_KEPT);
     })();
     // ``loadCase`` is left out: the mutation object is new at every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

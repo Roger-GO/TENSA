@@ -227,4 +227,14 @@ describe('<GeneratorsGrid /> reactive limits', () => {
     expect(limitCells('pv-2')).toEqual(['—', '—', '—']);
     expect(limitCells('slack-1')[2]).toBe('Within limits');
   });
+
+  it('says in the headings which values are set-points and which the power flow solved', () => {
+    mockTopology = TOPOLOGY;
+    render(<GeneratorsGrid />);
+    const heading = (key: string) => screen.getByTestId(`generators-grid-header-${key}`);
+    expect(heading('p0')).toHaveTextContent('p0 set-point (pu)');
+    expect(heading('v0')).toHaveTextContent('v0 set-point (pu)');
+    expect(heading('p')).toHaveTextContent('P solved (MW)');
+    expect(heading('q')).toHaveTextContent('Q solved (MVAr)');
+  });
 });
