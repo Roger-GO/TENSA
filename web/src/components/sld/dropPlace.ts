@@ -56,6 +56,7 @@ import {
   BAR_THICKNESS,
   RUN_CLEARANCE,
   SLIDE_CLEARANCE,
+  grown,
   type ConnectionEdge,
   type ConnectionLayout,
   type ConnectionNode,
@@ -221,15 +222,6 @@ function crosses(a: Point, b: Point, rect: Rect): boolean {
     within(b[0] - a[0], rect.left - a[0], rect.right - a[0]) &&
     within(b[1] - a[1], rect.top - a[1], rect.bottom - a[1])
   );
-}
-
-function grown(rect: Rect, across: number, down: number = across): Rect {
-  return {
-    left: rect.left - across,
-    right: rect.right + across,
-    top: rect.top - down,
-    bottom: rect.bottom + down,
-  };
 }
 
 function moved(rect: Rect, dx: number, dy: number): Rect {

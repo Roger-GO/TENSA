@@ -16,7 +16,7 @@
  *
  * Pure: nothing read but the arguments.
  */
-import { distanceToRun, lengthInside, type Rect } from '../connections';
+import { distanceToRun, grown, lengthInside, type Rect } from '../connections';
 
 type At = readonly [number, number];
 
@@ -85,13 +85,6 @@ function boxOf(corners: readonly At[]): Rect {
     bottom: Math.max(...ys),
   };
 }
-
-const grown = (box: Rect, by: number): Rect => ({
-  left: box.left - by,
-  right: box.right + by,
-  top: box.top - by,
-  bottom: box.bottom + by,
-});
 
 /** Whether two boxes reach into each other; two that only touch do not. */
 const meet = (a: Rect, b: Rect): boolean =>

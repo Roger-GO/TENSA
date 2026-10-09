@@ -95,6 +95,7 @@ import {
   TRANSFORMER_SYMBOL_SIZE,
   distanceToRun,
   faceSpan,
+  grown,
   layoutConnections,
   runsIn,
   simplifyRoute,
@@ -598,14 +599,14 @@ class Frontier {
   push(cost: number, ahead: number, state: number): void {
     if (this.pushed === this.keys.length) {
       const room = 2 * this.keys.length;
-      const grown = <T extends Float64Array | Int32Array>(held: T, made: T): T => {
+      const larger = <T extends Float64Array | Int32Array>(held: T, made: T): T => {
         made.set(held);
         return made;
       };
-      this.keys = grown(this.keys, new Float64Array(room));
-      this.states = grown(this.states, new Int32Array(room));
-      this.costs = grown(this.costs, new Float64Array(room));
-      this.heap = grown(this.heap, new Int32Array(room));
+      this.keys = larger(this.keys, new Float64Array(room));
+      this.states = larger(this.states, new Int32Array(room));
+      this.costs = larger(this.costs, new Float64Array(room));
+      this.heap = larger(this.heap, new Int32Array(room));
     }
     const entry = this.pushed;
     this.pushed += 1;
@@ -679,16 +680,6 @@ function cellsOf(rect: Rect): number[] {
   const [r0, r1] = [Math.floor(rect.top / SYMBOL_CELL), Math.floor(rect.bottom / SYMBOL_CELL)];
   for (let c = c0; c <= c1; c += 1) for (let r = r0; r <= r1; r += 1) keys.push(c * 65_536 + r);
   return keys;
-}
-
-/** `rect` with `by` more room on every side. */
-function grown(rect: Rect, by: number): Rect {
-  return {
-    left: rect.left - by,
-    right: rect.right + by,
-    top: rect.top - by,
-    bottom: rect.bottom + by,
-  };
 }
 
 /** The box `node` is taken to have: its bar and the strip its label hangs in for a bus. */

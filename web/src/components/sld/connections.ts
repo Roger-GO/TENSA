@@ -90,6 +90,7 @@
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
+import { clamp } from '@/lib/clamp';
 import type { Side } from './sides';
 
 /** A point on the canvas, `[x, y]`. */
@@ -842,21 +843,16 @@ export function onOwnSymbol(
   box: Rect,
   room: number = OWN_SYMBOL_ROOM,
 ): 'through' | 'along' | 'beside' | null {
-  const grown = (by: number): Rect => ({
-    left: box.left - by,
-    right: box.right + by,
-    top: box.top - by,
-    bottom: box.bottom + by,
-  });
+  const around = (by: number): Rect => grown(box, by);
   // As far as a first run that leaves at the least angle stays within `room`.
   const flat = room / Math.sin((MEET_ANGLE * Math.PI) / 180) + EPS;
   for (let k = 1; k < points.length; k += 1) {
     const [a, b] = [points[k - 1]!, points[k]!];
-    if (lengthInside(a, b, grown(-EPS)) > 0) return 'through';
+    if (lengthInside(a, b, around(-EPS)) > 0) return 'through';
     if (k === 1) {
-      if (lengthInside(a, b, grown(EPS)) > ALONG_EDGE) return 'along';
-      if (lengthInside(a, b, grown(room - EPS)) > flat) return 'along';
-    } else if (lengthInside(a, b, grown(room - EPS)) > 0) return 'beside';
+      if (lengthInside(a, b, around(EPS)) > ALONG_EDGE) return 'along';
+      if (lengthInside(a, b, around(room - EPS)) > flat) return 'along';
+    } else if (lengthInside(a, b, around(room - EPS)) > 0) return 'beside';
   }
   return null;
 }
@@ -955,10 +951,6 @@ function lo(bar: Bar): number {
 
 function hi(bar: Bar): number {
   return bar.cx + bar.half - TAP_INSET - (bar.eastTaken ? TAP_SPACING : 0);
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
 }
 
 /**
@@ -2315,6 +2307,16 @@ export interface Rect {
   top: number;
   right: number;
   bottom: number;
+}
+
+/** `rect` with `across` more room on its left and right and `down` more above and below. */
+export function grown(rect: Rect, across: number, down: number = across): Rect {
+  return {
+    left: rect.left - across,
+    right: rect.right + across,
+    top: rect.top - down,
+    bottom: rect.bottom + down,
+  };
 }
 
 /** The side of the squares `runsIn` sorts the runs into, to find the ones near a box. */

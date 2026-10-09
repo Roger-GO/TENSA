@@ -38,6 +38,7 @@
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
+import { clamp } from '@/lib/clamp';
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
@@ -122,10 +123,6 @@ export interface EditedRoute {
   by: [number, number];
   /** Set where the tap of an upright run was at the tip of its bar and went no further. */
   stopped?: true;
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
 }
 
 /**

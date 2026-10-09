@@ -59,6 +59,7 @@ import {
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
   distanceToRun,
+  grown,
   labelBoxAt,
   onOwnSymbol,
   routeFolds,
@@ -133,16 +134,6 @@ export const HAND_BEND_CLEARANCE = LINE_GAP;
 
 /** Two distances closer than this are the same. */
 const EPS = 0.5;
-
-/** `rect` with `by` more room on every side. */
-function grown(rect: Rect, by: number): Rect {
-  return {
-    left: rect.left - by,
-    right: rect.right + by,
-    top: rect.top - by,
-    bottom: rect.bottom + by,
-  };
-}
 
 /** Whether a run of `points`, from the run `first` to the run `last`, comes within `room` of `rect`. */
 function comesNear(
