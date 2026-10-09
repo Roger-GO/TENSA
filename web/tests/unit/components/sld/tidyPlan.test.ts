@@ -32,6 +32,7 @@ import {
   overlapsOf,
   tidied,
   typicalWidths,
+  withPlan,
   type Diagram,
 } from '../../helpers/diagramStates';
 import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
@@ -426,6 +427,91 @@ describe('a plan for a diagram that is on screen leaves no line worse off', () =
     }
     expect(worseOff(detoured, after, shown)).toEqual([]);
     expect(overlapsOf(after, shown)).toEqual([]);
+  });
+
+  it('routes a line that does not hold afresh however few steps the tidy has', async () => {
+    // The line from bus 9 to bus 14 of IEEE 14 as it opens, which the
+    // checker is made to find on a symbol as it runs now: the one line whose
+    // route does not hold. With steps this few, the rounds that give the
+    // lines a tidy would leave worse off their routes back take all there
+    // are for them. The last one, which routes that line around every
+    // other as it runs, still has steps of its own: the line is not left as
+    // it is drawn for want of them, where routing every line afresh finds
+    // it a way.
+    const first = await opened(IEEE14);
+    const line = first.edges.find((e) => e.source === '9' && e.target === '14')!;
+    const runs = (picture: DrawnDiagram): string =>
+      JSON.stringify(picture.lines.find((l) => l.id === line.id)?.points);
+    const asDrawn = runs(drawnDiagram(first.nodes, drawn(first), { values: false }));
+    const there: Overlap = {
+      kind: 'line-box',
+      a: line.id,
+      b: 'shunt-Shunt_2',
+      detail: 'runs through the symbol',
+    };
+    checker.also = (picture) => (runs(picture) === asDrawn ? [there] : []);
+    try {
+      const graph = { nodes: first.nodes, edges: first.edges };
+      for (const steps of [1_000, 2_000, 4_000]) {
+        const options = { relayout: false, barLengths: first.barLengths, steps };
+        const afresh = planTidy(graph, IEEE14, options);
+        expect(afresh.tidied.unrouted, `${steps} steps, afresh`).toEqual([]);
+        const plan = planTidy(graph, IEEE14, { ...options, shown: { values: false } });
+        expect(plan.refused, `${steps} steps`).toBeUndefined();
+        expect(plan.tidied.unrouted, `${steps} steps`).toEqual([]);
+        expect(plan.left, `${steps} steps`).not.toContain(line.id);
+        expect(plan.tidied.routes.has(line.id), `${steps} steps`).toBe(true);
+      }
+    } finally {
+      checker.also = null;
+    }
+  });
+
+  it('mends a line that has no way round the routes that hold with the plan that had one, though that changes another line', async () => {
+    // IEEE 14 laid out again, with the generator of bus 3 dragged under its
+    // bar. The checker is made to find the line from bus 4 to bus 5 on a
+    // symbol as it runs now, and on another wherever else it runs while the
+    // line from bus 1 to bus 5 runs as it does now: a line that does not
+    // hold, and that can only be mended if that other one gives way.
+    // Routing every line afresh moves both, and sends the line from bus 1
+    // to bus 5 the long way round, which a tidy otherwise never does.
+    const first = await opened(IEEE14);
+    const shown: Shown = { values: false };
+    const dropped = dragged(tidied(first, true, shown), 'generator-3', 30, 111);
+    const [amiss, inTheWay] = ['line-Line_7', 'line-Line_2'];
+    const was = measured(dropped, shown);
+    const runs = (picture: DrawnDiagram, id: string): string =>
+      JSON.stringify(picture.lines.find((l) => l.id === id)?.points);
+    const asDrawn = drawnDiagram(dropped.nodes, drawn(dropped, shown), shown);
+    const on = (symbol: string): Overlap => ({
+      kind: 'line-box',
+      a: amiss,
+      b: symbol,
+      detail: 'runs through the symbol',
+    });
+    checker.also = (picture) => {
+      if (runs(picture, amiss) === runs(asDrawn, amiss)) return [on('shunt-Shunt_2')];
+      return runs(picture, inTheWay) === runs(asDrawn, inTheWay) ? [on('shunt-Shunt_1')] : [];
+    };
+    try {
+      expect(overlapsOf(dropped, shown)).toEqual([
+        `line-box: ${amiss} / shunt-Shunt_2: runs through the symbol`,
+      ]);
+      const plan = planOf(dropped, shown);
+      expect(plan.refused).toBeUndefined();
+      expect(plan.tidied.unrouted).toEqual([]);
+      // The line is on nothing any more, and nothing else is.
+      const after = withPlan(dropped, plan);
+      expect(overlapsOf(after, shown)).toEqual([]);
+      // At the price of the line that was in its way, which no plan that
+      // leaves it where it runs could spare.
+      const now = measured(after, shown);
+      expect(now.get(amiss)!.points).not.toEqual(was.get(amiss)!.points);
+      expect(now.get(inTheWay)!.bends).toBeGreaterThan(was.get(inTheWay)!.bends);
+      expect(plan.left).not.toContain(inTheWay);
+    } finally {
+      checker.also = null;
+    }
   });
 });
 

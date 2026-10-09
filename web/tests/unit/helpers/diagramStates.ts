@@ -25,7 +25,7 @@ import {
   type Picture,
   type PictureOptions,
 } from '@/components/sld/picture';
-import { planTidy } from '@/components/sld/tidyPlan';
+import { planTidy, type TidyPlan } from '@/components/sld/tidyPlan';
 import { arrangeDiagram } from '@/components/sld/useAutoLayout';
 
 /** A diagram as the canvas holds it: the nodes where they stand, and the edges with their routes. */
@@ -86,6 +86,14 @@ export function tidied(
     barLengths: diagram.barLengths,
     shown,
   });
+  return withPlan(diagram, plan);
+}
+
+/**
+ * `diagram` with `plan` put in place, the way the canvas puts a plan of
+ * `planTidy` in place, and `diagram` itself where the plan is refused.
+ */
+export function withPlan(diagram: Diagram, plan: TidyPlan): Diagram {
   if (plan.refused !== undefined) return diagram;
   const at = new Map(plan.nodes.map((n) => [n.id, n.position]));
   const edges = plan.edges.map((edge) => {

@@ -48,6 +48,18 @@
  * does not hold (drawn the plain way for want of a better one, or on
  * something) is made afresh whatever it was.
  *
+ * Mending the routes that do not hold comes before leaving the others as
+ * they are. Those rounds share a part of the steps of a tidy
+ * (`KEEP_STEPS`), and none is made with no steps left for it: a routing
+ * that may take no step finds no line a way. The last of them, which leaves
+ * every route that holds as it is and routes only the rest, has steps of
+ * its own whatever the ones before it took (`LAST_STEPS`). And a plan that
+ * would leave a line that does not hold as it is drawn, where an earlier
+ * plan had found it a way (the routes that stay left it no room, or the
+ * steps ran out), is not taken: the last plan that had a way for it is,
+ * though it changes a line for no gain. A line that stays on something is
+ * worse than one that is longer than it was.
+ *
  * A route that was drawn by hand (`data.bendManual`) is the user's and is
  * not made afresh: it stays as it is drawn (`TidyPlan.byHand`), and the
  * other lines are routed around it. After a re-layout it is brought along
@@ -426,14 +438,6 @@ function planOnce(
   // ---- held to the picture it gives ----
   const overlapsOf = (picture: Picture<ConnectionEdge>, drawnNodes: readonly Node[]): Overlap[] =>
     findOverlaps(drawnDiagram(drawnNodes, picture, shown));
-  /**
-   * What is wrong with the picture the diagram gives with `routes` in
-   * place: what it has drawn over what that it has not now (nothing, for a
-   * plan that leaves no more on each other than there is: a layout that
-   * came with two symbols on each other is tidied all the same), and the
-   * buses whose label is worse off than it is now (left with its name
-   * alone, or without a place by its bar). With them the picture itself.
-   */
   let overlapsNow: Overlap[] | null = null;
   /** What the diagram has drawn over what as it stands, before anything is planned. */
   const drawnOverlaps = (): Overlap[] =>
@@ -441,10 +445,53 @@ function planOnce(
       drawnNow ?? pictureOf(graph.nodes, graph.edges as ConnectionEdge[], shown),
       graph.nodes,
     ));
+  /**
+   * What does not hold in `picture`, which has `overlaps` drawn over each
+   * other, by id: the lines no way was found for, and whatever is on
+   * something or has something on it.
+   */
+  const amissIn = (picture: Picture<ConnectionEdge>, overlaps: readonly Overlap[]): Set<string> => {
+    const amiss = new Set(picture.unrouted);
+    for (const { a, b } of overlaps) {
+      // A box that is drawn on a line (the symbol of a transformer) goes by that line.
+      for (const id of [a, b]) amiss.add(id).add(id.slice(id.indexOf(':') + 1));
+    }
+    return amiss;
+  };
+  // The routes that hold as the diagram draws them now: on nothing, and no
+  // stand-in for a way that was not found. Every other line or transformer
+  // that is not drawn by hand is one to mend: it is drawn the plain way, or
+  // on something.
+  const holds = new Map<string, Point[]>();
+  const toMend: string[] = [];
+  if (drawnNow !== null) {
+    const amiss = amissIn(drawnNow, drawnOverlaps());
+    for (const edge of edges) {
+      if (edge.type === 'stub' || byHand.has(edge.id)) continue;
+      const points = drawnNow.connections.routes.get(edge.id)?.points;
+      if (points === undefined || amiss.has(edge.id)) toMend.push(edge.id);
+      else {
+        holds.set(
+          edge.id,
+          points.map(([x, y]): Point => [x, y]),
+        );
+      }
+    }
+  }
+  /**
+   * What is wrong with the picture the diagram gives with `routes` in
+   * place: what it has drawn over what that it has not now (nothing, for a
+   * plan that leaves no more on each other than there is: a layout that
+   * came with two symbols on each other is tidied all the same), and the
+   * buses whose label is worse off than it is now (left with its name
+   * alone, or without a place by its bar). With them how many of the lines
+   * to mend it leaves unmended (`gone`: still drawn the plain way, or on
+   * something), and the picture itself.
+   */
   let known: Set<string> | null = null;
   const faults = (
     routes: TidyResult['routes'],
-  ): { overlaps: Overlap[]; labels: string[]; picture: Picture<ConnectionEdge> } => {
+  ): { overlaps: Overlap[]; labels: string[]; gone: number; picture: Picture<ConnectionEdge> } => {
     const picture = pictureOf(nodes, alongRoutes(nodes, edges, routes, relayout, byHand), shown);
     const found = overlapsOf(picture, nodes);
     let overlaps: Overlap[] = [];
@@ -457,50 +504,80 @@ function planOnce(
       const label = picture.busLabels.get(bus);
       if (label !== undefined && busLabelLack(label) > busLabelLack(now)) labels.push(bus);
     }
-    return { overlaps, labels, picture };
+    const amiss = toMend.length === 0 ? null : amissIn(picture, found);
+    const gone = amiss === null ? 0 : toMend.filter((id) => amiss.has(id)).length;
+    return { overlaps, labels, gone, picture };
   };
   type Faults = ReturnType<typeof faults>;
-  type Held = { tidied: TidyResult; found: Faults };
+  /**
+   * A plan with what is wrong with its picture. `starved` where the steps
+   * ran out before what is wrong could be mended.
+   */
+  type Held = { tidied: TidyResult; found: Faults; starved?: true };
   // The steps the plans that leave some routes as they are may take, all of
   // them together (below): a part of what routing every line afresh may.
+  // The plan that leaves every route that holds as it is routes the lines
+  // that do not, which no tidy may leave undone: each routing of it has
+  // `least` steps whatever was taken before.
   let spare = (steps ?? TIDY_STEPS) * KEEP_STEPS;
+  const least = (steps ?? TIDY_STEPS) * LAST_STEPS;
   const none = (found: Faults): boolean => found.overlaps.length === 0 && found.labels.length === 0;
   /**
    * The plan that leaves least wrong with its picture, with the routes
    * `stay` left as they are drawn now (none of them, for a plan that makes
-   * every route afresh) and the rest routed around them.
+   * every route afresh) and the rest routed around them. `null` where there
+   * are no steps left to route them with.
    */
-  const heldToPicture = (stay: ReadonlyMap<string, Point[]>): Held => {
+  const heldToPicture = (stay: ReadonlyMap<string, Point[]>): Held | null => {
     /** `made`, with the routes that stay as they are among its routes. */
     const withKept = (made: TidyResult, more?: ReadonlyMap<string, Point[]>): TidyResult =>
       stay.size === 0 && more === undefined
         ? made
         : { ...made, routes: new Map([...made.routes, ...stay, ...(more ?? [])]) };
-    /** The routes made again around `keep`, within the steps that are left for it. */
-    const again = (keep: ReadonlyMap<string, Point[]>, shut = false): TidyResult => {
+    /**
+     * The routes made again around `keep`, within the steps that are left
+     * for it: `null` with none left, since a routing that may take no step
+     * finds no line a way.
+     */
+    const again = (keep: ReadonlyMap<string, Point[]>, shut = false): TidyResult | null => {
       if (stay.size === 0) return route(keep.size === 0 ? undefined : keep, shut);
-      const made = route(keep, shut, Math.max(0, spare));
+      const within = stay.size === holds.size ? Math.max(spare, least) : spare;
+      if (within <= 0) return null;
+      const made = route(keep, shut, within);
       spare -= made.steps;
       return made;
     };
-    const plain = withKept(stay.size === 0 ? tidied : again(stay));
+    const routed = stay.size === 0 ? tidied : again(stay);
+    if (routed === null) return null;
+    const plain = withKept(routed);
     const first = faults(plain.routes);
-    if (none(first)) return { tidied: plain, found: first };
     // The plan that leaves least wrong, of the ones tried: nothing drawn
-    // over anything comes before a label that is as well off as it was.
+    // over anything comes first, then no line left unmended, then a label
+    // that is as well off as it was.
     let best: Held = { tidied: plain, found: first };
-    const offer = (candidate: TidyResult): boolean => {
+    if (none(first) || drawnNow === null) return best;
+    /**
+     * Whether `best` has nothing wrong with its picture, once `other` was
+     * held against it: routes made another way, around `more` as well, or
+     * `null` where there were no steps left to make them.
+     */
+    const offer = (other: TidyResult | null, more?: ReadonlyMap<string, Point[]>): boolean => {
+      if (other === null) {
+        best = { ...best, starved: true };
+        return false;
+      }
+      const candidate = withKept(other, more);
       const found = faults(candidate.routes);
-      const fewer =
-        found.overlaps.length < best.found.overlaps.length ||
-        (found.overlaps.length === best.found.overlaps.length &&
-          found.labels.length < best.found.labels.length);
-      if (fewer) best = { tidied: candidate, found };
-      return none(found);
+      const order = [
+        found.overlaps.length - best.found.overlaps.length,
+        found.gone - best.found.gone,
+        found.labels.length - best.found.labels.length,
+      ];
+      if ((order.find((by) => by !== 0) ?? 0) < 0) best = { tidied: candidate, found };
+      return none(best.found);
     };
-    if (drawnNow === null) return best;
     // With no route through a place where a label stands.
-    if (first.labels.length > 0 && offer(withKept(again(stay, true)))) return best;
+    if (first.labels.length > 0 && offer(again(stay, true))) return best;
     // With the lines of the buses that have a part in it kept as they are
     // drawn now, and with them the bars their length and the symbols of the
     // transformers their places; the others are routed again around those.
@@ -527,7 +604,7 @@ function planOnce(
         );
       }
     }
-    if (keep.size > 0) offer(withKept(again(new Map([...stay, ...keep]), true), keep));
+    if (keep.size > 0) offer(again(new Map([...stay, ...keep]), true), keep);
     return best;
   };
   /** `held` as the plan it is: refused where its picture has something drawn over something else. */
@@ -554,12 +631,13 @@ function planOnce(
     }
     return { ...settled, refused: describeOverlaps(found.overlaps), blamed: [...blamed] };
   };
-  if (drawnNow === null) return planOf(heldToPicture(new Map()));
+  // Every route afresh: there are always the steps for that.
+  const afresh = heldToPicture(new Map())!;
+  if (drawnNow === null) return planOf(afresh);
 
   // ---- and to leaving no line worse off ----
-  // The routes that hold as the diagram draws them now: on nothing, and no
-  // stand-in for a way that was not found. Such a route is given up only
-  // for a better one: no longer, with no more bends and across no more
+  // A route that holds as the diagram draws it now (`holds`) is given up
+  // only for a better one: no longer, with no more bends and across no more
   // lines, and less of one of the three. Where a plan would leave a line
   // worse off, or change it for no gain, the line keeps the route it has
   // and the rest are routed around it; and where a line that stays would be
@@ -569,32 +647,35 @@ function planOnce(
   const linesOf = (picture: Picture<ConnectionEdge>): readonly DrawnLine[] =>
     drawnDiagram(nodes, picture, shown).lines;
   const before = routeMeasures(linesOf(drawnNow));
-  const amiss = new Set(drawnNow.unrouted);
-  for (const { a, b } of drawnOverlaps()) {
-    // A box that is drawn on a line (the symbol of a transformer) goes by that line.
-    for (const id of [a, b]) amiss.add(id).add(id.slice(id.indexOf(':') + 1));
-  }
-  const holds = new Map<string, Point[]>();
-  for (const edge of edges) {
-    const points = drawnNow.connections.routes.get(edge.id)?.points;
-    if (edge.type === 'stub' || byHand.has(edge.id) || amiss.has(edge.id)) continue;
-    if (points !== undefined) {
-      holds.set(
-        edge.id,
-        points.map(([x, y]): Point => [x, y]),
-      );
-    }
-  }
   let stay = new Map<string, Point[]>();
+  // The last plan that may be put in place: nothing drawn over anything
+  // else, and no line that does not hold left as it is that a plan before
+  // it had found a way for. With it the lines it leaves on their routes.
+  let sound: { held: Held; left: string[] } | null = null;
   for (let round = 0; ; round += 1) {
-    const held = heldToPicture(stay);
     const everyOne = stay.size === holds.size;
-    if (held.found.overlaps.length > 0) {
-      // Something would be drawn over something else: with every route that
-      // holds left as it is, or not at all.
-      if (everyOne) return planOf(held);
-      stay = new Map(holds);
-      continue;
+    const held = stay.size === 0 ? afresh : heldToPicture(stay);
+    if (
+      held === null ||
+      held.found.overlaps.length > 0 ||
+      (sound !== null && held.found.gone > sound.held.found.gone) ||
+      (held.starved === true && !everyOne)
+    ) {
+      // No plan to take: there were no steps left to make it with, or to
+      // mend it with; something would be drawn over something else; or a
+      // line that does not hold would stay as it is though a plan before
+      // found it a way (the routes that stay left it none, or the steps ran
+      // out). With every route that holds left as it is, then, which has
+      // steps of its own; and where that is no plan to take either, the
+      // last one that was: a line that stays on something is worse than one
+      // that is changed for no gain. With none such, every plan would draw
+      // something over something else, and the one that was made is refused.
+      if (!everyOne) {
+        stay = new Map(holds);
+        continue;
+      }
+      if (sound !== null) return planOf(sound.held, sound.left);
+      return planOf(held ?? afresh);
     }
     const lines = linesOf(held.found.picture);
     const drawnAs = new Map(lines.map((line) => [line.id, line.points]));
@@ -616,6 +697,7 @@ function planOnce(
       } else if (!stay.has(id) && !betterRoute(now, was)) back.add(id);
     }
     if (back.size === 0) return planOf(held, left);
+    sound = { held, left };
     // The ones that are left on their route stay on it from here on: only
     // the lines that were given a better one are routed again, around the
     // rest, and fewer of them with every round.
@@ -631,12 +713,16 @@ function planOnce(
 /**
  * How many times the lines a tidy would leave worse off are given their
  * routes back and the others routed around them, before every route that
- * holds is left as it is; and how much of the steps of a tidy those rounds
- * may take together. A line that is not reached within them keeps the route
- * it has.
+ * holds is left as it is; how much of the steps of a tidy those rounds may
+ * take together; and how much each routing of the last of them may take at
+ * the least, the one that leaves every route that holds as it is and routes
+ * the rest. A line whose route holds and that is not reached within them
+ * keeps the route it has; one whose route does not hold is not left
+ * without a way for want of steps (`planOnce`).
  */
 const KEEP_ROUNDS = 3;
 const KEEP_STEPS = 1 / 3;
+const LAST_STEPS = 1 / 3;
 
 /** What a route is measured by where a tidy is held to leaving no line worse off. */
 interface RouteMeasure {
