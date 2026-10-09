@@ -21,8 +21,11 @@
  *
  *   open Kundur -> change a value in a table -> Components -> reload -> still
  *   on Components, and Kundur is open again by itself, with its disturbance,
- *   the edit and a notice that says the edit was put back -> Change case ->
- *   reload -> no case is opened for one the user closed
+ *   the edit and a notice that says the edit was put back -> reload, and
+ *   reload again while the case is loading -> Kundur and the edit all the
+ *   same -> reload, and reload again while the edit is being put back -> the
+ *   same again -> Change case -> reload -> no case is opened for one the user
+ *   closed
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`).
  * The unit tests check the tabs and the palette each on their own; this one
@@ -277,6 +280,41 @@ test('a reload opens the case again, on whichever tab the sidebar is, with the e
   // ---- A second reload opens it again, with the same edit --------------------
   await reloadWithCase(page);
   await expect(sidebar).toContainText(/Loaded case\s*kundur_full\.xlsx/, { timeout: 90_000 });
+  await expect(limit).toHaveText('1.07', { timeout: 30_000 });
+
+  // ---- A reload while the case is still on its way back -----------------------
+  // The page that goes takes its requests with it, the load of the case among
+  // them. That is no answer about the case, and the next page opens it.
+  const loading = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      /\/sessions\/[^/]+\/case$/.test(new URL(request.url()).pathname),
+    { timeout: 90_000 },
+  );
+  await page.reload({ waitUntil: 'commit' });
+  await loading;
+  await reloadWithCase(page);
+  await expect(sidebar).toContainText(/Loaded case\s*kundur_full\.xlsx/, { timeout: 90_000 });
+  await expect(limit).toHaveText('1.07', { timeout: 30_000 });
+  await expect(toast('Could not reopen')).toHaveCount(0);
+
+  // ---- And one while the edit is being put back -------------------------------
+  // The request that replays the edit is held, so the reload finds it under
+  // way. The page that goes does not cut what the tab keeps back to the edits
+  // it got through, which here is none.
+  const replayedEdit = /\/api\/sessions\/[^/]+\/elements\/Bus\/1$/;
+  await page.route(replayedEdit, () => {
+    // Never answered: the reload ends it.
+  });
+  const replaying = page.waitForRequest(
+    (request) => request.method() === 'PUT' && replayedEdit.test(new URL(request.url()).pathname),
+    { timeout: 90_000 },
+  );
+  await page.reload({ waitUntil: 'commit' });
+  await replaying;
+  await page.unroute(replayedEdit);
+  await reloadWithCase(page);
+  await expect(toast('Edits restored')).toContainText('1 change replayed', { timeout: 30_000 });
   await expect(limit).toHaveText('1.07', { timeout: 30_000 });
 
   // ---- A case the user closed is not opened by a reload ----------------------
