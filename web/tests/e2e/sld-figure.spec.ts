@@ -36,7 +36,7 @@
  * run's own, so the example cases the other specs open keep their layout.
  */
 import { readFileSync } from 'node:fs';
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 import {
   NEAR,
   dragInDiagram,
@@ -217,11 +217,9 @@ test('the figure is the diagram as it is drawn, and each file is what it says', 
     'Export: a figure of the diagram for a paper (SVG, PDF or PNG), or a PNG of this view',
   );
   await way.click();
-  await expect(page.getByTestId('export-menu-figure')).toHaveText(
-    'Figure for a paper (SVG, PDF, PNG)…',
-  );
+  await expect(page.getByTestId('export-menu-figure')).toHaveText('Figure for a paper…');
   await page.getByTestId('export-menu-figure').click();
-  const dialog = page.getByRole('dialog', { name: 'Figure of the diagram' });
+  const dialog = page.getByRole('dialog', { name: 'Figure for a paper' });
   await expect(dialog).toBeVisible();
 
   // A figure a browser can draw: the preview is a picture, as large as it says.
@@ -451,8 +449,8 @@ test('the choices come back with the case, and the figure follows a move and a s
   await closeFigure(page);
 
   // Reloaded: the dialog opens as it was left, and draws the same figure.
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   await runPowerFlow(page);
   await settled(page);
   await openFigure(page);

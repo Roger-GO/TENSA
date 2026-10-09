@@ -11,7 +11,7 @@
  * loads. `playwright.config.ts` says how to start the substrate. Every test uses a
  * file name of its own, so repeated runs against one workspace do not collide.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, reloadWithCase, type Page } from './fixtures';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
@@ -140,7 +140,10 @@ test('Add files lists the files, asks before replacing one, and refuses what is 
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(3, { timeout: 90_000 });
 });
 
-test('an opened case is listed under Recent, and still is after a reload', async ({ page }) => {
+test('an opened case is listed under Recent, and still is after a reload', async ({
+  page,
+  context,
+}) => {
   const name = uniqueName('recent', '.m');
   await openApp(page);
   // Nothing has been opened in this browser profile yet.
@@ -154,18 +157,23 @@ test('an opened case is listed under Recent, and still is after a reload', async
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(3, { timeout: 90_000 });
   await expect(page.getByTestId(`saved-cases-recent-${name}`)).toBeVisible();
 
-  // A reload starts an empty session, and the list still remembers the case.
-  await page.reload();
-  await expect(page.getByTestId('saved-cases-list')).toBeVisible();
-  const recent = page.getByTestId(`saved-cases-recent-${name}`);
-  await expect(recent).toBeVisible();
-  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(0);
+  // A reload starts an empty session and opens the case again in it, and the
+  // list still remembers the case.
+  await reloadWithCase(page);
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(3, { timeout: 90_000 });
+  await expect(page.getByTestId(`saved-cases-recent-${name}`)).toBeVisible();
 
-  // Opening it from there loads that file. A click before the session exists does
-  // nothing, so click until the case request actually goes out.
+  // Another tab starts with no case, and the same list. Opening the case from
+  // there loads that file. A click before the session exists does nothing, so
+  // click until the case request actually goes out.
+  const other = await context.newPage();
+  await openApp(other);
+  const recent = other.getByTestId(`saved-cases-recent-${name}`);
+  await expect(recent).toBeVisible();
+  await expect(other.getByTestId(/^bus-node-\d+$/)).toHaveCount(0);
   await expect(async () => {
     const [request] = await Promise.all([
-      page.waitForRequest(
+      other.waitForRequest(
         (r) => r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/case'),
         { timeout: 2_000 },
       ),
@@ -173,5 +181,5 @@ test('an opened case is listed under Recent, and still is after a reload', async
     ]);
     expect(request.postDataJSON()).toEqual({ primary_path: name, addfiles: null });
   }).toPass({ timeout: 30_000 });
-  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(3, { timeout: 90_000 });
+  await expect(other.getByTestId(/^bus-node-\d+$/)).toHaveCount(3, { timeout: 90_000 });
 });

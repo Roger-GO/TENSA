@@ -82,7 +82,7 @@ test('rate a line in its table, run PF, and the loading is judged against the ra
     .locator('[data-sonner-toast]')
     .filter({ hasText: 'Changed rate_a of Line Line_1' });
   await expect(confirmation).toBeVisible();
-  await expect(confirmation).toContainText('Undo in the Edit menu takes it back');
+  await expect(confirmation).toContainText('Undo (Ctrl+Z or Edit > Undo) takes it back');
 
   await page.getByTestId('run-pflow-button').click();
   await expect(
@@ -95,7 +95,7 @@ test('rate a line in its table, run PF, and the loading is judged against the ra
   );
 
   // The run has locked the case: the table says so and opens no editor.
-  await expect(page.getByTestId('lines-grid-hint')).toContainText('set up for a run');
+  await expect(page.getByTestId('lines-grid-hint')).toContainText('A run has fixed the system.');
   await page.getByTestId('lines-grid-cell-line-Line_1-x').dblclick();
   await expect(page.getByTestId('lines-grid-editor')).toBeHidden();
 

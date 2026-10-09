@@ -57,7 +57,7 @@
  * Everything is done in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 import {
   dragInDiagram,
   drawing,
@@ -176,9 +176,12 @@ test("IEEE 14: a line moved by hand is the user's, clear of everything, kept by 
   const run = levelRun(before);
 
   // ---- a click picks it ----
-  await expect(page.getByTestId('sld-canvas-hint')).toContainText(
+  // How a line is moved is in the list behind the More of the line above the diagram.
+  await page.getByTestId('sld-canvas-hint-more').click();
+  await expect(page.getByTestId('sld-canvas-hint-full')).toContainText(
     'Click a line or a device connector to move its route by hand',
   );
+  await page.keyboard.press('Escape');
   await clickLine(page, id);
   const bar = page.getByTestId('sld-route-bar');
   await expect(bar).toBeVisible();
@@ -234,8 +237,8 @@ test("IEEE 14: a line moved by hand is the user's, clear of everything, kept by 
   expect((await drawing(page)).edges[id]!.points).toEqual(nudged);
 
   // ---- a reload keeps it ----
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   expect((await settled(page)).edges[id]!.points).toEqual(nudged);
   // Picked from its menu this time, which hands one of its runs the focus of the keys.
   await pickFromMenu(page, id);
@@ -388,8 +391,8 @@ test('IEEE 14: a connector moved by hand cannot be folded onto its symbol, is gi
   await page.waitForTimeout(1_200);
 
   // ---- a reload draws the same connector ----
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   const reopened = await settled(page);
   expect(reopened.nodes['load-PQ_3']).toEqual(dropped.nodes['load-PQ_3']);
   expect(reopened.edges[id]!.points).toEqual(dropped.edges[id]!.points);
@@ -626,8 +629,8 @@ test('WSCC 9: a bend of a line moved by hand is not put on the line beside it, s
   await settled(page);
   expect(await overlapsOnScreen(page)).toEqual([]);
   expect(await labelProblems(page)).toEqual([]);
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   expect((await settled(page)).edges[id]!.points).toEqual(crossed);
   expect(await overlapsOnScreen(page)).toEqual([]);
 });

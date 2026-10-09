@@ -19,7 +19,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { inflateRawSync } from 'node:zlib';
-import { test, expect, type Page } from './fixtures';
+import { test, expect, reloadWithCase, type Page } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 const TF_SECONDS = 4;
@@ -286,12 +286,13 @@ test('a time-domain run is saved as a COMTRADE record that holds the run', async
   }
   expect(plotted.record.t).toEqual(run.t);
 
-  // ---- the run the browser kept, after a reload and with no case open --------------
+  // ---- the run the browser kept, after a reload ------------------------------------
   const runId = await page.getByTestId('time-series-plot').getAttribute('data-run-id');
   expect(runId).toBeTruthy();
   await expect.poll(() => runsInBrowserStorage(page)).toBe(1);
-  await page.reload();
-  await expect(page.getByTestId('run-pflow-button')).toBeDisabled();
+  // The page opens the case again, in a new session that has run nothing.
+  await reloadWithCase(page);
+  await expect(page.getByTestId('run-pflow-button')).toBeEnabled({ timeout: 90_000 });
   await openHistory(page);
   await page.getByTestId(`history-run-row-pin-${runId}`).click();
   await page.keyboard.press('Escape');
@@ -300,8 +301,8 @@ test('a time-domain run is saved as a COMTRADE record that holds the run', async
   await expect(page.getByTestId('time-series-plot')).toHaveAttribute('data-run-id', runId!);
 
   const kept = await exportComtrade(page, 'Export plot', testInfo.outputPath('kept.zip'));
-  // The session that computed the run is gone and no case is open: the record
-  // is written from what the browser kept, and still says which case it is of.
+  // The session that computed the run is gone: the record is written from
+  // what the browser kept, and still says which case it is of.
   expect(kept.record.header).toBe('kundur_full,TENSA TDS #1,1999');
   expect(kept.record.name).toBe(run.name);
   expect(kept.fileName).toMatch(/^kundur_full_[0-9a-f]{8}_time-series-comtrade_.*\.zip$/);

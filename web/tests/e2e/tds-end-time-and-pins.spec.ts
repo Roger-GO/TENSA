@@ -20,7 +20,7 @@
  * fault added here to have something to show.
  */
 import { readFile } from 'node:fs/promises';
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 
@@ -171,8 +171,8 @@ test('a run ends where it was told to, and is drawn beside the runs pinned befor
       ),
     )
     .toBe(2);
-  await page.reload();
-  await openCase(page, CASE_FILE);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   await page.getByRole('button', { name: 'Change the end time' }).click();
   await page.getByLabel('tf — end time (s)').fill('1');
   await runTds(page, 1);

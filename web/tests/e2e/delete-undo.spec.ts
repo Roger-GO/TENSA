@@ -75,7 +75,7 @@ test('delete a line of the case file, take it back with Undo, and put it back wi
 
   await askToDeleteLine(page, 'Line_3');
   await expect(page.getByTestId('delete-element-dialog')).toContainText(
-    'Undo in the Edit menu brings it back.',
+    'Undo (Ctrl+Z or Edit > Undo) brings it back.',
   );
   await page.getByTestId('delete-confirm').click();
   await expect(toast(page, 'Deleted Line Line_3')).toBeVisible({ timeout: 30_000 });

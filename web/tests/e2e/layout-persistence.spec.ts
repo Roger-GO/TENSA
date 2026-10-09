@@ -27,7 +27,7 @@
  * menu. It then saves a snapshot with the button of the left rail and restores
  * it with a click on its row.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 const OTHER_CASE = 'wscc9.xlsx';
@@ -355,8 +355,8 @@ test('a drag made a moment before the diagram is left is still written to the fi
   expect(differences(before, dragged)).toContain('5');
 
   // And the file has it: a page loaded afresh has nothing else to draw from.
-  await page.reload();
-  await openCase(page, copy);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   await expectPicture(page, dragged);
 });
 
@@ -437,7 +437,13 @@ test('a node is placed by a drag of one pointer move and by the arrow keys, and 
   await page.getByRole('button', { name: /^Lock the diagram/ }).click();
   await expect(page.getByTestId('sld-canvas-locked')).toContainText('The diagram is locked.');
   await page.getByRole('button', { name: /^Unlock the diagram/ }).click();
-  await expect(page.getByTestId('sld-canvas-hint')).toContainText('press the arrow keys');
+  // The line is one sentence again, with the rest of it behind More.
+  await expect(page.getByTestId('sld-canvas-hint')).toContainText(
+    'Drag a bus or device to move it.',
+  );
+  await page.getByTestId('sld-canvas-hint-more').click();
+  await expect(page.getByTestId('sld-canvas-hint-full')).toContainText('press the arrow keys');
+  await page.keyboard.press('Escape');
 
   // ---- Save a snapshot from the left rail, move on, and click it -----------
   await page.getByTestId('saved-cases-save-snapshot').click();

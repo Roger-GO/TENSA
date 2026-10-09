@@ -101,14 +101,27 @@ test('CPF: limits change the nose, and the result says which generator it is due
   // ---- with limits: the form says the power flow has to be solved with them --
   await page.getByTestId('cpf-config-enforce-q-limits').check();
   const note = page.getByTestId('cpf-config-q-limits-pflow-note');
-  await expect(note).toContainText('The last power flow left generators 2, 4 past a Q limit.');
-  await page.getByTestId('cpf-config-q-limits-run-pflow').click();
+  // The generators go by the names the table under the curve gives them.
+  await expect(note).toContainText(
+    'The last power flow left generators PV 2 (bus 2), PV 4 (bus 6) past a Q limit.',
+  );
+  // One press runs the power flow with the limits and then the curve.
+  const both = page.getByTestId('cpf-config-q-limits-run-pflow');
+  await expect(both).toHaveText('Run CPF (runs the power flow with Q limits first)');
+  const [curve] = await Promise.all([
+    page.waitForResponse(
+      (reply) =>
+        reply.request().method() === 'POST' && new URL(reply.url()).pathname.endsWith('/cpf'),
+      { timeout: 120_000 },
+    ),
+    both.click(),
+  ]);
   await expect(
     page.locator('[data-sonner-toast]').filter({ hasText: 'Q limits enforced' }),
   ).toHaveCount(1, { timeout: 90_000 });
   await expect(note).toHaveCount(0);
-
-  const enforced = await runCpf(page);
+  expect(curve.status()).toBe(200);
+  const enforced = (await curve.json()) as Record<string, unknown>;
   expect(enforced.q_limits_enforced).toBe(true);
   // Half again the base load: where the slack, the last generator with any
   // reactive power to give, runs out of it too.

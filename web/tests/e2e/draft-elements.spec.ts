@@ -41,7 +41,7 @@
  * The drafts are placed in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 import {
   drawing,
   dropInDiagram,
@@ -144,7 +144,8 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
   await dropOnDiagram(page, 'Add PQ load', left - 160, first.nodes['1']!.y + 40);
   const load = draftNode(page, 'draft-1');
   await expect(load).toBeVisible();
-  await expect(load).toHaveAttribute('aria-label', /^Draft PQ load PQ_12: Missing name, bus, Vn/);
+  // The name follows the idx, so it is not among what is missing.
+  await expect(load).toHaveAttribute('aria-label', /^Draft PQ load PQ_12: Missing bus, Vn/);
   await expect(page.getByTestId('draft-badge-draft-1')).toHaveText('Incomplete');
   // Its form is in the Inspector, not in a panel over it.
   const inspector = page.getByTestId('draft-inspector');
@@ -186,12 +187,15 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
     load8.x + load8.width / 2,
     load8.y + load8.height - 4,
   );
-  await expect(
-    page
-      .locator('[data-sonner-toast]')
-      .filter({ hasText: 'Draft placed in the nearest free place' }),
-  ).toBeVisible();
+  // It goes on a bus and was dropped on none: the notice says that, and where
+  // it came to stand, with a button that leads to the bus field of its form.
+  const onNoBus = page
+    .locator('[data-sonner-toast]')
+    .filter({ hasText: /PV generator \d+ is not on a bus yet/ });
+  await expect(onNoBus).toContainText('It was placed in the nearest free place.');
   await expect(draftNode(page, 'draft-2')).toBeVisible();
+  await onNoBus.getByRole('button', { name: 'Pick a bus' }).click();
+  await expect(page.getByTestId('draft-inspector').getByTestId('bus-idx-select')).toBeFocused();
 
   // ---- A line that names both its buses is drawn as a branch -----------------
   await dropOnDiagram(page, 'Add Line', left - 160, first.nodes['11']!.y);
@@ -211,9 +215,9 @@ test('a component dropped on the diagram is a draft: filled in the Inspector, ke
   const before = { load: now.nodes['draft-1']!, generator: now.nodes['draft-2']! };
 
   // ---- A reload: the drafts are the browser's, and come back with the case ---
-  await page.reload();
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   await page.getByRole('tab', { name: 'Project' }).click();
-  await openCase(page, `${stem}.xlsx`);
   now = await settled(page);
   await expect(indicator(page)).toHaveAttribute('data-draft-count', '3');
   expect(now.nodes['draft-1']).toMatchObject({ x: before.load.x, y: before.load.y });
@@ -308,10 +312,10 @@ test('a draft leaves the lines of the system as they run: it is dropped beside t
   // ---- Dropped where the lines run close together: beside them ---------------
   await page.getByRole('tab', { name: 'Components' }).click();
   await dropOnDiagram(page, 'Add PQ load', bus5.x + 54, bus5.y - 80);
+  // A load goes on a bus and was dropped on none: the notice says that, and
+  // then where it came to stand.
   await expect(
-    page
-      .locator('[data-sonner-toast]')
-      .filter({ hasText: 'Draft placed in the nearest free place' }),
+    page.locator('[data-sonner-toast]').filter({ hasText: 'PQ load PQ_12 is not on a bus yet' }),
   ).toContainText('a draft leaves the lines as they are');
   const draft = draftNode(page, 'draft-1');
   await expect(draft).toBeVisible();

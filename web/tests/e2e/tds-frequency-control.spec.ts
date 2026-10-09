@@ -247,7 +247,7 @@ test('frequency control on a case without a battery: the tab leads to one, step 
   await expect(panel.getByTestId('bus-idx-select')).toHaveValue(String(BATTERY_BUS));
   await panel.getByRole('button', { name: 'Add PV' }).click();
   await expect(panel.getByTestId('form-problems')).toHaveText(
-    'Nothing was added: Sn, Vn, p0 and v0 are required and empty.',
+    'Nothing was added: Sn, p0 and v0 are required and empty.',
   );
   await expect(panel.getByTestId('field-Sn').locator('input')).toBeFocused();
   await panel.getByTestId('field-Sn').locator('input').fill('100');

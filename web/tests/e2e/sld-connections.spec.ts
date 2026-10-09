@@ -26,7 +26,7 @@
  * this run's own, so the example cases the other specs open keep their
  * automatic layout.
  */
-import { test, expect } from './fixtures';
+import { test, expect, reloadWithCase } from './fixtures';
 import {
   NEAR,
   SYMBOLS,
@@ -133,8 +133,8 @@ test('no connector of IEEE 14 runs through another symbol, drawn straight or at 
     data: layout,
   });
   expect(placedByHand.status()).toBe(204);
-  await page.reload();
-  await openCase(page, copy);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   const straight = await settled(page);
   expect(straight.nodes['load-PQ_1']).toMatchObject(beyond);
   expect(problems(straight)).toEqual([]);
@@ -247,8 +247,8 @@ test('a connector follows its device through a drag, turns at a right angle when
   expect(route[1]![0]).toBeCloseTo(route[2]![0], 1);
 
   // ---- A page loaded afresh draws the same ---------------------------------
-  await page.reload();
-  await openCase(page, copy);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   const reopened = await settled(page);
   expect(reopened.nodes[load]).toEqual(turned.nodes[load]);
   expect(reopened.edges[stub]!.points).toEqual(route);

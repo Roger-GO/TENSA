@@ -44,7 +44,7 @@
  * Everything is done in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, type Page, reloadWithCase } from './fixtures';
 import {
   drawing,
   dropInDiagram,
@@ -221,7 +221,7 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   // ---- A load dropped on the bar of a bus is a draft on that bus -------------
   await page.getByRole('tab', { name: 'Components' }).click();
   await expect(page.getByTestId('component-library-hint')).toContainText(
-    'Dropped on a bus, it is connected to that bus.',
+    'A device dropped on the bar or the name of a bus is connected to that bus.',
   );
   const bar10 = onBar(first, '10');
   await dropOnDiagram(page, 'Add PQ load', bar10.x, bar10.y);
@@ -235,6 +235,26 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   expect(onAFaceMiddle(connector.points[0]!, now.nodes['draft-1']!)).toBe(true);
   expect(onATap(connector.points.at(-1)!, now.nodes['10']!)).toBe(true);
   expect(sent).toEqual([]);
+
+  // ---- So is one dropped on the name of a bus, which is what is aimed at ----
+  const name = (await page.getByTestId('bus-label-14').boundingBox())!;
+  const surface = (await page.getByTestId('sld-canvas-surface').boundingBox())!;
+  await page
+    .getByRole('button', { name: 'Add PQ load', exact: true })
+    .dragTo(page.getByTestId('sld-canvas-surface'), {
+      targetPosition: {
+        x: name.x + name.width / 2 - surface.x,
+        y: name.y + name.height - 1 - surface.y,
+      },
+    });
+  await expect(toast(page, 'Draft PQ load PQ_13 connected to bus 14')).toBeVisible();
+  await expectClean(page);
+  // It was for this check alone: the rest goes on with one draft, as before.
+  await node(page, 'draft-2').click();
+  await page.keyboard.press('Delete');
+  await expect(toast(page, 'Draft deleted: PQ load PQ_13')).toBeVisible();
+  await expect(node(page, 'draft-2')).toHaveCount(0);
+  await expectClean(page);
 
   // ---- A draft that is dragged onto a bus is connected to it -----------------
   await dropOnDiagram(page, 'Add Shunt', left - 180, first.nodes['5']!.y);
@@ -399,9 +419,9 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   await dropInDiagram(page, 'load-PQ_3', 130, 40);
   const kept = await expectClean(page);
   await save(page);
-  await page.reload();
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   await page.getByRole('tab', { name: 'Project' }).click();
-  await openCase(page, `${stem}.xlsx`);
   now = await expectClean(page);
   expect(now.edges['stub-load-PQ_9']?.label).toMatch(/connection to bus 13$/);
   expect(now.nodes['load-PQ_9']).toMatchObject({
@@ -427,14 +447,17 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   await expectClean(page);
   await node(page, 'load-PQ_9').click();
   await expect(ring).toHaveAttribute('aria-disabled', 'true');
-  await expect(ring).toHaveAccessibleName(/not now\. A run has locked the system\./);
+  await expect(ring).toHaveAccessibleName(/not now\. A run has fixed the system\./);
   await expect(page.getByTestId('sld-canvas-hint')).toContainText(
     'It cannot be moved to another bus now, which is why the ring on its bar is greyed out.',
   );
   sent.length = 0;
   now = await settled(page);
   await dragTo(page, await ringAt(page), onBar(now, '12'));
-  await expect(toast(page, 'Not moved to another bus')).toContainText('Reset run in the Inspector');
+  // The notice says why, and has the way out on it.
+  const refused = toast(page, 'Not moved to another bus');
+  await expect(refused).toContainText('A run has fixed the system. Reset run lets you edit again');
+  await expect(refused.getByRole('button', { name: 'Reset run' })).toBeVisible();
   expect(sent).toEqual([]);
   expect((await drawing(page)).edges['stub-load-PQ_9']?.label).toMatch(/connection to bus 13$/);
 });
@@ -537,9 +560,9 @@ for (const plan of ARRANGEMENTS) {
     // Both that were drawn are lines of the diagram, each on a route of its own.
     expect(Object.keys(kept.edges).filter((id) => id.startsWith('draft-line-'))).toHaveLength(2);
     await save(page);
-    await page.reload();
+    // The page opens the case again by itself.
+    await reloadWithCase(page);
     await page.getByRole('tab', { name: 'Project' }).click();
-    await openCase(page, `${stem}.xlsx`);
     now = await expectClean(page);
     expect(routesOf(now)).toEqual(routesOf(kept));
     expect(now.nodes).toEqual(kept.nodes);

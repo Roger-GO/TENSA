@@ -2,10 +2,10 @@
  * Results that outlive a reload of the page.
  *
  *   load Kundur -> run a power flow -> run a time-domain simulation -> name the
- *   run -> reload the page -> no "leave site?" prompt -> the page says what it
- *   kept -> History still lists the run, as an earlier one -> pin it -> the plot
- *   draws it, with no case open -> the Compare tab still has the power flow ->
- *   delete the run -> reload -> it is gone for good
+ *   run -> reload the page -> no "leave site?" prompt -> the case is open again
+ *   -> a tab with no case says what the browser kept -> History still lists the
+ *   run, as an earlier one -> pin it -> the plot draws it -> the Compare tab
+ *   still has the power flow -> delete the run -> reload -> it is gone for good
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`)
  * in a real browser, which is the point: the results are kept in the browser's
@@ -23,7 +23,7 @@
  * Kundur's own case file trips a line at 2 s, so a short run has something to
  * show without a fault being added.
  */
-import { test, expect, type Page } from './fixtures';
+import { test, expect, reloadWithCase, type BrowserContext, type Page } from './fixtures';
 
 const CASE_FILE = 'kundur_full.xlsx';
 
@@ -106,7 +106,23 @@ async function runsInBrowserStorage(page: Page): Promise<number> {
   );
 }
 
-test('a run and a power flow are still there after the page is reloaded', async ({ page }) => {
+/**
+ * A tab that opens with no case, on the same address: what the page shows
+ * before a case is opened, with what the browser kept. A reload opens the
+ * case again, so the tab that was reloaded does not show it.
+ */
+async function tabWithNoCase(context: BrowserContext): Promise<Page> {
+  const fresh = await context.newPage();
+  await dismissFirstRunCoach(fresh);
+  await fresh.goto('/');
+  await expect(fresh.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
+  return fresh;
+}
+
+test('a run and a power flow are still there after the page is reloaded', async ({
+  page,
+  context,
+}) => {
   const uncaughtErrors: string[] = [];
   page.on('pageerror', (error) => uncaughtErrors.push(error.message));
   // A page that still held unsaved work would ask before it is left. Record it,
@@ -156,24 +172,32 @@ test('a run and a power flow are still there after the page is reloaded', async 
   await expect.poll(() => runsInBrowserStorage(page)).toBe(1);
 
   // ---- reload ------------------------------------------------------------------
-  await page.reload();
+  await reloadWithCase(page);
   // The run was safely kept, so the page had nothing to ask on the way out.
   expect(leavePrompts).toEqual([]);
 
-  // No case is open, and the run is listed all the same.
-  await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
-  await expect(page.getByTestId('run-pflow-button')).toBeDisabled();
+  // The case is open again, in a new session that has run nothing.
+  await expect(page.getByTestId('run-pflow-button')).toBeEnabled({ timeout: 90_000 });
+  await expect(page.getByRole('complementary', { name: 'Case navigation' })).toContainText(
+    /Loaded case\s*kundur_full\.xlsx/,
+  );
 
   // ---- the page says what it kept, wherever an earlier run is looked for --------
-  // Where the eye lands: the page shown before a case is opened.
-  await expect(page.getByTestId('kept-results-note')).toContainText(
+  // Where the eye lands in a tab with no case: the page shown before one is opened.
+  const fresh = await tabWithNoCase(context);
+  await expect(fresh.getByTestId('kept-results-note')).toContainText(
     'Kept in this browser: 1 time-domain run and 1 power flow.',
   );
-  // The Activity tab lists the jobs of this page load, so it is empty now. It
-  // says that this is no loss, and leads to the runs.
+  await fresh.getByTestId('kept-results-open-history').click();
+  await expect(fresh.getByTestId(`history-run-row-${runId}`)).toBeVisible();
+  await fresh.close();
+  await page.bringToFront();
+  // The Activity tab lists the jobs of this page load: the case that was
+  // opened again, and no run. It says that this is no loss, and leads to the runs.
   await page.getByRole('tab', { name: 'Activity' }).click();
   await page.getByTestId('activity-panel-subtab-history').click();
-  await expect(page.getByTestId('activity-panel-history-empty')).toBeVisible();
+  await expect(page.getByTestId('activity-panel-content-history')).toContainText('Load case');
+  await expect(page.getByTestId('activity-panel-content-history')).not.toContainText('TDS');
   await expect(page.getByTestId('activity-panel-history-note')).toContainText(
     'A reload empties this list but not your results',
   );
@@ -193,8 +217,7 @@ test('a run and a power flow are still there after the page is reloaded', async 
   await expect(page.getByTestId(`history-run-row-${runId}`)).toBeVisible();
   await closeHistory(page);
 
-  await page.getByTestId('kept-results-open-history').click();
-  await expect(page.getByTestId('history-drawer')).toBeVisible();
+  await openHistory(page);
   const row = page.getByTestId(`history-run-row-${runId}`);
   await expect(row).toBeVisible();
   await expect(page.getByTestId(`history-run-row-label-${runId}`)).toHaveText(
@@ -233,20 +256,25 @@ test('a run and a power flow are still there after the page is reloaded', async 
   await expect(page.getByTestId(`history-run-row-${runId}`)).toHaveCount(0);
   await expect.poll(() => runsInBrowserStorage(page)).toBe(0);
 
-  await page.reload();
-  await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
-  // Nothing to list, and no case open: History is off again, and says why. The
-  // power flow is still kept, so the note is there for it alone.
-  await page.getByTestId('topbar-menu-more-trigger').click();
-  await expect(page.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
-  await expect(page.getByTestId('topbar-menu-more-navigation.history-reason')).toContainText(
+  await reloadWithCase(page);
+  // The case is open again, and its history has nothing to list.
+  await openHistory(page);
+  await expect(page.getByTestId(`history-run-row-${runId}`)).toHaveCount(0);
+  await closeHistory(page);
+  // In a tab with no case History is off again, and says why. The power flow
+  // is still kept, so the note is there for it alone.
+  const empty = await tabWithNoCase(context);
+  await empty.getByTestId('topbar-menu-more-trigger').click();
+  await expect(empty.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+  await expect(empty.getByTestId('topbar-menu-more-navigation.history-reason')).toContainText(
     'No runs yet',
   );
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('kept-results-note')).toContainText(
+  await empty.keyboard.press('Escape');
+  await expect(empty.getByTestId('kept-results-note')).toContainText(
     'Kept in this browser: 1 power flow.',
   );
-  await expect(page.getByTestId('kept-results-open-history')).toHaveCount(0);
+  await expect(empty.getByTestId('kept-results-open-history')).toHaveCount(0);
+  await empty.close();
 
   expect(leavePrompts).toEqual([]);
   expect(uncaughtErrors).toEqual([]);
@@ -297,11 +325,11 @@ test('a tab asks before it is left once another tab has deleted its run', async 
   await expect(page.getByTestId('history-drawer')).toBeHidden();
 
   // So it asks before it goes, and once it has gone the run is gone with it.
-  await page.reload();
+  await reloadWithCase(page);
   expect(leavePrompts).toEqual(['beforeunload']);
-  await expect(page.getByTestId(`saved-cases-row-${CASE_FILE}`)).toBeVisible();
-  await page.getByTestId('topbar-menu-more-trigger').click();
-  await expect(page.getByTestId('topbar-menu-more-navigation.history')).toBeDisabled();
+  await openHistory(page);
+  await expect(page.getByTestId(`history-run-row-${runId}`)).toHaveCount(0);
+  await closeHistory(page);
 
   expect(uncaughtErrors).toEqual([]);
 });

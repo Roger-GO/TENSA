@@ -28,7 +28,7 @@
  * Everything is done in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
  */
-import { test, expect } from './fixtures';
+import { test, expect, reloadWithCase } from './fixtures';
 import {
   NEAR,
   branchesIntoDevices,
@@ -190,8 +190,8 @@ test('IEEE 14 opens tidy, stays so when it is arranged by hand, and a Tidy diagr
   expect(branchPaths(redone)).toEqual(branchPaths(tidied));
 
   // ---- A page loaded afresh draws the same ---------------------------------
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   const reopened = await settled(page);
   expect(branchPaths(reopened)).toEqual(branchPaths(tidied));
   expect(placement(reopened)).toEqual(placement(tidied));
@@ -310,8 +310,8 @@ test('a bus takes its devices along, moves are taken back, picked buses are line
 
   // What is on screen is what a page loaded afresh draws.
   const final = await drawing(page);
-  await page.reload();
-  await openCase(page, `${stem}.xlsx`);
+  // The page opens the case again by itself.
+  await reloadWithCase(page);
   const reopened = await settled(page);
   expect(placement(reopened)).toEqual(placement(final));
   expect(branchPaths(reopened)).toEqual(branchPaths(final));
