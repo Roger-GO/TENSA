@@ -277,7 +277,7 @@ describe('nothing overlaps on a case of a hundred buses', () => {
     expect(bothWays(first)).toEqual([]);
     expect(bothWays(tidied(first, false))).toEqual([]);
     expect(bothWays(tidied(first, true))).toEqual([]);
-  }, 120_000);
+  }, 240_000);
 
   it('IEEE 118: after a bus with many lines is dragged', async () => {
     const first = await opened(CASE118);

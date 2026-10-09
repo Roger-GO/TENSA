@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import { CASE118 } from '../../helpers/case118';
-import { drawn, opened, overlapsOf, settled } from '../../helpers/diagramStates';
+import { drawn, opened, overlapsOf, pictureTime, settled } from '../../helpers/diagramStates';
 import { rehung } from '../../helpers/wiringSweeps';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -45,7 +45,9 @@ describe('nothing overlaps on a case of a hundred buses when a device is moved t
       }
     }
     expect(found).toEqual([]);
-    // Each a rebuild of the diagram and a place beside the bus: far inside what a person waits for.
-    expect(Math.max(...took)).toBeLessThan(6_000);
+    // Each a rebuild of the diagram and a place beside the bus, which comes
+    // to twenty or thirty pictures of the diagram as it stands: far inside
+    // what a person waits for (two hundred are six seconds on a laptop).
+    expect(Math.max(...took) / pictureTime(first)).toBeLessThan(200);
   }, 180_000);
 });

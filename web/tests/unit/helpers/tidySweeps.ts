@@ -181,6 +181,6 @@ export function holdTidy(name: string, topology: TopologySummary, inTheWay: InTh
         }
       }
       expect(found).toEqual([]);
-    }, 240_000);
+    }, 600_000);
   });
 }

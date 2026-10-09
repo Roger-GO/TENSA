@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import { DRAFT_NODE_TYPE } from '@/components/sld/drafts';
 import { CASE118 } from '../../helpers/case118';
-import { drawn, opened, overlapsOf, settled } from '../../helpers/diagramStates';
+import { drawn, opened, overlapsOf, pictureTime, settled } from '../../helpers/diagramStates';
 import { drafted } from '../../helpers/draftSweeps';
 
 vi.mock('@/components/sld/elkClient', async () => {
@@ -49,7 +49,9 @@ describe('nothing overlaps on a case of a hundred buses with drafts on it', () =
     found.push(...drawn(line.diagram).unrouted.map((id) => `the line: no route for ${id}`));
     found.push(...overlapsOf(line.diagram).map((text) => `the line: ${text}`));
     expect(found).toEqual([]);
-    // Each a drop and a pick of a bus: far inside what a person waits for.
-    expect(Math.max(...took)).toBeLessThan(4_000);
+    // Each a drop and a pick of a bus, which comes to ten pictures of the
+    // diagram as it stands at most: far inside what a person waits for (a
+    // hundred and thirty are four seconds on a laptop).
+    expect(Math.max(...took) / pictureTime(first)).toBeLessThan(130);
   }, 120_000);
 });

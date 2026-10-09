@@ -879,25 +879,25 @@ function mesh(
 }
 
 describe('tidyRoutes: how much work it does', () => {
-  it('routes a diagram of over 200 branches within its steps, in about a second', () => {
+  it('routes a diagram of over 200 branches within its steps', () => {
     const { nodes, edges } = mesh(12, 10, 70);
     const branches = edges.filter((edge) => edge.type !== 'stub');
     expect(nodes.filter((node) => node.type === 'bus')).toHaveLength(120);
     expect(branches.length).toBeGreaterThan(200);
-    const started = performance.now();
     const { routes, unrouted, steps } = tidyRoutes(nodes, edges);
-    const took = performance.now() - started;
     // The steps are what bounds the work, on any machine, and this diagram
     // takes all it is given: routed until nothing could be bettered it
-    // takes several times as many. The time is about a second; the bound
-    // here is loose enough for a slow machine that is doing other things.
+    // takes several times as many. No time is held here, since a time says
+    // how fast the machine is: the steps are about a second on one core of
+    // a laptop, and 5 to 7 s on a CI runner, where coverage makes the
+    // search four to five times slower. The timeout below is the guard
+    // against a step that has come to cost many times what it did.
     expect(steps).toBeGreaterThanOrEqual(TIDY_STEPS);
     expect(steps).toBeLessThanOrEqual(TIDY_STEPS + 20_000);
-    expect(took).toBeLessThan(20_000);
     expect(unrouted).toEqual([]);
     expect(routes.size).toBe(branches.length);
     expect(meetings(routes).shared).toEqual([]);
-  });
+  }, 60_000);
 
   it('stops when the steps it is given run out, and says so', () => {
     const { nodes, edges } = mesh(8, 6, 30);

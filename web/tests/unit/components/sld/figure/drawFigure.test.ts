@@ -58,7 +58,7 @@ import { LINE_LABEL_BOX, TRANSFORMER_LABEL_BOX } from '@/components/sld/labels';
 import { describeOverlaps, findOverlaps } from '@/components/sld/overlapCheck';
 import { valueLabelWidths } from '@/components/sld/valueWidths';
 import { CASE118 } from '../../../helpers/case118';
-import { opened, tidied, type Diagram } from '../../../helpers/diagramStates';
+import { opened, pictureTime, tidied, type Diagram } from '../../../helpers/diagramStates';
 import { IEEE14, KUNDUR, WSCC9 } from '../../../helpers/exampleCases';
 import { figureAsDrawn, figureOf, itemsOf, solved, sourceOf } from '../../../helpers/figureCases';
 import { lineFlow } from '../../../helpers/lineFlow';
@@ -214,11 +214,13 @@ describe('nothing on a figure is drawn over anything else', () => {
       expect(arrowsAmiss(figure, source)).toEqual([]);
       expect(arrowsOf(figure).length).toBeGreaterThan(170);
       expect(figure.shown).toBeGreaterThan(118);
-      // The picture and the figure of it together; a choice in the dialog
-      // redraws the figure alone, which is a small part of this.
-      expect(took).toBeLessThan(4_000);
+      // The picture and the figure of it together, which comes to two or
+      // three pictures of the diagram with its values on it (thirty are
+      // four seconds on a laptop); a choice in the dialog redraws the
+      // figure alone, which is a small part of this.
+      expect(took / pictureTime(diagram, { values: true })).toBeLessThan(30);
     }
-  }, 60_000);
+  }, 180_000);
 
   it('a part of IEEE 14, which is drawn from the same picture', async () => {
     const first = await opened(IEEE14);

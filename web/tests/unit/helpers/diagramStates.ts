@@ -65,6 +65,28 @@ export function drawn(
   });
 }
 
+/**
+ * How long one picture of `diagram` takes on this machine in this run, in
+ * milliseconds: the least of a few, which leaves out what else the machine
+ * was doing. It is the unit a test holds a time to. A bound in seconds says
+ * how fast the runner is, since the same work takes four times as long on a
+ * small CI runner with coverage on as on a laptop; a bound in pictures says
+ * how much work was done, and holds on both.
+ */
+export function pictureTime(
+  diagram: Diagram,
+  options: Omit<PictureOptions, 'barLengths'> = { values: false },
+  runs = 5,
+): number {
+  let least = Number.POSITIVE_INFINITY;
+  for (let run = 0; run < runs; run += 1) {
+    const started = performance.now();
+    drawn(diagram, options);
+    least = Math.min(least, performance.now() - started);
+  }
+  return least;
+}
+
 /** `diagram` with the routes its picture made kept as its own, as the canvas keeps them at rest. */
 export function settled(diagram: Diagram): Diagram {
   return { ...diagram, edges: drawn(diagram).edges as Edge[] };

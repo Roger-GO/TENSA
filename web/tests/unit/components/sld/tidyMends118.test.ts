@@ -72,6 +72,6 @@ describe('Tidy diagram mends the lines of a hundred buses that do not hold', () 
       expect(plan.left?.length).toBeGreaterThan(0);
       for (const id of plan.left ?? [])
         expect(now.get(id)!.points, id).toEqual(was.get(id)!.points);
-    }, 120_000);
+    }, 360_000);
   }
 });

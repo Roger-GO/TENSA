@@ -113,7 +113,7 @@ export function holdMoves(name: string, topology: TopologySummary): void {
       expect(found).toEqual([]);
       // Most of the moves are clear ones: the drag itself is held to the rule.
       expect(clear).toBeGreaterThan(BUS_MOVES.length);
-    }, 240_000);
+    }, 600_000);
 
     it(`after any device is dragged and dropped, after a tidy of that, and while it is dragged`, async () => {
       const first = await opened(topology);
@@ -139,7 +139,7 @@ export function holdMoves(name: string, topology: TopologySummary): void {
         }
       }
       expect(found).toEqual([]);
-    }, 240_000);
+    }, 600_000);
 
     it(`after any device is dropped far from its bus, and after a tidy of that`, async () => {
       const first = await opened(topology);
@@ -157,6 +157,6 @@ export function holdMoves(name: string, topology: TopologySummary): void {
         }
       }
       expect(found).toEqual([]);
-    }, 240_000);
+    }, 600_000);
   });
 }
