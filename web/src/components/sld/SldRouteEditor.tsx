@@ -66,6 +66,7 @@ import {
   runIn,
   sameRoute,
   settleEdit,
+  slideRun,
   SPLIT_ROOM,
   tidyPoints,
   type EditPart,
@@ -603,6 +604,30 @@ export function SldRouteEditor({
     }
     return best;
   }, [working]);
+  // The run the keys are handed when the line is picked from away from it
+  // (its row in the Lines table, the Inspector, Enter on the line): one a
+  // first press of an arrow key moves. A middle run before an end run, since
+  // the end of a line stays on its bar and one that is at the tip already
+  // goes nowhere; the longer before the shorter; and of those the first that
+  // slides either way.
+  const focusRun = useMemo(() => {
+    const count = working.length - 1;
+    const length = (k: number): number =>
+      Math.hypot(working[k + 1]![0] - working[k]![0], working[k + 1]![1] - working[k]![1]);
+    const atEnd = (k: number): number => (k === 0 || k === count - 1 ? 1 : 0);
+    const order = Array.from({ length: Math.max(count, 0) }, (_, k) => k).sort(
+      (a, b) => atEnd(a) - atEnd(b) || length(b) - length(a),
+    );
+    const base = tidyPoints(working);
+    const slides = (k: number): boolean => {
+      const upright = runKind(working[k]!, working[k + 1]!) !== 'level';
+      return [MIN_STEP, -MIN_STEP].some((step) => {
+        const edited = slideRun(working, k, upright ? [step, 0] : [0, step], ends);
+        return edited.stopped !== true && !sameRoute(tidyPoints(edited.points), base);
+      });
+    };
+    return order.find(slides) ?? longestRun;
+  }, [working, ends, longestRun]);
   const pickedBend =
     picked?.kind === 'bend' && picked.index > 0 && picked.index < working.length - 1
       ? picked.index
@@ -684,7 +709,7 @@ export function SldRouteEditor({
               data-testid={`sld-route-run-${k}`}
               data-kind={kind}
               data-picked={pickedRun === k ? 'true' : undefined}
-              {...(k === longestRun ? { [ROUTE_FOCUS_ATTR]: '' } : {})}
+              {...(k === focusRun ? { [ROUTE_FOCUS_ATTR]: '' } : {})}
               role="button"
               tabIndex={0}
               aria-label={`Run ${k + 1} of ${total} of ${name}, ${KIND_NAME[kind]}: drag it to slide it, or the ${RUN_KEYS[kind]}. Enter adds a bend in its middle.`}

@@ -60,6 +60,7 @@ const drawn: {
   onNodeDragStop: DragHandler | null;
   onNodeClick: ((event: unknown, node: DrawnNode) => void) | null;
   onEdgeClick: ((event: unknown, edge: DrawnEdge) => void) | null;
+  onInteractiveChange: ((interactive: boolean) => void) | null;
 } = {
   nodes: [],
   edges: [],
@@ -68,6 +69,7 @@ const drawn: {
   onNodeDragStop: null,
   onNodeClick: null,
   onEdgeClick: null,
+  onInteractiveChange: null,
 };
 const setCenter = vi.fn();
 
@@ -122,7 +124,11 @@ vi.mock('@xyflow/react', async () => {
     ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
     Handle: () => null,
     Background: () => null,
-    Controls: () => null,
+    // The padlock of the controls: a test locks the diagram through it.
+    Controls: (props: { onInteractiveChange?: (interactive: boolean) => void }) => {
+      drawn.onInteractiveChange = props.onInteractiveChange ?? null;
+      return null;
+    },
     MiniMap: () => null,
     BaseEdge: () => null,
     BackgroundVariant: { Lines: 'lines', Dots: 'dots', Cross: 'cross' },
@@ -159,7 +165,8 @@ import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { useDraftsStore, type DraftElement } from '@/store/drafts';
 import { useLayoutStore } from '@/store/layout';
-import { useSldStore } from '@/store/sld';
+import { useLayoutHistoryStore } from '@/store/layoutHistory';
+import { __requestSldCommand, useSldStore } from '@/store/sld';
 import { parseWorkspacePath } from '@/api/types';
 import type { SidecarLayout, TopologyEntry, TopologySummary } from '@/api/types';
 import { TOPOLOGY_SCHEMA } from '../../helpers/topologySchema';
@@ -257,7 +264,8 @@ beforeEach(() => {
   putSidecarSpy.mockReset();
   mockTopology = square();
   mockSchema = TOPOLOGY_SCHEMA;
-  useDraftsStore.setState({ byCase: {}, placements: {}, routes: {} });
+  useDraftsStore.setState({ byCase: {}, placements: {}, routes: {}, kept: {} });
+  useLayoutHistoryStore.getState().clear();
   useSldStore.getState().clearSelectedNodeId();
   useSldStore.setState({ pickedNodeIds: [] });
   useLayoutStore.setState({ sldSnapToGrid: false });
@@ -511,6 +519,85 @@ describe('a draft on the diagram', () => {
     await waitFor(() => expect(screen.queryByTestId('sld-drafts-indicator')).toBeNull());
   });
 
+  it('comes back by Undo once the notice of its delete is gone, and goes again by Redo', async () => {
+    const info = vi.spyOn(toast, 'info');
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.keyDown(screen.getByTestId('rf-node-draft-1'), { key: 'Delete' });
+    await waitFor(() => expect(node('draft-1')).toBeUndefined());
+    // Undo, in the Edit menu and by Ctrl+Z, names it and takes it back.
+    expect(useLayoutHistoryStore.getState().past.at(-1)?.label).toBe(
+      'delete draft PV generator PV_1',
+    );
+    act(() => __requestSldCommand('undo-layout'));
+    expect(drafts()).toEqual(HELD);
+    await waitFor(() => expect(node('draft-1')!.position).toEqual({ x: 700, y: 400 }));
+    expect(info).toHaveBeenLastCalledWith('Undone: delete draft PV generator PV_1');
+    // Back, it is the one that is picked: its form is what the user wants next.
+    expect(useSldStore.getState().selectedNodeId).toBe('draft-1');
+    act(() => __requestSldCommand('redo-layout'));
+    expect(drafts().map((d) => d.id)).toEqual(['draft-2']);
+    expect(info).toHaveBeenLastCalledWith('Redone: delete draft PV generator PV_1');
+    act(() => __requestSldCommand('undo-layout'));
+    expect(drafts()).toEqual(HELD);
+  });
+
+  it('comes back by Undo on a locked diagram too: the lock is on the arrangement', async () => {
+    useDraftsStore.setState({ byCase: { [CASE]: HELD } });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    fireEvent.click(screen.getByTestId('sld-drafts-indicator'));
+    fireEvent.click(await screen.findByTestId('sld-drafts-delete-all'));
+    expect(drafts()).toEqual([]);
+    act(() => drawn.onInteractiveChange!(false));
+    expect(screen.getByTestId('sld-canvas-locked')).toBeInTheDocument();
+    act(() => __requestSldCommand('undo-layout'));
+    expect(drafts()).toEqual(HELD);
+  });
+
+  it('says once, with what to do about them, that drafts were kept from an earlier visit', async () => {
+    const info = vi.spyOn(toast, 'info');
+    // As the store has them when the page starts with drafts in the browser.
+    useDraftsStore.setState({
+      byCase: { [CASE]: HELD },
+      kept: { [CASE]: HELD.map((d) => d.id) },
+    });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      '2 drafts from an earlier visit are kept in this browser',
+      expect.objectContaining({
+        description: expect.stringContaining('is not in the system yet'),
+        action: expect.objectContaining({ label: 'Show' }),
+        secondary: expect.objectContaining({ label: 'Delete all' }),
+      }),
+    );
+    const notice = info.mock.calls[0]![1] as {
+      action: { onClick: () => void };
+      secondary: { onClick: () => void };
+    };
+    // Show opens the list over the diagram.
+    expect(screen.queryByTestId('sld-drafts-list')).toBeNull();
+    act(() => notice.action.onClick());
+    expect(await screen.findByTestId('sld-drafts-list')).toBeInTheDocument();
+    // Delete all removes them, and Undo brings them back.
+    act(() => notice.secondary.onClick());
+    expect(drafts()).toEqual([]);
+    act(() => __requestSldCommand('undo-layout'));
+    expect(drafts()).toEqual(HELD);
+    // Said once: not again for the same case in this visit.
+    expect(useDraftsStore.getState().takeKept(CASE)).toBe(0);
+  });
+
+  it('says nothing of an earlier visit for drafts that were placed in this one', async () => {
+    const info = vi.spyOn(toast, 'info');
+    useDraftsStore.setState({ byCase: { [CASE]: HELD }, kept: {} });
+    await draw();
+    await waitFor(() => expect(node('draft-1')).toBeDefined());
+    expect(info).not.toHaveBeenCalled();
+  });
+
   it('takes nothing of the system out by a key: a bus and a line stay', async () => {
     useDraftsStore.setState({ byCase: { [CASE]: HELD } });
     await draw();
@@ -663,9 +750,17 @@ describe('a line that a draft stands on', () => {
     await waitFor(() => expect(node('draft-1')).toBeDefined());
     expect(beside(node('draft-1')!.position)).toBe(true);
     expect(routeOf('line-L12')).toEqual(before);
+    // A load goes on a bus and was dropped on none: the notice says that
+    // first, since a draft beside a bus looks connected, and then where it
+    // came to stand.
     expect(info).toHaveBeenCalledWith(
-      'Draft placed in the nearest free place',
-      expect.objectContaining({ description: expect.stringContaining('Drag it to move it.') }),
+      'PQ load PQ_2 is not on a bus yet',
+      expect.objectContaining({
+        description: expect.stringMatching(
+          /^It was placed in the nearest free place\. .*Drag it to move it\. Pick its bus in its form in the Inspector, or drag it onto the bar or the name of a bus\.$/,
+        ),
+        action: expect.objectContaining({ label: 'Pick a bus' }),
+      }),
     );
     // Dragged onto the line by hand, with free ground right beside it: there.
     info.mockClear();

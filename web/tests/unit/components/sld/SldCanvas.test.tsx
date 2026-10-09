@@ -1367,14 +1367,27 @@ describe('SldCanvas', () => {
       /^Lock the diagram.*dragging/,
     );
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      /Drag a bus.*Right-click a bus, line or the background/,
+      /Drag a bus.*Right-click a bus, a line or the background/,
     );
-    // The way to move something without a drag, how a component is
-    // connected and a line drawn, that a line can be moved too, how to pick
-    // several and take a move back, and that an arrangement is kept.
-    expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      /click it and press the arrow keys\. Drop a component from the Components tab on a bus to connect it there; Draw line \(top left\) joins two buses\. Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table\. Shift\+drag a box to pick several; Ctrl\+Z takes a move back\. Your layout is saved with the case\./,
+    // The rest is one press away, where no line of it is cut: the way to
+    // move something without a drag, how a component is connected and a
+    // line drawn, that a line can be moved too, how to pick several and take
+    // a move back, and that an arrangement is kept.
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Show everything that can be done on the diagram' }),
     );
+    const whole = await screen.findByTestId('sld-canvas-hint-full');
+    for (const line of [
+      'or click it and press the arrow keys.',
+      'Drop a device from the Components tab on the bar or the name of a bus to connect it there. Draw line (top left) joins two buses.',
+      'Click a line or a device connector to move its route by hand',
+      'A line can also be picked by its row in the Lines table.',
+      'Shift+drag a box to pick several',
+      'Undo (Ctrl+Z or Edit > Undo) takes a move back.',
+      'Your layout is saved with the case.',
+    ]) {
+      expect(whole).toHaveTextContent(line);
+    }
   });
 
   it('starts a drag on the press, so that a drag made of one pointer move moves the node', async () => {

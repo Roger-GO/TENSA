@@ -334,6 +334,25 @@ describe('a component dropped on a bus', () => {
     expect(drafts()[1]!.values).toEqual({});
   });
 
+  it('is connected when it is dropped on the name of the bus, out of reach of the bar itself', async () => {
+    // A drop aimed at "the bus" lands on its name as often as on the thin bar.
+    await draw();
+    const one = node('1')!;
+    const label = (one.data as { labelAt?: { offset: number; side: string } }).labelAt;
+    expect(label?.side).toBe('below');
+    // In the name under the bar, further from the bar than a drop on it reaches.
+    const onName = { x: one.position.x + label!.offset, y: one.position.y + 6 + 16 };
+    act(() => useSldStore.getState().setPaletteDragKind('PQ'));
+    dragEvent('dragOver', 'PQ', onName.x, onName.y);
+    // The bar is marked while the row is over the name, as over the bar.
+    expect(screen.getByTestId('sld-wire-target')).toHaveAttribute('data-bus', '1');
+    drop('PQ', onName.x, onName.y);
+    expect(drafts()[0]!.values).toEqual({ bus: '1' });
+    // Free ground under the name is still on no bus.
+    drop('PQ', onName.x, onName.y + 60);
+    expect(drafts()[1]!.values).toEqual({});
+  });
+
   it('leaves a kind that is on no bus a plain draft, clear of the bar', async () => {
     await draw();
     const bar = onBar('2');
@@ -400,11 +419,21 @@ describe('a draft that is dragged onto a bus', () => {
     drop('PV', 700, 500);
     await waitFor(() => expect(node('draft-1')).toBeDefined());
     expect(drafts()[0]!.values).toEqual({});
+    // Dropped on no bus, which a generator needs: the notice says so plainly.
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      'PV generator 4 is not on a bus yet',
+      expect.objectContaining({
+        description:
+          'Pick its bus in its form in the Inspector, or drag it onto the bar or the name of a bus.',
+        action: expect.objectContaining({ label: 'Pick a bus' }),
+      }),
+    );
+    info.mockClear();
     // Picked, and on no bus: the line above the diagram says how it is put on one.
     const hint = screen.getByTestId('sld-canvas-hint');
     expect(hint).toHaveAttribute('data-hint', 'connectable');
     expect(hint).toHaveTextContent(
-      /^Draft PV generator 4 is selected\. To connect it, drag it onto the bar of a bus/,
+      /^Draft PV generator 4 is selected and is on no bus yet\. To connect it, drag it onto the bar of a bus/,
     );
     const bar = onBar('2');
     dragTo('draft-1', { x: bar.x - W / 2, y: bar.y - H / 2 }, () => {
@@ -658,7 +687,7 @@ describe('a device that is moved to another bus by the end of its connector', ()
       'Load PQ_1 moved to bus 2',
       expect.objectContaining({
         description:
-          'It was on bus 4. The rated voltage Vn went with the bus, from 138 to 69 kV. Undo in the Edit menu takes it back.',
+          'It was on bus 4. The rated voltage Vn went with the bus, from 138 to 69 kV. Undo (Ctrl+Z or Edit > Undo) takes it back.',
       }),
     );
   });
@@ -691,7 +720,7 @@ describe('a device that is moved to another bus by the end of its connector', ()
       'Generator 3 moved to bus 1',
       expect.objectContaining({
         description:
-          'It was on bus 3. PV 3 and GENROU_3 went together. Undo in the Edit menu takes it back, one step for each of the 2.',
+          'It was on bus 3. PV 3 and GENROU_3 went together. Undo (Ctrl+Z or Edit > Undo) takes it back, one step for each of the 2.',
       }),
     );
   });
@@ -717,21 +746,23 @@ describe('a device that is moved to another bus by the end of its connector', ()
     const ring = await screen.findByTestId('sld-wire-grip');
     expect(ring).toHaveAttribute('aria-disabled', 'true');
     expect(ring).toHaveAccessibleName(
-      /^Move load PQ_1 to another bus: not now\. A run has locked the system\./,
+      /^Move load PQ_1 to another bus: not now\. A run has fixed the system\./,
     );
     // The line above the diagram says why, and not how to do what cannot be done.
     const hint = screen.getByTestId('sld-canvas-hint');
     expect(hint).toHaveAttribute('data-hint', 'immovable');
     expect(hint).toHaveTextContent(
-      /^Load PQ_1 is selected\. It cannot be moved to another bus now, which is why the ring on its bar is greyed out\. A run has locked the system\./,
+      /^Load PQ_1 is selected\. It cannot be moved to another bus now, which is why the ring on its bar is greyed out\. A run has fixed the system\./,
     );
     dragHandle('sld-wire-grip', onBar('4'), onBar('2'));
     expect(editSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('sld-wire-bar')).toBeNull();
     expect(info).toHaveBeenCalledWith(
       'Not moved to another bus',
+      // The sentence of every place a run has locked, with the way out on the notice.
       expect.objectContaining({
-        description: expect.stringContaining('use Reset run in the Inspector'),
+        description: expect.stringMatching(/^A run has fixed the system\. Reset run lets/),
+        action: expect.objectContaining({ label: 'Reset run' }),
       }),
     );
   });

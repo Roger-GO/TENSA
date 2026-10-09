@@ -30,10 +30,11 @@ type Change = {
   dimensions: { width: number; height: number };
 };
 
-const { view, setCenterSpy, zoomToSpy } = vi.hoisted(() => ({
-  view: { zoom: 1 },
+const { view, setCenterSpy, zoomToSpy, fitViewSpy } = vi.hoisted(() => ({
+  view: { zoom: 1, bounds: { x: 0, y: 0, width: 200, height: 240 } },
   setCenterSpy: vi.fn(),
   zoomToSpy: vi.fn(),
+  fitViewSpy: vi.fn(),
 }));
 
 const drawn: {
@@ -69,7 +70,9 @@ vi.mock('@xyflow/react', () => ({
     zoomTo: zoomToSpy,
     getZoom: () => view.zoom,
     getNodes: () => [],
-    fitView: vi.fn(),
+    fitView: fitViewSpy,
+    // What a fit measures the diagram with.
+    getNodesBounds: () => view.bounds,
     screenToFlowPosition: (p: { x: number; y: number }) => p,
   }),
 }));
@@ -82,8 +85,10 @@ vi.mock('@/components/sld/elkClient', () => ({
 
 import { SldCanvas } from '@/components/sld/SldCanvas';
 import { __clearAllPendingForTests, buildSidecarLayout } from '@/components/sld/sidecar';
-import { FULL_ZOOM, LEGIBLE_ZOOM } from '@/components/sld/zoom';
+import { FULL_ZOOM, LEGIBLE_ZOOM, middleOfDiagram } from '@/components/sld/zoom';
+import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
+import { useLayoutStore } from '@/store/layout';
 import { useSessionStore } from '@/store/session';
 import { useSldStore } from '@/store/sld';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -196,11 +201,26 @@ describe('a diagram too small to read', () => {
     expect(screen.queryByTestId('sld-zoom-readable')).not.toBeInTheDocument();
   });
 
-  it('zooms to full size where the view is when nothing is selected', async () => {
+  it('zooms to full size on the middle of the diagram when nothing is selected', async () => {
     await drawAt(FITTED_TO_A_SHORT_PANE);
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom to 100%' }));
-    expect(zoomToSpy).toHaveBeenCalledWith(FULL_ZOOM, expect.objectContaining({ duration: 250 }));
-    expect(setCenterSpy).not.toHaveBeenCalled();
+    const button = screen.getByRole('button', { name: 'Zoom to 100%' });
+    expect(button).toHaveAttribute('title', 'Show the middle of the diagram at full size (100%)');
+    fireEvent.click(button);
+    // On something that is drawn: the node nearest to the middle, not the
+    // ground between the two buses, and not wherever the view happens to be.
+    const to = middleOfDiagram(
+      drawn.nodes.map((n) => ({
+        ...n.position,
+        width: n.id === 'load-PQ' ? 40 : (n.initialWidth ?? 0),
+        height: n.id === 'load-PQ' ? 30 : (n.initialHeight ?? 0),
+      })),
+    )!;
+    expect(setCenterSpy).toHaveBeenCalledExactlyOnceWith(
+      to.x,
+      to.y,
+      expect.objectContaining({ zoom: FULL_ZOOM, duration: 250 }),
+    );
+    expect(zoomToSpy).not.toHaveBeenCalled();
   });
 
   it('names the selected device on the button, and zooms to full size on its middle', async () => {
@@ -294,5 +314,135 @@ describe('a bus or device picked away from the diagram', () => {
       LOAD_MIDDLE.y,
       expect.objectContaining({ zoom: FITTED_TO_A_SHORT_PANE }),
     );
+  });
+});
+
+describe('a diagram that opens too small to read under the bottom drawer', () => {
+  // The sizes the browser would give the diagram's pane and the drawer.
+  const sizes = { pane: { width: 1100, height: 110 }, drawer: 553 };
+  let drawer: HTMLElement;
+  const widths = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const heights = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+
+  /** Open the case with every node measured, which is when the diagram is fitted. */
+  async function open(): Promise<void> {
+    useCaseStore.getState().setCase({ primaryPath: parseWorkspacePath('pair.xlsx'), addfiles: [] });
+    render(<SldCanvas />);
+    await waitFor(() => expect(drawn.nodes.length).toBeGreaterThan(0));
+    act(() =>
+      drawn.onNodesChange?.(
+        drawn.nodes.map((n) => ({
+          id: n.id,
+          type: 'dimensions' as const,
+          dimensions: { width: 92, height: 30 },
+        })),
+      ),
+    );
+  }
+
+  beforeEach(() => {
+    fitViewSpy.mockClear();
+    view.zoom = 1;
+    // As tall as IEEE 14 is drawn.
+    view.bounds = { x: 0, y: 0, width: 600, height: 1150 };
+    sizes.pane = { width: 1100, height: 110 };
+    sizes.drawer = 553;
+    drawer = document.createElement('div');
+    drawer.setAttribute('data-testid', 'bottom-drawer');
+    document.body.appendChild(drawer);
+    const sized = (side: 'width' | 'height') =>
+      function (this: HTMLElement): number {
+        if (this === drawer) return side === 'height' ? sizes.drawer : 1100;
+        if (this.getAttribute('data-testid') === 'sld-canvas-surface') return sizes.pane[side];
+        return 0;
+      };
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get: sized('width'),
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: sized('height'),
+    });
+    useLayoutStore.setState({ bottomDrawerCollapsed: false, drawerLoweredForDiagram: false });
+  });
+
+  afterEach(() => {
+    drawer.remove();
+    if (widths) Object.defineProperty(HTMLElement.prototype, 'clientWidth', widths);
+    if (heights) Object.defineProperty(HTMLElement.prototype, 'clientHeight', heights);
+    vi.restoreAllMocks();
+    useLayoutStore.setState({ bottomDrawerCollapsed: false, drawerLoweredForDiagram: false });
+  });
+
+  it('lowers the drawer to its tabs, once, and says so', async () => {
+    const info = vi.spyOn(toast, 'info');
+    await open();
+    await waitFor(() => expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(true));
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      'The bottom drawer was lowered to its tabs',
+      expect.objectContaining({
+        description: expect.stringContaining('Click a tab of the drawer'),
+      }),
+    );
+    // Kept, so the next case that opens small leaves the drawer as the user has it.
+    expect(useLayoutStore.getState().drawerLoweredForDiagram).toBe(true);
+  });
+
+  it('stands what floats over the top left corner beside the zoom controls in a short pane, not on them', async () => {
+    // The pane is measured as it changes size, which the test browser has no way to say.
+    class Measured {
+      observe(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', Measured);
+    try {
+      useLayoutStore.setState({ drawerLoweredForDiagram: true });
+      await open();
+      const over = screen.getByTestId('sld-draw-line').closest('[data-short-pane]');
+      expect(over).toHaveAttribute('data-short-pane', 'true');
+      expect(over).toHaveClass('left-14');
+      cleanup();
+      useCaseStore.getState().clearCase();
+      // With room for both, it stands in the corner.
+      sizes.pane = { width: 1100, height: 600 };
+      await open();
+      expect(screen.getByTestId('sld-draw-line').closest('[data-short-pane]')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves the drawer where the user has it once it has done so before', async () => {
+    const info = vi.spyOn(toast, 'info');
+    useLayoutStore.setState({ drawerLoweredForDiagram: true });
+    await open();
+    await waitFor(() => expect(fitViewSpy).toHaveBeenCalled());
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('leaves it in a pane of a usable height, and for a diagram that its room would not make readable', async () => {
+    const info = vi.spyOn(toast, 'info');
+    // Small in a pane 400 high, and the drawer is where the user expects it.
+    sizes.pane = { width: 700, height: 400 };
+    sizes.drawer = 283;
+    await open();
+    await waitFor(() => expect(fitViewSpy).toHaveBeenCalled());
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    cleanup();
+    useCaseStore.getState().clearCase();
+
+    // A case of a hundred buses is small with or without the drawer.
+    fitViewSpy.mockClear();
+    sizes.pane = { width: 1100, height: 250 };
+    view.bounds = { x: 0, y: 0, width: 6000, height: 5000 };
+    await open();
+    await waitFor(() => expect(fitViewSpy).toHaveBeenCalled());
+    expect(useLayoutStore.getState()).toMatchObject({
+      bottomDrawerCollapsed: false,
+      drawerLoweredForDiagram: false,
+    });
+    expect(info).not.toHaveBeenCalled();
   });
 });

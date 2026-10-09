@@ -12,9 +12,12 @@ vi.mock('@xyflow/react', () => ({ useStore: () => null }));
 import {
   FULL_ZOOM,
   LEGIBLE_ZOOM,
+  drawerKeepsTooSmall,
   fitPadding,
+  fittedZoom,
   isTooSmallToRead,
   locateZoom,
+  middleOfDiagram,
   withinPane,
 } from '@/components/sld/zoom';
 
@@ -117,6 +120,84 @@ describe('fitPadding', () => {
     expect(fitPadding({ width: 0, height: 0 }, { width: 800, height: 400 }).left).toMatch(
       /^\d+px$/,
     );
+  });
+});
+
+describe('fittedZoom', () => {
+  it('is the zoom the padding of a fit leaves a diagram, so it can be known before the fit', () => {
+    // A wide diagram stands over the minimap: 24 px each side, 24 over and 176 under.
+    expect(fittedZoom({ width: 1200, height: 700 }, { width: 2400, height: 600 })).toBeCloseTo(
+      Math.min((1200 - 48) / 2400, (700 - 200) / 600),
+    );
+    // A tall one stands between the zoom controls and the minimap.
+    expect(fittedZoom({ width: 1200, height: 700 }, { width: 500, height: 2000 })).toBeCloseTo(
+      Math.min((1200 - 288) / 500, (700 - 48) / 2000),
+    );
+  });
+
+  it('is too small to read for a diagram of some size in a pane a hundred pixels high', () => {
+    const zoom = fittedZoom({ width: 1200, height: 110 }, { width: 1800, height: 1100 });
+    expect(isTooSmallToRead(zoom)).toBe(true);
+    // The same diagram in the room a lowered drawer gives it can be read.
+    expect(
+      isTooSmallToRead(fittedZoom({ width: 1200, height: 700 }, { width: 1800, height: 1100 })),
+    ).toBe(false);
+  });
+
+  it('never goes past full size, and is nothing in a pane with no room', () => {
+    expect(fittedZoom({ width: 1200, height: 700 }, { width: 92, height: 40 })).toBe(FULL_ZOOM);
+    expect(fittedZoom({ width: 100, height: 20 }, { width: 800, height: 400 })).toBe(0);
+  });
+});
+
+describe('drawerKeepsTooSmall', () => {
+  const IEEE14 = { width: 600, height: 1150 };
+
+  it('is so for a diagram a tall drawer leaves a strip, which the room of the drawer makes readable', () => {
+    // A window 485 high with the drawer open: the diagram has about 110.
+    expect(drawerKeepsTooSmall({ width: 1100, height: 110 }, 520, IEEE14)).toBe(true);
+  });
+
+  it('is not so for a diagram that can be read as it is', () => {
+    expect(drawerKeepsTooSmall({ width: 1100, height: 600 }, 300, IEEE14)).toBe(false);
+  });
+
+  it('is not so for a diagram that is too small with or without the drawer', () => {
+    // A case of a hundred buses: lowering the drawer takes the tables and gives nothing.
+    const large = { width: 6000, height: 5000 };
+    expect(drawerKeepsTooSmall({ width: 1100, height: 250 }, 500, large)).toBe(false);
+  });
+
+  it('is not so in a pane of a usable height, however small the diagram is fitted there', () => {
+    // A laptop window with the drawer at its usual third: the diagram is
+    // small, the tables are where the user expects them, and both stay.
+    const pane = { width: 700, height: 400 };
+    expect(isTooSmallToRead(fittedZoom(pane, IEEE14))).toBe(true);
+    expect(isTooSmallToRead(fittedZoom({ width: 700, height: 650 }, IEEE14))).toBe(false);
+    expect(drawerKeepsTooSmall(pane, 250, IEEE14)).toBe(false);
+    // The same diagram in a strip is another matter.
+    expect(drawerKeepsTooSmall({ width: 700, height: 240 }, 410, IEEE14)).toBe(true);
+  });
+
+  it('is not so for a pane that is not on screen, or a drawer that has nothing to give', () => {
+    expect(drawerKeepsTooSmall({ width: 0, height: 0 }, 520, IEEE14)).toBe(false);
+    expect(drawerKeepsTooSmall({ width: 1100, height: 110 }, 0, IEEE14)).toBe(false);
+  });
+});
+
+describe('middleOfDiagram', () => {
+  const box = (x: number, y: number, width = 100, height = 20) => ({ x, y, width, height });
+
+  it('is the middle of the box nearest to the middle of them all, not the ground between them', () => {
+    // Two buses far apart and a load between them, off the middle.
+    const boxes = [box(0, 0), box(0, 1000), box(300, 450, 40, 30)];
+    // The middle of the whole is (170, 510), where nothing is drawn.
+    expect(middleOfDiagram(boxes)).toEqual({ x: 320, y: 465 });
+  });
+
+  it('is the middle of the one box of a diagram that has one, and nothing for none', () => {
+    expect(middleOfDiagram([box(40, 60)])).toEqual({ x: 90, y: 70 });
+    expect(middleOfDiagram([])).toBeNull();
   });
 });
 

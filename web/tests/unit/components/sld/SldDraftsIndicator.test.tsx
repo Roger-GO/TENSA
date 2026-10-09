@@ -105,3 +105,40 @@ describe('<SldDraftsIndicator />', () => {
     expect(screen.queryByTestId('sld-drafts-delete-all')).toBeNull();
   });
 });
+
+describe('<SldDraftsIndicator /> with a parent that opens the list too', () => {
+  // The notice of drafts kept from an earlier visit has a Show button.
+  it('is open when the parent says so, and asks the parent to open and close it', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const handlers = { onSelect: vi.fn(), onDelete: vi.fn(), onDeleteAll: vi.fn() };
+    const { rerender } = render(
+      <SldDraftsIndicator
+        rows={ROWS}
+        selectedId={null}
+        {...handlers}
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(screen.queryByTestId('sld-drafts-list')).toBeNull();
+    // A press on the button asks; nothing opens until the parent agrees.
+    await user.click(screen.getByTestId('sld-drafts-indicator'));
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByTestId('sld-drafts-list')).toBeNull();
+    rerender(
+      <SldDraftsIndicator
+        rows={ROWS}
+        selectedId={null}
+        {...handlers}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(screen.getByTestId('sld-drafts-list')).toBeInTheDocument();
+    // A pick in the list asks for it to be closed.
+    await user.click(screen.getByTestId('sld-drafts-row-draft-2'));
+    expect(handlers.onSelect).toHaveBeenCalledWith('draft-2');
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+});

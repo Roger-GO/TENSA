@@ -373,10 +373,11 @@ export function SldFigureDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Figure of the diagram</DialogTitle>
+          <DialogTitle>Figure for a paper</DialogTitle>
           <DialogDescription>
-            The diagram as it is arranged now, drawn for a paper: no selection, no handles and no
-            screen colours. Choose what it shows, then save it as SVG, PDF or PNG.
+            This is the publication look of the diagram: as it is arranged now, drawn for print,
+            with no selection, no handles and no screen colours. Choose what it shows, then save it
+            as SVG, PDF or PNG.
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-4 md:flex-row">
@@ -474,7 +475,7 @@ export function SldFigureDialog({
               <div className="flex gap-4">
                 {(
                   [
-                    [true, 'Black and white', 'sld-figure-style-mono'],
+                    [true, 'Black and white (print)', 'sld-figure-style-mono'],
                     [false, 'Colour', 'sld-figure-style-colour'],
                   ] as const
                 ).map(([mono, label, testId]) => (

@@ -135,9 +135,10 @@ const said = (): string[] =>
 describe('<SldFigureDialog /> shows the figure it saves', () => {
   it('names itself and says what it is for', () => {
     render(<Harness source={solvedCase} />);
-    const dialog = screen.getByRole('dialog', { name: 'Figure of the diagram' });
+    // Named for what a user looks for, and said outright: this is that look.
+    const dialog = screen.getByRole('dialog', { name: 'Figure for a paper' });
     expect(dialog).toHaveAccessibleDescription(
-      /drawn for a paper: no selection, no handles and no screen colours.*save it as SVG, PDF or PNG/,
+      /^This is the publication look of the diagram.*no selection, no handles and no screen colours.*save it as SVG, PDF or PNG/,
     );
   });
 
@@ -225,7 +226,7 @@ describe('<SldFigureDialog /> shows the figure it saves', () => {
     ]) {
       expect(screen.getByRole('checkbox', { name })).toBeEnabled();
     }
-    expect(screen.getByRole('radio', { name: 'Black and white' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Black and white (print)' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Colour' })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: 'Whole diagram' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Selection only (2 picked)' })).toBeEnabled();

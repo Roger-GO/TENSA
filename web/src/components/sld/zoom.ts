@@ -78,6 +78,14 @@ export function withinPane(
 const FIT_MARGIN = 24;
 
 /**
+ * The height under which the pane of the diagram is a strip: what floats
+ * over its top left corner (the draw buttons and the two legends) would
+ * reach the zoom controls of the bottom left one, and a diagram of any size
+ * is fitted too small to use.
+ */
+export const SHORT_PANE_PX = 300;
+
+/**
  * What floats over the corners of the diagram: the minimap with the search
  * button at the bottom right, and the zoom controls at the bottom left, each
  * with the margin it keeps to the edge.
@@ -112,4 +120,72 @@ export function fitPadding(
     bottom: `${side ? FIT_MARGIN : MINIMAP_CORNER.height}px`,
     left: `${side ? CONTROLS_CORNER.width : FIT_MARGIN}px`,
   };
+}
+
+/**
+ * The zoom a diagram of the size `diagram` is fitted at in a pane of the
+ * size `pane`, with the padding `fitPadding` keeps; never more than full
+ * size, which a fit does not go past.
+ */
+export function fittedZoom(
+  pane: { width: number; height: number },
+  diagram: { width: number; height: number },
+): number {
+  const px = (side: `${number}px`): number => Number.parseFloat(side);
+  const padding = fitPadding(pane, diagram);
+  const across = pane.width - px(padding.left) - px(padding.right);
+  const down = pane.height - px(padding.top) - px(padding.bottom);
+  return Math.min(
+    FULL_ZOOM,
+    Math.max(0, across) / Math.max(1, diagram.width),
+    Math.max(0, down) / Math.max(1, diagram.height),
+  );
+}
+
+/**
+ * Whether the bottom drawer is what keeps a diagram too small to read: the
+ * pane is a strip (under `SHORT_PANE_PX`, which a drawer that was left tall
+ * makes of it), fitted in it the diagram is too small, and in a pane higher
+ * by `drawer`, the room an open drawer gives back when it is lowered to its
+ * tabs, it could be read. A pane of a usable height is how the user has the
+ * window, small diagram or not; a diagram that is too small either way (a
+ * case of a hundred buses) gains nothing; and a pane with no size is not on
+ * screen.
+ */
+export function drawerKeepsTooSmall(
+  pane: { width: number; height: number },
+  drawer: number,
+  diagram: { width: number; height: number },
+): boolean {
+  if (pane.width <= 0 || pane.height <= 0 || drawer <= 0) return false;
+  if (pane.height >= SHORT_PANE_PX) return false;
+  if (!isTooSmallToRead(fittedZoom(pane, diagram))) return false;
+  return !isTooSmallToRead(
+    fittedZoom({ width: pane.width, height: pane.height + drawer }, diagram),
+  );
+}
+
+/**
+ * Where full size is shown when nothing is selected: the middle of the box,
+ * among `boxes`, that is nearest to the middle of them all. Full size on the
+ * middle of the diagram itself would as often show the ground between two
+ * buses as anything drawn. `null` with no box.
+ */
+export function middleOfDiagram(
+  boxes: readonly { x: number; y: number; width: number; height: number }[],
+): { x: number; y: number } | null {
+  if (boxes.length === 0) return null;
+  const left = Math.min(...boxes.map((b) => b.x));
+  const right = Math.max(...boxes.map((b) => b.x + b.width));
+  const top = Math.min(...boxes.map((b) => b.y));
+  const bottom = Math.max(...boxes.map((b) => b.y + b.height));
+  const middle = { x: (left + right) / 2, y: (top + bottom) / 2 };
+  let nearest: { x: number; y: number } | null = null;
+  let least = Infinity;
+  for (const box of boxes) {
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const far = Math.hypot(at.x - middle.x, at.y - middle.y);
+    if (far < least) [nearest, least] = [at, far];
+  }
+  return nearest;
 }

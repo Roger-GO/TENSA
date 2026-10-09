@@ -216,12 +216,13 @@ describe('the ways to the figure of the diagram', () => {
     const menu = await screen.findByTestId('export-menu');
     expect(within(menu).getByTestId('export-menu-png')).toHaveTextContent('PNG');
     const entry = within(menu).getByTestId('export-menu-figure');
-    expect(entry).toHaveTextContent('Figure for a paper (SVG, PDF, PNG)…');
+    // The same words as the entry of the top bar's Export menu.
+    expect(entry).toHaveTextContent(/^Figure for a paper…$/);
 
     await user.click(entry);
 
     const dialog = await screen.findByTestId('sld-figure-dialog', undefined, { timeout: 5000 });
-    expect(within(dialog).getByRole('heading', { name: 'Figure of the diagram' })).toBeVisible();
+    expect(within(dialog).getByRole('heading', { name: 'Figure for a paper' })).toBeVisible();
     // The menu it came from is gone from over it.
     expect(screen.queryByTestId('export-menu')).toBeNull();
   });

@@ -37,6 +37,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReactFlow, useStore } from '@xyflow/react';
 
+import { ClampedText } from '@/components/ui/ClampedText';
 import { cn } from '@/lib/cn';
 import type { Point } from './connections';
 import {
@@ -497,19 +498,22 @@ export function SldWiring({
                   Cancel
                 </button>
               </div>
-              <p
+              {/* One line, with the rest of a hint that does not fit behind More. */}
+              <ClampedText
                 role="status"
-                aria-live="polite"
-                data-testid="sld-wire-note"
-                data-tone={note === null ? 'hint' : 'refused'}
-                title={note ?? wiringHint(mode, bars)}
+                testId="sld-wire-note"
+                attributes={{
+                  'aria-live': 'polite',
+                  'data-tone': note === null ? 'hint' : 'refused',
+                }}
+                text={note ?? wiringHint(mode, bars)}
+                moreLabel="Show the whole instruction"
+                rowClassName="items-center"
                 className={cn(
                   'truncate text-[11px] leading-[14px]',
                   note === null ? 'text-muted-foreground' : 'text-danger font-medium',
                 )}
-              >
-                {note ?? wiringHint(mode, bars)}
-              </p>
+              />
             </div>,
             barSlot,
           )}

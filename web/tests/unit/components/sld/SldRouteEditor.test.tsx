@@ -172,6 +172,38 @@ describe('the handles', () => {
     // The level run of 150 is the longest of the three.
     expect(marked[0]).toBe(screen.getByTestId('sld-route-run-1'));
   });
+
+  it('mark a run in the middle before a longer one at an end, so that the first arrow key moves the line', () => {
+    // The run down from the first bar is the longest by far, and it ends on
+    // the tip of that bar: an arrow key that slides it further out does nothing.
+    draw({
+      points: [
+        [97, 0],
+        [97, 180],
+        [200, 180],
+        [200, 200],
+      ],
+    });
+    const marked = document.querySelectorAll(`[${ROUTE_FOCUS_ATTR}]`);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toBe(screen.getByTestId('sld-route-run-1'));
+    // And it moves at the first press.
+    fireEvent.keyDown(marked[0]!, { key: 'ArrowUp', shiftKey: true });
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(committed()[1]![1]).toBeLessThan(180);
+  });
+
+  it('mark the one run of a line that has no other', () => {
+    draw({
+      points: [
+        [50, 0],
+        [200, 200],
+      ],
+    });
+    const marked = document.querySelectorAll(`[${ROUTE_FOCUS_ATTR}]`);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toBe(screen.getByTestId('sld-route-run-0'));
+  });
 });
 
 describe('dragging', () => {

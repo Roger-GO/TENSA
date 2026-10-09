@@ -18,7 +18,9 @@ import type { DraftRow } from './drafts';
  * the one under the list deletes them all.
  *
  * The component only lists: the canvas hands it the rows and acts on what
- * is asked. It is left out of a PNG of the view (`data-export-ignore`).
+ * is asked, and holds whether the list is open, since the notice of drafts
+ * kept from an earlier visit opens it too. It is left out of a PNG of the
+ * view (`data-export-ignore`).
  */
 export interface SldDraftsIndicatorProps {
   rows: readonly DraftRow[];
@@ -27,6 +29,12 @@ export interface SldDraftsIndicatorProps {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onDeleteAll: () => void;
+  /**
+   * Whether the list is open, and what a press on the button or a pick in the
+   * list asks, for a parent that opens it too. Left out, the list keeps it.
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
@@ -39,9 +47,13 @@ export function SldDraftsIndicator({
   onSelect,
   onDelete,
   onDeleteAll,
+  open: openAsked,
+  onOpenChange,
   className,
 }: SldDraftsIndicatorProps) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openAsked ?? ownOpen;
+  const setOpen = onOpenChange ?? setOwnOpen;
   if (rows.length === 0) return null;
   const incomplete = rows.filter((row) => !row.ready).length;
   const count = `${rows.length} ${rows.length === 1 ? 'draft' : 'drafts'}`;

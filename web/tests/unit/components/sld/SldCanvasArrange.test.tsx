@@ -1603,7 +1603,7 @@ describe('Reset to auto-layout', () => {
     act(() => options.action.onClick());
 
     expect(info).toHaveBeenCalledWith(
-      'The diagram was changed since. Use Undo in the Edit menu to go back.',
+      'The diagram was changed since. Use Undo (Ctrl+Z or Edit > Undo) to go back.',
     );
     // Nothing was put back, and the history still matches what is drawn.
     expect(picture()).toEqual(after);

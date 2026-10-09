@@ -16,7 +16,9 @@
  * that the canvas keeps the same on screen whatever the zoom
  * (`BUS_HIT_PX`), and of two bars in reach the nearer one is meant.
  * `busUnderBox` is the same for a symbol that is dragged: the bar its box
- * lies on.
+ * lies on. A row of the palette is aimed at what names the bus as readily
+ * as at its bar, so `busDroppedOn` also takes a place on the label of a bus,
+ * or in the box of its node, as that bus.
  *
  * `attachDraft` is what connecting a draft to a bus sets on it: `bus` for a
  * device, and for a line or a transformer its first end that is still open
@@ -131,6 +133,42 @@ export function busAt(
   for (const bar of bars) {
     const far = distanceToBox(point, bar.box);
     if (far <= reach && (best === null || far < best.far)) best = { id: bar.id, far };
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * How far outside the label or the box of a bus a drop still counts as on
+ * it, as a share of the reach of its bar: a name is as wide as it is read.
+ */
+const NAME_REACH = 0.25;
+
+/**
+ * The bus a component dropped at `point` is meant for. A bar within `reach`
+ * comes first, the nearest of them (`busAt`); with none, the bus whose name
+ * or node the place is on: `around` lists, by bus id, the boxes that stand
+ * for a bus besides its bar (its label as the diagram placed it, the box of
+ * its node). `null` when the place is on no bus.
+ */
+export function busDroppedOn(
+  point: { x: number; y: number },
+  bars: readonly BusBar[],
+  reach: number,
+  around: ReadonlyMap<string, readonly Rect[]>,
+): string | null {
+  const onBar = busAt(point, bars, reach);
+  if (onBar !== null) return onBar;
+  let best: { id: string; far: number; toBar: number } | null = null;
+  for (const bar of bars) {
+    for (const box of around.get(bar.id) ?? []) {
+      const far = distanceToBox(point, box);
+      if (far > reach * NAME_REACH) continue;
+      // Of two names the place is on, the one whose bar is nearer is meant.
+      const toBar = distanceToBox(point, bar.box);
+      if (best === null || far < best.far || (far === best.far && toBar < best.toBar)) {
+        best = { id: bar.id, far, toBar };
+      }
+    }
   }
   return best?.id ?? null;
 }

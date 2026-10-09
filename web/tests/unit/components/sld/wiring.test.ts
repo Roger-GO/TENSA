@@ -11,6 +11,7 @@ import {
   branchValues,
   busAt,
   busBars,
+  busDroppedOn,
   busFields,
   busTitle,
   busUnderBox,
@@ -80,6 +81,50 @@ describe('which bus a place on the diagram is on', () => {
     // Clear of both.
     expect(busUnderBox(over(-80), drawn)).toBeNull();
     expect(busUnderBox({ left: 200, right: 296, top: 0, bottom: 64 }, drawn)).toBeNull();
+  });
+
+  describe('for a component that is dropped', () => {
+    // The name of bus 1 under its bar, and the name of bus 2 beside its tip.
+    const around = new Map([
+      ['1', [{ left: 30, right: 62, top: 10, bottom: 22 }]],
+      ['2', [{ left: 100, right: 120, top: 36, bottom: 48 }]],
+    ]);
+
+    it('takes the bar in reach first, as a place on the diagram is read', () => {
+      expect(busDroppedOn({ x: 46, y: 3 }, drawn, 10, around)).toBe('1');
+      expect(busDroppedOn({ x: -15, y: 43 }, drawn, 10, around)).toBe('2');
+    });
+
+    it('takes the name of a bus for that bus, where no bar is in reach', () => {
+      // Too far under the bar of bus 1 for the bar, and on its name.
+      expect(busAt({ x: 46, y: 20 }, drawn, 10)).toBeNull();
+      expect(busDroppedOn({ x: 46, y: 20 }, drawn, 10, around)).toBe('1');
+      // Beside the tip of bus 2, on its name.
+      expect(busDroppedOn({ x: 115, y: 44 }, drawn, 5, around)).toBe('2');
+      // A little way off a name still counts, by a part of the reach of a bar.
+      expect(busDroppedOn({ x: 122, y: 44 }, drawn, 10, around)).toBe('2');
+      expect(busDroppedOn({ x: 126, y: 44 }, drawn, 10, around)).toBeNull();
+    });
+
+    it('takes the bar where a place is on the name of one bus and in reach of the bar of another', () => {
+      // The name of bus 1 stands just over the bar of bus 2.
+      const over = new Map([['1', [{ left: 30, right: 62, top: 28, bottom: 38 }]]]);
+      expect(busDroppedOn({ x: 46, y: 36 }, drawn, 10, over)).toBe('2');
+    });
+
+    it('takes the name the place is nearer to, and of two it is on, the one with the nearer bar', () => {
+      const both = new Map([
+        ['1', [{ left: 30, right: 62, top: 10, bottom: 22 }]],
+        ['2', [{ left: 40, right: 72, top: 14, bottom: 26 }]],
+      ]);
+      // On both names, at 14 from the bar of bus 1 and 20 from that of bus 2.
+      expect(busDroppedOn({ x: 50, y: 20 }, drawn, 10, both)).toBe('1');
+    });
+
+    it('is on no bus on free ground, and with no names to go by', () => {
+      expect(busDroppedOn({ x: 300, y: 300 }, drawn, 10, around)).toBeNull();
+      expect(busDroppedOn({ x: 46, y: 20 }, drawn, 10, new Map())).toBeNull();
+    });
   });
 
   it('leaves a bar at the place nearest to where the line goes', () => {

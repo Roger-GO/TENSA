@@ -57,6 +57,10 @@ import { useHotkeys } from '@/lib/useHotkeys';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { toast } from '@/lib/toast';
 import { describeError } from '@/lib/describeError';
+import { runLockNotice } from '@/lib/runLock';
+import { UNDO } from '@/lib/undoWording';
+import { requestResetRun } from '@/lib/resetRunRequest';
+import { useReloadDiscardsEdits } from '@/lib/useResetRunAction';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { LazyMount } from '@/components/ui/Lazy';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -131,8 +135,9 @@ import {
   BUS_HIT_PX,
   attachDraft,
   branchValues,
-  busAt,
   busBars,
+  busDroppedOn,
+  busFields,
   busUnderBox,
   connectsToBus,
   isBranchKind,
@@ -211,9 +216,20 @@ import {
   type LabelPlace,
   type NodeSize,
   type Point,
+  type Rect,
 } from './connections';
-import { FULL_ZOOM, fitPadding, isTooSmallToRead, locateZoom, withinPane } from './zoom';
+import {
+  FULL_ZOOM,
+  SHORT_PANE_PX,
+  drawerKeepsTooSmall,
+  fitPadding,
+  isTooSmallToRead,
+  locateZoom,
+  middleOfDiagram,
+  withinPane,
+} from './zoom';
 import { symbolBoxes } from './labels';
+import { DRAWER_STRIP_PX } from '@/components/shell/drawerSizes';
 import { cn } from '@/lib/cn';
 
 // The figure of the diagram is fetched when it is first asked for: its
@@ -264,7 +280,7 @@ const SNAP_GRID: [number, number] = [GRID_STEP, GRID_STEP];
 const SETTLING_ROUNDS = 4;
 
 /** What the Undo of a toast says when its change is no longer the newest one. */
-const CHANGED_SINCE_NOTICE = 'The diagram was changed since. Use Undo in the Edit menu to go back.';
+const CHANGED_SINCE_NOTICE = `The diagram was changed since. Use ${UNDO} to go back.`;
 
 /**
  * What a bus or device was dropped on, as the notice says it when the drop
@@ -292,13 +308,6 @@ const DROP_PICTURES_LARGE = 3;
 
 /** The node types of the devices of the system that hang off a bus by a connector. */
 const HUNG_TYPES: ReadonlySet<string> = new Set(['generator', 'load', 'shunt']);
-
-/**
- * Why no element of the system can be moved to another bus while a run has
- * set it up, and the way out: the words the palette has for an add.
- */
-const RUN_LOCKS_MOVES =
-  'A run has locked the system. Select an element and use Reset run in the Inspector to move elements to another bus again.';
 
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
@@ -694,6 +703,28 @@ function SldCanvasInner({
   );
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
+  // Whether the list of drafts over the diagram is open.
+  const [draftsListOpen, setDraftsListOpen] = useState(false);
+  // Drafts that were kept from an earlier visit turn up dashed on a case
+  // that was just opened, with nothing to say where they came from: said
+  // once for the case, with the two things to do about them.
+  useEffect(() => {
+    if (caseKey === null) return;
+    const kept = useDraftsStore.getState().takeKept(caseKey);
+    if (kept === 0) return;
+    toast.info(
+      kept === 1
+        ? '1 draft from an earlier visit is kept in this browser'
+        : `${kept} drafts from an earlier visit are kept in this browser`,
+      {
+        description:
+          'A draft is drawn dashed and is not in the system yet: no run sees it. Show lists them. Delete all removes them, and Undo brings them back.',
+        duration: 15_000,
+        action: { label: 'Show', onClick: () => setDraftsListOpen(true) },
+        secondary: { label: 'Delete all', onClick: () => deleteAllDrafts(caseKey) },
+      },
+    );
+  }, [caseKey]);
   // Whether there are drafts and the fields of the models, by which each is
   // read, are still on their way: the drafts are then drawn as symbols on no
   // bus, which is not how they stand.
@@ -1374,7 +1405,7 @@ function SldCanvasInner({
           );
           if (landed === null) {
             toast.info('Moved to the nearest free place', {
-              description: `${DROPPED_ON[shift.onto]} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Undo puts it back where it was before the move.`,
+              description: `${DROPPED_ON[shift.onto]} Nothing on the diagram is drawn over anything else, so it stands as near as it can. ${UNDO} puts it back where it was before the move.`,
               duration: 8_000,
             });
           }
@@ -1982,6 +2013,7 @@ function SldCanvasInner({
   // Set where the line that is picked next takes the keyboard focus on its
   // longest run: one that was picked with the keys is moved with the keys.
   const focusRouteRef = useRef(false);
+  const [routeFocusAsked, setRouteFocusAsked] = useState(0);
   // Enter or Space on a line that has the keyboard focus picks it, as a
   // click on it does. React Flow only marks it selected for those keys.
   // Escape lets go of the line that is picked, wherever on the diagram the
@@ -2289,21 +2321,35 @@ function SldCanvasInner({
   const sessionId = useSessionStore((s) => s.sessionId);
   const pfRunning = usePflowStore((s) => s.isRunning);
   const editElements = useEditElements();
+  // Why no element of the system can be moved to another bus while a run has
+  // fixed it, and the way out: the words every such place has (`runLock.ts`).
+  const lockedByRun = topology.state === 'committed';
+  const runLocksMoves = runLockNotice(useReloadDiscardsEdits());
   // Why no element of the system can be moved to another bus now. A draft
   // can always: it is not in the system.
   const moveBlocked =
     sessionId === null
       ? 'The server session is not ready yet.'
-      : topology.state === 'committed'
-        ? RUN_LOCKS_MOVES
+      : lockedByRun
+        ? runLocksMoves
         : pfRunning
           ? 'Wait for the power flow to finish.'
           : editElements.isPending
             ? 'The last move is still being made.'
             : null;
-  const sayBlocked = useCallback((reason: string) => {
-    toast.info('Not moved to another bus', { description: reason, duration: 8_000 });
-  }, []);
+  const sayBlocked = useCallback(
+    (reason: string) => {
+      toast.info('Not moved to another bus', {
+        description: reason,
+        duration: 8_000,
+        // The way out of a run's lock, on the notice that says it.
+        ...(reason === runLocksMoves
+          ? { action: { label: 'Reset run', onClick: () => void requestResetRun() } }
+          : {}),
+      });
+    },
+    [runLocksMoves],
+  );
   const busCount = topology.buses.length;
   const startDraw = useCallback(
     (model: BranchKind, from: string | null = null) => {
@@ -2453,8 +2499,8 @@ function SldCanvasInner({
                   ? `The rated voltage Vn went with the bus, from ${plan.rated.from} to ${plan.rated.to} kV.`
                   : '',
                 several
-                  ? `Undo in the Edit menu takes it back, one step for each of the ${plan.edits.length}.`
-                  : 'Undo in the Edit menu takes it back.',
+                  ? `${UNDO} takes it back, one step for each of the ${plan.edits.length}.`
+                  : `${UNDO} takes it back.`,
               ]
                 .filter((part) => part !== '')
                 .join(' '),
@@ -2607,18 +2653,60 @@ function SldCanvasInner({
       ) {
         return draft;
       }
-      if (shift !== null) {
-        // A draft stands beside a line, where a device that is dragged onto
-        // one has it routed round. What the picture refused with the rules
-        // passed is a line as well: one that would have had to give way.
-        const onto =
-          shift.onto === 'no-way' || shift.onto === 'line'
-            ? 'A line runs where it was dropped, and a draft leaves the lines as they are.'
-            : DROPPED_ON[shift.onto];
+      // A draft stands beside a line, where a device that is dragged onto
+      // one has it routed round. What the picture refused with the rules
+      // passed is a line as well: one that would have had to give way.
+      const moved =
+        shift === null
+          ? ''
+          : `${
+              shift.onto === 'no-way' || shift.onto === 'line'
+                ? 'A line runs where it was dropped, and a draft leaves the lines as they are.'
+                : DROPPED_ON[shift.onto]
+            } Nothing on the diagram is drawn over anything else, so it stands as near as it can. Drag it to move it.`;
+      const fields = busFields(draftFields(draft, schema));
+      if (fields.length > 0) {
+        // A kind that goes on a bus and was dropped on none: said plainly,
+        // since a draft that stands near a bus looks connected and is not.
+        const open = fields.find((name) => (draft.values[name] ?? '') === '') ?? fields[0]!;
+        const named = draftName(
+          draft,
+          draftStatus(
+            draft,
+            schema,
+            topology,
+            draftReservedIdxs(draftsOf(useDraftsStore.getState().byCase, caseKey), topology).get(
+              draft.id,
+            ),
+          ),
+        );
+        toast.info(`${capitalised(named)} is not on a bus yet`, {
+          description: [
+            moved === '' ? '' : `It was placed in the nearest free place. ${moved}`,
+            fields.length > 1
+              ? 'Pick the two buses it runs between in its form in the Inspector, or drag it onto the bar of the bus it starts at.'
+              : 'Pick its bus in its form in the Inspector, or drag it onto the bar or the name of a bus.',
+          ]
+            .filter((part) => part !== '')
+            .join(' '),
+          duration: 12_000,
+          action: {
+            label: 'Pick a bus',
+            onClick: () => {
+              // The form is in the Inspector, which may be folded away.
+              useLayoutStore.getState().setRightInspectorCollapsed(false);
+              selectDraft(draft.id, 'diagram');
+              useDraftsStore.getState().askField({ id: draft.id, name: open });
+            },
+          },
+        });
+      } else if (shift !== null) {
         toast.info('Draft placed in the nearest free place', {
-          description: `${onto} Nothing on the diagram is drawn over anything else, so it stands as near as it can. Drag it to move it.`,
+          description: moved,
           duration: 8_000,
         });
+      }
+      if (shift !== null) {
         // Free ground may be some way off where the lines run close
         // together: the view goes to a draft that came to stand out of it.
         const pane = canvasRef.current?.querySelector('.react-flow')?.getBoundingClientRect();
@@ -2634,16 +2722,38 @@ function SldCanvasInner({
       }
       return draft;
     },
-    [caseKey, rf, schema, connectDraft],
+    [caseKey, rf, schema, topology, connectDraft],
   );
-  /** The bus under the pointer of `e`, within the reach a drop is aimed with. */
+  /**
+   * The bus under the pointer of `e`, within the reach a drop is aimed with:
+   * its bar, or the name under it or the box of its node, which is what a
+   * drop aimed at "the bus" lands on as often as on the thin bar.
+   */
   const busUnderPointer = useCallback(
     (e: { clientX: number; clientY: number }): string | null => {
       const zoom = rf.getZoom();
-      return busAt(
+      const around = new Map<string, Rect[]>();
+      for (const node of nodesRef.current) {
+        if ((node.type ?? 'bus') !== 'bus') continue;
+        const boxes: Rect[] = [];
+        const label = pictureRef.current.busLabels.get(node.id);
+        if (label !== undefined) boxes.push(label.box);
+        const size = drawnRef.current.sizes.get(node.id);
+        if (size !== undefined) {
+          boxes.push({
+            left: node.position.x,
+            top: node.position.y,
+            right: node.position.x + size.width,
+            bottom: node.position.y + size.height,
+          });
+        }
+        around.set(node.id, boxes);
+      }
+      return busDroppedOn(
         rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }),
         busBars(nodesRef.current, drawnRef.current.connections),
         BUS_HIT_PX / (zoom > 0 ? zoom : 1),
+        around,
       );
     },
     [rf],
@@ -2694,6 +2804,13 @@ function SldCanvasInner({
       // next. With one bus only there is none to pick, and it is a draft.
       if (bus !== null && isBranchKind(kind) && busCount >= 2) {
         startDraw(kind, bus);
+        // The drop placed nothing yet, which the palette's own hint says of a
+        // device only: say what it started, where to look and how to stop.
+        toast.info(`Drawing a ${BRANCH_NOUN[kind]} from bus ${bus}`, {
+          description:
+            'Now click the bus it goes to: the row above the diagram says so, and every bus is a button meanwhile. Esc cancels. What is drawn is a draft, not yet an element of the system.',
+          duration: 8_000,
+        });
         return;
       }
       placeDraft(kind, rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), bus);
@@ -2738,11 +2855,60 @@ function SldCanvasInner({
     if (fittedRef.current || nodes.length === 0 || !nodes.every((n) => sizes.has(n.id))) return;
     fittedRef.current = true;
     fitWithin(0);
-  }, [nodes, sizes, fitWithin]);
+    // A diagram that opens too small to read in the strip a tall drawer
+    // leaves it gets the room of the drawer, once in a browser, and the
+    // user is told so: the tables are a click on a tab away, and a diagram
+    // of dashes is of no use. After that the drawer is as the user leaves
+    // it. Only where that room makes it readable: a case of a hundred
+    // buses is small either way, and keeps its tables.
+    const surface = canvasRef.current;
+    const layout = useLayoutStore.getState();
+    if (surface === null || layout.bottomDrawerCollapsed || layout.drawerLoweredForDiagram) return;
+    const pane = { width: surface.clientWidth, height: surface.clientHeight };
+    const drawer = document.querySelector<HTMLElement>('[data-testid="bottom-drawer"]');
+    const gained = (drawer?.clientHeight ?? 0) - DRAWER_STRIP_PX;
+    if (!drawerKeepsTooSmall(pane, gained, rf.getNodesBounds(nodes))) return;
+    layout.setDrawerLoweredForDiagram(true);
+    layout.setBottomDrawerCollapsed(true);
+    toast.info('The bottom drawer was lowered to its tabs', {
+      description:
+        'The diagram was too small to read in the room it had. Click a tab of the drawer (Buses, Lines, Analysis) to open it again; it stays as you leave it from now on.',
+      duration: 10_000,
+    });
+    // Fitted again once the pane has the room.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (surface.clientHeight <= pane.height) return;
+      observer.disconnect();
+      fitWithin(0);
+    });
+    observer.observe(surface);
+    const giveUp = window.setTimeout(() => observer.disconnect(), 2000);
+    return () => {
+      window.clearTimeout(giveUp);
+      observer.disconnect();
+    };
+  }, [nodes, sizes, fitWithin, rf]);
+
+  // In a short pane what floats over the top left corner (the draw buttons,
+  // the legends) would reach down onto the zoom controls of the bottom left
+  // one: it stands beside their column then.
+  const [shortPane, setShortPane] = useState(false);
+  const drawn = coords !== null;
+  useEffect(() => {
+    const surface = canvasRef.current;
+    if (surface === null || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setShortPane(surface.clientHeight < SHORT_PANE_PX);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(surface);
+    return () => observer.disconnect();
+    // The surface is there once the diagram is drawn, and not before.
+  }, [drawn]);
 
   // The button above a diagram that is too small to read (`SldCanvasHint`):
   // full size, on the selected bus or device when there is one, and about
-  // the middle of the view otherwise.
+  // the middle of the diagram otherwise.
   const selectedName = useMemo(() => {
     const node = baseGraph?.nodes.find((n) => isSelectedNode(n, selectedElement, selectedDrawnId));
     if (!node) return null;
@@ -2758,7 +2924,20 @@ function SldCanvasInner({
       ),
     );
     if (!node) {
-      void rf.zoomTo(FULL_ZOOM, { duration: 250 });
+      // With nothing selected: the node nearest to the middle of the
+      // diagram, so that full size shows something (`middleOfDiagram`).
+      const to = middleOfDiagram(
+        nodesRef.current.map((n) => {
+          const size = sizes.get(n.id);
+          return {
+            ...n.position,
+            width: size?.width ?? n.initialWidth ?? 0,
+            height: size?.height ?? n.initialHeight ?? 0,
+          };
+        }),
+      );
+      if (to === null) void rf.zoomTo(FULL_ZOOM, { duration: 250 });
+      else void rf.setCenter(to.x, to.y, { zoom: FULL_ZOOM, duration: 250 });
       return;
     }
     const centre = centreOf(node, sizes.get(node.id));
@@ -2903,7 +3082,8 @@ function SldCanvasInner({
         );
         return;
       }
-      if (locked) {
+      // The lock is on the arrangement: a deleted draft comes back all the same.
+      if (locked && newest.drafts === undefined) {
         toast.info(LOCKED_NOTICE);
         return;
       }
@@ -2915,7 +3095,22 @@ function SldCanvasInner({
       );
       const step = way === 'undo' ? history.undo(current) : history.redo(current);
       if (step === null) return;
-      applyArrangement(step.snapshot);
+      if (step.drafts !== undefined) {
+        // Drafts that were deleted: back as they were, or gone again. Nothing
+        // was arranged by it, so the arrangement stays as it is.
+        const { caseKey: of, deleted } = step.drafts;
+        const store = useDraftsStore.getState();
+        if (way === 'undo') {
+          const back = store.restore(of, deleted);
+          // Redo deletes the ones that are back, under the ids they are back with.
+          useLayoutHistoryStore.getState().redoDeletes(back);
+          if (back.length === 1) selectDraft(back[0]!.id, 'diagram');
+        } else {
+          for (const draft of deleted) store.remove(of, draft.id);
+        }
+      } else {
+        applyArrangement(step.snapshot);
+      }
       toast.info(`${way === 'undo' ? 'Undone' : 'Redone'}: ${step.label}`);
     },
     [applyArrangement, locked],
@@ -3115,13 +3310,20 @@ function SldCanvasInner({
   // leaves the view where it is. A locked diagram picks none, and says
   // nothing: the row was picked to look at the line.
   const pickRouteOf = useCallback(
-    (branchIdx: string) => {
+    (branchIdx: string, takeFocus = false) => {
       if (locked || tidying) return;
       const edge = baseGraphRef.current?.edges.find(
         (held) =>
           held.type !== 'stub' && String((held.data as { idx?: unknown }).idx) === branchIdx,
       );
       if (edge === undefined) return;
+      // Asked for by a control that says it moves the route: the keys go to
+      // a run of it, so that the next press of an arrow moves the line.
+      if (takeFocus) {
+        focusRouteRef.current = true;
+        // Counted, so that a line that is picked already is answered too.
+        setRouteFocusAsked((n) => n + 1);
+      }
       setRouteEditId(edge.id);
       const points = pictureRef.current.connections.routes.get(edge.id)?.points;
       if (points === undefined || points.length < 2) return;
@@ -3154,17 +3356,18 @@ function SldCanvasInner({
   useEffect(
     () =>
       subscribeRouteEdit((branchIdx, what) =>
-        what === 'reset' ? resetRouteOf(branchIdx) : pickRouteOf(branchIdx),
+        what === 'reset' ? resetRouteOf(branchIdx) : pickRouteOf(branchIdx, what === 'edit-focus'),
       ),
     [pickRouteOf, resetRouteOf],
   );
-  // The line that was picked with the keys takes the focus on its longest
-  // run, once its handles are drawn.
+  // The line that was picked with the keys, or by a control that says it
+  // moves the route, takes the focus on a run the arrow keys move, once its
+  // handles are drawn.
   useEffect(() => {
     if (!focusRouteRef.current || routeEditId === null || editedRoute === null) return;
     focusRouteRef.current = false;
     canvasRef.current?.querySelector<SVGElement>(`[${ROUTE_FOCUS_ATTR}]`)?.focus();
-  }, [routeEditId, editedRoute]);
+  }, [routeEditId, editedRoute, routeFocusAsked]);
 
   // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
   // `relayout` the buses are first lined up on the grid and every generator,
@@ -3510,7 +3713,7 @@ function SldCanvasInner({
   // a PNG of the pane as it is shown. The row has no room for a button of its
   // own: with the note of a tidy in it, it is full in a window 1280 px wide.
   const figureAction = useMemo(
-    () => [{ id: 'figure', label: 'Figure for a paper (SVG, PDF, PNG)…', onSelect: openFigure }],
+    () => [{ id: 'figure', label: 'Figure for a paper…', onSelect: openFigure }],
     [openFigure],
   );
   // A draft is not part of the system, so it is not in a figure of it.
@@ -3865,7 +4068,15 @@ function SldCanvasInner({
             loading and generator limit markers. Inside the surface so the PNG
             export carries them; each draws nothing until a power flow or a
             run has put what it explains on the diagram. */}
-            <div className="pointer-events-none absolute top-0.5 left-2 z-10 flex flex-col items-start gap-1.5">
+            <div
+              data-short-pane={shortPane ? 'true' : undefined}
+              className={cn(
+                'pointer-events-none absolute top-0.5 z-10 flex flex-col items-start gap-1.5',
+                // Beside the column of the zoom controls where the pane is
+                // too short for both to stand one over the other.
+                shortPane ? 'left-14' : 'left-2',
+              )}
+            >
               {/* Draw a line or a transformer from one bus to another. No
                   higher than the margin a fitted diagram keeps to the top
                   of its pane, so the buttons stand on none of it. */}
@@ -3890,6 +4101,8 @@ function SldCanvasInner({
                 onSelect={pickDraft}
                 onDelete={removeDraft}
                 onDeleteAll={removeAllDrafts}
+                open={draftsListOpen}
+                onOpenChange={setDraftsListOpen}
                 className="pointer-events-auto"
               />
             </div>

@@ -371,7 +371,7 @@ describe('picking a line', () => {
     open('square.xlsx');
     await draw();
     expect(screen.getByTestId('sld-canvas-hint')).toHaveTextContent(
-      'Click a line or a device connector to move its route by hand; a line can also be picked by its row in the Lines table.',
+      'Drag a bus or device to move it. Right-click a bus, a line or the background for more actions.',
     );
     expect(screen.queryByTestId('sld-route-editor')).toBeNull();
 
@@ -484,6 +484,38 @@ describe('picking a line', () => {
     act(() => drawn.onInteractiveChange?.(false));
     act(() => __requestRouteEdit('L14'));
     expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+  });
+
+  it('hands the keys to a run of the line for Move route by hand, and leaves them with a row of the table', async () => {
+    open('square.xlsx');
+    await draw();
+    const row = document.createElement('button');
+    document.body.appendChild(row);
+    try {
+      row.focus();
+      // A row of the Lines table: the handles show, and the row keeps the focus.
+      act(() => __requestRouteEdit('L14'));
+      expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L14');
+      expect(document.activeElement).toBe(row);
+      // Move route by hand, in the Inspector: the next press of an arrow moves the line.
+      act(() => __requestRouteEdit('L14', { focus: true }));
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('data-route-focus'));
+      const before = routeOf('line-L14');
+      fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+      expect(routeOf('line-L14')).not.toEqual(before);
+      // Asked for a line that is not picked yet, the same.
+      row.focus();
+      act(() => __requestRouteEdit('T24', { focus: true }));
+      await waitFor(() =>
+        expect(screen.getByTestId('sld-route-editor')).toHaveAttribute(
+          'data-edge-id',
+          'transformer-T24',
+        ),
+      );
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('data-route-focus'));
+    } finally {
+      row.remove();
+    }
   });
 
   it('picks the line that has the keyboard focus on Enter or Space, and hands the focus to its longest run', async () => {
