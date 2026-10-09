@@ -5,14 +5,14 @@ from __future__ import annotations
 import importlib.metadata
 
 import pytest
-from typer.testing import CliRunner
 
 import tensa
 from tensa import cli
+from tests._cli import cli_runner
 
 pytestmark = pytest.mark.unit
 
-runner = CliRunner()
+runner = cli_runner()
 
 
 def test_version_flag_prints_tensa_and_andes_versions() -> None:

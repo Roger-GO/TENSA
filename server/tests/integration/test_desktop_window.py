@@ -25,13 +25,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from tensa import cli
 from tensa.core.logging_setup import reset_logging
 from tensa.desktop import WindowSupport
+from tests._cli import cli_runner
 
 pytestmark = pytest.mark.integration
 
@@ -116,7 +116,7 @@ def test_the_window_reaches_the_server_and_closing_it_leaves_nothing_running(
     before = {p.pid for p in multiprocessing.active_children()}
 
     with caplog.at_level("INFO"):
-        result = CliRunner().invoke(
+        result = cli_runner().invoke(
             cli.app,
             ["desktop", "--workspace", str(tmp_path / "ws"), "--no-warm-cache"],
         )

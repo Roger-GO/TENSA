@@ -35,15 +35,15 @@ import typer.main
 import uvicorn
 from fastapi import FastAPI
 from starlette.testclient import TestClient
-from typer.testing import CliRunner
 
 from tensa import cli
 from tensa.api.app import make_app
 from tensa.core.logging_setup import reset_logging
+from tests._cli import cli_runner
 
 pytestmark = pytest.mark.unit
 
-runner = CliRunner()
+runner = cli_runner()
 
 
 @pytest.fixture(autouse=True)

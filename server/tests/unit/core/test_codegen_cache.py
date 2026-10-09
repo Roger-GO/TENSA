@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 
 from tensa import cli
 from tensa.core import codegen_cache
@@ -40,6 +39,7 @@ from tensa.core.errors import CaseLoadError
 from tensa.core.worker_spawn import DEFAULT_WORKER_THREADS
 from tensa.core.wrapper import Wrapper
 from tensa.core.wrapper import case as case_module
+from tests._cli import cli_runner
 
 pytestmark = pytest.mark.unit
 
@@ -595,7 +595,7 @@ def fake_andes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any
 
 
 def test_warm_cache_stamps_the_cache_it_generated(fake_andes: dict[str, Any]) -> None:
-    result = CliRunner().invoke(cli.app, ["warm-cache", "--quick", "--incremental"])
+    result = cli_runner().invoke(cli.app, ["warm-cache", "--quick", "--incremental"])
     assert result.exit_code == 0, result.output
     assert fake_andes["calls"] == [{"quick": True, "incremental": True}]
     # ``tensa serve`` now finds the cache ready and starts no child.
@@ -608,7 +608,7 @@ def test_warm_cache_leaves_the_cache_unstamped_when_the_generation_fails(
     fake_andes["directory"].mkdir()
     (fake_andes["directory"] / "__init__.py").write_text("", encoding="utf-8")
     fake_andes["fail"] = True
-    result = CliRunner().invoke(cli.app, ["warm-cache"])
+    result = cli_runner().invoke(cli.app, ["warm-cache"])
     assert result.exit_code != 0
     assert cache_state("9.9.9", fake_andes["directory"]) == "unchecked"
 

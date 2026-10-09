@@ -39,12 +39,13 @@ import webbrowser
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import FrameType
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 import typer
 import uvicorn
 from fastapi import FastAPI
+from typer.core import TyperGroup
 
 from tensa import __version__
 from tensa import andes_version as _andes_version
@@ -70,10 +71,61 @@ from tensa.desktop import (
 )
 from tensa.security.paths import ensure_workspace
 
+
+def _on_a_terminal() -> bool:
+    """Whether what the command writes is read on a terminal: both of its streams
+    (help goes to one, a usage error to the other), since Typer has one setting
+    for the two."""
+    for stream in (sys.stdout, sys.stderr):
+        # A windowed program has no streams at all, and a closed one cannot say.
+        isatty = getattr(stream, "isatty", None)
+        try:
+            if isatty is None or not isatty():
+                return False
+        except ValueError:
+            return False
+    return True
+
+
+def _style_only_on_a_terminal() -> None:
+    """Have Typer write ``--help`` and its usage errors as plain text unless they
+    are read on a terminal.
+
+    Typer writes both through Rich, which styles them for a terminal and leaves
+    them plain otherwise. But Typer takes ``GITHUB_ACTIONS``, ``FORCE_COLOR`` or
+    ``PY_COLORS`` in the environment as a reason to style them whatever they are
+    written to, and Rich takes ``FORCE_COLOR`` as one by itself. Help that is piped
+    to a file or a pager, or read by a script or an assistant, is then full of
+    escape codes, with an option name cut in two by the codes around its dashes
+    (``--log`` and ``-file``), so it can be neither searched nor copied. Here the
+    stream decides and the environment does not: on a terminal Rich finds out what
+    it can show (``NO_COLOR`` and ``TERM=dumb`` still count), and anywhere else
+    nothing is styled.
+    """
+    try:
+        from typer import rich_utils
+    except ImportError:  # Typer without Rich writes plain text everywhere
+        return
+    rich_utils.FORCE_TERMINAL = None if _on_a_terminal() else False
+
+
+class _TensaGroup(TyperGroup):
+    """The ``tensa`` command group, which settles how it writes before it runs.
+
+    ``main`` is where both the installed command and a test's runner come in, and
+    by then the streams are the ones the run writes to.
+    """
+
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        _style_only_on_a_terminal()
+        return super().main(*args, **kwargs)
+
+
 app = typer.Typer(
     name="tensa",
     help="Substrate for the ANDES power-system simulator GUI.",
     no_args_is_help=True,
+    cls=_TensaGroup,
 )
 
 
