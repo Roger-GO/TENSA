@@ -10,7 +10,7 @@
  * it (`__requestSldCommand`), or a button of the canvas is pressed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 interface DrawnNode {
@@ -61,6 +61,9 @@ const drawn: {
   nodesDraggable: undefined,
 };
 
+/** Where the canvas last sent the view. */
+const flow = vi.hoisted(() => ({ setCenter: vi.fn() }));
+
 vi.mock('@xyflow/react', () => ({
   ReactFlow: (props: {
     nodes: DrawnNode[];
@@ -99,7 +102,7 @@ vi.mock('@xyflow/react', () => ({
   useStore: (selector: (s: { transform: [number, number, number] }) => unknown) =>
     selector({ transform: [0, 0, 1] }),
   useReactFlow: () => ({
-    setCenter: vi.fn(),
+    setCenter: flow.setCenter,
     getZoom: () => 1,
     getNodes: () => [],
     fitView: vi.fn(),
@@ -156,6 +159,11 @@ const forced = vi.hoisted(() => ({
    * bar from anywhere near.
    */
   noClearPlace: false,
+  /**
+   * The lines and devices whose values the picture finds no place for, by
+   * edge id and by node id, as on a diagram too crowded to hold them.
+   */
+  leftOff: [] as string[],
 }));
 
 vi.mock('@/components/sld/picture', async () => {
@@ -164,7 +172,20 @@ vi.mock('@/components/sld/picture', async () => {
   );
   const drawsClear: typeof actual.drawsClear = (...args) =>
     forced.noClearPlace ? () => false : actual.drawsClear(...args);
-  return { ...actual, drawsClear };
+  const pictureOf: typeof actual.pictureOf = (...args) => {
+    const made = actual.pictureOf(...args);
+    if (forced.leftOff.length === 0) return made;
+    const labelPlaces = new Map(made.labelPlaces);
+    const readouts = new Map(made.readouts);
+    for (const id of forced.leftOff) {
+      const place = labelPlaces.get(id);
+      if (place !== undefined) labelPlaces.set(id, { ...place, hidden: true });
+      const readout = readouts.get(id);
+      if (readout !== undefined) readouts.set(id, { ...readout, spot: 'none' });
+    }
+    return { ...made, labelPlaces, readouts };
+  };
+  return { ...actual, drawsClear, pictureOf };
 });
 
 vi.mock('@/components/sld/tidyPlan', async () => {
@@ -454,7 +475,9 @@ beforeEach(() => {
   forced.refused = null;
   forced.blamed = [];
   forced.noClearPlace = false;
+  forced.leftOff = [];
   forced.job = null;
+  flow.setCenter.mockClear();
   vi.mocked(startTidy).mockClear();
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   usePflowStore.setState({ lastRun: null });
@@ -1701,6 +1724,72 @@ describe('labels that keep out of the way', () => {
     // Showing the values moved no line: the routes left room for them.
     expect(labels()).toEqual([]);
     expect(putSidecarSpy).not.toHaveBeenCalled();
+  });
+
+  it('counts the values that have no place over the diagram, lists them, and goes to the one that is picked', async () => {
+    open('square.xlsx');
+    await draw();
+    const solved = {
+      run_id: parseRunId('pf-1'),
+      converged: true,
+      iterations: 4,
+      mismatch: 1e-6,
+      bus_voltages: { '1': 1.04, '2': 1.01, '3': 1.0, '4': 0.99 },
+      bus_angles: { '1': 0, '2': -1, '3': -2, '4': -3 },
+      line_flows: {
+        L12: lineFlow(120, 10, { from: '1', to: '2' }),
+        L13: lineFlow(80, 5, { from: '1', to: '3' }),
+        L14: lineFlow(40, 2, { from: '1', to: '4' }),
+      },
+      load_consumption: { PQ_1: { p: 30, q: 10, bus: 4 } },
+    };
+    // Every value has a place on a diagram of four buses: nothing to say.
+    act(() => usePflowStore.setState({ lastRun: solved, isRunning: false, error: null }));
+    await waitFor(() =>
+      expect(placeOf(drawn.edges.find((e) => e.id === 'line-L13')!)).toBeDefined(),
+    );
+    expect(screen.queryByTestId('sld-values-left-off')).toBeNull();
+
+    // With no place for the flow of one line and the readout of the load,
+    // the diagram leaves the two off and says so.
+    forced.leftOff = ['line-L13', 'load-PQ_1'];
+    act(() => usePflowStore.setState({ lastRun: { ...solved } }));
+    const count = await screen.findByTestId('sld-values-left-off');
+    expect(count).toHaveTextContent('2 values not shown');
+    expect(drawn.edges.find((e) => e.id === 'line-L13')!.data?.labelAt).toMatchObject({
+      hidden: true,
+    });
+    expect(drawn.nodes.find((n) => n.id === 'load-PQ_1')!.data.readoutSpot).toBe('none');
+
+    fireEvent.click(count);
+    const list = await screen.findByTestId('sld-values-left-off-list');
+    expect(within(list).getByTestId('sld-values-left-off-row-line-L13')).toHaveTextContent(
+      'line Line L13→ 80.00 MW',
+    );
+    expect(within(list).getByTestId('sld-values-left-off-row-load-PQ_1')).toHaveTextContent(
+      'load PQ PQ_130.0 MW, 10.0 MVAr',
+    );
+
+    // A pick selects the line, as a click on it does, with its handles to
+    // show which it is, and brings the middle of it into view.
+    fireEvent.click(within(list).getByTestId('sld-values-left-off-row-line-L13'));
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'line', idx: 'L13' });
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L13');
+    const points = pointsOf(drawn.edges.find((e) => e.id === 'line-L13')!);
+    const [x, y] = flow.setCenter.mock.calls.at(-1) as [number, number];
+    expect(onARun({ x, y }, points)).toBe(true);
+    expect(screen.queryByTestId('sld-values-left-off-list')).toBeNull();
+
+    // So does a pick of the load, which is the node that is selected then.
+    fireEvent.click(screen.getByTestId('sld-values-left-off'));
+    fireEvent.click(await screen.findByTestId('sld-values-left-off-row-load-PQ_1'));
+    expect(useCaseStore.getState().selectedElement).toEqual({ kind: 'load', idx: 'PQ_1' });
+    expect(useSldStore.getState().selectedNodeId).toBe('load-PQ_1');
+    expect(screen.queryByTestId('sld-route-editor')).toBeNull();
+
+    // Nothing is counted of a power flow that is no longer there.
+    act(() => usePflowStore.setState({ lastRun: null }));
+    await waitFor(() => expect(screen.queryByTestId('sld-values-left-off')).toBeNull());
   });
 
   it('tells each bus where its label stands, clear of the lines that leave its bar', async () => {

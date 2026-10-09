@@ -165,6 +165,7 @@ import { ROUTE_FOCUS_ATTR, routeEndsOf } from './routeEdit';
 import { SldRouteEditor } from './SldRouteEditor';
 import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
 import { valueLabelWidths } from './valueWidths';
+import { valuesLeftOff, type LeftOffValue } from './valuesLeftOff';
 import type { FigureSource } from './figure/drawFigure';
 import {
   figureSettingsEntries,
@@ -174,6 +175,7 @@ import {
 } from './figure/figureSettings';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
 import { SldEmptySystem } from './SldEmptySystem';
+import { SldValuesLeftOff } from './SldValuesLeftOff';
 import { SldVoltageLegend } from './SldVoltageLegend';
 import { SldLimitsLegend } from './SldLimitsLegend';
 import { useAutoLayout } from './useAutoLayout';
@@ -1933,15 +1935,11 @@ function SldCanvasInner({
   // Where the bar of that line is drawn: in the row above the diagram, in
   // the place of the line that says what can be done on it.
   const [routeBarSlot, setRouteBarSlot] = useState<HTMLDivElement | null>(null);
-  const onNodeClick: NodeMouseHandler = useCallback(
-    (_e, node) => {
-      setRouteEditId(null);
-      // A draft is no element of the system: the Inspector shows its form.
-      const draftId = draftIdOf(node);
-      if (draftId !== null) {
-        selectDraft(draftId, 'diagram');
-        return;
-      }
+  // Select the element `node` stands for. `from` is `'diagram'` for a click
+  // on the node itself, which the view stays put for; without it the node
+  // was picked somewhere else, and the view goes to it.
+  const selectNode = useCallback(
+    (node: Node, from?: 'diagram') => {
       const data = node.data as { idx?: string; kind?: string };
       const idx = data.idx ?? node.id;
       // Map the React Flow nodeType back to the inspector's element-kind
@@ -1961,7 +1959,7 @@ function SldCanvasInner({
         const modelClass = cd.kind ?? '';
         const subKind = cd.subKind ?? subKindForControllerClass(modelClass);
         setSelectedElement({ kind: 'controller', subKind, modelClass, idx: String(idx) });
-        setSelectedNodeId(node.id, 'diagram');
+        setSelectedNodeId(node.id, from);
         return;
       }
       const kind = rawKind as 'bus' | 'line' | 'generator' | 'load' | 'shunt';
@@ -1976,9 +1974,22 @@ function SldCanvasInner({
       // canvas + bus-node visual highlight follow the click. The
       // inspector-row → SLD-pan path goes through the same slot, without
       // the `'diagram'` that says the user is already looking at the node.
-      setSelectedNodeId(node.id, 'diagram');
+      setSelectedNodeId(node.id, from);
     },
     [setSelectedElement, setSelectedNodeId],
+  );
+  const onNodeClick: NodeMouseHandler = useCallback(
+    (_e, node) => {
+      setRouteEditId(null);
+      // A draft is no element of the system: the Inspector shows its form.
+      const draftId = draftIdOf(node);
+      if (draftId !== null) {
+        selectDraft(draftId, 'diagram');
+        return;
+      }
+      selectNode(node, 'diagram');
+    },
+    [selectNode],
   );
 
   const pickEdge = useCallback(
@@ -3752,6 +3763,47 @@ function SldCanvasInner({
         : null,
     [figureOpen, nodes, edges, sizes, connectorStyle, barLengths, pflowResult, unitMode],
   );
+  // The values of the power flow the diagram has no clear place for, which
+  // it leaves off and counts over its corner (`SldValuesLeftOff`). While a
+  // node is dragged the labels are placed the quick way, and the list is the
+  // one of the diagram at rest.
+  const leftOffAtRestRef = useRef<LeftOffValue[]>([]);
+  const leftOff = useMemo(() => {
+    if (dragging) return leftOffAtRestRef.current;
+    const found = valuesShown
+      ? valuesLeftOff(nodes, edges as ConnectionEdge[], picture, pflowResult, unitMode)
+      : [];
+    leftOffAtRestRef.current = found;
+    return found;
+  }, [dragging, valuesShown, nodes, edges, picture, pflowResult, unitMode]);
+  // A pick in that list: the element is selected, as by a click on it, and
+  // the view goes to it, at a size it can be read at. A line is picked as a
+  // click on it picks it, so its handles show which line it is, and moving
+  // it by hand is at hand: that is one way to give its flow a place.
+  const showLeftOff = useCallback(
+    (row: LeftOffValue) => {
+      const zoom = locateZoom(rf.getZoom());
+      if (row.kind === 'flow') {
+        const edge = baseGraphRef.current?.edges.find((e) => e.id === row.id);
+        const route = pictureRef.current.connections.routes.get(row.id);
+        const idx = (edge?.data as { idx?: string } | undefined)?.idx;
+        if (route === undefined || idx === undefined) return;
+        setRouteEditId(locked || tidying ? null : row.id);
+        setSelectedElement({ kind: 'line', idx: String(idx) });
+        useSldStore.getState().clearSelectedNodeId();
+        const middle = routeMidpoint(route.points);
+        void rf.setCenter(middle.x, middle.y, { zoom, duration: 250 });
+        return;
+      }
+      const node = nodesRef.current.find((n) => n.id === row.id);
+      if (node === undefined) return;
+      setRouteEditId(null);
+      selectNode(node);
+      const centre = centreOf(node, sizes.get(node.id));
+      void rf.setCenter(centre.x, centre.y, { zoom, duration: 250 });
+    },
+    [rf, selectNode, setSelectedElement, sizes, locked, tidying],
+  );
   // The choices are settings of the diagram and are kept like the connector
   // style: in the store for this visit, in the layout every save sends, and
   // in the file beside the case.
@@ -4113,8 +4165,10 @@ function SldCanvasInner({
                 <SldLimitsLegend />
               </div>
             </div>
-            {/* The drafts of the diagram, counted and listed, while it has any. */}
-            <div className="pointer-events-none absolute top-2 right-2 z-10 flex">
+            {/* The drafts of the diagram, counted and listed, while it has
+                any; and under them the values of the power flow that have
+                no clear place on it, while there are any. */}
+            <div className="pointer-events-none absolute top-0.5 right-2 z-10 flex flex-col items-end gap-1.5">
               <SldDraftsIndicator
                 rows={draftList}
                 selectedId={pickedDraftId}
@@ -4123,6 +4177,11 @@ function SldCanvasInner({
                 onDeleteAll={removeAllDrafts}
                 open={draftsListOpen}
                 onOpenChange={setDraftsListOpen}
+                className="pointer-events-auto"
+              />
+              <SldValuesLeftOff
+                rows={leftOff}
+                onShow={showLeftOff}
                 className="pointer-events-auto"
               />
             </div>
