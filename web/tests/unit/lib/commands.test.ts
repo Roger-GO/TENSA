@@ -1288,7 +1288,7 @@ describe('useCommandRegistry: Fit view and Reset to auto-layout', () => {
   });
 });
 
-describe('useCommandRegistry: Figure of the diagram', () => {
+describe('useCommandRegistry: Figure for a paper', () => {
   it('is an export, offered while a diagram is on screen, and opens the figure of the canvas', () => {
     MOCK_TOPOLOGY = oneBusTopology();
     const seen: SldCommand[] = [];
