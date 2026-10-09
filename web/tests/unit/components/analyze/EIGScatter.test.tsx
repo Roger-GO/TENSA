@@ -570,6 +570,55 @@ describe('<EIGScatter /> — "All modes" filter toggle', () => {
     expect(screen.getByText(/0 of 4 visible/)).toBeInTheDocument();
   });
 
+  // The two ways a result opens, and what the header says of each: the e2e
+  // suite runs a real eigenvalue analysis and holds the page to whichever of
+  // the two the eigenvalues it got call for.
+  it.each([
+    ['none that is poorly damped', WELL_DAMPED, '4 of 4 visible (all modes)', true],
+    ['some that are', RESULT, '2 of 4 visible (filter: damping < 0.05, |Re| < 5)', false],
+  ] as const)('opens a result with %s on the view it calls for', (_what, result, header, said) => {
+    useAnalyzeStore.setState({ eigResult: result });
+    render(<EIGScatter />);
+
+    expect(screen.getByTestId('eig-scatter')).toHaveTextContent(`Eigenvalue scatter — ${header}`);
+    expect(screen.queryAllByTestId('eig-scatter-none-poorly-damped')).toHaveLength(said ? 1 : 0);
+    expect(screen.getByTestId('eig-scatter-filter-toggle')).toHaveAttribute(
+      'aria-pressed',
+      String(said),
+    );
+  });
+
+  // A system with no fixed angle reference has a zero eigenvalue. The server
+  // sends it as exactly zero with a damping ratio of 1, never as the rounding
+  // noise the solver returns for it, whose sign made it a growing mode on one
+  // machine and a decaying one on the next.
+  const WITH_A_ZERO: EigResult = {
+    ...RESULT,
+    eigenvalues: [
+      { real: -1.5, imag: 6.0 },
+      { real: -1.5, imag: -6.0 },
+      { real: 0, imag: 0 },
+      { real: -0.47, imag: 0 },
+    ],
+    damping_ratios: [0.2425, 0.2425, 1.0, 1.0],
+    frequencies_hz: [0.955, 0.955, 0, 0],
+  };
+
+  it('takes a zero eigenvalue for neither a poorly damped mode nor a growing one', async () => {
+    const user = userEvent.setup();
+    useAnalyzeStore.setState({ eigResult: WITH_A_ZERO });
+    render(<EIGScatter />);
+
+    expect(screen.getByTestId('eig-scatter-none-poorly-damped')).toHaveTextContent(
+      'No poorly damped modes: none of the 4 has a damping ratio under 0.05',
+    );
+    expect(screen.getByTestId('eig-scatter-point-2')).toHaveAttribute('data-damping-band', 'ok');
+    // The log axis says so when a mode it shows grows; none does here.
+    await user.click(screen.getByTestId('eig-scatter-log-toggle'));
+    expect(screen.getByTestId('eig-scatter')).toHaveAttribute('data-x-scale', 'log');
+    expect(screen.queryByTestId('eig-scatter-log-warning')).toBeNull();
+  });
+
   it('opens the next result on all modes again, and leaves one with poorly damped modes filtered', () => {
     useAnalyzeStore.setState({ eigResult: WELL_DAMPED });
     const { rerender } = render(<EIGScatter />);

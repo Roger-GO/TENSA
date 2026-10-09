@@ -31,6 +31,13 @@ async function runFromMenu(page: Page, id: string): Promise<void> {
   await page.getByTestId(`topbar-menu-run-${id}`).click();
 }
 
+/** What the test reads of the answer to `POST /eig`. */
+interface EigReply {
+  eigenvalues: { real: number; imag: number }[];
+  damping_ratios: number[];
+  mode_count: number;
+}
+
 const posted = (page: Page, path: string) =>
   page.waitForResponse(
     (reply) => reply.request().method() === 'POST' && new URL(reply.url()).pathname.endsWith(path),
@@ -98,20 +105,42 @@ test('an entry of the Run menu starts its routine, or says why it cannot', async
   await tab.focus();
   await page.keyboard.press('Control+k');
   await page.getByTestId('command-palette-input').fill('Run eigenvalue');
-  await Promise.all([
+  const [eigReply] = await Promise.all([
     posted(page, '/eig'),
     page.getByRole('option', { name: /Run eigenvalue analysis \(EIG\)/ }).click(),
   ]);
   await expect(page.getByTestId('command-palette')).toBeHidden();
   await expect(page.getByTestId('analyze-run-eig')).toBeVisible();
   await expect(tab).toBeFocused();
-  // IEEE 14 has no poorly damped mode: the plot opens on all of them and says
-  // so, where the filter left it empty; and the notice of the run says what
-  // the reload it calls for would cost.
-  await expect(page.getByTestId('eig-scatter-none-poorly-damped')).toContainText(
-    /^No poorly damped modes: none of the \d+ has a damping ratio under 0\.05/,
-  );
-  await expect(page.getByTestId('eig-scatter')).toContainText(/(\d+) of \1 visible \(all modes\)/);
+  // The plot opens on the poorly damped modes, or, for a result that has none,
+  // on all of them with a sentence that says so, where the filter left it
+  // empty. Which of the two it must be is read off the result the server sent
+  // and not taken from what one machine computes: the eigenvalues are the
+  // solver's, and a test that knows them beforehand passes on one processor
+  // and fails on the next.
+  const modes = (await eigReply.json()) as EigReply;
+  const poorlyDamped = modes.damping_ratios.filter(
+    (ratio, i) => ratio <= 0.05 && Math.abs(modes.eigenvalues[i]!.real) <= 5,
+  ).length;
+  const scatter = page.getByTestId('eig-scatter');
+  const none = page.getByTestId('eig-scatter-none-poorly-damped');
+  if (poorlyDamped === 0) {
+    await expect(none).toContainText(
+      `No poorly damped modes: none of the ${modes.mode_count} has a damping ratio under 0.05`,
+    );
+    await expect(scatter).toContainText(
+      `${modes.mode_count} of ${modes.mode_count} visible (all modes)`,
+    );
+  } else {
+    await expect(scatter).toContainText(
+      `${poorlyDamped} of ${modes.mode_count} visible (filter: damping < 0.05, |Re| < 5)`,
+    );
+    await expect(none).toHaveCount(0);
+  }
+  // What no machine may make of this case: a zero eigenvalue (IEEE 14 has no
+  // fixed angle reference) read as a mode that grows.
+  expect(modes.eigenvalues.filter((z) => z.real > 0)).toEqual([]);
+  // And the notice of the run says what the reload it calls for would cost.
   await expect(page.getByTestId('eig-info-tds-initialized')).toContainText(
     'The reload loses none of your edits',
   );

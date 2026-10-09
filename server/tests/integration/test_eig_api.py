@@ -124,6 +124,37 @@ async def test_eig_happy_path_returns_eigenvalues_and_damping(
         assert "imag" in z
 
 
+@pytest.mark.integration
+async def test_eig_reports_the_zero_eigenvalue_as_zero_and_not_as_a_growing_mode(
+    client: httpx.AsyncClient,
+) -> None:
+    """IEEE 14 has no fixed angle reference, so it has a zero eigenvalue, and the
+    solver returns rounding noise for it whose sign depends on the machine
+    (``OPENBLAS_CORETYPE=Nehalem`` gives ``+3.7e-15`` where another processor
+    gives ``-1.8e-14``). The result must not: with a positive sign the case was
+    reported with a growing mode, damped at -100%."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    resp = await client.post(f"/api/sessions/{sid}/eig", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    modes = [complex(z["real"], z["imag"]) for z in body["eigenvalues"]]
+    # The two ANDES counts as zeros: one it computes as zero and one as noise.
+    zeros = [i for i, z in enumerate(modes) if z == 0]
+    assert len(zeros) == 2, sorted(modes, key=abs)[:4]
+    for i in zeros:
+        assert body["damping_ratios"][i] == 1.0
+        assert body["frequencies_hz"][i] == 0.0
+    # No other eigenvalue is anywhere near zero, so none of them is noise.
+    assert min(abs(z) for i, z in enumerate(modes) if i not in zeros) > 1e-3
+    # What a reader of the result concludes, on every machine: nothing grows,
+    # and the least damped mode is far from poorly damped (0.21 against 0.05).
+    assert all(z.real <= 0.0 for z in modes)
+    assert min(body["damping_ratios"]) > 0.1
+
+
 # ---- edge: stock IEEE 14 (no .dyr) → empty modes ---------------------------
 
 

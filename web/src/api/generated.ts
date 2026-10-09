@@ -2927,12 +2927,12 @@ export interface components {
         EigResultResponse: {
             /**
              * Eigenvalues
-             * @description Eigenvalues of ``EIG.As`` (the system's reduced state matrix). Length equals ``mode_count``. Each entry is ``{real, imag}`` so the JSON payload doesn't carry an out-of-band complex encoding.
+             * @description Eigenvalues of ``EIG.As`` (the system's reduced state matrix). Length equals ``mode_count``. Each entry is ``{real, imag}`` so the JSON payload doesn't carry an out-of-band complex encoding. An eigenvalue ANDES counts as zero (magnitude within ``EIG.config.tol``, 1e-6 by default) is exactly ``{0, 0}``: what the solver returns for it is rounding noise whose sign differs between machines.
              */
             eigenvalues: components["schemas"]["ComplexNumberModel"][];
             /**
              * Damping Ratios
-             * @description Per-mode damping ratio ``-Re(z) / |z|``. Index-aligned with ``eigenvalues``. NaN-collapsed to 0.0 so the wire payload never carries non-finite floats.
+             * @description Per-mode damping ratio ``-Re(z) / |z|``. Index-aligned with ``eigenvalues``. A zero eigenvalue, which neither oscillates nor grows, has 1.0. NaN-collapsed to 0.0 so the wire payload never carries non-finite floats.
              */
             damping_ratios: number[];
             /**

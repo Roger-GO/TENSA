@@ -53,6 +53,7 @@ class EigMixin(WrapperBase):
             ) from exc
 
         mu = getattr(ss.EIG, "mu", None)
+        zero_tol = _zero_tolerance(ss)
         eigenvalues: list[ComplexNumber] = []
         damping_ratios: list[float] = []
         frequencies_hz: list[float] = []
@@ -62,7 +63,7 @@ class EigMixin(WrapperBase):
             except TypeError:
                 mu_iter = []
             for z in mu_iter:
-                z_complex = complex(z)
+                z_complex = _settle_zero(complex(z), zero_tol)
                 eigenvalues.append(ComplexNumber.from_complex(z_complex))
                 damping_ratios.append(_compute_damping_ratio(z_complex))
                 frequencies_hz.append(_compute_frequency_hz(z_complex))
@@ -183,16 +184,49 @@ class EigMixin(WrapperBase):
 # ---- EIG helpers (Unit 6) --------------------------------------------------
 
 
+# What ANDES counts as zero when its routine has no bound to give.
+_ZERO_EIGENVALUE_TOL = 1e-6
+
+
+def _zero_tolerance(ss: System) -> float:
+    """The magnitude up to which an eigenvalue is zero: ANDES's own bound
+    (``EIG.config.tol``, which its statistics and its plot go by)."""
+    try:
+        tol = float(ss.EIG.config.tol)
+    except (AttributeError, TypeError, ValueError):
+        return _ZERO_EIGENVALUE_TOL
+    return tol if math.isfinite(tol) and tol >= 0.0 else _ZERO_EIGENVALUE_TOL
+
+
+def _settle_zero(z: complex, tol: float) -> complex:
+    """``z``, or exactly zero when it is zero to within ``tol``.
+
+    A system with no fixed angle reference has a zero eigenvalue, and what the
+    solver returns for it is rounding noise of either sign: ``-3e-14`` on one
+    processor and ``+1e-14`` on another, for the same case and the same ANDES.
+    Left as it came, the sign decided whether the mode was reported as decaying
+    (a damping ratio of 1) or as growing (-1, with a positive real part), so one
+    machine showed a stable system and the next an unstable one. ANDES counts
+    such an eigenvalue among its zeros and so does the result.
+    """
+    return 0j if abs(z) <= tol else z
+
+
 def _compute_damping_ratio(z: complex) -> float:
     """Per-mode damping ratio.
 
     Convention used by power-systems texts (and ANDES's own
-    plotting): ``zeta = -Re(z) / |z|``. NaN guards collapse to 0.0
-    so the wire payload never carries non-finite floats (which would
-    fail JSON serialization in the routes layer).
+    plotting): ``zeta = -Re(z) / |z|``. A zero eigenvalue has none by
+    that formula and is given 1.0: it neither oscillates nor grows, so
+    it is listed with the real modes that decay and not with the poorly
+    damped ones. NaN guards collapse to 0.0 so the wire payload never
+    carries non-finite floats (which would fail JSON serialization in
+    the routes layer).
     """
     magnitude = (z.real * z.real + z.imag * z.imag) ** 0.5
-    if magnitude == 0.0 or not math.isfinite(magnitude):
+    if magnitude == 0.0:
+        return 1.0
+    if not math.isfinite(magnitude):
         return 0.0
     zeta = -z.real / magnitude
     if not math.isfinite(zeta):

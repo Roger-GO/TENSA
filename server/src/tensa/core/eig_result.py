@@ -48,10 +48,13 @@ class EigResult:
     Field semantics:
 
     - ``eigenvalues``: list of complex eigenvalues (``EIG.mu``), each
-      wrapped as :class:`ComplexNumber`. Length == ``mode_count``.
+      wrapped as :class:`ComplexNumber`. Length == ``mode_count``. One
+      that ANDES counts as zero (``EIG.config.tol``) is exactly zero
+      here: the solver returns rounding noise of either sign for it.
     - ``damping_ratios``: per-mode damping ratio
       ``-Re(mu) / |mu|`` (1 for purely real negative-Re eigenvalues, 0
-      for purely imaginary). NaN guards collapsed to 0.0.
+      for purely imaginary, 1 for a zero eigenvalue). NaN guards
+      collapsed to 0.0.
     - ``frequencies_hz``: per-mode oscillation frequency
       ``|Im(mu)| / (2 * pi)``. 0 for purely real eigenvalues.
     - ``mode_count``: number of eigenvalues == ``len(EIG.mu)``.

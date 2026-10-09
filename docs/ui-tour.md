@@ -150,7 +150,7 @@ The **Analysis** tab has a sub-tab for each routine. `Ctrl+Shift+M` (or **Expand
 
 ![Time-domain run with a fault on bus 4 in the results view](img/ui-tds.jpg)
 
-**EIG** runs the small-signal analysis and plots the eigenvalues. Click a point to see its participation factors. The plot opens on the poorly damped modes (a damping ratio under 0.05 with a real part under 5 in size), and **All modes** shows the rest; a system with no such mode opens on all of them, with a line that says so. After an eigenvalue run a power flow cannot run again until **Reload case**, which the entry of the Run menu and the **Run EIG** button say before the run; the notice after it says whether the reload would lose edits you have not saved.
+**EIG** runs the small-signal analysis and plots the eigenvalues. Click a point to see its participation factors. The plot opens on the poorly damped modes (a damping ratio under 0.05 with a real part under 5 in size), and **All modes** shows the rest; a system with no such mode opens on all of them, with a line that says so. A zero eigenvalue, which a system with no fixed angle reference has, is not one of them: it neither oscillates nor grows. After an eigenvalue run a power flow cannot run again until **Reload case**, which the entry of the Run menu and the **Run EIG** button say before the run; the notice after it says whether the reload would lose edits you have not saved.
 
 ![Eigenvalue scatter of the Kundur case](img/ui-eig.jpg)
 
