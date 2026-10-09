@@ -35,6 +35,10 @@ function recordDeleted(caseKey: string, label: string, deleted: DraftElement[]):
 
 /** Put `deleted` back by the Undo of their notice, and take the step for it out of the history. */
 function putBack(caseKey: string, deleted: DraftElement[], step: number): void {
+  // Undo in the Edit menu took the delete back already: its step waits for a
+  // Redo, the drafts are there, and putting them back again would make a
+  // second copy of each.
+  if (useLayoutHistoryStore.getState().future.some((entry) => entry.id === step)) return;
   const back = useDraftsStore.getState().restore(caseKey, deleted);
   useLayoutHistoryStore.getState().forget(step);
   if (back.length === 1) selectDraft(back[0]!.id);

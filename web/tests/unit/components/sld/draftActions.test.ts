@@ -153,6 +153,26 @@ describe('deleting drafts', () => {
     ]);
   });
 
+  it('makes no second copy when Undo in the Edit menu brought the draft back before the Undo of the notice', () => {
+    const info = vi.spyOn(toast, 'info');
+    const { add } = useDraftsStore.getState();
+    add(CASE, 'PV', { x: 1, y: 2 }, { bus: '4' });
+    deleteDraft(CASE, 'draft-1', 'PV generator 6');
+    // Ctrl+Z, as the canvas takes the step back: the draft is there again,
+    // and its step waits for a Redo.
+    const step = useLayoutHistoryStore.getState().undo({ positions: {}, routes: {} })!;
+    useDraftsStore.getState().restore(CASE, step.drafts!.deleted);
+    expect(drafts()[CASE]?.map((d) => d.id)).toEqual(['draft-1']);
+
+    const [, options] = info.mock.calls[0]!;
+    (options as { action: { onClick: () => void } }).action.onClick();
+    expect(drafts()[CASE]).toEqual([
+      { id: 'draft-1', kind: 'PV', position: { x: 1, y: 2 }, values: { bus: '4' } },
+    ]);
+    // The step is still there for a Redo.
+    expect(useLayoutHistoryStore.getState().future.map((entry) => entry.id)).toEqual([step.id]);
+  });
+
   it('says nothing of a draft that is not there', () => {
     const info = vi.spyOn(toast, 'info');
     deleteDraft(CASE, 'draft-9', 'nothing');
