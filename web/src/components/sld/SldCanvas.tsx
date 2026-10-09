@@ -3369,10 +3369,12 @@ function SldCanvasInner({
     canvasRef.current?.querySelector<SVGElement>(`[${ROUTE_FOCUS_ATTR}]`)?.focus();
   }, [routeEditId, editedRoute, routeFocusAsked]);
 
-  // Tidy diagram: route every line and transformer afresh (`tidy.ts`). With
-  // `relayout` the buses are first lined up on the grid and every generator,
-  // load and shunt is put back beside its bus, where the diagram places one
-  // that was never moved. `applyTidy` puts a plan in place (`planTidy`).
+  // Tidy diagram: route the lines and transformers again, all together
+  // (`tidy.ts`), and give each the route that came of it where that is a
+  // better one than it has (`planTidy`). With `relayout` the buses are first
+  // lined up on the grid and every generator, load and shunt is put back
+  // beside its bus, where the diagram places one that was never moved, and
+  // every line is routed afresh. `applyTidy` puts a plan in place.
   const applyTidy = useCallback(
     (plan: TidyPlan, relayout: boolean) => {
       const { nodes: placedNodes, edges: placedEdges, tidied, refused } = plan;
@@ -3443,20 +3445,26 @@ function SldCanvasInner({
       // where they stood. After a re-layout it has none: the picture routes
       // it on its own if it finds a way, and draws it from bar to bar if not.
       const at = new Map(placedNodes.map((n) => [n.id, n.position]));
+      // The lines the plan leaves on the route they are drawn along: the
+      // ones no better route was found for. Each keeps the route the
+      // diagram holds for it, where it holds one.
+      const left = new Set(plan.left ?? []);
       const chosen: RouteOverrides = {};
       for (const edge of branches) {
         const kept = byHand.get(edge.id);
+        const held = left.has(edge.id) ? before.routes[edge.id] : null;
         const points = kept ?? routes.get(edge.id);
         const source = at.get(edge.source);
         const target = at.get(edge.target);
         chosen[edge.id] =
-          points === undefined || source === undefined || target === undefined
+          held ??
+          (points === undefined || source === undefined || target === undefined
             ? ((relayout ? null : before.routes[edge.id]) ?? null)
             : {
                 points: points.map(([x, y]): [number, number] => [x, y]),
                 anchors: { source: { ...source }, target: { ...target } },
                 ...(kept !== undefined ? { manual: true as const } : {}),
-              };
+              });
       }
       // The connector of a device that was drawn by hand stays with its
       // device: as it is drawn where a re-layout has put the two, and as it
@@ -3487,14 +3495,26 @@ function SldCanvasInner({
         toast.info('The diagram is already tidy.', {
           description: relayout
             ? `Every bus is on the grid, every device beside its bus, and no line would be routed differently. Nothing was changed.${handNote}`
-            : `No line or transformer would be routed differently. Nothing was changed.${handNote}`,
+            : `Every line and transformer keeps its route: none has a shorter one with no more bends and crossings. Nothing was changed.${handNote}`,
           duration: 8_000,
         });
         return;
       }
       const step = arrange(relayout ? 'tidy and re-layout' : 'tidy diagram', positions, chosen);
-      const rerouted = branches.length - byHand.size - unrouted.length;
-      const lines = `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed`;
+      const rerouted = branches.filter(
+        (edge) => !byHand.has(edge.id) && !unrouted.includes(edge.id) && !left.has(edge.id),
+      ).length;
+      const stayed = branches.filter(
+        (edge) => left.has(edge.id) && !unrouted.includes(edge.id),
+      ).length;
+      const lines =
+        `${rerouted} ${rerouted === 1 ? 'line or transformer' : 'lines and transformers'} re-routed` +
+        (stayed === 0 ? '' : `, ${stayed} left as ${stayed === 1 ? 'it was' : 'they were'}`);
+      // Why some were left: said once, where the toast has the room.
+      const whyLeft =
+        stayed === 0
+          ? ''
+          : ' A line keeps its route unless a shorter one with no more bends and crossings is found.';
       // What became of the routes that were drawn by hand.
       const hand =
         (keptByHand === 0
@@ -3512,14 +3532,14 @@ function SldCanvasInner({
         : one
           ? 'it keeps the route it had'
           : 'they keep the routes they had';
-      const left = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
+      const leftOver = unrouted.length === 0 ? '' : ` ${why}: ${then}.`;
       setTidyNote(
         keptByHand === 0 ? `Tidied: ${lines}` : `Tidied: ${lines}, ${keptByHand} by hand kept`,
       );
       toast.success(relayout ? 'Diagram tidied and laid out again' : 'Diagram tidied', {
         description: relayout
-          ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${hand}${left} Saved with the layout.`
-          : `${lines}. Nothing was moved.${hand}${left} Saved with the layout.`,
+          ? `Buses lined up on the grid, devices put back beside their buses, ${lines}.${hand}${leftOver} Saved with the layout.`
+          : `${lines}. Nothing was moved.${whyLeft}${hand}${leftOver} Saved with the layout.`,
         duration: 8_000,
         action: { label: 'Undo', onClick: () => undoStep(step) },
       });

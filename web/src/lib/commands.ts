@@ -1039,7 +1039,7 @@ function useCommandSets(): CommandSets {
         action: () => __requestSldCommand('reset-layout'),
         when: () => diagramVisible,
       },
-      // Tidy diagram routes every line and transformer afresh and moves
+      // Tidy diagram routes the lines and transformers again and moves
       // nothing; Tidy and re-layout also lines the buses up on the grid and
       // puts the devices back beside them. Either is one step for Undo. They
       // are a button and a menu above the diagram too, and in its right-click
@@ -1048,7 +1048,7 @@ function useCommandSets(): CommandSets {
         id: 'view.tidy',
         label: 'Tidy diagram',
         description:
-          'Routes every line and transformer afresh: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. Nothing is moved, and Undo takes it back in one step.',
+          'Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. A line keeps the route it has unless a shorter one with no more bends and crossings is found. Nothing is moved, and Undo takes it back in one step.',
         group: 'view',
         keywords: [
           'tidy',

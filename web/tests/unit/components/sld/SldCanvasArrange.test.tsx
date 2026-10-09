@@ -621,7 +621,7 @@ describe('a bus or device that is dropped on something', () => {
 });
 
 describe('Tidy diagram', () => {
-  it('routes every branch afresh, moves nothing, and writes the result beside the case', async () => {
+  it('gives the line that has a better route that one, moves nothing, and writes the result beside the case', async () => {
     const success = vi.spyOn(toast, 'success');
     await openUntidy();
     const before = picture();
@@ -641,13 +641,17 @@ describe('Tidy diagram', () => {
     for (const a of ids) {
       for (const b of ids) if (a < b) expect(overlap(tidy[a]!, tidy[b]!), `${a} ${b}`).toBe(0);
     }
-    // The jog is gone: one turn takes the line from bus 1 to bus 4.
+    // The jog is gone: one turn takes the line from bus 1 to bus 4. The
+    // other three had no shorter or straighter way, and keep theirs.
     expect(tidy['line-L14']!.length).toBeLessThan(JOGGED.length);
+    for (const id of ids) {
+      if (id !== 'line-L14') expect(after.stored[id], id).toEqual(before.stored[id]);
+    }
     expect(success).toHaveBeenCalledWith(
       'Diagram tidied',
       expect.objectContaining({
         description: expect.stringContaining(
-          '4 lines and transformers re-routed. Nothing was moved.',
+          '1 line or transformer re-routed, 3 left as they were. Nothing was moved. A line keeps its route unless a shorter one with no more bends and crossings is found.',
         ),
       }),
     );
@@ -744,7 +748,7 @@ describe('Tidy diagram', () => {
     run('tidy');
     await waitFor(() => expect(routes()).not.toEqual(before));
     expect(note()).toHaveTextContent(
-      /^Tidied: \d+ lines? (and transformers|or transformer) re-routed$/,
+      'Tidied: 1 line or transformer re-routed, 3 left as they were',
     );
 
     // A second tidy changes nothing that could be seen: the note says so,
@@ -868,7 +872,8 @@ describe('Tidy diagram that cannot route every branch', () => {
     run('tidy');
 
     await waitFor(() => expect(labels()).toEqual(['tidy diagram']));
-    // The other three are routed afresh; this one keeps the route it had.
+    // Of the other three, the one with the jog is routed afresh and two had
+    // no better way; this one keeps the route it had.
     expect(picture().stored['line-L13']).toEqual(before.picture.stored['line-L13']);
     expect(squareCornered(routes()['line-L13']!)).toBe(true);
     expect(picture().stored['line-L14']).not.toEqual(before.picture.stored['line-L14']);
@@ -876,7 +881,7 @@ describe('Tidy diagram that cannot route every branch', () => {
       'Diagram tidied',
       expect.objectContaining({
         description:
-          '3 lines and transformers re-routed. Nothing was moved. No way was found for 1: it keeps the route it had. Saved with the layout.',
+          '1 line or transformer re-routed, 2 left as they were. Nothing was moved. A line keeps its route unless a shorter one with no more bends and crossings is found. No way was found for 1: it keeps the route it had. Saved with the layout.',
       }),
     );
     // And the file holds the route it kept.
@@ -1066,7 +1071,7 @@ describe('lines that are drawn through a symbol or a bar', () => {
     expect(Number(count.textContent)).toBeGreaterThan(0);
     const button = screen.getByTestId('sld-tidy');
     expect(button.getAttribute('title')).toMatch(
-      /^\d+ lines? runs? through a symbol or a bar\. Routes every line and transformer afresh/,
+      /^\d+ lines? runs? through a symbol or a bar\. Routes the lines and transformers again/,
     );
     expect(button).toHaveAccessibleName(/^Tidy diagram.*runs? through a symbol or a bar\.$/);
 

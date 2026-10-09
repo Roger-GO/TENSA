@@ -506,21 +506,45 @@ export function describeOverlaps(overlaps: readonly Overlap[]): string[] {
   return overlaps.map(({ kind, a, b, detail }) => `${kind}: ${a} / ${b}: ${detail}`);
 }
 
-/** How often two different lines of `lines` cross, each in the middle of a run. */
-export function countCrossings(lines: readonly DrawnLine[]): number {
+/** Whether the run from `a` to `b` and the run from `c` to `d` cross, each in its middle. */
+function runsCross(a: Point, b: Point, c: Point, d: Point): boolean {
   const side = (u: Point, v: Point, w: Point): number =>
     (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0]);
-  let count = 0;
+  return side(c, d, a) * side(c, d, b) < 0 && side(a, b, c) * side(a, b, d) < 0;
+}
+
+/**
+ * Which lines of `lines` each of them crosses, and how often: by the id of
+ * the line, the ids of the ones that cross it with the number of places
+ * they do. A line that crosses none has no entry.
+ */
+export function crossingsByLine(lines: readonly DrawnLine[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  const count = (of: string, other: string): void => {
+    const crossed = out.get(of) ?? new Map<string, number>();
+    crossed.set(other, (crossed.get(other) ?? 0) + 1);
+    out.set(of, crossed);
+  };
   for (let i = 0; i < lines.length; i += 1) {
     for (let k = i + 1; k < lines.length; k += 1) {
       const [p, q] = [lines[i]!.points, lines[k]!.points];
       for (let m = 1; m < p.length; m += 1) {
         for (let n = 1; n < q.length; n += 1) {
-          const [a, b, c, d] = [p[m - 1]!, p[m]!, q[n - 1]!, q[n]!];
-          if (side(c, d, a) * side(c, d, b) < 0 && side(a, b, c) * side(a, b, d) < 0) count += 1;
+          if (!runsCross(p[m - 1]!, p[m]!, q[n - 1]!, q[n]!)) continue;
+          count(lines[i]!.id, lines[k]!.id);
+          count(lines[k]!.id, lines[i]!.id);
         }
       }
     }
   }
-  return count;
+  return out;
+}
+
+/** How often two different lines of `lines` cross, each in the middle of a run. */
+export function countCrossings(lines: readonly DrawnLine[]): number {
+  let count = 0;
+  for (const crossed of crossingsByLine(lines).values()) {
+    for (const times of crossed.values()) count += times;
+  }
+  return count / 2;
 }

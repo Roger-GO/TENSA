@@ -23,7 +23,7 @@ import { autoLayout } from '@/components/sld/layout';
 import { buildGraph, defaultBarLengths } from '@/components/sld/graph';
 import { countCrossings, type DrawnDiagram, type Overlap } from '@/components/sld/overlapCheck';
 import { drawnDiagram } from '@/components/sld/picture';
-import { GRID_STEP } from '@/components/sld/tidy';
+import { GRID_STEP, tidyRoutes } from '@/components/sld/tidy';
 import { branchesThroughSymbols, planTidy, type TidyPlan } from '@/components/sld/tidyPlan';
 import {
   dragged,
@@ -31,9 +31,11 @@ import {
   opened,
   overlapsOf,
   tidied,
+  typicalWidths,
   type Diagram,
 } from '../../helpers/diagramStates';
 import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
+import { measured, worseOff, type Shown } from '../../helpers/tidySweeps';
 
 vi.mock('@/components/sld/elkClient', async () => {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
@@ -263,22 +265,31 @@ describe('a plan for a diagram that is on screen, held to the picture it gives',
   });
 
   it('is refused where it would still leave something drawn over something else, with what that is', async () => {
-    // The checker is made to find the connector of the load of bus 9 on a
-    // symbol wherever the line from bus 1 to bus 2 runs another way than it
-    // does now: a fault the plan has no way round, as that line is no line
-    // of bus 9 and is routed afresh whatever is kept.
+    // The checker is made to find the line from bus 1 to bus 5 on a symbol
+    // as it runs now, round two corners, so that its route does not hold
+    // and every plan makes it afresh; and the connector of the load of bus
+    // 9 on a symbol wherever that line runs another way. A fault the plan
+    // has no way round: the line is no line of bus 9, and no route that is
+    // kept takes its place.
     const before = await alongElkRoutes(IEEE14);
-    const line = before.edges.find((e) => e.source === '1' && e.target === '2')!;
+    const line = before.edges.find((e) => e.source === '1' && e.target === '5')!;
     const runs = (picture: DrawnDiagram): string =>
       JSON.stringify(picture.lines.find((l) => l.id === line.id)?.points);
     const asDrawn = runs(drawnDiagram(before.nodes, drawn(before), { values: false }));
+    expect((JSON.parse(asDrawn) as unknown[]).length).toBeGreaterThan(2);
+    const there: Overlap = {
+      kind: 'line-box',
+      a: line.id,
+      b: 'shunt-Shunt_2',
+      detail: 'runs through the symbol',
+    };
     const fault: Overlap = {
       kind: 'line-box',
       a: 'stub-load-PQ_6',
       b: 'shunt-Shunt_1',
       detail: 'runs through the symbol',
     };
-    checker.also = (picture) => (runs(picture) === asDrawn ? [] : [fault]);
+    checker.also = (picture) => (runs(picture) === asDrawn ? [there] : [there, fault]);
     try {
       const plan = planOf(before, { values: false });
       expect(plan.refused).toEqual([
@@ -291,6 +302,130 @@ describe('a plan for a diagram that is on screen, held to the picture it gives',
     } finally {
       checker.also = null;
     }
+  });
+});
+
+describe('a plan for a diagram that is on screen leaves no line worse off', () => {
+  const planOf = (diagram: Diagram, shown: Shown): TidyPlan =>
+    planTidy({ nodes: diagram.nodes, edges: diagram.edges }, diagram.topology, {
+      relayout: false,
+      barLengths: diagram.barLengths,
+      shown,
+    });
+
+  it('leaves the line from bus 1 to bus 5 of IEEE 14 as it runs, after generator 3 was moved under its bus', async () => {
+    // The scene a tidy once made worse: laid out again with the values of a
+    // power flow on it, then the generator of bus 3 dragged from over its
+    // bar to under it. Routed afresh, the line from bus 1 to bus 5 went
+    // from two bends to six, half as long again and across two
+    // transformers, with a route that held all along.
+    const first = await opened(IEEE14);
+    const shown: Shown = { values: true, labelWidths: typicalWidths(first) };
+    const laid = tidied(first, true, shown);
+    const dropped = dragged(laid, 'generator-3', 30, 111);
+    const bar = dropped.nodes.find((n) => n.id === '3')!;
+    const generator = dropped.nodes.find((n) => n.id === 'generator-3')!;
+    expect(generator.position.y).toBeGreaterThan(bar.position.y);
+    expect(overlapsOf(dropped, shown)).toEqual([]);
+    const was = measured(dropped, shown).get('line-Line_2')!;
+    expect(was.bends).toBe(2);
+
+    const routesAlone = planTidy({ nodes: dropped.nodes, edges: dropped.edges }, IEEE14, {
+      relayout: false,
+      barLengths: dropped.barLengths,
+    });
+    // Not held to the diagram, the routes made afresh take the long way.
+    expect(routesAlone.tidied.routes.get('line-Line_2')!.length - 2).toBeGreaterThan(was.bends);
+
+    const plan = planOf(dropped, shown);
+    expect(plan.refused).toBeUndefined();
+    expect(plan.left).toContain('line-Line_2');
+    const after = tidied(dropped, false, shown);
+    expect(measured(after, shown).get('line-Line_2')!.points).toEqual(was.points);
+    expect(worseOff(dropped, after, shown)).toEqual([]);
+    expect(overlapsOf(after, shown)).toEqual([]);
+  });
+
+  it('leaves every line of a diagram that is tidy already on its route, and says which', async () => {
+    const first = await opened(IEEE14);
+    const shown: Shown = { values: false };
+    const plan = planOf(first, shown);
+    const branches = first.edges.filter((e) => e.type !== 'stub').map((e) => e.id);
+    expect([...(plan.left ?? [])].sort()).toEqual([...branches].sort());
+    const now = measured(first, shown);
+    for (const id of branches) expect(plan.tidied.routes.get(id), id).toEqual(now.get(id)!.points);
+    // A re-layout routes every line afresh and leaves none.
+    const relaid = planTidy({ nodes: first.nodes, edges: first.edges }, IEEE14, {
+      relayout: true,
+      barLengths: first.barLengths,
+      shown,
+    });
+    expect(relaid.left).toBeUndefined();
+  });
+
+  it('gives a line that goes a long way round the shorter route there is, and leaves the others', async () => {
+    // The line from bus 1 to bus 2 of IEEE 14, made to go round
+    // something that has since gone: routed alone with a block in its way,
+    // among the others as they run. Its route holds, on nothing, and is
+    // longer and has more bends than it need be.
+    const first = await opened(IEEE14);
+    const shown: Shown = { values: false };
+    const straight = measured(first, shown);
+    const id = 'line-Line_1';
+    const direct = straight.get(id)!;
+    const [a, b] = [direct.points[0]!, direct.points[direct.points.length - 1]!];
+    // Wider than the two bars, so that no place on them has a straight way.
+    const block = {
+      left: Math.min(a[0], b[0]) - 200,
+      right: Math.max(a[0], b[0]) + 200,
+      top: (a[1] + b[1]) / 2 - 8,
+      bottom: (a[1] + b[1]) / 2 + 8,
+    };
+    const others = new Map(
+      [...straight].filter(([edge]) => edge !== id).map(([edge, { points }]) => [edge, points]),
+    );
+    const round = tidyRoutes(first.nodes, first.edges as ConnectionEdge[], {
+      barLengths: first.barLengths,
+      keep: others,
+      only: new Set([id]),
+      obstacles: [block],
+    }).routes.get(id)!;
+    const at = new Map(first.nodes.map((n) => [n.id, n.position]));
+    const detoured: Diagram = {
+      ...first,
+      edges: first.edges.map((edge) =>
+        edge.id !== id
+          ? edge
+          : {
+              ...edge,
+              data: {
+                ...edge.data,
+                bendPoints: round,
+                bendAnchors: {
+                  source: { ...at.get(edge.source)! },
+                  target: { ...at.get(edge.target)! },
+                },
+              },
+            },
+      ),
+    };
+    expect(overlapsOf(detoured, shown)).toEqual([]);
+    const was = measured(detoured, shown).get(id)!;
+    expect(was.points).toEqual(round);
+    expect(was.length).toBeGreaterThan(direct.length + 16);
+
+    const plan = planOf(detoured, shown);
+    expect(plan.left).not.toContain(id);
+    expect(plan.left).toHaveLength(straight.size - 1);
+    const after = tidied(detoured, false, shown);
+    const now = measured(after, shown);
+    expect(now.get(id)!.length).toBeLessThan(was.length - 16);
+    expect(now.get(id)!.bends).toBeLessThanOrEqual(was.bends);
+    for (const [edge, { points }] of straight) {
+      if (edge !== id) expect(now.get(edge)!.points, edge).toEqual(points);
+    }
+    expect(worseOff(detoured, after, shown)).toEqual([]);
+    expect(overlapsOf(after, shown)).toEqual([]);
   });
 });
 

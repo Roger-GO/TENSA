@@ -5,10 +5,13 @@
  *   with another -> Tidy diagram says there is nothing to tidy -> move a bus
  *   and two loads by hand: the lines are routed round them as they are
  *   dropped, and none shares a run or is in a bar or a device -> Tidy
- *   diagram -> nothing has moved, every line and transformer runs at right
- *   angles from a tap to a tap -> Undo (Ctrl+Z) -> the routes of before ->
- *   Redo from the Edit menu -> tidied again -> reload the page -> the same
- *   routes
+ *   diagram -> no line is longer or has more bends for it -> drag a
+ *   generator into the way of the lines beside it and back: they keep the
+ *   way round -> Tidy diagram -> nothing has moved, the lines that went
+ *   round have the shorter way back and the others are left, every line
+ *   and transformer runs at right angles from a tap to a tap -> Undo
+ *   (Ctrl+Z) -> the routes of before -> Redo from the Edit menu -> tidied
+ *   again -> reload the page -> the same routes
  *
  *   open WSCC 9 -> drag a bus -> its load goes along -> Undo puts both back
  *   -> pick two buses with Ctrl held -> Align top from the bar over the
@@ -106,6 +109,24 @@ function sharedRuns(drawn: Drawing): string[] {
   return found;
 }
 
+/** How long the route through `points` is. */
+function lengthOf(points: [number, number][]): number {
+  let length = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    length += Math.hypot(points[i]![0] - points[i - 1]![0], points[i]![1] - points[i - 1]![1]);
+  }
+  return length;
+}
+
+/** The branches that are longer in `now` than in `was` (by more than a unit), or have more bends. */
+function longerOrMoreBent(was: Drawing, now: Drawing): string[] {
+  const [before, after] = [branchPaths(was), branchPaths(now)];
+  return Object.keys(before).filter((id) => {
+    const [old, made] = [before[id]!, after[id]!];
+    return lengthOf(made) > lengthOf(old) + 1 || made.length > old.length;
+  });
+}
+
 test('IEEE 14 opens tidy, stays so when it is arranged by hand, and a Tidy diagram is one step for Undo and is kept through a reload', async ({
   page,
 }) => {
@@ -141,16 +162,53 @@ test('IEEE 14 opens tidy, stays so when it is arranged by hand, and a Tidy diagr
   // No line runs through a symbol or a bar, so the button has none to count.
   await expect(page.getByTestId('sld-tidy-count')).toHaveCount(0);
 
+  // ---- Tidy diagram leaves no line worse off --------------------------------
+  // The lines were routed as each node was dropped, and every route holds. A
+  // tidy gives a line another route only where that one is better, so
+  // whatever it finds here, no line comes out of it longer or with more
+  // bends, and nothing is moved.
+  await page.getByTestId('sld-tidy').click();
+  await expect(page.getByTestId('sld-tidy-note')).toHaveText(/^(Already tidy|Tidied)/);
+  // A tidy that changed something writes the layout a moment later.
+  await Promise.race([layoutWritten(page).catch(() => null), page.waitForTimeout(1_500)]);
+  const kept = await settled(page);
+  expect(placement(kept)).toEqual(placement(before));
+  expect(longerOrMoreBent(before, kept)).toEqual([]);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+
+  // ---- A line left with a way round something that has gone -----------------
+  // The generator of bus 2 is dragged into the way of the lines beside its
+  // bus, which go round it, and then back to where it stood. The lines keep
+  // the way round, which holds: that is what a tidy is for.
+  const home = kept.nodes['generator-2']!;
+  await dragInDiagram(page, 'generator-2', -160, 0);
+  const away = await settled(page);
+  await dragInDiagram(page, 'generator-2', home.x - away.nodes['generator-2']!.x, 0);
+  const roundabout = await settled(page);
+  expect(roundabout.nodes['generator-2']!.x).toBeCloseTo(home.x, 0);
+  expect(roundabout.nodes['generator-2']!.y).toBeCloseTo(home.y, 0);
+  const wentRound = longerOrMoreBent(kept, roundabout);
+  expect(wentRound.length).toBeGreaterThan(0);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+
   // ---- Tidy diagram ---------------------------------------------------------
-  // The lines were routed one drop at a time, each round what was there: all
-  // of them routed together come out simpler.
+  // The lines that went round get the shorter way back, and the others are
+  // left as they were.
   const [write] = await Promise.all([layoutWritten(page), page.getByTestId('sld-tidy').click()]);
   expect(write.status()).toBe(204);
   await expect(page.getByText('Diagram tidied', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('sld-tidy-note')).toHaveText(
+    /^Tidied: \d+ lines? (and transformers|or transformer) re-routed, \d+ left as (it was|they were)$/,
+  );
   const tidied = await settled(page);
 
-  expect(placement(tidied)).toEqual(placement(before));
-  expect(branchPaths(tidied)).not.toEqual(branchPaths(before));
+  expect(placement(tidied)).toEqual(placement(roundabout));
+  expect(branchPaths(tidied)).not.toEqual(branchPaths(roundabout));
+  // No line is worse off for it, and each that went round is better off.
+  expect(longerOrMoreBent(roundabout, tidied)).toEqual([]);
+  for (const id of wentRound) {
+    expect(longerOrMoreBent(tidied, roundabout), id).toContain(id);
+  }
   expect(sharedRuns(tidied)).toEqual([]);
   // Every branch runs at right angles from a tap to a tap, clear of the bars
   // it passes, and none is in a device. (The two loads that were dragged
@@ -179,8 +237,8 @@ test('IEEE 14 opens tidy, stays so when it is arranged by hand, and a Tidy diagr
   await Promise.all([layoutWritten(page), page.keyboard.press('Control+z')]);
   await expect(page.getByText('Undone: tidy diagram')).toBeVisible();
   const undone = await settled(page);
-  expect(branchPaths(undone)).toEqual(branchPaths(before));
-  expect(placement(undone)).toEqual(placement(before));
+  expect(branchPaths(undone)).toEqual(branchPaths(roundabout));
+  expect(placement(undone)).toEqual(placement(roundabout));
 
   await page.getByTestId('topbar-menu-edit-trigger').click();
   const redo = page.getByTestId('topbar-menu-edit-redo');

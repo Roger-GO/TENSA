@@ -2,8 +2,9 @@
  * The controls that arrange the diagram: Tidy diagram, the Arrange menu, and
  * the bar that shows over the diagram while several nodes are picked.
  *
- * - **Tidy diagram** routes every line and transformer afresh and moves
- *   nothing (`tidy.ts`). It is a button of its own, beside the diagram's
+ * - **Tidy diagram** routes the lines and transformers again, gives each
+ *   the better route where one came of it, and moves nothing (`tidy.ts`,
+ *   `tidyPlan.ts`). It is a button of its own, beside the diagram's
  *   other buttons, because it is the one command a diagram arranged by hand
  *   wants again and again. While lines are drawn through a symbol or a bar
  *   it counts them, which is how a diagram says that it wants a tidy. While
@@ -48,7 +49,7 @@ export type ArrangeCommand = Extract<
 
 /** What Tidy diagram does, for its tooltip and the menu. */
 export const TIDY_DESCRIPTION =
-  'Routes every line and transformer afresh: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. Nothing is moved.';
+  'Routes the lines and transformers again, all together: at right angles, clear of the buses, the devices and each other, with as few crossings as it finds. A line keeps the route it has unless a shorter one with no more bends and crossings is found. Nothing is moved.';
 
 /**
  * What the Tidy diagram button says while lines are drawn through a symbol or
