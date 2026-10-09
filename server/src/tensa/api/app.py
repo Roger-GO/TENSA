@@ -104,6 +104,13 @@ def _names_a_file(path: str) -> bool:
     return "." in _url_path(path).rsplit("/", 1)[-1]
 
 
+def _is_api_path(path: str) -> bool:
+    """True for ``api`` and anything under it: the substrate's routers answer
+    there, so a path of theirs that reaches the mount is one no route has."""
+    url = _url_path(path)
+    return url == "api" or url.startswith("api/")
+
+
 class _SpaStaticFiles(StaticFiles):
     """``StaticFiles`` with SPA-style fallback and cache headers.
 
@@ -138,7 +145,7 @@ class _SpaStaticFiles(StaticFiles):
             # surface as 404, not the SPA HTML.
             if exc.status_code != 404:
                 raise
-            if path.startswith("api/") or path == "api" or _names_a_file(path):
+            if _is_api_path(path) or _names_a_file(path):
                 raise
             return self._with_cache_control(
                 "index.html", await super().get_response("index.html", scope)
@@ -148,7 +155,7 @@ class _SpaStaticFiles(StaticFiles):
             # permissions change to deny read), Starlette can leak a bare
             # OSError instead of an HTTPException. Re-raise as a 404 so the
             # surrounding fallback logic handles it like any other miss.
-            if path.startswith("api/") or path == "api" or _names_a_file(path):
+            if _is_api_path(path) or _names_a_file(path):
                 raise StarletteHTTPException(status_code=404) from exc
             try:
                 return self._with_cache_control(
