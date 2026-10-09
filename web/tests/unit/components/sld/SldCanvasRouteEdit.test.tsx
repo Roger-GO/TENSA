@@ -427,6 +427,17 @@ describe('picking a line', () => {
     fireEvent.keyDown(screen.getByTestId('sld-canvas-surface'), { key: 'Escape' });
     gone();
 
+    // Not on an Escape that something else took: a menu, a popover or the
+    // search that was opened from the diagram closes on it, and the line
+    // stays picked.
+    pick('line-L14');
+    const taken = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    taken.preventDefault();
+    act(() => void screen.getByTestId('sld-canvas-surface').dispatchEvent(taken));
+    expect(screen.getByTestId('sld-route-editor')).toHaveAttribute('data-edge-id', 'line-L14');
+    fireEvent.click(screen.getByTestId('sld-route-done'));
+    gone();
+
     pick('line-L14');
     act(() => drawn.onPaneClick?.());
     gone();

@@ -626,6 +626,22 @@ describe('a line or a transformer drawn from one bus to another', () => {
     expect(screen.getByTestId('sld-draw-transformer')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('stops on Escape wherever the keyboard focus is, and leaves an Escape that something else took', async () => {
+    await draw();
+    // Started from the command palette, the focus is not in the diagram.
+    act(() => __requestSldCommand('draw-line'));
+    expect(screen.getByTestId('sld-wire-bar')).toBeInTheDocument();
+    // An Escape a dialog or a menu closed on is that one's, not the pick's.
+    const taken = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    taken.preventDefault();
+    act(() => void document.body.dispatchEvent(taken));
+    expect(screen.getByTestId('sld-wire-bar')).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByTestId('sld-wire-bar')).toBeNull();
+    expect(screen.getByTestId('sld-draw-line')).toHaveAttribute('aria-pressed', 'false');
+    expect(drafts()).toHaveLength(0);
+  });
+
   it('says why it cannot be drawn in a system of one bus, on the button and when it is pressed', async () => {
     const info = vi.spyOn(toast, 'info');
     mockTopology = { ...square(), buses: [entry(1, 'Bus', { Vn: 69 })], lines: [], loads: [] };

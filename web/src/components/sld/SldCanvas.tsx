@@ -2038,6 +2038,11 @@ function SldCanvasInner({
   const onSurfaceKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Escape') {
+        // A menu, a popover or the search that was opened from the diagram
+        // closes on Escape and marks the key as its own (a key pressed in
+        // one reaches here all the same, through the portal it is drawn
+        // in): the line that is picked stays picked.
+        if (e.defaultPrevented) return;
         setRouteEditId(null);
         setWiring(null);
         return;
@@ -2529,6 +2534,18 @@ function SldCanvasInner({
     [connectDraft, moveBlocked, sayBlocked, topology, schema, sessionId, sendEdits],
   );
   const cancelWiring = useCallback(() => setWiring(null), []);
+  // Esc stops the pick wherever the keyboard focus is: a draw that was
+  // started from the palette of components or from the command palette
+  // leaves it outside the diagram. Not an Esc that something else took (a
+  // dialog or a menu that closed on it).
+  useEffect(() => {
+    if (wiring === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setWiring(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [wiring]);
   // A bus is picked on a diagram that can be changed, with one thing in
   // hand: not while it is locked or tidied, and not the route of a line too.
   useEffect(() => {
