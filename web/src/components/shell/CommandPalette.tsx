@@ -63,21 +63,29 @@ const GROUP_HEADINGS: Record<CommandGroup, string> = {
   help: 'Help',
 };
 
+/** The watch `whenGone` has on the page now, if any. */
+let watching: MutationObserver | null = null;
+
 /**
  * Call `then` once the dialog `dialog` has left the page, if the focus has
  * fallen to `<body>` by then: a dialog that a command opened hands the focus
  * back to what had it as it opened, which was the palette.
  */
 function whenGone(dialog: Element, then: () => void): void {
+  // One watch at a time: an element that stays for as long as the page does
+  // would otherwise be watched once more for every command that ends in it.
+  watching?.disconnect();
   const observer = new MutationObserver(() => {
     if (dialog.isConnected) return;
     observer.disconnect();
+    if (watching === observer) watching = null;
     // After the dialog's own hand-back, which Radix makes a tick later.
     window.setTimeout(() => {
       const active = document.activeElement;
       if (active === null || active === document.body) then();
     }, 0);
   });
+  watching = observer;
   // A dialog is drawn in a portal, a child of the body.
   observer.observe(document.body, { childList: true });
   if (dialog.parentNode !== null && dialog.parentNode !== document.body) {
