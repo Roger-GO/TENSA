@@ -13,6 +13,8 @@ by calling this.
 from __future__ import annotations
 
 import contextlib
+import hashlib
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
@@ -37,6 +39,25 @@ def _manager(request: Request) -> SessionManager:
         )
     assert isinstance(mgr, SessionManager)
     return mgr
+
+
+def workspace_id(workspace: Path) -> str:
+    """An opaque name for the workspace folder ``workspace``.
+
+    A digest of its path, cut to 16 hex digits: the same for one folder however
+    often the server is started on it, another for another folder, and nothing a
+    client can read the path back from.
+    """
+    return hashlib.sha256(str(workspace).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def _descriptor(request: Request, session_id: str) -> SessionDescriptor:
+    workspace = getattr(request.app.state, "workspace", None)
+    return SessionDescriptor(
+        session_id=session_id,
+        state="live",
+        workspace_id=workspace_id(workspace) if isinstance(workspace, Path) else "",
+    )
 
 
 @router.post(
@@ -84,7 +105,7 @@ async def create_session(
             detail=str(exc),
             headers={"Retry-After": "5"},
         ) from exc
-    return SessionDescriptor(session_id=session_id, state="live")
+    return _descriptor(request, session_id)
 
 
 @router.get(
@@ -97,7 +118,7 @@ async def create_session(
 async def list_sessions(request: Request) -> SessionList:
     mgr = _manager(request)
     return SessionList(
-        sessions=[SessionDescriptor(session_id=sid, state="live") for sid in mgr.list_sessions()]
+        sessions=[_descriptor(request, sid) for sid in mgr.list_sessions()]
     )
 
 
@@ -123,7 +144,7 @@ async def get_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"session {session_id!r} is not active",
         )
-    return SessionDescriptor(session_id=session_id, state="live")
+    return _descriptor(request, session_id)
 
 
 @router.delete(

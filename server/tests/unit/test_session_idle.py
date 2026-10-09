@@ -22,6 +22,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from tensa.api.app import make_app
+from tensa.api.routes.sessions import workspace_id
 from tensa.core.session import SessionManager, _Session
 from tensa.core.session import registry as registry_module
 
@@ -130,10 +131,29 @@ def test_get_session_counts_as_activity(tmp_path: Path) -> None:
         resp = client.get("/api/sessions/s1")
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"session_id": "s1", "state": "live"}
+        assert resp.json() == {
+            "session_id": "s1",
+            "state": "live",
+            "workspace_id": workspace_id(client.app.state.workspace),
+        }
         assert sess.last_active > before
         assert time.monotonic() - sess.last_active < 5.0
 
         # A session the manager does not hold still answers 404, which is how the
         # web client learns its session was reaped.
         assert client.get("/api/sessions/unknown").status_code == 404
+
+
+def test_a_workspace_is_named_by_a_digest_that_holds_no_path(tmp_path: Path) -> None:
+    """The name a session gives its workspace: one per folder, and not the folder."""
+    first, second = tmp_path / "cases", tmp_path / "other cases"
+
+    name = workspace_id(first)
+
+    assert name == workspace_id(first)
+    assert name != workspace_id(second)
+    assert len(name) == 16
+    int(name, 16)
+    assert "cases" not in name
+    assert str(tmp_path) not in name
+

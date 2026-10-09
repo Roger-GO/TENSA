@@ -31,6 +31,16 @@ class SessionDescriptor(BaseModel):
             "``closed`` if the session has been reaped or explicitly closed."
         ),
     )
+    workspace_id: str = Field(
+        "",
+        description=(
+            "An opaque name for the workspace folder this server serves: the same for "
+            "every session of one folder, and another for another folder. It is a digest "
+            "and holds no path. A client that keeps something by case file name (the web "
+            "UI keeps the drafts of a diagram in the browser) keys it by this as well, so "
+            "that a file of the same name in another workspace is another case."
+        ),
+    )
 
 
 class SessionList(BaseModel):

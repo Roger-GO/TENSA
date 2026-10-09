@@ -109,6 +109,21 @@ async def test_list_sessions_returns_active(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.integration
+async def test_every_session_names_the_same_workspace(client: httpx.AsyncClient) -> None:
+    """A client keys what it keeps by case file with it, so it must not change."""
+    created = (await client.post("/api/sessions")).json()
+    other = (await client.post("/api/sessions")).json()
+    name = created["workspace_id"]
+    assert len(name) == 16
+    int(name, 16)
+    assert other["workspace_id"] == name
+    read = (await client.get(f"/api/sessions/{created['session_id']}")).json()
+    assert read["workspace_id"] == name
+    listed = (await client.get("/api/sessions")).json()["sessions"]
+    assert {s["workspace_id"] for s in listed} == {name}
+
+
+@pytest.mark.integration
 async def test_get_unknown_session_returns_404(client: httpx.AsyncClient) -> None:
     resp = await client.get(
         "/api/sessions/does-not-exist"
