@@ -76,7 +76,7 @@ desktop = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
-    "pytest-cov>=6",
+    "pytest-cov>=7.1.0",
     # ``[tool.coverage.run]`` below uses ``patch`` and ``core``, which need coverage 7.10.
     "coverage>=7.10",
     "httpx>=0.27",
