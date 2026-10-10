@@ -69,7 +69,7 @@ cd web
 node scripts/docs-screenshots.mjs http://127.0.0.1:18800
 ```
 
-It needs the built UI and Playwright's Chromium (`pnpm exec playwright install chromium`, once). It writes `ui-overview.jpg`, `ui-tds.jpg`, `ui-eig.jpg`, `ui-cpf.jpg` and `hero.jpeg` into `docs/img/`. The browser it drives is headless, so no window opens. Keep the images JPEG and under about 200 KB each. CI refuses a change that adds a file over 1 MiB, which [CONTRIBUTING.md](https://github.com/Roger-GO/TENSA/blob/main/CONTRIBUTING.md#media-and-other-large-files) explains.
+It needs the built UI and Playwright's Chromium (`pnpm exec playwright install chromium`, once). It writes `ui-overview.jpg`, `ui-tds.jpg`, `ui-eig.jpg`, `ui-cpf.jpg` and `hero.jpeg` into `docs/img/`. The browser it drives is headless, so no window opens. For the hero image it arranges the diagram of the Kundur case wide, and that arrangement is kept beside the case in the workspace as the app keeps one made by hand, which is one more reason to give the script a workspace of its own. Keep the images JPEG and under about 200 KB each. CI refuses a change that adds a file over 1 MiB, which [CONTRIBUTING.md](https://github.com/Roger-GO/TENSA/blob/main/CONTRIBUTING.md#media-and-other-large-files) explains.
 
 ## Publish on GitHub Pages
 

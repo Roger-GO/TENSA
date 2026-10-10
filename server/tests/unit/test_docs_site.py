@@ -396,6 +396,25 @@ def test_the_hero_image_is_one_the_script_takes(mkdocs: dict[str, Any]) -> None:
             assert f"img/{path.name}" in shown, f"no page shows docs/img/{path.name}"
 
 
+def test_the_hero_image_is_not_taken_with_a_line_cut_short() -> None:
+    """The picture at the top of the README once showed the line over the diagram cut off
+    with an ellipsis, because the window it was taken in was too narrow for it. The app
+    marks a text it has cut (``data-cut``, set by ``ClampedText``), and the script looks for
+    that mark and stops before it takes the hero while the window holds one. A mark by
+    another name would let every window pass, so the two are held together here."""
+    script = WEB_DIR / "scripts" / "docs-screenshots.mjs"
+    clamped = WEB_DIR / "src" / "components" / "ui" / "ClampedText.tsx"
+    if not script.is_file() or not clamped.is_file():
+        pytest.skip("the web sources are not next to the tests")
+    assert "data-cut={cut ? 'true' : undefined}" in clamped.read_text(encoding="utf-8")
+    source = script.read_text(encoding="utf-8")
+    assert """page.locator('[data-cut="true"]')""" in source
+    # The last thing before the picture, so nothing that follows can cut a line again.
+    assert re.search(r"await refuseCutText\(page\);\s+await shoot\(page, 'hero\.jpeg'", source), (
+        "the hero is taken without the check for a cut line"
+    )
+
+
 # ---- what the pages say about the program ----------------------------------------------
 
 
