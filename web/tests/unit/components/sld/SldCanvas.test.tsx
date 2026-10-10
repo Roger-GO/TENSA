@@ -182,17 +182,31 @@ vi.mock('@xyflow/react', async () => {
       }),
     // The lock button of the real controls reports each press through
     // `onInteractiveChange`; the stand-in has one that turns the lock on and off.
+    // Its Fit View button does what the real one does: it asks React Flow for
+    // a fit with the options the controls were given, and then calls `onFitView`.
     Controls: ({
       className,
       onInteractiveChange,
+      fitViewOptions,
+      onFitView,
     }: {
       className?: string;
       onInteractiveChange?: (interactive: boolean) => void;
+      fitViewOptions?: Record<string, unknown>;
+      onFitView?: () => void;
     }) => {
       const [interactive, setInteractive] = React.useState(true);
       return React.createElement(
         'div',
         { 'data-testid': 'sld-canvas-controls', className },
+        React.createElement('button', {
+          type: 'button',
+          'data-testid': 'sld-canvas-controls-fit',
+          onClick: () => {
+            fitViewSpy(fitViewOptions);
+            onFitView?.();
+          },
+        }),
         React.createElement('button', {
           type: 'button',
           'data-testid': 'sld-canvas-lock',
@@ -1516,6 +1530,22 @@ describe('SldCanvas', () => {
         left: expect.stringMatching(/^\d+px$/),
       },
     });
+  });
+
+  it('the Fit View button of the zoom controls fits as the command does', async () => {
+    loadSavedCase();
+    await renderLoaded();
+    act(() => __requestSldCommand('fit-view'));
+    const asTheCommand = fitViewSpy.mock.lastCall?.[0];
+    expect(asTheCommand).toMatchObject({ padding: { bottom: expect.stringMatching(/^\d+px$/) } });
+
+    fitViewSpy.mockClear();
+    fireEvent.click(screen.getByTestId('sld-canvas-controls-fit'));
+    // React Flow's button asks for its own fit, to the edges of the pane,
+    // before it calls the canvas. A fit is made when the nodes are next
+    // applied, with what was asked for last, so the last request is the fit.
+    expect(fitViewSpy).toHaveBeenCalledTimes(2);
+    expect(fitViewSpy.mock.lastCall?.[0]).toEqual(asTheCommand);
   });
 
   it('Reset to auto-layout forgets the drags, replaces the saved layout with an empty one, and offers Undo', async () => {

@@ -8,6 +8,13 @@
  *   out -> Fit view -> the button is named for the load, and brings it back
  *   -> Fit view, and click a bus on the diagram -> the zoom stays
  *
+ * And a fit keeps the diagram clear of what floats over the corners of its
+ * pane, whichever way it is asked for.
+ *
+ *   open IEEE 14 in a narrow window -> zoom in -> Fit view from the palette
+ *   -> no node is under the minimap or the zoom controls -> zoom in -> the
+ *   Fit View button of the zoom controls -> the same view
+ *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`).
  * The unit tests check the same rules against a stand-in for React Flow; this
  * one checks them where the pane, the fit and the pan are the browser's. It
@@ -59,6 +66,69 @@ async function zoomOf(page: Page): Promise<number> {
     const viewport = document.querySelector<HTMLElement>('.react-flow__viewport');
     const scale = /scale\(([\d.]+)\)/.exec(viewport?.style.transform ?? '');
     return scale === null ? NaN : Number(scale[1]);
+  });
+}
+
+/** Where React Flow has the diagram: its pan in pixels, and its zoom. */
+interface View {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+async function viewOf(page: Page): Promise<View> {
+  return await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('.react-flow__viewport');
+    const found = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(
+      viewport?.style.transform ?? '',
+    );
+    return found === null
+      ? { x: NaN, y: NaN, zoom: NaN }
+      : { x: Number(found[1]), y: Number(found[2]), zoom: Number(found[3]) };
+  });
+}
+
+/**
+ * How far apart two views are: the pan in pixels, and the zoom counted so
+ * that a thousandth of it is a pixel. Two fits of one diagram in one pane
+ * are under 1 apart.
+ */
+function apart(a: View, b: View): number {
+  return Math.hypot(a.x - b.x, a.y - b.y) + 1000 * Math.abs(a.zoom - b.zoom);
+}
+
+/**
+ * The view once the diagram has stopped moving: a fit glides to its place.
+ * It is read until two readings 300 ms apart are the same.
+ */
+async function settledView(page: Page): Promise<View> {
+  let last: View = { x: NaN, y: NaN, zoom: NaN };
+  await expect(async () => {
+    const before = last;
+    last = await viewOf(page);
+    expect(apart(before, last)).toBe(0);
+  }).toPass({ intervals: [300], timeout: 10_000 });
+  return last;
+}
+
+/** The nodes that are under the minimap or the zoom controls, wholly or in part. */
+async function nodesUnderTheCorners(page: Page): Promise<string[]> {
+  return await page.evaluate(() => {
+    const corners = [
+      ...document.querySelectorAll('.react-flow__minimap, .react-flow__controls'),
+    ].map((corner) => corner.getBoundingClientRect());
+    return [...document.querySelectorAll<HTMLElement>('.react-flow__node')]
+      .filter((node) => {
+        const box = node.getBoundingClientRect();
+        return corners.some(
+          (corner) =>
+            box.left < corner.right &&
+            corner.left < box.right &&
+            box.top < corner.bottom &&
+            corner.top < box.bottom,
+        );
+      })
+      .map((node) => node.dataset.id ?? '');
   });
 }
 
@@ -140,7 +210,8 @@ test('a diagram too small to read says so, and a pick in a table shows the devic
   // pointing at what they see.
   await page.getByRole('button', { name: 'Fit View' }).click();
   await expect(tooSmall).toBeVisible();
-  const whole = await zoomOf(page);
+  // The fit glides to its place, and the line shows before it is there.
+  const whole = (await settledView(page)).zoom;
   await page.getByTestId('bus-node-5').click();
   await expect(zoomIn).toHaveText('Zoom to BUS5');
   // The view pans to the bus, at the zoom it had.
@@ -148,4 +219,47 @@ test('a diagram too small to read says so, and a pick in a table shows the devic
   expect(await zoomOf(page)).toBeCloseTo(whole, 3);
 
   expect(uncaughtErrors).toEqual([]);
+});
+
+test.describe('in a narrow window', () => {
+  // The pane is narrower than it is high, so IEEE 14 is fitted by its width
+  // and its foot comes down to the corners: a fit to the edges of the pane
+  // leaves bus 10 and two loads under the minimap.
+  test.use({ viewport: { width: 800, height: 1000 } });
+
+  test('the Fit View button of the zoom controls keeps the diagram clear of the minimap, as the command does', async ({
+    page,
+  }) => {
+    await openCase(page);
+    const controls = page.getByTestId('rf__controls');
+    const zoomIn = controls.getByRole('button', { name: 'Zoom In', exact: true });
+    await expect(page.locator('.react-flow__minimap')).toBeVisible();
+
+    /** Zoom in from wherever the diagram is, so that a fit has somewhere to go. */
+    const zoomedIn = async (): Promise<View> => {
+      const from = await settledView(page);
+      await zoomIn.click();
+      await zoomIn.click();
+      await expect.poll(async () => apart(await viewOf(page), from)).toBeGreaterThan(50);
+      return await settledView(page);
+    };
+
+    // Fit view from the palette: all of the diagram, none of it under a corner.
+    let away = await zoomedIn();
+    await page.keyboard.press('Control+k');
+    await page.getByTestId('command-palette-input').fill('Fit view');
+    await page.getByRole('option', { name: 'Fit view' }).click();
+    await expect(page.getByTestId('command-palette')).toBeHidden();
+    await expect.poll(async () => apart(await viewOf(page), away)).toBeGreaterThan(50);
+    const asTheCommand = await settledView(page);
+    expect(await nodesUnderTheCorners(page)).toEqual([]);
+
+    // The button of the zoom controls makes the same fit.
+    away = await zoomedIn();
+    expect(apart(away, asTheCommand)).toBeGreaterThan(50);
+    await controls.getByRole('button', { name: 'Fit View', exact: true }).click();
+    await expect.poll(async () => apart(await viewOf(page), asTheCommand)).toBeLessThan(1);
+    expect(apart(await settledView(page), asTheCommand)).toBeLessThan(1);
+    expect(await nodesUnderTheCorners(page)).toEqual([]);
+  });
 });

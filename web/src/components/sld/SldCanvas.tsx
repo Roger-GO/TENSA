@@ -2863,7 +2863,7 @@ function SldCanvasInner({
   // Commands of the palette and of the right-click menu; the registry reaches
   // the canvas through the bridge in ``store/sld.ts``.
   // A fit shows the whole diagram clear of the minimap and the zoom controls
-  // (`fitPadding`).
+  // (`fitPadding`), from the Fit View button of those controls as well.
   const fitWithin = useCallback(
     (duration: number) => {
       const surface = canvasRef.current;
@@ -4124,9 +4124,15 @@ function SldCanvasInner({
                 color={DOT_GRID_COLOR}
                 data-testid="sld-canvas-dot-grid"
               />
+              {/* The Fit View button asks React Flow for its own fit, to the
+                  edges of the pane, and then calls `onFitView`. A fit is made
+                  when the nodes are next applied and the last one asked for
+                  is the one that is made, so the button fits as the command
+                  does, clear of the minimap. */}
               <Controls
                 className={FLOATING_OVERLAY_CHROME}
                 onInteractiveChange={onInteractiveChange}
+                onFitView={fitView}
               />
               <MiniMap
                 pannable

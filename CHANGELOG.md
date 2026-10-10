@@ -5,6 +5,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 ## [Unreleased]
 
 ### Fixed
+- The Fit View button of the diagram's zoom controls keeps the diagram clear of the minimap, as Fit view in the command palette and in the right-click menu do. The button made React Flow's own fit, to the edges of the pane, so in a narrow window the foot of a diagram ended up under the minimap (bus 10 and two loads of IEEE 14 in a window 800 px wide).
 - The handler of the job-event WebSocket (`/api/ws/{id}/jobs/events`) passes a cancellation on as it received it. While it ended, the handler waited for its two tasks with `asyncio.gather`, and a cancellation that reached it in those few turns of the event loop came out as a bare `CancelledError`, without the message it was sent with. A running server never noticed: uvicorn cancels a handler only when a shutdown has outlasted its grace period, and logs it the same either way. An app run inside a cancel scope did, which is how Starlette's test client runs one: the scope no longer knew its own cancellation, and leaving the socket raised `CancelledError` in the test, rarely on a machine with several cores and nearly every time on one.
 
 ### Development
