@@ -33,8 +33,8 @@ dependencies = [
     # oldest that allows Starlette 1.x. Starlette is declared here because
     # FastAPI no longer caps it and every release below 1.3.1 has a published
     # advisory (the UI is served through StaticFiles).
-    "fastapi>=0.133,<0.143",
-    "starlette>=1.3.1,<2",
+    "fastapi>=0.142.2,<0.143",
+    "starlette>=1.7.0,<2",
     "uvicorn[standard]>=0.30",
     "pyarrow>=17",
     # The stream encoder packs each frame's values with numpy. ANDES already
