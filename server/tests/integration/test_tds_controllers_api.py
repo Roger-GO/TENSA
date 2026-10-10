@@ -24,6 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tensa.api.app import make_app
 from tensa.core.session import SessionManager
+from tests._ws import websocket_session
 
 pytestmark = pytest.mark.integration
 
@@ -427,7 +428,7 @@ def test_a_streamed_run_says_what_its_controllers_did_in_the_done_frame(
         "tds_config_overrides": {"criteria": 0},
     }
     frames = 0
-    with test_client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(test_client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(json.dumps(start))
         started = json.loads(ws.receive_text())
@@ -454,7 +455,7 @@ def test_a_streamed_run_says_what_its_controllers_did_in_the_done_frame(
 
 def test_a_streamed_run_without_controllers_has_no_such_key(live: tuple[TestClient, str]) -> None:
     test_client, sid = live
-    with test_client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(test_client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(json.dumps({"type": "start_tds", "tf": 0.2}))
         while True:
@@ -469,7 +470,7 @@ def test_a_streamed_run_without_controllers_has_no_such_key(live: tuple[TestClie
 def _refused(test_client: TestClient, sid: str, controllers: Any) -> dict[str, Any]:
     """Send ``start_tds`` with ``controllers`` and return the error frame, which
     is the first thing sent: a refused run starts no stream."""
-    with test_client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(test_client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(json.dumps({"type": "start_tds", "tf": 0.3, "controllers": controllers}))
         frame: dict[str, Any] = json.loads(ws.receive_text())

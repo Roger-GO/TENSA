@@ -18,6 +18,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from tensa.api.app import make_app
+from tests._ws import websocket_session
 
 WS_CLOSE_WORKER_ERROR = 4500
 
@@ -59,7 +60,7 @@ def live(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
 
 def _refused(client: TestClient, sid: str, start: dict[str, Any]) -> dict[str, Any]:
     """Send ``start_tds`` and return the error frame; the close follows it."""
-    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(json.dumps({"type": "start_tds", **start}))
         frame: dict[str, Any] = json.loads(ws.receive_text())
@@ -135,7 +136,7 @@ def test_ws_close_frame_stays_within_its_byte_limit(live: tuple[TestClient, str]
     is more than 123 bytes once the client's own text is not ASCII, and the
     close that failed for it was swallowed: the client never got the code."""
     client, sid = live
-    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(
             json.dumps({"type": "start_tds", "tf": 0.3, "decimation": "é" * 100})

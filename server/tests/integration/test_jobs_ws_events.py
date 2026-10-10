@@ -28,6 +28,7 @@ from starlette.websockets import WebSocket
 from tensa.api.app import make_app
 from tensa.api.routes.jobs import ws_job_events
 from tensa.core.session import SessionManager, _Session
+from tests._ws import websocket_session
 
 
 class _FakeProcess:
@@ -93,7 +94,7 @@ def test_ws_streams_two_transitions() -> None:
         job_b = sess.job_registry.register_job(kind="sweep", can_cancel=True)
         sess.job_registry.mark_running(job_b)
 
-        with client.websocket_connect("/api/ws/s1/jobs/events") as ws:
+        with websocket_session(client, "/api/ws/s1/jobs/events") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             snapshot = json.loads(ws.receive_text())
             assert snapshot["type"] == "snapshot"
@@ -132,7 +133,7 @@ def test_ws_failed_transition_carries_problem() -> None:
         job_id = sess.job_registry.register_job(kind="tds-stream", can_cancel=True)
         sess.job_registry.mark_running(job_id)
 
-        with client.websocket_connect("/api/ws/s1/jobs/events") as ws:
+        with websocket_session(client, "/api/ws/s1/jobs/events") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             assert json.loads(ws.receive_text())["type"] == "snapshot"
 
@@ -169,8 +170,8 @@ def test_multiple_subscribers_receive_same_broadcast() -> None:
         job_id = sess.job_registry.register_job(kind="tds-stream", can_cancel=True)
         sess.job_registry.mark_running(job_id)
 
-        with client.websocket_connect("/api/ws/s1/jobs/events") as ws1, \
-                client.websocket_connect("/api/ws/s1/jobs/events") as ws2:
+        with websocket_session(client, "/api/ws/s1/jobs/events") as ws1, \
+                websocket_session(client, "/api/ws/s1/jobs/events") as ws2:
             for ws in (ws1, ws2):
                 assert json.loads(ws.receive_text())["type"] == "ready"
                 assert json.loads(ws.receive_text())["type"] == "snapshot"

@@ -35,6 +35,7 @@ import pytest
 
 from tensa.api.app import make_app
 from tensa.core.session import SessionManager
+from tests._ws import websocket_session
 
 
 def _bundled_ieee14_dir() -> Path:
@@ -440,9 +441,7 @@ def test_sweep_progress_via_websocket(workspace: Path) -> None:
         assert resp.status_code == 202, resp.text
         sweep_id = resp.json()["sweep_id"]
         # Connect WS + drain.
-        with tc.websocket_connect(
-            f"/api/ws/{sid}/sweep/{sweep_id}"
-        ) as ws:
+        with websocket_session(tc, f"/api/ws/{sid}/sweep/{sweep_id}") as ws:
             ready = json.loads(ws.receive_text())
             assert ready["type"] == "ready"
             snapshot = json.loads(ws.receive_text())

@@ -22,6 +22,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tensa.api.app import make_app
 from tensa.core.session import SessionExpiredError, SessionManager, _Session
+from tests._ws import websocket_session
 
 WS_CLOSE_INTERNAL_ERROR = 4500
 WS_CLOSE_SESSION_NOT_FOUND = 4404
@@ -112,7 +113,7 @@ def test_ws_start_tds_rejects_a_bad_step_size(h: object, tmp_path: Path) -> None
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
-        with client.websocket_connect("/api/ws/s1") as ws:
+        with websocket_session(client, "/api/ws/s1") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             ws.send_text(json.dumps({"type": "start_tds", "tf": 1.0, "h": h}))
             frame = json.loads(ws.receive_text())
@@ -134,7 +135,7 @@ def test_ws_start_tds_rejects_non_finite_step_size(literal: str, tmp_path: Path)
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
-        with client.websocket_connect("/api/ws/s1") as ws:
+        with websocket_session(client, "/api/ws/s1") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             ws.send_text(f'{{"type": "start_tds", "tf": 1.0, "h": {literal}}}')
             frame = json.loads(ws.receive_text())
@@ -151,7 +152,7 @@ def test_ws_start_tds_rejects_an_integer_too_large_for_a_float(tmp_path: Path) -
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
-        with client.websocket_connect("/api/ws/s1") as ws:
+        with websocket_session(client, "/api/ws/s1") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             ws.send_text(f'{{"type": "start_tds", "tf": 1.0, "h": 1{"0" * 400}}}')
             frame = json.loads(ws.receive_text())
@@ -173,7 +174,7 @@ def test_ws_start_tds_forwards_a_valid_step_size_as_a_float(
     calls = _record_start_streaming_run(mgr)
     with client:
         client.app.state.session_manager = mgr
-        with client.websocket_connect("/api/ws/s1") as ws:
+        with websocket_session(client, "/api/ws/s1") as ws:
             assert json.loads(ws.receive_text())["type"] == "ready"
             ws.send_text(json.dumps({"type": "start_tds", "tf": 1.0, "h": sent}))
             frame = json.loads(ws.receive_text())

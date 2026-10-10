@@ -27,6 +27,7 @@ from tensa.core import worker
 from tensa.core.dae_vars import dae_variables
 from tensa.core.stream import StreamCollector, decode_batch
 from tensa.core.wrapper import Wrapper
+from tests._ws import websocket_session
 
 pytestmark = pytest.mark.integration
 
@@ -434,7 +435,7 @@ def test_a_faulted_batch_runs_traces_go_straight_into_the_metrics_route(
 
 def test_a_websocket_run_streams_the_named_variables(live: tuple[TestClient, str]) -> None:
     client, sid = live
-    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(
             json.dumps(
@@ -461,7 +462,7 @@ def test_a_websocket_run_with_a_bad_name_is_refused_with_the_reason(
     live: tuple[TestClient, str],
 ) -> None:
     client, sid = live
-    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(
             json.dumps({"type": "start_tds", "tf": 0.3, "dae_vars": ["omega GENROU 99"]})
@@ -477,7 +478,7 @@ def test_a_websocket_dae_vars_that_is_not_a_list_of_names_is_refused(
     live: tuple[TestClient, str],
 ) -> None:
     client, sid = live
-    with client.websocket_connect(f"/api/ws/{sid}") as ws:
+    with websocket_session(client, f"/api/ws/{sid}") as ws:
         assert json.loads(ws.receive_text())["type"] == "ready"
         ws.send_text(json.dumps({"type": "start_tds", "tf": 0.3, "dae_vars": "omega"}))
         frame = json.loads(ws.receive_text())

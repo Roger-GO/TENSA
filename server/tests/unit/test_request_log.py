@@ -20,6 +20,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tensa.api.app import make_app
 from tensa.api.request_log import make_request_log_middleware
+from tests._ws import websocket_session
 
 pytestmark = pytest.mark.unit
 
@@ -213,7 +214,9 @@ def test_the_app_logs_a_websocket_the_origin_check_rejects(
 ) -> None:
     with (
         pytest.raises(WebSocketDisconnect),
-        client.websocket_connect("/api/sessions/abc/jobs/ws", headers={"Origin": "http://evil.example"}),
+        websocket_session(
+            client, "/api/sessions/abc/jobs/ws", headers={"Origin": "http://evil.example"}
+        ),
     ):
         pass
     assert _lines(caplog) == ["WEBSOCKET /api/sessions/abc/jobs/ws refused"]
