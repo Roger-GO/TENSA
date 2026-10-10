@@ -35,7 +35,7 @@ dependencies = [
     # advisory (the UI is served through StaticFiles).
     "fastapi>=0.133,<0.143",
     "starlette>=1.3.1,<2",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.54.0",
     "pyarrow>=17",
     # The stream encoder packs each frame's values with numpy. ANDES already
     # requires it; it is listed here because the substrate imports it directly.
