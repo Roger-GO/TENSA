@@ -197,7 +197,7 @@ def test_what_the_configuration_excludes_is_there_to_exclude(mkdocs: dict[str, A
 
 
 def test_the_site_does_not_carry_the_demo_video(mkdocs: dict[str, Any]) -> None:
-    # 3.5 MB that the README links to on GitHub instead.
+    # 3.3 MB that the README links to on GitHub instead.
     assert _is_excluded("demo/ieee9-agent-demo.mp4", _excluded(mkdocs))
 
 
@@ -321,7 +321,7 @@ def test_links_and_images_resolve_to_pages_and_headings(
 
 def test_images_stay_small_enough_for_a_repository() -> None:
     """contributing.md asks for screenshots under about 200 KB."""
-    for path in sorted((DOCS / "img").glob("ui-*.jpg")):
+    for path in [*sorted((DOCS / "img").glob("ui-*.jpg")), DOCS / "img" / "hero.jpeg"]:
         assert path.stat().st_size < 250_000, f"{path.name} is {path.stat().st_size} bytes"
 
 
@@ -344,6 +344,25 @@ def test_the_screenshots_the_pages_show_are_the_ones_the_script_takes(
     )
     for name in taken:
         assert (DOCS / "img" / name).is_file(), f"docs/img/{name} is not committed"
+
+
+def test_the_hero_image_is_one_the_script_takes(mkdocs: dict[str, Any]) -> None:
+    """The picture at the top of the README and of the site's first page is taken by the
+    script that takes the others, so it is taken again with them when the UI changes. A
+    picture nothing shows is not kept: the one from before the project was renamed stayed
+    in ``docs/img`` for as long as only the build's exclusion list named it."""
+    script = WEB_DIR / "scripts" / "docs-screenshots.mjs"
+    if not script.is_file():
+        pytest.skip("web/scripts/docs-screenshots.mjs is not next to the tests")
+    assert "'hero.jpeg'" in script.read_text(encoding="utf-8")
+    assert (DOCS / "img" / "hero.jpeg").is_file()
+    assert "](img/hero.jpeg)" in _hand_written(mkdocs)["index.md"]
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "](docs/img/hero.jpeg)" in readme
+    shown = "\n".join([readme, *_hand_written(mkdocs).values()])
+    for path in sorted((DOCS / "img").iterdir()):
+        if path.suffix in {".jpg", ".jpeg", ".png", ".gif"}:
+            assert f"img/{path.name}" in shown, f"no page shows docs/img/{path.name}"
 
 
 # ---- what the pages say about the program ----------------------------------------------

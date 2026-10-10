@@ -693,18 +693,21 @@ async function main() {
     page.locator('[data-testid="analyze-run-eig"]').click(),
   ]);
   await sleep(2000);
-  // Every mode of this well-damped system is hidden by the default
-  // "poorly damped only" scatter filter — widen it to show all modes.
+  // The scatter opens on every mode when none is poorly damped, as on this
+  // system, and on the poorly damped ones otherwise. "All modes" is a toggle,
+  // so press it only while some modes are hidden: a press on a scatter that
+  // already shows them all would hide every one of them.
+  const allModes = page.locator('[data-testid="eig-scatter-filter-toggle"]');
+  const showingAll = (await allModes.getAttribute('aria-pressed').catch(() => null)) === 'true';
   await caption(
     page,
     'Every mode is stable and well damped',
-    '"All modes" widens the scatter filter to the full eigenvalue set',
+    showingAll
+      ? 'The scatter shows the full eigenvalue set'
+      : '"All modes" widens the scatter filter to the full eigenvalue set',
     'top',
   );
-  await page
-    .locator('[data-testid="eig-scatter-filter-toggle"]')
-    .click()
-    .catch(() => {});
+  if (!showingAll) await allModes.click().catch(() => {});
   await sleep(4500);
 
   // -- outro ----------------------------------------------------------------

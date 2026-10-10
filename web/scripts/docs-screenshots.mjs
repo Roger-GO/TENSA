@@ -2,7 +2,8 @@
  * Screenshots for the documentation site (docs/img/ui-*.jpg): the window after a power flow,
  * a time-domain run with a fault, the eigenvalue plot and the continuation power flow curve.
  * The UI tour (docs/ui-tour.md) shows them, so rerun this after a change that moves the
- * layout the tour describes.
+ * layout the tour describes. It also takes docs/img/hero.jpeg, the picture at the top of the
+ * README and of the site's first page.
  *
  * Prereqs: a running server with the built SPA and a fresh workspace (a new workspace is
  * seeded with the IEEE 14 and Kundur cases the script opens), e.g.
@@ -11,9 +12,9 @@
  * Run:
  *   cd web && node scripts/docs-screenshots.mjs [baseUrl] [outDir]
  *
- * Output: ui-overview.jpg, ui-tds.jpg, ui-eig.jpg and ui-cpf.jpg in outDir (../docs/img by
- * default), each a 1600 x 1000 JPEG. The last three show the results view (Ctrl+Shift+M), which
- * gives a plot the whole window.
+ * Output: ui-overview.jpg, ui-tds.jpg, ui-eig.jpg, ui-cpf.jpg and hero.jpeg in outDir
+ * (../docs/img by default), each a 1600 x 1000 JPEG. The three after the first show the
+ * results view (Ctrl+Shift+M), which gives a plot the whole window.
  */
 import { chromium } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
@@ -22,12 +23,21 @@ import { join } from 'node:path';
 const BASE_URL = process.argv[2] ?? 'http://127.0.0.1:18800';
 const OUT_DIR = process.argv[3] ?? '../docs/img';
 const SIZE = { width: 1600, height: 1000 };
+/**
+ * The window of the hero picture: smaller, and drawn at a scale that makes the picture as
+ * wide as the others, so that its text can still be read where a page shows it at half size.
+ */
+const HERO_SIZE = { width: 1280, height: 800 };
 
 /** The first-run coach is a floating card that would sit over the diagram. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 
-async function openApp(browser) {
-  const context = await browser.newContext({ viewport: SIZE });
+async function openApp(browser, viewport = SIZE) {
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: SIZE.width / viewport.width,
+    colorScheme: 'light',
+  });
   await context.addInitScript((key) => {
     try {
       window.localStorage.setItem(key, 'dismissed');
@@ -191,6 +201,21 @@ try {
   await dismissToasts(page);
   await showResultsView(page);
   await shoot(page, 'ui-cpf.jpg');
+  await page.context().close();
+
+  // The hero: Kundur's two-area system after a power flow, with a bus picked so that the
+  // Inspector shows its result. The drawer is down to its tabs, which gives the diagram the
+  // height of the window, and the diagram is fitted again after the pick, which zooms in.
+  page = await openApp(browser, HERO_SIZE);
+  await loadCase(page, 'kundur_full.xlsx');
+  await runPowerFlow(page);
+  await page.keyboard.press('Control+j');
+  await page.waitForTimeout(800);
+  await page.getByTestId('bus-node-7').click();
+  await page.waitForTimeout(1_000);
+  await page.getByRole('button', { name: 'Fit View' }).click();
+  await page.waitForTimeout(1_200);
+  await shoot(page, 'hero.jpeg');
   await page.context().close();
 } finally {
   await browser.close();

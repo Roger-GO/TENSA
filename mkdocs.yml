@@ -64,14 +64,12 @@ nav:
 
 # Files in docs/ that are not part of the site: the tooling's requirements, the GUI parity
 # ledger the CI check writes (a review table for contributors), and the media only the
-# README uses: the demo video, which it links to on GitHub, the GIF made from it, and a
-# screenshot from before the project was renamed.
+# README uses: the demo video, which it links to on GitHub, and the GIF made from it.
 exclude_docs: |
   requirements.txt
   gui-parity-ledger.md
   demo/
   img/demo.gif
-  img/empty-state.jpeg
 
 # `mkdocs build --strict` turns each of these into an error.
 validation:

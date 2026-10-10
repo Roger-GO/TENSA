@@ -11,7 +11,7 @@ This site is built with [MkDocs](https://www.mkdocs.org/) and the [Material](htt
 | `docs/requirements.txt` | The packages the build needs besides TENSA itself |
 | `mkdocs.yml` | The site's configuration and navigation |
 | `scripts/docs_reference.py` | A MkDocs hook that writes the **Reference** pages |
-| `web/scripts/docs-screenshots.mjs` | Takes the screenshots of the UI tour |
+| `web/scripts/docs-screenshots.mjs` | Takes the screenshots of the UI tour and the hero image |
 | `.github/workflows/docs.yml` | Builds the site in CI, and publishes it once Pages is on |
 
 The three pages under **Reference** (the command line, the API routes and the API models) are not files in `docs/`. The hook renders them while the site builds, from `tensa --help` and from the OpenAPI schema of the server, so they cannot drift from the code. To change one, change the help text of an option, or the description of a route or a field, in the source of the server, and not the page.
@@ -61,7 +61,7 @@ which writes the site to `site/` and turns every warning into a failure. A link 
 
 ## Screenshots
 
-The images of the UI tour come from a script, so that they can be taken again after a change moves the layout. Start a server on a fresh workspace and run it:
+The images of the UI tour, and the hero image of the first page and of the README, come from a script, so that they can be taken again after a change moves the layout. Start a server on a fresh workspace and run it:
 
 ```bash
 tensa serve --port 18800 --workspace "$(mktemp -d)" --max-sessions 16
@@ -69,7 +69,7 @@ cd web
 node scripts/docs-screenshots.mjs http://127.0.0.1:18800
 ```
 
-It needs the built UI and Playwright's Chromium (`pnpm exec playwright install chromium`, once). It writes `ui-overview.jpg`, `ui-tds.jpg`, `ui-eig.jpg` and `ui-cpf.jpg` into `docs/img/`. Keep the images JPEG and under about 200 KB each. CI refuses a change that adds a file over 1 MiB, which [CONTRIBUTING.md](https://github.com/Roger-GO/TENSA/blob/main/CONTRIBUTING.md#media-and-other-large-files) explains.
+It needs the built UI and Playwright's Chromium (`pnpm exec playwright install chromium`, once). It writes `ui-overview.jpg`, `ui-tds.jpg`, `ui-eig.jpg`, `ui-cpf.jpg` and `hero.jpeg` into `docs/img/`. The browser it drives is headless, so no window opens. Keep the images JPEG and under about 200 KB each. CI refuses a change that adds a file over 1 MiB, which [CONTRIBUTING.md](https://github.com/Roger-GO/TENSA/blob/main/CONTRIBUTING.md#media-and-other-large-files) explains.
 
 ## Publish on GitHub Pages
 

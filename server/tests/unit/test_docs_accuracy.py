@@ -243,6 +243,20 @@ def test_the_dev_mode_command_admits_the_vite_origin() -> None:
         assert all("--allow-origin http://127.0.0.1:5173" in line for line in lines), document
 
 
+def test_the_demo_recorder_presses_all_modes_only_while_modes_are_hidden() -> None:
+    """**All modes** of the eigenvalue scatter is a toggle, and the scatter opens on every
+    mode when none is poorly damped. A recorder that pressed it without looking hid them
+    all, and the README's demo ended on an empty plot."""
+    scatter = _read("web/src/components/analyze/EIGScatter.tsx")
+    assert 'data-testid="eig-scatter-filter-toggle"' in scatter
+    assert "aria-pressed={showingAll}" in scatter
+    recorder = _read("web/scripts/agent-demo.mjs")
+    toggle = recorder.index("eig-scatter-filter-toggle")
+    after = recorder[toggle : toggle + 800]
+    assert "getAttribute('aria-pressed')" in after
+    assert re.search(r"if \(!showingAll\) await \w+\.click\(\)", after)
+
+
 # ---- stale planning text -----------------------------------------------------
 
 # A promise about the future ("lands in Phase 2"), a plan reference, or a query parameter that
