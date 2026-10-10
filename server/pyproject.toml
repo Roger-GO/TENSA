@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
@@ -88,7 +88,7 @@ dev = [
     # tests/unit/test_packaging.py and tests/integration/test_packaging.py drive
     # the build hook and the build backend directly (``editables`` is what the
     # backend needs to build an editable wheel).
-    "hatchling>=1.25",
+    "hatchling>=1.32.4",
     "editables>=0.5",
 ]
 
