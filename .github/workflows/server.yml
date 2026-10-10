@@ -127,7 +127,7 @@ jobs:
           cache-dependency-path: server/pyproject.toml
 
       - name: Download web/dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: web/dist
