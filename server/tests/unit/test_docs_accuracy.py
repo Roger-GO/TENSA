@@ -20,6 +20,7 @@ import typer
 
 from tensa import cli, desktop
 from tensa.api.app import make_app
+from tests._cli import cli_runner
 from tests._repo import REPO_ROOT, pyproject
 
 pytestmark = pytest.mark.unit
@@ -173,6 +174,18 @@ def test_every_desktop_flag_a_document_uses_exists(document: str) -> None:
         if "tensa desktop" in line:
             used.update(re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", line))
     assert used - real == set(), f"{document} passes flags `tensa desktop` does not have"
+
+
+@pytest.mark.parametrize(
+    ("command", "install"),
+    [("mcp", 'pip install "tensa[mcp]"'), ("desktop", 'pip install "tensa[desktop]"')],
+)
+def test_the_help_of_a_command_names_the_extra_it_needs(command: str, install: str) -> None:
+    """The help is printed through Rich, which reads ``[mcp]`` as a style and prints
+    nothing for it: ``tensa mcp --help`` said to ``pip install 'tensa'``."""
+    result = cli_runner().invoke(cli.app, [command, "--help"])
+    assert result.exit_code == 0, result.output
+    assert install in " ".join(result.output.split())
 
 
 def test_readmes_say_windows_on_arm_is_unsupported() -> None:

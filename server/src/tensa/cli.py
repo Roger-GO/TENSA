@@ -989,11 +989,11 @@ def mcp(
         ),
     ),
 ) -> None:
-    """Run the MCP (Model Context Protocol) stdio server for LLM agents.
+    r"""Run the MCP (Model Context Protocol) stdio server for LLM agents.
 
     Exposes sessions, case loading, disturbances, power flow, TDS, and
     eigenanalysis as MCP tools. Requires the optional dependency:
-    ``pip install 'tensa[mcp]'``. Configure your MCP client to launch::
+    pip install "tensa\[mcp]". Configure your MCP client to launch::
 
         tensa mcp --workspace ~/andes-cases
     """
