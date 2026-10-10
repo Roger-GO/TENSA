@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # The check compares with the commit the change started from, so it needs the history.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
