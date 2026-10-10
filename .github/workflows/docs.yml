@@ -1,18 +1,16 @@
-# Build the documentation site (MkDocs, Material theme; see mkdocs.yml) and, once the
-# repository owner has turned on GitHub Pages, publish it.
+# Build the documentation site (MkDocs, Material theme; see mkdocs.yml) and publish it on
+# GitHub Pages, at the `site_url` of mkdocs.yml.
 #
 # `mkdocs build --strict` fails on any warning, so a broken link or a page that is not in
 # the navigation is a red check on the pull request. The API and command line reference
 # pages are written while the site builds, from the server's OpenAPI schema and its CLI,
 # which is why TENSA is installed beside MkDocs. The UI does not need to be built.
 #
-# Publishing is off until the owner opts in, because enabling Pages is a repository
-# setting and not something a workflow can do for itself. To turn it on, set Pages'
-# source to GitHub Actions and add a repository variable DOCS_DEPLOY with the value true
-# (docs/contributing.md has the steps). Until then the `deploy` job is skipped, and the
-# built site is still available as the `github-pages` artifact of each run. The package's
-# Documentation link (server/pyproject.toml) is the docs folder on GitHub until the first
-# publish: switch it to the site's address then.
+# Publishing takes two settings of the repository, because enabling Pages is not something
+# a workflow can do for itself: Pages' source set to GitHub Actions, and a repository
+# variable DOCS_DEPLOY with the value true (docs/contributing.md has the steps). A fork
+# has neither, so its `deploy` job is skipped, and the built site is still available as
+# the `github-pages` artifact of each run.
 name: docs
 
 on:
@@ -78,7 +76,7 @@ jobs:
   deploy:
     name: publish on GitHub Pages
     needs: build
-    # Only from main, and only once the owner has opted in (see the header).
+    # Only from main, and only where the owner has opted in (see the header).
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DOCS_DEPLOY == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10

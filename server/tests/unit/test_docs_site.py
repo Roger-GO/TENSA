@@ -201,21 +201,52 @@ def test_the_site_does_not_carry_the_demo_video(mkdocs: dict[str, Any]) -> None:
     assert _is_excluded("demo/ieee9-agent-demo.mp4", _excluded(mkdocs))
 
 
-def test_the_documentation_link_of_the_package_is_a_page_that_exists(
+def test_the_documentation_link_of_the_package_is_the_published_site(
     mkdocs: dict[str, Any],
 ) -> None:
-    """The site is published only once the repository owner turns Pages on, and until
-    then its address answers 404, on PyPI and in ``pip show``. The link is the docs
-    folder on GitHub, which is there today. ``docs/contributing.md`` says to point it at
-    the site after the first publish, and this test changes with it."""
+    """PyPI and ``pip show`` send a reader to the site GitHub Pages serves, which is the
+    address the site is built for. The readmes link to it too, and none of them still
+    sends a reader to the ``docs`` folder on GitHub, which was the link before the site
+    was published."""
+    site = mkdocs["site_url"]
+    assert site == "https://roger-go.github.io/TENSA/"
     urls = pyproject()["project"]["urls"]
-    assert urls["Documentation"] == f"{urls['Homepage']}/tree/main/docs"
+    assert urls["Documentation"] == site
     assert (DOCS / "index.md").is_file()
-    assert urls["Documentation"].rstrip("/") != mkdocs["site_url"].rstrip("/")
     steps = _hand_written(mkdocs)["contributing.md"]
     assert "server/pyproject.toml" in steps
-    assert mkdocs["site_url"] in steps
-    assert "test_the_documentation_link_of_the_package_is_a_page_that_exists" in steps
+    assert site in steps
+    for name in ("README.md", "server/README.md", "CONTRIBUTING.md", "llms.txt"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        assert site in text, f"{name} does not link to the documentation site"
+        assert f"{urls['Homepage']}/tree/main/docs" not in text, name
+
+
+def test_links_to_the_site_from_outside_it_name_pages_and_headings_that_exist(
+    mkdocs: dict[str, Any], generated: dict[str, str]
+) -> None:
+    """The readmes link to the published site by its address, which no build checks: a
+    page that is renamed, or a heading that is reworded, would leave them at a 404 or at
+    the top of the wrong section."""
+    site = mkdocs["site_url"]
+    pages = _all_pages(mkdocs, generated)
+    anchors = {name: _anchors(text) for name, text in pages.items()}
+    link = re.compile(re.escape(site) + r"([\w./#-]*)")
+    problems: list[str] = []
+    found = 0
+    for name in ("README.md", "server/README.md", "CONTRIBUTING.md", "CHANGELOG.md", "llms.txt"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for match in link.finditer(text):
+            found += 1
+            # A sentence that ends on the address ends on a full stop that is not part of it.
+            path, _, fragment = match.group(1).rstrip(".").partition("#")
+            page = f"{path.rstrip('/')}.md" if path else "index.md"
+            if page not in pages:
+                problems.append(f"{name}: {match.group(0)} is not a page of the site")
+            elif fragment and fragment not in anchors[page]:
+                problems.append(f"{name}: {match.group(0)} has no heading with that id")
+    assert found, "no link to the site was found"
+    assert not problems, "\n".join(problems)
 
 
 def test_the_theme_fetches_nothing_from_a_third_party(mkdocs: dict[str, Any]) -> None:

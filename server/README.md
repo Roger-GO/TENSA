@@ -6,6 +6,8 @@ This package is the TENSA server, and it ships with the web UI already built, so
 
 Requires Python 3.12 or newer. Windows on ARM is not supported, because `kvxopt` (through ANDES) and `pyarrow` publish no wheels for it.
 
+The [documentation](https://roger-go.github.io/TENSA/) has the [install guide](https://roger-go.github.io/TENSA/install/) for each operating system, a [quick start](https://roger-go.github.io/TENSA/quickstart/), a [tour of the UI](https://roger-go.github.io/TENSA/ui-tour/) and [troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/).
+
 ## Quick start
 
 ```bash
@@ -83,7 +85,7 @@ Over SSH or on a server there is no display, so no window can open. Run `tensa s
 
 Before it creates the workspace or starts the server, the command checks that a window can open: that pywebview is installed and, on Linux, that there is a display and that a toolkit starts. It finds the last out by starting the toolkit in a short-lived child process, because Qt does not report a missing system library as an error. It aborts the whole program (`Could not load the Qt platform plugin "xcb"`, exit status 134), which no Python code can catch but a parent process can see. When something is missing the command prints one message and exits with status 1, having created nothing. The message says what is missing, gives the command that installs it (for a system library, the one for Debian and Ubuntu, for Fedora and for Arch), and ends with the way that needs none of it: `tensa serve --open` shows the same UI in your browser. If no window can be opened after the check, the command logs why and exits with status 1 too. One message comes from outside the command:
 
-- `pip` warns that `tensa` "does not provide the extra desktop". The copy of tensa that is installed is older than the extra (the 0.4.0 release has none), so the extra installs nothing. Install pywebview itself with `pip install "pywebview>=5,<7"`, or upgrade tensa once a release has the extra. When pywebview is missing, the message `tensa desktop` prints names whichever of the two works for the copy you have.
+- `pip` warns that `tensa` "does not provide the extra desktop". The copy of tensa that is installed is older than the extra (releases before 0.5.0 have none), so the extra installs nothing. Upgrade tensa with `pip install -U "tensa[desktop]"`, or install pywebview itself with `pip install "pywebview>=5,<7"`. When pywebview is missing, the message `tensa desktop` prints names whichever of the two works for the copy you have.
 
 `tensa desktop` flags:
 
@@ -126,6 +128,7 @@ pyinstaller --windowed --name TENSA --collect-all tensa --collect-all andes tens
 
 Anything the UI does, a script can do. A request with a JSON body needs a `Content-Type: application/json` header (with curl, `-H 'Content-Type: application/json' -d '{...}'`), or the server answers 422.
 
+- The [API guide](https://roger-go.github.io/TENSA/api/) explains the routes, the errors and the streaming protocol, and the [route reference](https://roger-go.github.io/TENSA/reference/api/) lists every route.
 - The [llms.txt](https://github.com/Roger-GO/TENSA/blob/main/llms.txt) API map lists the endpoints, the order they are used in, the enums, and the gotchas.
 - The [examples](https://github.com/Roger-GO/TENSA/tree/main/examples) folder has a curl walkthrough and a self-contained Python client.
 
@@ -141,7 +144,7 @@ The canonical statement is the top-level docstring of [`tensa/__init__.py`](http
 
 ## More
 
-The [project README](https://github.com/Roger-GO/TENSA#readme) has the feature tour and the demo video, and the [changelog](https://github.com/Roger-GO/TENSA/blob/main/CHANGELOG.md) lists what changed in each release. Report problems on the [issue tracker](https://github.com/Roger-GO/TENSA/issues).
+The [documentation site](https://roger-go.github.io/TENSA/) covers the UI, the concepts, the API and the command line. The [project README](https://github.com/Roger-GO/TENSA#readme) has the feature overview and the demo video, and the [changelog](https://github.com/Roger-GO/TENSA/blob/main/CHANGELOG.md) lists what changed in each release. Report problems on the [issue tracker](https://github.com/Roger-GO/TENSA/issues).
 
 ## Development
 

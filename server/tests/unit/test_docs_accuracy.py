@@ -177,6 +177,24 @@ def test_every_desktop_flag_a_document_uses_exists(document: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "document",
+    ["README.md", "server/README.md", "docs/agents.md", "docs/install.md", "llms.txt"],
+)
+def test_every_mcp_command_a_document_shows_says_where_the_server_is(document: str) -> None:
+    """``tensa mcp`` takes exactly one of ``--workspace`` and ``--url`` and stops without
+    one, so a command shown bare does not run."""
+    fences = re.findall(r"```\w*\n(.*?)```", _read(document), flags=re.DOTALL)
+    commands = [
+        line.strip()
+        for body in fences
+        for line in body.splitlines()
+        if re.match(r"\s*tensa mcp\b", line)
+    ]
+    for command in commands:
+        assert ("--workspace" in command) != ("--url" in command), f"{document}: {command}"
+
+
+@pytest.mark.parametrize(
     ("command", "install"),
     [("mcp", 'pip install "tensa[mcp]"'), ("desktop", 'pip install "tensa[desktop]"')],
 )
@@ -216,24 +234,41 @@ def test_api_docs_tell_callers_to_label_json_bodies(document: str) -> None:
     assert "Content-Type: application/json" in _read(document)
 
 
-def test_readme_gives_powershell_equivalents_for_the_posix_only_commands() -> None:
-    readme = _read("README.md")
-    fences = re.findall(r"```(\w+)\n(.*?)```", readme, flags=re.DOTALL)
-    bash = "\n".join(body for lang, body in fences if lang == "bash")
-    powershell = "\n".join(body for lang, body in fences if lang == "powershell")
-    assert "source .venv/bin/activate" in bash
-    assert r".venv\Scripts\Activate.ps1" in powershell
-    assert re.search(r"^VITE_ANDES_PORT=\d+ pnpm dev", bash, flags=re.MULTILINE)
-    assert re.search(r'^\$env:VITE_ANDES_PORT = "\d+"$', powershell, flags=re.MULTILINE)
-    # `&&` is not a statement separator in Windows PowerShell 5.1, and a trailing backslash is not
-    # a line continuation there, so the bash blocks avoid it too (one command per line).
-    assert "&&" not in powershell
+def _fenced(document: str, language: str) -> str:
+    fences = re.findall(r"```(\w+)\n(.*?)```", _read(document), flags=re.DOTALL)
+    return "\n".join(body for lang, body in fences if lang == language)
+
+
+def test_the_readme_shows_only_commands_that_run_in_every_shell() -> None:
+    """The README is where a Windows user starts too, and it has no PowerShell version
+    of its commands: each one runs as written in PowerShell, in ``cmd.exe`` and in a POSIX
+    shell. What only a POSIX shell takes (activating an environment, a variable set in
+    front of a command) is in the pages that give both versions, below."""
+    bash = _fenced("README.md", "bash")
+    assert "pip install tensa" in bash and "tensa serve --open" in bash
+    assert "source " not in bash
+    assert "&&" not in bash
+    assert "$(" not in bash and "`" not in bash
     assert not re.search(r"\\\n", bash)
+    assert not re.search(r"^\s*[A-Z_]+=\S+ \S", bash, flags=re.MULTILINE)
+    assert _fenced("README.md", "powershell") == ""
+
+
+def test_contributing_gives_powershell_equivalents_for_the_posix_only_commands() -> None:
+    bash = _fenced("CONTRIBUTING.md", "bash")
+    powershell = _fenced("CONTRIBUTING.md", "powershell")
+    contributing = _read("CONTRIBUTING.md")
+    assert "source .venv/bin/activate" in bash
+    assert r".venv\Scripts\Activate.ps1" in contributing
+    assert re.search(r"VITE_ANDES_PORT=\d+ pnpm dev", bash)
+    assert re.search(r'^\$env:VITE_ANDES_PORT = "\d+"$', powershell, flags=re.MULTILINE)
+    # `&&` is not a statement separator in Windows PowerShell 5.1.
+    assert "&&" not in powershell
 
 
 def test_the_dev_mode_command_admits_the_vite_origin() -> None:
     # Without --allow-origin, requests that carry the dev server's Origin get a 400.
-    for document in ("README.md", "CONTRIBUTING.md", "web/README.md"):
+    for document in ("CONTRIBUTING.md", "web/README.md"):
         lines = [
             line
             for line in _read(document).splitlines()
@@ -241,6 +276,10 @@ def test_the_dev_mode_command_admits_the_vite_origin() -> None:
         ]
         assert lines, f"{document} has no dev-mode `tensa serve` line"
         assert all("--allow-origin http://127.0.0.1:5173" in line for line in lines), document
+    # The README sends a contributor to CONTRIBUTING.md for it; a line it has is held too.
+    readme = [line for line in _read("README.md").splitlines() if "5173" in line]
+    assert all("--allow-origin http://127.0.0.1:5173" in line for line in readme)
+    assert "CONTRIBUTING.md" in _read("README.md")
 
 
 def test_the_demo_recorder_presses_all_modes_only_while_modes_are_hidden() -> None:

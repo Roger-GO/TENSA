@@ -1,4 +1,4 @@
-# TENSA — API map for LLM agents
+# TENSA: API map for LLM agents
 
 TENSA is a web workbench + HTTP/WebSocket API around the ANDES power-system
 simulator. Everything the UI does goes through this API, so an agent can do
@@ -8,12 +8,15 @@ binds to 127.0.0.1 by default.
 Base URL: http://127.0.0.1:<port>/api  (all routes below are relative to /api)
 Full machine-readable contract: GET /openapi.json  (Swagger UI at /docs, ReDoc at /redoc)
 Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
+Documentation for people: https://roger-go.github.io/TENSA/ (API guide at /api/, every route at /reference/api/).
+Install and start: pip install tensa, then tensa serve --workspace <dir> --port 8000.
+GET /api/version and tensa --version say which version is running.
 
 ## Golden workflow (order matters)
 
 1. POST /sessions                          → {"session_id": "..."}  (one ANDES System per session, isolated subprocess)
-2. POST /sessions/{id}/case                {"primary_path": "ieee14/ieee14_full.xlsx"}  — path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
-3. (pre-setup only) POST /sessions/{id}/disturbances  — add faults/toggles/alters BEFORE running anything
+2. POST /sessions/{id}/case                {"primary_path": "ieee14/ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
+3. (pre-setup only) POST /sessions/{id}/disturbances  (add faults/toggles/alters BEFORE running anything)
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
                                              per generator, its Q limits in MVAr, and a "summary" (generation, load, shunts, losses, slack output)
@@ -29,7 +32,7 @@ Copy-paste examples: examples/ in the repo (curl walkthrough + Python client).
 
 Key state rule: a session is "pre-setup" after case load / reload, and "setup" after the
 first PF/TDS run. Disturbances and topology edits (add/edit/delete elements) are
-REJECTED with 409 once setup has happened — the error's "recovery" field tells you to reload.
+REJECTED with 409 once setup has happened: the error's "recovery" field tells you to reload.
 
 ## Errors
 
@@ -120,7 +123,7 @@ CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a
                  cpf/qv body: {"bus_idx": "5", "q_range": 5.0, "enforce_q_limits": false}; same response, lambdas holding Q at the bus and max_lam the largest of them.
 State estimation:POST /sessions/{id}/se/measurements/generate · POST /sessions/{id}/se
 PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_idx} · GET .../pmu/{run_id}/export.csv
-Profiles:        POST /sessions/{id}/profiles/upload · POST/GET/DELETE /sessions/{id}/profiles
+Profiles:        POST /sessions/{id}/profiles/upload · POST/GET /sessions/{id}/profiles · DELETE /sessions/{id}/profiles/{profile_idx}
 Sweeps:          POST /sessions/{id}/sweep (param sweep over disturbance/sim values; per-iteration TDS results)
 Snapshots:       POST /sessions/{id}/snapshot · POST .../snapshot/restore · GET .../snapshots · DELETE .../snapshot/{name}
                  (a snapshot keeps the diagram layout: "layout" in the save body, else the one beside the case file;
@@ -160,7 +163,7 @@ Health:          GET /health  → {"status": "ok", "version", "andes_version", "
 Protocol for all WS endpoints: connect → server sends {"type":"ready"} → client sends its
 first command frame. Close codes: 4404 unknown session, 4500 worker error.
 
-WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds","tf":5.0}, optionally with
+WS /api/ws/{session_id}              TDS live stream. Send {"type":"start_tds","tf":5.0}, optionally with
                                      "vars" (groups bus_v gen_state gen_power line_flow load_pq), "dae_vars" (ANDES
                                      variable names, each one more column named as given) and "controllers" (as on
                                      POST /tds; the "done" frame then carries "controllers" without the traces);
@@ -177,10 +180,10 @@ WS /api/ws/{session_id}            — TDS live stream. Send {"type":"start_tds"
                                      ~30 s buffer, gets {"type":"resync",...} and the socket closes;
                                      its "cause" is "client_lagged" or "buffer_evicted" ("reason"
                                      says it in words). The run itself is never slowed by a client.
-WS /api/ws/{session_id}/jobs/events— job lifecycle feed: "snapshot" then "job" envelopes per transition.
-WS /api/ws/{session_id}/sweep/{id} — sweep progress per iteration.
+WS /api/ws/{session_id}/jobs/events  job lifecycle feed: "snapshot" then "job" envelopes per transition.
+WS /api/ws/{session_id}/sweep/{id}   sweep progress per iteration.
 
-Prefer batch POST /tds unless you need live data — it returns complete results in one
+Prefer batch POST /tds unless you need live data: it returns complete results in one
 response and needs no Arrow decoding.
 
 ## Gotchas for agents
@@ -223,7 +226,8 @@ response and needs no Arrow decoding.
 ## MCP
 
 An MCP (Model Context Protocol) stdio server ships as an optional extra:
-  pip install -e './server[mcp]' && tensa mcp --workspace ~/andes-cases
+  pip install "tensa[mcp]"          (from a source checkout: pip install -e "./server[mcp]")
+  tensa mcp --workspace ~/tensa-cases
 It wraps the golden workflow (create_session, load_case, run_pflow, run_tds,
 add_disturbance, get_topology, get_operating_point, list_workspace_files, ...) so MCP
 clients (Claude Code, etc.) can drive simulations as native tools.

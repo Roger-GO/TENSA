@@ -6,8 +6,8 @@ Thanks for your interest in improving TENSA! This guide covers everything you ne
 
 The repo holds two independent packages:
 
-- `server/` — Python 3.12+ FastAPI substrate (src layout, hatchling)
-- `web/` — React 19 + TypeScript SPA (Vite 6, pnpm 11+)
+- `server/`: Python 3.12+ FastAPI substrate (src layout, hatchling)
+- `web/`: React 19 + TypeScript SPA (Vite 6, pnpm 11+)
 
 ```bash
 # Server
@@ -69,10 +69,10 @@ Dependencies are kept current by weekly Dependabot pull requests (`.github/depen
 
 - **Commits** are conventional: `feat(scope): ...`, `fix(scope): ...`, `refactor:`, `chore:`, `docs:`, `test:`.
 - **Python**: ruff + `mypy --strict`. Every Pydantic schema field carries a `description` (the OpenAPI schema is a first-class product for API consumers and agents).
-- **TypeScript**: ESLint with `--max-warnings 0`, strict TS with `noUncheckedIndexedAccess`. Named exports only for components. Tailwind v4 tokens (`web/src/styles/tokens.css`) — never hardcode colors/spacing.
+- **TypeScript**: ESLint with `--max-warnings 0`, strict TS with `noUncheckedIndexedAccess`. Named exports only for components. Tailwind v4 tokens (`web/src/styles/tokens.css`): never hardcode colors/spacing.
 - **API types are codegen'd**: after changing server schemas/routes, run `cd web && pnpm regen-api-types` (boots a throwaway server, fetches `/openapi.json`, regenerates `web/src/api/generated.ts`). Never hand-edit `generated.ts`.
 - **Version** is set in one place, `server/pyproject.toml`. `tensa.__version__`, the OpenAPI version, and the `tensa_version` stamped on bundles and snapshots read it from the installed package metadata, so re-run `pip install -e ./server` after a bump. `web/package.json` and `CITATION.cff` carry copies; `server/tests/unit/test_version.py` fails if any of them drift.
-- **Stage files explicitly** — no `git add .`.
+- **Stage files explicitly**: no `git add .`.
 
 ## Releasing
 
@@ -84,7 +84,7 @@ To build the same packages locally, build the UI first and then run the build: `
 
 ## Documentation
 
-The documentation site is MkDocs with the Material theme: the pages are Markdown files in `docs/`, listed in `mkdocs.yml`, and `mkdocs serve` previews them. Its Reference pages (the command line, the API routes and the API models) are written from the code while the site builds, so a change to a route's description or an option's help text is a change to the documentation, and no page needs editing. [`docs/contributing.md`](./docs/contributing.md) explains how to build the site, how to write a page, how to take the screenshots again, and how the repository owner turns on publishing to GitHub Pages. Docs are plain prose: no em dashes and no emoji.
+The documentation site, at <https://roger-go.github.io/TENSA/>, is MkDocs with the Material theme: the pages are Markdown files in `docs/`, listed in `mkdocs.yml`, and `mkdocs serve` previews them. Its Reference pages (the command line, the API routes and the API models) are written from the code while the site builds, so a change to a route's description or an option's help text is a change to the documentation, and no page needs editing. [`docs/contributing.md`](./docs/contributing.md) explains how to build the site, how to write a page, how to take the screenshots again, and how the site is published on GitHub Pages. Docs are plain prose: no em dashes and no emoji.
 
 ## Media and other large files
 
