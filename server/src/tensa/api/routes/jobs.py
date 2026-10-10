@@ -286,8 +286,17 @@ async def ws_job_events(websocket: WebSocket, session_id: str) -> None:
         for task in (feed, gone):
             task.cancel()
         # Both have caught what they raise; the wait is for the feed to take its
-        # queue off the session before the handler returns.
-        await asyncio.gather(feed, gone, return_exceptions=True)
+        # queue off the session before the handler returns. It is asyncio.wait and
+        # not asyncio.gather because the handler can itself be cancelled here: by
+        # uvicorn when a shutdown has taken too long, and by a cancel scope around
+        # the app (Starlette's test client has one, and cancels it each time a
+        # socket is left). gather answers that with a cancellation it takes from
+        # the last task it was given, which does not carry the message the handler
+        # was sent, and a cancel scope, which knows its own cancellation by that
+        # message, takes it for someone else's and lets it through. asyncio.wait
+        # raises what it was sent; the two tasks, cancelled already, end on the
+        # loop's next turn.
+        await asyncio.wait({feed, gone})
 
 
 async def _send_job_events(

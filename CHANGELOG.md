@@ -4,6 +4,9 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+- The handler of the job-event WebSocket (`/api/ws/{id}/jobs/events`) passes a cancellation on as it received it. While it ended, the handler waited for its two tasks with `asyncio.gather`, and a cancellation that reached it in those few turns of the event loop came out as a bare `CancelledError`, without the message it was sent with. A running server never noticed: uvicorn cancels a handler only when a shutdown has outlasted its grace period, and logs it the same either way. An app run inside a cancel scope did, which is how Starlette's test client runs one: the scope no longer knew its own cancellation, and leaving the socket raised `CancelledError` in the test, rarely on a machine with several cores and nearly every time on one.
+
 ## [0.5.0] - 2026-10-09
 
 ### Highlights
