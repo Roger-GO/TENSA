@@ -422,12 +422,18 @@ _TEXT_SUFFIXES = {".py", ".ts", ".tsx", ".md", ".yml", ".toml", ".txt", ".sh", "
 _NOT_SOURCE = {"node_modules", "dist", "site", "__pycache__", ".venv", "coverage", "htmlcov"}
 
 
-def test_nothing_names_a_module_that_became_a_package() -> None:
+def _written_by_hand() -> list[Path]:
+    """The text files someone wrote: the sources and the tests of both packages, the web
+    scripts, the pages, the examples, the scripts and the workflows, with the pages at the
+    top of the repository, of ``server/`` and of ``web/``. Left out are ``CHANGELOG.md``,
+    which tells the history with the names of its time, ``paper/``, whatever is installed or
+    built, and this file, which has to spell what it looks for."""
     roots = [
         REPO_ROOT / "server" / "src",
         REPO_ROOT / "server" / "tests",
         REPO_ROOT / "web" / "src",
         REPO_ROOT / "web" / "tests",
+        REPO_ROOT / "web" / "scripts",
         REPO_ROOT / "docs",
         REPO_ROOT / "examples",
         REPO_ROOT / "scripts",
@@ -435,18 +441,10 @@ def test_nothing_names_a_module_that_became_a_package() -> None:
     ]
     if not all(root.is_dir() for root in roots):
         pytest.skip("the repository is not next to the tests")
-    # The files themselves are gone, which is what makes a mention of one stale.
-    for gone in (
-        "server/src/tensa/api/schemas.py",
-        "server/src/tensa/core/wrapper.py",
-        "server/src/tensa/core/session.py",
-        "web/src/api/queries.ts",
-    ):
-        assert not (REPO_ROOT / gone).exists(), gone
     files = [path for root in roots for path in root.rglob("*")]
-    # Top-level pages and the server's; the changelog tells the history, with the old names.
-    files += [*REPO_ROOT.glob("*.md"), *REPO_ROOT.glob("*.txt"), *(REPO_ROOT / "server").glob("*.md")]
-    stale: list[str] = []
+    for folder in (REPO_ROOT, REPO_ROOT / "server", REPO_ROOT / "web"):
+        files += [*folder.glob("*.md"), *folder.glob("*.txt")]
+    kept: list[Path] = []
     for path in files:
         if path.suffix not in _TEXT_SUFFIXES or not path.is_file():
             continue
@@ -455,8 +453,49 @@ def test_nothing_names_a_module_that_became_a_package() -> None:
             continue
         if path == Path(__file__).resolve():
             continue
+        kept.append(path)
+    return kept
+
+
+def _lines_with(pattern: re.Pattern[str]) -> list[str]:
+    """``path:line: match`` for every line of a hand-written file that ``pattern`` finds."""
+    found: list[str] = []
+    for path in _written_by_hand():
+        relative = path.relative_to(REPO_ROOT).as_posix()
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            found = _SPLIT_MODULE.search(line)
-            if found:
-                stale.append(f"{relative.as_posix()}:{number}: {found.group(0)}")
+            match = pattern.search(line)
+            if match:
+                found.append(f"{relative}:{number}: {match.group(0)}")
+    return found
+
+
+def test_nothing_names_a_module_that_became_a_package() -> None:
+    # The files themselves are gone, which is what makes a mention of one stale.
+    for gone in (
+        "server/src/tensa/api/schemas.py",
+        "server/src/tensa/core/wrapper.py",
+        "server/src/tensa/core/session.py",
+        "web/src/api/queries.ts",
+    ):
+        assert not (REPO_ROOT / gone).exists(), gone
+    stale = _lines_with(_SPLIT_MODULE)
     assert not stale, "these name a file that is now a package:\n" + "\n".join(stale)
+
+
+# The folder the commands on the pages keep their cases in. It was ``~/andes-cases`` while
+# the project was called ANDES App.
+_OLD_CASES_FOLDER = re.compile(r"andes-cases", flags=re.IGNORECASE)
+
+
+def test_every_page_and_help_text_names_the_same_cases_folder() -> None:
+    """A reader takes a command from one page and the next from another, and a folder
+    that changes its name on the way reads as two folders. The README and the site had
+    moved to ``~/tensa-cases`` while the help of ``tensa mcp``, which the site prints in its
+    command reference, the examples and ``CONTRIBUTING.md`` still said ``~/andes-cases``."""
+    stale = _lines_with(_OLD_CASES_FOLDER)
+    assert not stale, "these still name the old cases folder:\n" + "\n".join(stale)
+    result = cli_runner().invoke(cli.app, ["mcp", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "tensa mcp --workspace ~/tensa-cases" in " ".join(result.output.split())
+    for document in ("CONTRIBUTING.md", "examples/README.md", "examples/run_fault_study.py"):
+        assert "tensa serve --workspace ~/tensa-cases" in _read(document), document

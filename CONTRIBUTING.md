@@ -24,7 +24,7 @@ pnpm install
 Run the app in dev mode:
 
 ```bash
-tensa serve --workspace ~/andes-cases --port 8000 --allow-origin http://127.0.0.1:5173   # terminal 1
+tensa serve --workspace ~/tensa-cases --port 8000 --allow-origin http://127.0.0.1:5173   # terminal 1
 cd web && VITE_ANDES_PORT=8000 pnpm dev                       # terminal 2 → http://127.0.0.1:5173
 ```
 

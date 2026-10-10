@@ -4,7 +4,7 @@ Wraps the HTTP API as MCP tools so agent runtimes (Claude Code, etc.) can drive
 power-system simulations natively. Two modes:
 
 - ``tensa mcp --url http://127.0.0.1:8000`` — attach to a running server.
-- ``tensa mcp --workspace ~/andes-cases`` — spawn a private ``tensa
+- ``tensa mcp --workspace ~/tensa-cases`` — spawn a private ``tensa
   serve`` child on an ephemeral loopback port for the lifetime of the MCP
   process (the usual mode when an MCP client launches this as a stdio server).
 

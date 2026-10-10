@@ -995,7 +995,7 @@ def mcp(
     eigenanalysis as MCP tools. Requires the optional dependency:
     pip install "tensa\[mcp]". Configure your MCP client to launch::
 
-        tensa mcp --workspace ~/andes-cases
+        tensa mcp --workspace ~/tensa-cases
     """
     if (url is None) == (workspace is None):
         raise typer.BadParameter("Provide exactly one of --url or --workspace.")

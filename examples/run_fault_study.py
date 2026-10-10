@@ -2,7 +2,7 @@
 
 Run with a server already serving a workspace that contains ieee14_full.xlsx:
 
-    tensa serve --workspace ~/andes-cases --port 8000
+    tensa serve --workspace ~/tensa-cases --port 8000
     python examples/run_fault_study.py [case_filename]
 """
 

@@ -3,7 +3,7 @@
 Copy-paste recipes for driving TENSA programmatically. Start the server first:
 
 ```bash
-tensa serve --workspace ~/andes-cases --port 8000
+tensa serve --workspace ~/tensa-cases --port 8000
 ```
 
 | File | What it shows |

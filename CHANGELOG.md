@@ -412,6 +412,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - The Undo of the `Draft deleted` notice makes no second copy of a draft that Undo in the Edit menu (`Ctrl+Z`) had already brought back.
 - A click on the middle of a line or of the connector of a device lands on it while the values of a power flow show. The point a line is clicked at kept 26 units from the bar it leaves, which is how far the box of a bus hangs under its bar without values; with a voltage and an angle in its label the box is taller, and a short line under a bar was clicked on the bus. It keeps 48 units under a bar then.
 - `tensa mcp --help` names the extra the command needs. It said to `pip install 'tensa'`: the help is printed through a library that reads `[mcp]` as a style and prints nothing for it. It now reads `pip install "tensa[mcp]"`.
+- Every page, example and help text names the same folder for the cases, `~/tensa-cases`. The help of `tensa mcp`, the two examples and `CONTRIBUTING.md` still said `~/andes-cases`, the name from before the project was renamed.
 - The script that records the README's demo (`web/scripts/agent-demo.mjs`) ended on an empty eigenvalue plot. It pressed **All modes**, which is a toggle, on a scatter that already showed every mode, since the scatter opens on all of them when none is poorly damped. It presses it only while some modes are hidden.
 
 ### Development
