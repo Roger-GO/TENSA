@@ -11,8 +11,8 @@ authors:
 repository-code: "https://github.com/Roger-GO/TENSA"
 url: "https://github.com/Roger-GO/TENSA"
 license: GPL-3.0-or-later
-version: "0.4.0"
-date-released: "2026-07-05"
+version: "0.5.0"
+date-released: "2026-10-09"
 references:
   - type: article
     title: "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis"

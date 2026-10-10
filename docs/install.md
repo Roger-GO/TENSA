@@ -46,7 +46,7 @@ tensa --version
 prints the TENSA and ANDES versions:
 
 ```text
-tensa 0.4.0
+tensa 0.5.0
 andes 2.0.0
 ```
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tensa"
-version = "0.4.0"
+version = "0.5.0"
 description = "TENSA: an interactive web workbench for power system simulation, built on ANDES"
 readme = "README.md"
 license = { file = "LICENSE" }
