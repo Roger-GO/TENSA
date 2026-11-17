@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import stat
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -74,6 +75,11 @@ SOURCES_FILE = "EXAMPLE-SOURCES.md"
 
 # The sources file is read whole to add to it; a file this big is not one TENSA wrote.
 _SOURCES_MAX_BYTES = 1024 * 1024
+
+# Adding to the sources file is read, change, write. Adds overlap in one process (the server
+# runs each in a worker thread, an agent can call several at once), and without this two of
+# them read the same text and the later write drops the other's section.
+_sources_lock = threading.Lock()
 
 _SOURCES_HEADER = (
     "# Example case sources\n\n"
@@ -403,7 +409,8 @@ def _record_sources(
 ) -> str | None:
     """Add (or, for a case that is added again, replace) the entry's section in the sources
     file. Returns a warning when the file could not be written: the cases are in place, so
-    this never fails the add."""
+    this never fails the add. Calls in one process take turns; two processes adding to one
+    workspace at the same moment are not coordinated."""
     section = _sources_section(example, names, warnings)
     marker = re.compile(
         rf"<!-- tensa-example:{re.escape(example.id)} -->.*?"
@@ -411,7 +418,7 @@ def _record_sources(
         re.DOTALL,
     )
     try:
-        with open_workspace_file_for_write(workspace, SOURCES_FILE) as target:
+        with _sources_lock, open_workspace_file_for_write(workspace, SOURCES_FILE) as target:
             info = _lstat(target)
             if info is None:
                 current = _SOURCES_HEADER

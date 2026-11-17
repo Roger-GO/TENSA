@@ -15,6 +15,8 @@ import os
 import stat
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ from tensa.core.example_catalog import Catalog, load_catalog, parse_catalog
 from tensa.core.examples import (
     SOURCES_FILE,
     SUPPORTED_CASE_EXTENSIONS,
+    AddResult,
     ExampleExistsError,
     ExampleHasNoFileError,
     ExampleIntegrityError,
@@ -469,6 +472,62 @@ def test_each_added_case_has_its_own_section_and_adding_again_replaces_it(
     assert text.count("<!-- tensa-example:one -->") == 1
     assert text.count("<!-- tensa-example:two -->") == 1
     assert text.index("(`one`)") < text.index("(`two`)")
+
+
+def _add_at_once(
+    ids: list[str], workspace: Path, catalog: Catalog
+) -> tuple[dict[str, AddResult], list[BaseException]]:
+    """Add every id from its own thread, all released together; the results and any failures."""
+    start = threading.Barrier(len(ids))
+    results: dict[str, AddResult] = {}
+    failures: list[BaseException] = []
+
+    def add(example_id: str) -> None:
+        try:
+            start.wait(timeout=10)
+            results[example_id] = add_example(example_id, workspace, catalog=catalog)
+        except BaseException as exc:  # noqa: BLE001 - reported by the caller's assertion
+            failures.append(exc)
+
+    threads = [threading.Thread(target=add, args=(example_id,)) for example_id in ids]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    return results, failures
+
+
+def test_cases_added_at_the_same_moment_each_keep_their_section(
+    fake_cases_dir: Path,
+    tmp_path: Path,
+    catalog: Catalog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The server runs each add in a worker thread, so adds overlap. The sources file is read,
+    changed and written back, and every add must find the sections the others wrote."""
+    real_lstat = examples._lstat  # noqa: SLF001
+
+    def slow_on_the_sources_file(path: Path) -> os.stat_result | None:
+        # Stretches the gap between reading the sources file and writing it, so an add
+        # that does not take turns is overtaken by the others every time.
+        info = real_lstat(path)
+        if path.name == SOURCES_FILE:
+            time.sleep(0.03)
+        return info
+
+    monkeypatch.setattr(examples, "_lstat", slow_on_the_sources_file)
+    ids = ["one", "two", "three"]
+    for round_number in range(3):
+        ws = tmp_path / f"ws{round_number}"
+        ws.mkdir(mode=0o700)
+        results, failures = _add_at_once(ids, ws, catalog)
+        assert failures == []
+        assert {i: r.warnings for i, r in results.items()} == dict.fromkeys(ids, ())
+        text = (ws / SOURCES_FILE).read_text(encoding="utf-8")
+        for example_id in ids:
+            assert text.count(f"<!-- tensa-example:{example_id} -->") == 1
+            assert text.count(f"<!-- /tensa-example:{example_id} -->") == 1
+        assert text.count("# Example case sources") == 1
 
 
 def test_what_the_user_wrote_in_the_sources_file_is_kept(
