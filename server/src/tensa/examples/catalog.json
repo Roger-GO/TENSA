@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "examples": [
+    {
+      "id": "ieee14",
+      "title": "IEEE 14-bus, with machines and controls",
+      "summary": "The IEEE 14-bus system with a round-rotor machine, an exciter and a governor on each generator: the usual first case for a power flow, a fault study and the eigenvalue analysis.",
+      "category": "dynamic",
+      "tags": [
+        "ieee",
+        "14-bus",
+        "genrou",
+        "first case"
+      ],
+      "size": {
+        "buses": 14,
+        "generators": 5
+      },
+      "analyses": [
+        "pf",
+        "tds",
+        "eig"
+      ],
+      "default": true,
+      "provenance": {
+        "kind": "andes",
+        "path": "ieee14/ieee14_full.xlsx",
+        "sha256": "ed5a7551ca9258fba9988fc8bdf9d66842f786141d607b99f389a1b6c52bc137",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/ieee14_full.xlsx",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17).",
+          "bibtex": "@misc{uw_pstca_ieee14,\n  title        = {{IEEE} 14 Bus Test Case},\n  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},\n  url          = {https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
+      },
+      "caveats": [
+        "The dynamic data was written for ANDES (by H. Cui, according to the ANDES cases README) and is not published by the IEEE.",
+        "The power flow data is a PSS/E version prepared by J. Conto and distributed with ANDES. It has not been compared with the data of the University of Washington archive."
+      ]
+    },
+    {
+      "id": "kundur",
+      "title": "Kundur two-area system, modified by ANDES",
+      "summary": "Four generators in two areas joined by a weak tie, the standard case for inter-area oscillations, with a round-rotor machine, an exciter and a governor on each generator.",
+      "category": "dynamic",
+      "tags": [
+        "kundur",
+        "two-area",
+        "inter-area oscillations",
+        "genrou"
+      ],
+      "size": {
+        "buses": 10,
+        "generators": 4
+      },
+      "analyses": [
+        "pf",
+        "tds",
+        "eig"
+      ],
+      "default": true,
+      "provenance": {
+        "kind": "andes",
+        "path": "kundur/kundur_full.xlsx",
+        "sha256": "f725e03ba12d8207616f68acdd606bbd35e7c4a68f13e66d7db43925adac2ed8",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/kundur/kundur_full.xlsx",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.",
+          "bibtex": "@book{kundur1994,\n  author    = {Kundur, Prabha},\n  title     = {Power System Stability and Control},\n  publisher = {McGraw-Hill},\n  address   = {New York},\n  year      = {1994},\n  isbn      = {007035958X}\n}"
+        },
+        {
+          "text": "M. Klein, G. J. Rogers and P. Kundur, \"A fundamental study of inter-area oscillations in power systems,\" IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229.",
+          "bibtex": "@article{klein1991fundamental,\n  author  = {Klein, M. and Rogers, G. J. and Kundur, P.},\n  title   = {A fundamental study of inter-area oscillations in power systems},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {6},\n  number  = {3},\n  pages   = {914--921},\n  year    = {1991},\n  doi     = {10.1109/59.119229}\n}",
+          "doi": "10.1109/59.119229",
+          "url": "https://doi.org/10.1109/59.119229"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
+      },
+      "caveats": [
+        "This is not the system of the book as printed. The file's own title is \"Modified Kundur's two-area test system, distributed with ANDES\", and it has 10 buses where the book's system has 11. Do not compare its results with the book's without checking the data.",
+        "One event is built into the file: Line_8 is switched out at 2 s."
+      ]
+    },
+    {
+      "id": "wscc9",
+      "title": "WSCC 9-bus, network only",
+      "summary": "The WSCC 3-machine, 9-bus network with its loads and generator set-points, for power flow. The file has no machine models, so there is nothing to simulate in the time domain.",
+      "category": "steady-state",
+      "tags": [
+        "wscc",
+        "9-bus",
+        "3-machine",
+        "power flow"
+      ],
+      "size": {
+        "buses": 9,
+        "generators": 3
+      },
+      "analyses": [
+        "pf"
+      ],
+      "default": true,
+      "provenance": {
+        "kind": "andes",
+        "path": "wscc9/wscc9.xlsx",
+        "sha256": "1e994b2b4c67bdcccf52b9007cf03c5c010f6ff72bcfe055c4c3b776baf51de8",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/wscc9/wscc9.xlsx",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "P. M. Anderson and A. A. Fouad, Power System Control and Stability. IEEE Press, 2002, doi:10.1109/9780470545577.",
+          "bibtex": "@book{anderson2002power,\n  author    = {Anderson, Paul M. and Fouad, A. A.},\n  title     = {Power System Control and Stability},\n  publisher = {IEEE Press},\n  year      = {2002},\n  doi       = {10.1109/9780470545577}\n}",
+          "doi": "10.1109/9780470545577",
+          "url": "https://doi.org/10.1109/9780470545577"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
+      },
+      "caveats": [
+        "ANDES does not say where the data of this file comes from. The first citation names the book the WSCC 9-bus system is taken from, not the file."
+      ]
+    }
+  ]
+}

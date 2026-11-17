@@ -21,3 +21,7 @@
 *.xlsx binary
 *.zip binary
 *.dill binary
+
+# The case files the example catalog bundles are held to a SHA-256, so they are kept exactly
+# as their source wrote them: no line-ending conversion on commit or on checkout.
+server/src/tensa/examples/cases/** -text
