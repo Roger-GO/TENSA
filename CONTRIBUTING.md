@@ -50,6 +50,7 @@ All of these must pass before a PR is merged (CI enforces them):
 | Server smoke test | `cd server && pytest -m smoke tests/integration` (starts a real server and worker; macOS and Windows CI run it alongside the unit tests) |
 | Server coverage | `cd server && pytest -m "not acceptance" --cov --cov-report=html` (report in `server/htmlcov`) |
 | Server acceptance | `scripts/ci-matrix.sh acceptance`, or `cd server && PYTHONPATH=src pytest tests/acceptance -m acceptance` (slow; each test starts its own server and runs real ANDES sims; CI runs it in the `acceptance` job) |
+| Example cases | `python scripts/verify_example_cases.py --defaults` (starts its own server, runs each case through the API and checks the outputs against `server/src/tensa/examples/references/`; `--help` lists the options. `scripts/crosscheck_pf.py` writes the independent power flow reference with pandapower, which stays in an environment of its own and is not a TENSA dependency) |
 | Web types | `cd web && pnpm typecheck` |
 | Web lint/format | `cd web && pnpm lint && pnpm format:check` |
 | Web tests | `cd web && pnpm test` |
