@@ -28,7 +28,9 @@ Checks no reference file is needed for:
 - the case adds, opens with the size the catalog states, and its power flow converges;
 - the undisturbed run completes to its end time and the largest change of any state or bus
   voltage over it is under ``FLAT_TOLERANCE`` (a power flow solution is an equilibrium of the
-  dynamic model, so nothing may move);
+  dynamic model, so nothing may move). It records every state the case lists, then the bus
+  values, up to the API's limit of ``MAX_DAE_VARS`` variables a run; a case with more says
+  so in its notes;
 - the eigenvalue analysis returns modes;
 - the ring-down of a 2% load step has its strongest oscillations at the frequency and with
   the damping of eigenvalues (within the reference's ``ring_down.tolerance_hz`` and
@@ -104,6 +106,9 @@ FLAT_TOLERANCE = 1e-4
 UNDISTURBED_TF = 10.0
 # The synchronous machine models whose ``delta`` and ``omega`` the disturbance run measures.
 SYNCHRONOUS_MODELS = frozenset({"GENROU", "GENCLS", "PLBVFU1"})
+# The most variables one page of ``GET /dae-variables`` gives: the route's ``limit`` maximum
+# (asked for no more, it gives 100).
+LISTING_PAGE = 1000
 # A tight bound on how long a server takes to bind, and on one request.
 SERVER_START_TIMEOUT = 180.0
 REQUEST_TIMEOUT = 900.0
@@ -643,6 +648,24 @@ class Variables:
     dropped: int  # states and bus values left out of ``flat`` by the API's limit
 
 
+def list_variables(api: Api, session_id: str) -> list[dict[str, Any]]:
+    """Every variable of the loaded case that ``GET /dae-variables`` lists, page by page.
+
+    The route answers 100 at a time unless asked for more and lists the models in order, the
+    buses first (a voltage and an angle each), so the first 100 hold no machine of a case of
+    50 buses or more and only some of the states of a smaller one.
+    """
+    items: list[dict[str, Any]] = []
+    while True:
+        page = api.get(
+            f"/sessions/{session_id}/dae-variables", limit=LISTING_PAGE, offset=len(items)
+        )
+        items += page["items"]
+        # An empty page ends it too, so a listing shorter than its total cannot loop forever.
+        if not page["items"] or len(items) >= int(page["total"]):
+            return items
+
+
 def choose_variables(listing: Sequence[dict[str, Any]]) -> Variables:
     """The variables the runs record, from ``GET /dae-variables``."""
     flat = [v["name"] for v in listing if v["kind"] == "x"]
@@ -786,8 +809,7 @@ def _dynamic(
         description="the events of the case file"
     )
     ring = reference.ring_down if reference else RingDownPlan.model_validate({})
-    listing = api.get(f"/sessions/{session.id}/dae-variables")["items"]
-    names = choose_variables(listing)
+    names = choose_variables(list_variables(api, session.id))
     if names.dropped:
         result.notes.append(
             f"The undisturbed run records the first {MAX_DAE_VARS} states and bus values only."

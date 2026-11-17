@@ -408,7 +408,9 @@ class FakeApi:
     ``log`` is every call in order. A time-domain run answers with traces that are flat when no
     event stands and the load has not been stepped, swing at the mode the eigenvalue analysis
     reports once the load is stepped, and lose voltage and move a rotor when the event stands,
-    so the flows that the script has to keep apart give answers that tell them apart.
+    so the flows that the script has to keep apart give answers that tell them apart. The
+    variable listing is the route's: the buses first, 100 to a page when no ``limit`` is asked
+    for, 1000 at most, with the ``total`` it holds.
     """
 
     MODE = (0.65, 0.034)
@@ -425,6 +427,9 @@ class FakeApi:
         self.pf_converged = True
         self.tds_converged = True
         self.fail_add: int | None = None
+        self.bus_padding = 0  # buses in the listing beyond the three, ahead of the machines
+        self.overstates = 0  # how many more variables the listing claims than it holds
+        self.listing_calls: list[dict[str, int]] = []
         self.reload_world()
 
     def reload_world(self) -> None:
@@ -501,18 +506,12 @@ class FakeApi:
                 "summary": {"loss_p": 2.5, "slack_p": 80.0},
             }
         if path.endswith("/dae-variables"):
-            items = [
-                {"name": f"{var} GENROU {i}", "kind": "x", "model": "GENROU", "var": var, "idx": i}
-                for i in (1, 2)
-                for var in ("delta", "omega")
-                if self.machines
-            ]
-            items += [
-                {"name": f"{var} Bus {i}", "kind": "y", "model": "Bus", "var": var, "idx": i}
-                for i in (1, 2, 3)
-                for var in ("v", "a")
-            ]
-            return {"items": items}
+            limit, offset = int(query.get("limit", 100)), int(query.get("offset", 0))
+            if not 1 <= limit <= 1000 or offset < 0:
+                raise self.harness.ApiError(method, path, 422, "limit or offset out of range")
+            self.listing_calls.append({"limit": limit, "offset": offset})
+            items = self.variables()
+            return {"total": len(items) + self.overstates, "items": items[offset : offset + limit]}
         if path.endswith("/eig"):
             f, z = self.MODE
             return {
@@ -524,6 +523,21 @@ class FakeApi:
         if path.endswith("/tds"):
             return self.tds(body)
         raise AssertionError(f"the fake has no answer for {method} {path}")
+
+    def variables(self) -> list[dict[str, Any]]:
+        """The listing in the order of the real one: the buses, then the machines' states."""
+        items = [
+            {"name": f"{var} Bus {i}", "kind": "y", "model": "Bus", "var": var, "idx": i}
+            for i in range(1, 4 + self.bus_padding)
+            for var in ("v", "a")
+        ]
+        items += [
+            {"name": f"{var} GENROU {i}", "kind": "x", "model": "GENROU", "var": var, "idx": i}
+            for i in (1, 2)
+            for var in ("delta", "omega")
+            if self.machines
+        ]
+        return items
 
     def tds(self, body: dict[str, Any]) -> dict[str, Any]:
         self.tds_requests.append(list(body["dae_vars"]))
@@ -674,6 +688,45 @@ def test_more_variables_than_the_api_records_are_cut_and_said_so(
     assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
     sizes = [len(c) for c in fake.tds_requests]
     assert max(sizes) <= 6
+
+
+def test_machines_beyond_the_first_hundred_variables_are_still_found(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    # 60 buses are 120 variables, so the machines are items 121 to 124 of the listing and the
+    # route's page of 100 has none of them.
+    fake.bus_padding = 57
+    result, measured = _run(harness, fake)
+    assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
+    ring = next(c for c in result.checks if c.name.startswith("Ring-down"))
+    assert ring.passed and "no synchronous machine" not in ring.result
+    assert measured.tds is not None and "max_angle_spread_deg" in measured.tds
+    # The undisturbed run records the machines' states along with the buses.
+    assert {"delta GENROU 1", "omega GENROU 2", "v Bus 60"} <= set(fake.tds_requests[0])
+    assert all(call["limit"] == 1000 for call in fake.listing_calls)
+
+
+def test_a_listing_of_more_than_one_page_is_read_to_its_end(
+    harness: ModuleType, fake: FakeApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(harness, "LISTING_PAGE", 7)
+    result, _ = _run(harness, fake)
+    # Ten variables: a page of seven and one of three.
+    assert fake.listing_calls == [{"limit": 7, "offset": 0}, {"limit": 7, "offset": 7}]
+    assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
+    assert "omega GENROU 2" in fake.tds_requests[0]
+
+
+def test_a_listing_that_ends_before_its_total_is_not_asked_for_forever(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    fake.overstates = 50
+    result, _ = _run(harness, fake)
+    assert fake.listing_calls == [
+        {"limit": 1000, "offset": 0},
+        {"limit": 1000, "offset": 10},
+    ]
+    assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
 
 
 def test_a_case_with_no_synchronous_machine_has_no_ring_down_to_check(
