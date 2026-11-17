@@ -321,6 +321,7 @@ def test_the_mcp_list_examples_tool_shortens_the_catalog_and_gives_one_entry_in_
         "analyses": ["pf"],
         "default": True,
         "in_workspace": False,
+        "differs": False,
         "available": True,
         "provenance": {"kind": "andes"},
         "licence": {"name": "GPL-3.0-or-later"},

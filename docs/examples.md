@@ -38,6 +38,14 @@ A case that comes from ANDES is copied from the ANDES installed on your machine,
 TENSA. If the file there is not the one the catalog was written against, TENSA adds it anyway
 and warns you, because the results may then differ from the ones documented here.
 
+A workspace can hold another file under the name of a case that TENSA bundles: an earlier
+release put a different file there (the WSCC 9-bus case was ANDES's network with no machines
+until this one), or the file was edited. Adding the case does not replace it. The card then
+says **Different file** and not **Added**, and **Replace with this version** puts the shipped
+file in its place once you have confirmed it, since that overwrites your copy.
+`tensa examples list` says `added, differs` for such a case, `GET /api/examples` sets its
+`differs` field, and `tensa examples add --force` or `overwrite=true` replaces the file.
+
 ## The cases
 
 | Case | Size | Analyses | First run | Source |
@@ -292,7 +300,7 @@ BibTeX:
 - Classical model: constant voltage behind the transient reactance, constant mechanical power, loads as constant impedances and no damping. Its modes lie on the imaginary axis (a damping ratio of 0) and a swing after a fault does not die out.
 - To run the book's fault, add it in the app: a three-phase fault at bus 7 from 1.0 s to 1.0833 s (5 cycles at 60 Hz) and a trip of line 5-7 (Line_2) at 1.0833 s. With the default step the faster mode swings 1.6 percent slow (the trapezoidal rule's lag, 0.034 Hz at 2.1 Hz); a step of 1/120 s reproduces a continuous solution to a fraction of a degree.
 - The inertia constants and reactances are per unit on 100 MVA, as the book tabulates them, so each machine is rated at 100 MVA here; the book's machine ratings (247.5, 192 and 128 MVA) are not in the file.
-- A workspace made by an earlier TENSA holds ANDES's steady-state wscc9.xlsx under this name. Adding this case does not replace that file unless you ask (the force option), and the card says Added for it, though it is not this case.
+- A workspace made by an earlier TENSA holds ANDES's steady-state wscc9.xlsx under this name. Adding this case does not replace that file unless you ask (the force option). The Example cases dialog marks it as a different file and offers to replace it, and tensa examples list says added, differs.
 
 **Verification.** The data was checked against the book: the power flow solution (bus voltages, the generator angles and the slack's power) agrees with the one the book prints, to its printed precision, and the reduced admittance matrix and the initial state of the machines computed from the file agree with those of Example 2.6 as printed by Wang, Liu and Sun, to four decimals (server/tests/unit/test_wscc9_build.py). The power flow agrees with pandapower's solution of the same network to 2e-8 pu. The modes and the book's fault (a three-phase fault at bus 7, cleared after 5 cycles by opening line 5-7) were also computed independently of TENSA and ANDES (Kron reduction, the linearised swing equations, scipy's DOP853 integration), and TENSA agrees: the modes (1.383 and 2.126 Hz, undamped) to 5e-7 Hz, the largest rotor angle spread (85.8 degrees) to 0.004 degrees, the lowest bus voltage to 4e-6 pu and the lowest machine frequency to 1.1e-4 Hz. The undisturbed 10 s run does not move, and the ring-down of a load step has the frequencies of the eigenvalues within 0.034 Hz, which is what the trapezoidal rule's error at TENSA's default step comes to. Not compared: the swing curves of the book's figures, which no source opened gives as numbers, and no published value of the two modes was found. The run is stable and its swings do not die out, as those of an undamped model do not.
 

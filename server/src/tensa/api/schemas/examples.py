@@ -24,6 +24,16 @@ class ExampleListEntry(Example):
             "no file."
         ),
     )
+    differs: bool = Field(
+        ...,
+        description=(
+            "Whether the file in the workspace is not the one this TENSA ships for the case: "
+            "a workspace made by an earlier release holds the file that release put under "
+            "the name, or the user edited it. Only ever ``true`` for a case TENSA bundles "
+            "(``provenance.kind`` ``bundled``) that is in the workspace. Add with "
+            "``overwrite`` puts the shipped file in its place."
+        ),
+    )
     available: bool = Field(
         ...,
         description=(

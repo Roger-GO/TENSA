@@ -66,10 +66,11 @@ async def list_examples(request: Request) -> ExampleList:
     An entry says what the case is for, its size and the analyses it supports, where its
     file comes from (``provenance``), how to cite it, its licence, what was changed in the
     data (``modifications``), what to know before relying on it (``caveats``) and how its
-    results were checked (``verification``, where that has been done). ``in_workspace`` and
-    ``available`` are about this server: whether the case's file is already in the
-    workspace, and whether the file it would copy can be found. An entry of kind
-    ``external`` has no file, only ``links``.
+    results were checked (``verification``, where that has been done). ``in_workspace``,
+    ``differs`` and ``available`` are about this server: whether the case's file is already in
+    the workspace, whether a bundled case's file there is not the one this TENSA ships (an
+    earlier release put another under the name, or it was edited), and whether the file it
+    would copy can be found. An entry of kind ``external`` has no file, only ``links``.
     """
     workspace = _workspace(request)
     statuses = await run_in_threadpool(example_statuses, workspace)
@@ -78,6 +79,7 @@ async def list_examples(request: Request) -> ExampleList:
             ExampleListEntry(
                 **s.example.model_dump(),
                 in_workspace=s.in_workspace,
+                differs=s.differs,
                 available=s.available,
             )
             for s in statuses

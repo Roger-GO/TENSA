@@ -5,6 +5,7 @@
  *   Open on a card -> the dialog closes and the case is on the diagram
  *   the command palette finds it; Escape closes it and the keyboard focus goes back
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
+ *   a bundled case whose file in the workspace is another one: the card says so, and Replace puts the shipped one there
  *
  * It drives the real UI against a real `tensa serve` (nothing but the one list in the last test is
  * answered by the test), on a workspace the server seeded with the three first-run cases, all of
@@ -193,4 +194,67 @@ test('Add on a case the list calls missing says the server has it, and the card 
   );
   // Focus goes to the button that replaced the one that was pressed.
   await expect(page.getByRole('button', { name: /^Open: WSCC 9-bus/ })).toBeFocused();
+});
+
+test('a WSCC 9 file that an earlier TENSA left in the workspace says it is a different file, and Replace puts this one there', async ({
+  page,
+}) => {
+  const uncaughtErrors: string[] = [];
+  page.on('pageerror', (error) => uncaughtErrors.push(error.message));
+  await openApp(page);
+
+  // What a workspace made by 0.5.0 holds under the name: another file. (Its bytes are not a
+  // case, which nothing here opens.) The server compares them with the file it ships.
+  const stale = await page.request.post('/api/workspace/files?name=wscc9.xlsx&overwrite=true', {
+    data: Buffer.from('a network with no machines, as an earlier TENSA seeded it'),
+    headers: { 'Content-Type': 'application/octet-stream' },
+  });
+  expect(stale.ok()).toBe(true);
+
+  try {
+    await page.getByTestId('example-cases-open').click();
+    const dialog = page.getByRole('dialog', { name: 'Example cases' });
+    await expect(dialog.getByTestId('example-differs-wscc9')).toHaveText('Different file');
+    await expect(dialog.getByTestId('example-added-wscc9')).toHaveCount(0);
+    await expect(dialog.getByTestId('example-differs-note-wscc9')).toContainText(
+      'The wscc9.xlsx in your workspace is not the file this version of TENSA ships',
+    );
+    // The two cases that hold the files that were shipped say Added, as before.
+    await expect(dialog.getByTestId('example-added-ieee14')).toHaveText('Added');
+    await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
+      'One case holds a file that is not the one this version of TENSA ships',
+    );
+
+    // Replace asks first, and Keep my file leaves the file as it is.
+    await dialog.getByRole('button', { name: /^Replace with this version: WSCC 9-bus/ }).click();
+    await expect(dialog.getByTestId('example-replace-confirm-wscc9')).toContainText(
+      'Your file is overwritten and cannot be brought back.',
+    );
+    await expect(dialog.getByRole('button', { name: 'Keep my file' })).toBeFocused();
+    await dialog.getByRole('button', { name: 'Keep my file' }).click();
+    await expect(dialog.getByTestId('example-replace-confirm-wscc9')).toHaveCount(0);
+    await expect(dialog.getByTestId('example-differs-wscc9')).toBeVisible();
+
+    // Confirmed, the shipped file goes over it: the card says Added, and so does the next read.
+    await dialog.getByRole('button', { name: /^Replace with this version: WSCC 9-bus/ }).click();
+    await dialog.getByTestId('example-replace-confirm-yes-wscc9').click();
+    await expect(dialog.getByTestId('example-added-wscc9')).toHaveText('Added');
+    await expect(dialog.getByTestId('example-differs-wscc9')).toHaveCount(0);
+    await expect(dialog.getByTestId('example-note-wscc9')).toContainText('Replaced wscc9.xlsx.');
+    await expect(dialog.getByRole('button', { name: /^Open: WSCC 9-bus/ })).toBeFocused();
+
+    const listed = (await (await page.request.get('/api/examples')).json()) as {
+      examples: { id: string; in_workspace: boolean; differs: boolean }[];
+    };
+    const wscc9 = listed.examples.find((example) => example.id === 'wscc9');
+    expect(wscc9).toMatchObject({ in_workspace: true, differs: false });
+
+    // Open loads it, and the nine buses of the case are drawn.
+    await dialog.getByRole('button', { name: /^Open: WSCC 9-bus/ }).click();
+    await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(9, { timeout: 90_000 });
+  } finally {
+    // Whatever happened above, the workspace the other specs share holds the shipped file.
+    await page.request.post('/api/examples/wscc9/add?overwrite=true');
+  }
+  expect(uncaughtErrors).toEqual([]);
 });

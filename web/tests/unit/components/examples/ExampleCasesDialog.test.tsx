@@ -74,15 +74,16 @@ function fakeFetch(input: unknown, init?: RequestInit): Promise<Response> {
     const entry = server.examples.find((e) => e.id === add[1]);
     if (entry === undefined) return Promise.resolve(problem(404, 'no such example'));
     const name = entry.provenance.path!.split('/').pop()!;
+    const replaced = url.includes('overwrite=true');
     server.examples = server.examples.map((e) =>
-      e.id === entry.id ? { ...e, in_workspace: true } : e,
+      e.id === entry.id ? { ...e, in_workspace: true, differs: false } : e,
     );
     return Promise.resolve(
       jsonResponse(
         {
           id: entry.id,
           primary: name,
-          files: [{ name, size_bytes: 10, replaced: false }],
+          files: [{ name, size_bytes: 10, replaced }],
           warnings: [],
           sources_file: 'EXAMPLE-SOURCES.md',
         },
@@ -389,6 +390,148 @@ describe('adding a case', () => {
     expect(screen.getByTestId('example-add-blocked-rts24')).toHaveTextContent(
       'This installation of TENSA is missing the file of this case.',
     );
+  });
+});
+
+describe('a file in the workspace that is not the one TENSA ships', () => {
+  /** The WSCC 9 card of a workspace made by an earlier TENSA: the file is there, and it is not this one. */
+  const staleWscc9 = () => {
+    server.examples = server.examples.map((e) =>
+      e.id === 'wscc9'
+        ? {
+            ...e,
+            provenance: { ...e.provenance, kind: 'bundled' as const },
+            in_workspace: true,
+            differs: true,
+          }
+        : e,
+    );
+  };
+
+  it('does not say Added: it says the file is different, why, and offers to replace it', async () => {
+    staleWscc9();
+    await openDialog();
+    const wscc9 = card('wscc9');
+    expect(screen.getByTestId('example-differs-wscc9')).toHaveTextContent('Different file');
+    expect(screen.queryByTestId('example-added-wscc9')).not.toBeInTheDocument();
+    expect(screen.getByTestId('example-card-wscc9')).toHaveAttribute('data-differs', 'true');
+    expect(screen.getByTestId('example-differs-note-wscc9')).toHaveTextContent(
+      'The wscc9.xlsx in your workspace is not the file this version of TENSA ships for this case',
+    );
+    expect(wscc9.getByRole('button', { name: /^Replace with this version/ })).toBeEnabled();
+    expect(wscc9.getByRole('button', { name: /^Open/ })).toBeEnabled();
+    expect(wscc9.queryByRole('button', { name: /Add to workspace/ })).toBeNull();
+    // The line under the filter counts it as a case with another file, not as Added.
+    expect(screen.getByTestId('example-cases-workspace-note')).toHaveTextContent(
+      'One case holds a file that is not the one this version of TENSA ships',
+    );
+    // A case with the shipped file in the workspace says Added as before.
+    expect(screen.queryByTestId('example-differs-ieee14')).not.toBeInTheDocument();
+  });
+
+  it('opens the file that is there when asked to, as it is', async () => {
+    staleWscc9();
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Open/ }));
+    expect(openCaseMock).toHaveBeenCalledWith('wscc9.xlsx', []);
+  });
+
+  it('asks before it overwrites, with the focus on the button that keeps the file', async () => {
+    staleWscc9();
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Replace with this version/ }));
+    const confirm = within(screen.getByTestId('example-replace-confirm-wscc9'));
+    expect(screen.getByRole('group', { name: 'Replace wscc9.xlsx?' })).toBeInTheDocument();
+    expect(screen.getByTestId('example-replace-confirm-wscc9')).toHaveTextContent(
+      'Your file is overwritten and cannot be brought back.',
+    );
+    await waitFor(() =>
+      expect(confirm.getByRole('button', { name: 'Keep my file' })).toHaveFocus(),
+    );
+    expect(requests.filter((r) => r.startsWith('POST'))).toEqual([]);
+
+    await user.click(confirm.getByRole('button', { name: 'Keep my file' }));
+    expect(screen.queryByTestId('example-replace-confirm-wscc9')).not.toBeInTheDocument();
+    const replace = card('wscc9').getByRole('button', { name: /^Replace with this version/ });
+    await waitFor(() => expect(replace).toHaveFocus());
+    expect(requests.filter((r) => r.startsWith('POST'))).toEqual([]);
+    expect(screen.getByTestId('example-differs-wscc9')).toBeInTheDocument();
+  });
+
+  it('replaces the file once it is confirmed, and the card then says Added with an Open button', async () => {
+    staleWscc9();
+    const success = vi.spyOn(toast, 'success');
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Replace with this version/ }));
+    await user.click(screen.getByTestId('example-replace-confirm-yes-wscc9'));
+    await screen.findByTestId('example-added-wscc9');
+
+    expect(requests).toContain('POST /api/examples/wscc9/add?overwrite=true');
+    expect(screen.queryByTestId('example-differs-wscc9')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('example-differs-note-wscc9')).not.toBeInTheDocument();
+    expect(screen.getByTestId('example-note-wscc9')).toHaveTextContent('Replaced wscc9.xlsx.');
+    expect(success).toHaveBeenCalledWith(
+      'Replaced wscc9.xlsx in the workspace',
+      expect.objectContaining({ description: expect.stringContaining('EXAMPLE-SOURCES.md') }),
+    );
+    const open = card('wscc9').getByRole('button', { name: /^Open/ });
+    await waitFor(() => expect(open).toHaveFocus());
+    // The list was read again and agrees: the case is added, and nothing is left to replace.
+    await waitFor(() =>
+      expect(requests.filter((r) => r === 'GET /api/examples').length).toBeGreaterThanOrEqual(2),
+    );
+    expect(screen.getByTestId('example-added-wscc9')).toBeInTheDocument();
+    expect(screen.getByTestId('example-cases-workspace-note')).not.toHaveTextContent(
+      'holds a file that is not the one',
+    );
+  });
+
+  it('says that the open case still holds the old file, and reloads it on request', async () => {
+    staleWscc9();
+    useCaseStore.setState({
+      selection: { primaryPath: parseWorkspacePath('wscc9.xlsx'), addfiles: [] },
+    });
+    const user = await openDialog();
+    expect(screen.getByTestId('example-open-now-wscc9')).toBeInTheDocument();
+    await user.click(card('wscc9').getByRole('button', { name: /^Replace with this version/ }));
+    await user.click(screen.getByTestId('example-replace-confirm-yes-wscc9'));
+
+    const note = await screen.findByTestId('example-note-wscc9');
+    expect(note).toHaveAttribute('data-kind', 'warning');
+    expect(note).toHaveTextContent('The open case still holds the old file');
+    const reload = await screen.findByTestId('example-reload-wscc9');
+    await waitFor(() => expect(reload).toHaveFocus());
+    await user.click(reload);
+    await waitFor(() => expect(requests).toContain('POST /api/sessions/s1/reload'));
+    expect(screen.queryByTestId('example-reload-wscc9')).not.toBeInTheDocument();
+  });
+
+  it('says why a refusal left the file as it was', async () => {
+    staleWscc9();
+    server.addAnswer = () => problem(500, 'No space left on device');
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Replace with this version/ }));
+    await user.click(screen.getByTestId('example-replace-confirm-yes-wscc9'));
+    const alert = await within(screen.getByTestId('example-card-wscc9')).findByRole('alert');
+    expect(alert).toHaveTextContent('Could not replace this file: No space left on device');
+    expect(screen.getByTestId('example-differs-wscc9')).toBeInTheDocument();
+    expect(card('wscc9').getByRole('button', { name: /^Replace with this version/ })).toBeEnabled();
+  });
+
+  it('can be replaced with the keyboard alone', async () => {
+    staleWscc9();
+    const user = await openDialog();
+    card('wscc9')
+      .getByRole('button', { name: /^Replace with this version/ })
+      .focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Keep my file' })).toHaveFocus());
+    // Tab to the button that replaces, and press it.
+    await user.tab();
+    expect(screen.getByTestId('example-replace-confirm-yes-wscc9')).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await screen.findByTestId('example-added-wscc9');
+    expect(requests).toContain('POST /api/examples/wscc9/add?overwrite=true');
   });
 });
 

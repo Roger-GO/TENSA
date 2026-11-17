@@ -79,6 +79,14 @@ A case that comes from ANDES is copied from the ANDES installed on your machine,
 TENSA. If the file there is not the one the catalog was written against, TENSA adds it anyway
 and warns you, because the results may then differ from the ones documented here.
 
+A workspace can hold another file under the name of a case that TENSA bundles: an earlier
+release put a different file there (the WSCC 9-bus case was ANDES's network with no machines
+until this one), or the file was edited. Adding the case does not replace it. The card then
+says **Different file** and not **Added**, and **Replace with this version** puts the shipped
+file in its place once you have confirmed it, since that overwrites your copy.
+`tensa examples list` says `added, differs` for such a case, `GET /api/examples` sets its
+`differs` field, and `tensa examples add --force` or `overwrite=true` replaces the file.
+
 ## The cases
 """
 

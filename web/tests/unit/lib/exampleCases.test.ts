@@ -7,6 +7,8 @@ import {
   ANALYSIS_LABELS,
   CASE_CATEGORIES,
   citationsText,
+  differsFromShipped,
+  differsNote,
   companionFileNames,
   hostOf,
   isLinkOnly,
@@ -117,6 +119,23 @@ describe('the filter', () => {
   });
 });
 
+describe('a file in the workspace that is not the shipped one', () => {
+  it('is one that is in the workspace and that the server says differs', () => {
+    expect(differsFromShipped({ ...wscc9, in_workspace: true, differs: true })).toBe(true);
+    expect(differsFromShipped({ ...wscc9, in_workspace: true, differs: false })).toBe(false);
+    expect(differsFromShipped({ ...wscc9, in_workspace: false, differs: true })).toBe(false);
+    expect(differsFromShipped(texas)).toBe(false);
+  });
+
+  it('is said with the name of the file, and what Open and Replace do to it', () => {
+    const text = differsNote(wscc9);
+    expect(text).toContain('wscc9.xlsx in your workspace');
+    expect(text).toContain('an earlier TENSA put another file under that name');
+    expect(text).toContain('Open loads your file as it is');
+    expect(text).toContain('Replace with this version overwrites it');
+  });
+});
+
 describe('what is said of the workspace', () => {
   const inWorkspace = (example: ReturnType<typeof makeExample>) => ({
     ...example,
@@ -147,6 +166,21 @@ describe('what is said of the workspace', () => {
     );
     expect(workspaceNote([inWorkspace(ieee14)])).toBe(
       'This case is already in your workspace and says Added (a new workspace starts with the default set), so there is nothing to add: choose Open to load it. If its file is deleted from the workspace folder, the card offers Add to workspace again.',
+    );
+  });
+
+  it('does not count a case with another file as added, and says how many have one', () => {
+    const differing = { ...inWorkspace(wscc9), differs: true };
+    expect(workspaceNote([inWorkspace(ieee14), differing])).toBe(
+      '1 of 2 cases is already in your workspace and says Added (a new workspace starts with the default set). Add to workspace copies the file of another one there; Open loads a case. One case holds a file that is not the one this version of TENSA ships (an earlier TENSA put another under that name, or it was edited). Its card says so and offers Replace with this version; Open loads the file as it is.',
+    );
+    expect(workspaceNote([ieee14, differing])).toBe(
+      'One case holds a file that is not the one this version of TENSA ships (an earlier TENSA put another under that name, or it was edited). Its card says so and offers Replace with this version; Open loads the file as it is.',
+    );
+    expect(workspaceNote([differing])).toContain('This case holds a file that is not the one');
+    expect(workspaceNote([differing])).not.toContain('says Added');
+    expect(workspaceNote([{ ...inWorkspace(ieee14), differs: true }, differing])).toContain(
+      '2 cases hold a file that is not the one this version of TENSA ships',
     );
   });
 

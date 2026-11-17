@@ -1039,7 +1039,7 @@ def _example_state(status: ExampleStatus) -> str:
     if not status.example.has_file:
         return "link only"
     if status.in_workspace:
-        return "added"
+        return "added, differs" if status.differs else "added"
     return "not added" if status.available else "unavailable"
 
 
@@ -1051,8 +1051,8 @@ def examples_list(
         typer.Option(
             "--json",
             help=(
-                "Print the whole catalog as JSON (every field, with in_workspace and "
-                "available) instead of a table."
+                "Print the whole catalog as JSON (every field, with in_workspace, differs "
+                "and available) instead of a table."
             ),
         ),
     ] = False,
@@ -1066,6 +1066,7 @@ def examples_list(
                     {
                         **s.example.model_dump(mode="json"),
                         "in_workspace": s.in_workspace,
+                        "differs": s.differs,
                         "available": s.available,
                     }
                     for s in statuses

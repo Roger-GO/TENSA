@@ -59,29 +59,54 @@ export function sizeText(example: ExampleListEntry): string | null {
 }
 
 /**
+ * True for a case whose file is in the workspace but is not the one this TENSA ships under
+ * that name: an earlier release put another there, or it was edited. Only a bundled case
+ * can be (the server says so), and its card offers to replace the file.
+ */
+export function differsFromShipped(example: ExampleListEntry): boolean {
+  return example.in_workspace && example.differs;
+}
+
+/** What a card says under its buttons when its file in the workspace is not the shipped one. */
+export function differsNote(example: ExampleListEntry): string {
+  const file = primaryFileName(example) ?? 'The file';
+  return `The ${file} in your workspace is not the file this version of TENSA ships for this case: an earlier TENSA put another file under that name, or the file was edited. Open loads your file as it is. Replace with this version overwrites it with the one described here.`;
+}
+
+/**
  * What the dialog says about the workspace under the filter, from how many of the cases that
  * have a file are in it already, or `null` when none has a file. A new workspace starts with
  * the default set, so a first-time user finds cards that say Added before anything was added:
  * this says why, what to press, and (when every case is there) how a case offers Add again.
+ * A case whose file there is not the shipped one does not say Added: its card says so and
+ * offers to replace the file, and this says how many.
  */
 export function workspaceNote(examples: readonly ExampleListEntry[]): string | null {
   const withFile = examples.filter((example) => !isLinkOnly(example));
   if (withFile.length === 0) return null;
-  const inWorkspace = withFile.filter((example) => example.in_workspace).length;
-  const single = withFile.length === 1;
+  const total = withFile.length;
+  const differing = withFile.filter(differsFromShipped).length;
+  const added = withFile.filter((example) => example.in_workspace).length - differing;
+  const single = total === 1;
   const starts = '(a new workspace starts with the default set)';
-  if (inWorkspace === 0) {
+  if (added === 0 && differing === 0) {
     return single
       ? 'This case is not in your workspace yet. Add to workspace copies its file there, and Open then loads it.'
       : 'None of these cases is in your workspace yet. Add to workspace copies the file of a case there, and Open then loads it.';
   }
-  if (inWorkspace < withFile.length) {
-    const one = inWorkspace === 1;
-    return `${inWorkspace} of ${withFile.length} cases ${one ? 'is' : 'are'} already in your workspace and ${one ? 'says' : 'say'} Added ${starts}. Add to workspace copies the file of another one there; Open loads a case.`;
+  const differ =
+    differing === 0
+      ? ''
+      : `${single ? 'This case holds' : differing === 1 ? 'One case holds' : `${differing} cases hold`} a file that is not the one this version of TENSA ships (an earlier TENSA put another under that name, or it was edited). ${differing === 1 ? 'Its card says' : 'Their cards say'} so and offer${differing === 1 ? 's' : ''} Replace with this version; Open loads the file as it is.`;
+  if (added === 0) return differ;
+  if (added < total) {
+    const one = added === 1;
+    const rest = `${added} of ${total} cases ${one ? 'is' : 'are'} already in your workspace and ${one ? 'says' : 'say'} Added ${starts}. Add to workspace copies the file of another one there; Open loads a case.`;
+    return differ === '' ? rest : `${rest} ${differ}`;
   }
   return single
     ? `This case is already in your workspace and says Added ${starts}, so there is nothing to add: choose Open to load it. If its file is deleted from the workspace folder, the card offers Add to workspace again.`
-    : `All ${withFile.length} cases are already in your workspace and say Added ${starts}, so there is nothing to add: choose Open to load one. A case whose file is deleted from the workspace folder offers Add to workspace again.`;
+    : `All ${total} cases are already in your workspace and say Added ${starts}, so there is nothing to add: choose Open to load one. A case whose file is deleted from the workspace folder offers Add to workspace again.`;
 }
 
 /** The citations of a case as text to copy: plain, or BibTeX, one block after the other. */

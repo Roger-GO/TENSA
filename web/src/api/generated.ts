@@ -710,10 +710,11 @@ export interface paths {
          *     An entry says what the case is for, its size and the analyses it supports, where its
          *     file comes from (``provenance``), how to cite it, its licence, what was changed in the
          *     data (``modifications``), what to know before relying on it (``caveats``) and how its
-         *     results were checked (``verification``, where that has been done). ``in_workspace`` and
-         *     ``available`` are about this server: whether the case's file is already in the
-         *     workspace, and whether the file it would copy can be found. An entry of kind
-         *     ``external`` has no file, only ``links``.
+         *     results were checked (``verification``, where that has been done). ``in_workspace``,
+         *     ``differs`` and ``available`` are about this server: whether the case's file is already in
+         *     the workspace, whether a bundled case's file there is not the one this TENSA ships (an
+         *     earlier release put another under the name, or it was edited), and whether the file it
+         *     would copy can be found. An entry of kind ``external`` has no file, only ``links``.
          */
         get: operations["listExamples"];
         put?: never;
@@ -3228,6 +3229,11 @@ export interface components {
              * @description Whether the case's primary file is already in the workspace (a regular file of that name, which may be one the user wrote). Always ``false`` for a case with no file.
              */
             in_workspace: boolean;
+            /**
+             * Differs
+             * @description Whether the file in the workspace is not the one this TENSA ships for the case: a workspace made by an earlier release holds the file that release put under the name, or the user edited it. Only ever ``true`` for a case TENSA bundles (``provenance.kind`` ``bundled``) that is in the workspace. Add with ``overwrite`` puts the shipped file in its place.
+             */
+            differs: boolean;
             /**
              * Available
              * @description Whether every file the case copies can be found: in the installed ANDES, or in this package. ``false`` for a case that has no file (``external``), and for an ANDES case the installed release does not hold.

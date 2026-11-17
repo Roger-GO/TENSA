@@ -8,6 +8,8 @@ import {
   ANALYSIS_LABELS,
   citationsText,
   companionFileNames,
+  differsFromShipped,
+  differsNote,
   hostOf,
   isLinkOnly,
   isWebUrl,
@@ -26,6 +28,13 @@ import { toast } from '@/lib/toast';
  * link to its source page instead. "Cite" opens the references of the case, with a
  * button that copies them as text and one that copies them as BibTeX.
  *
+ * A bundled case whose file in the workspace is not the one this TENSA ships (a workspace
+ * made by an earlier release holds the file that release put under the name, or the file
+ * was edited) does not say Added: it says the file is different, why, and offers to
+ * replace it. Replacing overwrites the file, so it asks first, with the keyboard focus on
+ * the button that keeps it. When the file is the open case, the session still holds the
+ * old copy, and the card says so and offers to reload the case.
+ *
  * Whatever a button cannot do is said in words under it, not left to a tooltip: the
  * installed ANDES does not hold the file, there is no session to open the case in, or
  * another case is loading. What an add answers (done, already there, refused, a warning
@@ -39,6 +48,8 @@ export interface ExampleCardProps {
   openBlocked: string | null;
   /** Open the case, which is in the workspace. */
   onOpen: (example: ExampleListEntry) => void;
+  /** Load the open case again, from its file. */
+  onReload: () => void;
 }
 
 /** What the last add of this card answered, shown under its buttons. */
@@ -84,7 +95,13 @@ function ExternalLink({
   );
 }
 
-export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleCardProps) {
+export function ExampleCard({
+  example,
+  openPath,
+  openBlocked,
+  onOpen,
+  onReload,
+}: ExampleCardProps) {
   const ids = useId();
   const titleId = `${ids}-title`;
   const citeId = `${ids}-cite`;
@@ -97,12 +114,23 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
   // not offer Add a second time. The keyboard focus was on the Add button, which the Open
   // button replaces: it goes to Open, and not to the top of the dialog.
   const [addedNow, setAddedNow] = useState(false);
+  // This card put the shipped file over the one in the workspace since the dialog opened: the
+  // list says so a moment later, and until then the card must not offer Replace again.
+  const [replacedNow, setReplacedNow] = useState(false);
+  // The press of Replace with this version asked, and has not been answered.
+  const [confirming, setConfirming] = useState(false);
+  // The file that was replaced is the open case, which still holds the old copy.
+  const [staleOpen, setStaleOpen] = useState(false);
   const openButton = useRef<HTMLButtonElement>(null);
+  const replaceButton = useRef<HTMLButtonElement>(null);
+  const keepButton = useRef<HTMLButtonElement>(null);
+  const reloadButton = useRef<HTMLButtonElement>(null);
   const noteBox = useRef<HTMLParagraphElement>(null);
 
   const linkOnly = isLinkOnly(example);
   const primary = primaryFileName(example);
-  const added = example.in_workspace || addedNow;
+  const differs = differsFromShipped(example) && !replacedNow;
+  const added = example.in_workspace || addedNow || replacedNow;
   const openNow = primary !== null && openPath === primary;
   const citations = example.citations ?? [];
   const analyses = example.analyses ?? [];
@@ -114,6 +142,19 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
   useEffect(() => {
     if (addedNow) openButton.current?.focus();
   }, [addedNow]);
+  // The Replace button is gone once the file is replaced: the keyboard focus goes to what the
+  // card offers next (the reload of the case that holds the old file, else Open).
+  useEffect(() => {
+    if (replacedNow) (reloadButton.current ?? openButton.current)?.focus();
+  }, [replacedNow]);
+  // Asking moves the focus to the button that keeps the file; an answer of "keep" gives it back
+  // to the button that asked.
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (confirming) keepButton.current?.focus();
+    else if (wasConfirming.current) replaceButton.current?.focus();
+    wasConfirming.current = confirming;
+  }, [confirming]);
   // A note is under the buttons, which may be below the fold of a long list.
   useEffect(() => {
     if (note !== null) noteBox.current?.scrollIntoView?.({ block: 'nearest' });
@@ -159,6 +200,34 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
     );
   };
 
+  const onReplace = () => {
+    setConfirming(false);
+    setNote(null);
+    // The case is open now (the card says "Open now"): the session loaded its old file.
+    const wasOpen = openNow;
+    void add.mutateAsync({ id: example.id, overwrite: true }).then(
+      (done) => {
+        setReplacedNow(true);
+        setStaleOpen(wasOpen);
+        const warnings = done.warnings;
+        const text = wasOpen
+          ? `Replaced ${done.primary}. The open case still holds the old file: reload it to get this one.`
+          : `Replaced ${done.primary}.`;
+        setNote({
+          kind: wasOpen || warnings.length > 0 ? 'warning' : 'status',
+          text: [text, ...warnings].join(' '),
+        });
+        toast.success(`Replaced ${done.primary} in the workspace`, {
+          id: `example-added-${example.id}`,
+          description: `Its source, citations and licence in ${done.sources_file} are the ones of this version.`,
+        });
+      },
+      (err: unknown) => {
+        setNote({ kind: 'error', text: `Could not replace this file: ${describeError(err)}` });
+      },
+    );
+  };
+
   // The answer is said beside the buttons as well as in a notice: the notice is drawn at the
   // corner of the window and is gone in a few seconds, and a press that seems to have done
   // nothing is the one a user presses again.
@@ -197,6 +266,7 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
       aria-labelledby={titleId}
       data-testid={`example-card-${example.id}`}
       data-added={added ? 'true' : undefined}
+      data-differs={differs ? 'true' : undefined}
       className="border-border bg-background flex flex-col gap-2 rounded-[var(--radius-md)] border p-3"
     >
       <h4 id={titleId} className="text-foreground text-sm leading-snug font-semibold">
@@ -321,7 +391,58 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
       ) : null}
 
       <div className="mt-1 flex flex-wrap items-center gap-2">
-        {linkOnly ? null : added ? (
+        {linkOnly ? null : differs ? (
+          <>
+            <span
+              data-testid={`example-differs-${example.id}`}
+              title={
+                primary !== null ? `${primary} in the workspace is not the shipped file` : undefined
+              }
+              className={cn(
+                'border-warning/50 bg-warning/20 text-foreground inline-flex items-center gap-1',
+                'rounded-[var(--radius-sm)] border px-2 py-1 text-[11px] font-medium',
+              )}
+            >
+              <WarningGlyph />
+              Different file
+            </span>
+            {confirming ? null : (
+              <Button
+                type="button"
+                ref={replaceButton}
+                variant="primary"
+                size="sm"
+                disabled={add.isPending}
+                aria-busy={add.isPending ? 'true' : undefined}
+                onClick={() => setConfirming(true)}
+                aria-label={`${add.isPending ? 'Replacing…' : 'Replace with this version'}: ${example.title}`}
+                data-testid={`example-replace-${example.id}`}
+              >
+                {add.isPending ? 'Replacing…' : 'Replace with this version'}
+              </Button>
+            )}
+            {openNow ? (
+              <span
+                data-testid={`example-open-now-${example.id}`}
+                className="text-muted-foreground text-xs"
+              >
+                Open now
+              </span>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={openBlocked !== null}
+                onClick={() => onOpen(example)}
+                aria-label={`Open: ${example.title}`}
+                data-testid={`example-open-${example.id}`}
+              >
+                Open
+              </Button>
+            )}
+          </>
+        ) : added ? (
           <>
             <span
               data-testid={`example-added-${example.id}`}
@@ -390,6 +511,68 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
         ) : null}
       </div>
 
+      {differs ? (
+        <p
+          data-testid={`example-differs-note-${example.id}`}
+          className="text-muted-foreground text-[11px] leading-snug"
+        >
+          {differsNote(example)}
+        </p>
+      ) : null}
+      {differs && confirming ? (
+        <div
+          role="group"
+          aria-label={`Replace ${primary ?? 'the file'}?`}
+          data-testid={`example-replace-confirm-${example.id}`}
+          className="border-warning/50 bg-warning/20 flex flex-wrap items-center gap-2 rounded-[var(--radius-sm)] border px-2 py-1.5 text-[11px] leading-snug"
+        >
+          <span className="text-foreground min-w-0 flex-1">
+            Replace {primary ?? 'the file'} in your workspace? Your file is overwritten and cannot
+            be brought back.
+          </span>
+          <Button
+            type="button"
+            ref={keepButton}
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirming(false)}
+            data-testid={`example-replace-keep-${example.id}`}
+          >
+            Keep my file
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            onClick={onReplace}
+            data-testid={`example-replace-confirm-yes-${example.id}`}
+          >
+            Replace
+          </Button>
+        </div>
+      ) : null}
+      {staleOpen && openNow ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            ref={reloadButton}
+            variant="primary"
+            size="sm"
+            disabled={openBlocked !== null}
+            onClick={() => {
+              setStaleOpen(false);
+              onReload();
+            }}
+            aria-label={`Reload the open case: ${example.title}`}
+            data-testid={`example-reload-${example.id}`}
+          >
+            Reload case
+          </Button>
+          {openBlocked !== null ? (
+            <span className="text-muted-foreground text-[11px]">{openBlocked}</span>
+          ) : null}
+        </div>
+      ) : null}
       {added && !openNow && openBlocked !== null ? (
         <p
           data-testid={`example-open-blocked-${example.id}`}
@@ -503,6 +686,24 @@ function CheckGlyph() {
       className="h-3 w-3 shrink-0"
     >
       <path d="m5 12 5 5L20 7" />
+    </svg>
+  );
+}
+
+function WarningGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3 w-3 shrink-0"
+    >
+      <path d="M12 4 2.5 20h19L12 4Z" />
+      <path d="M12 10v5M12 18h.01" />
     </svg>
   );
 }

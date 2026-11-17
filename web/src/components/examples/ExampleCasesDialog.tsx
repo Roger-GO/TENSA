@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { useListExamples } from '@/api/queries';
+import { useListExamples, useReloadCase } from '@/api/queries';
 import type { ExampleListEntry } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -113,6 +113,7 @@ function Body() {
   const openPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
   const loadingPath = useCaseStore((s) => s.loadingPath);
   const { openCase, isPending: loadPending } = useOpenCase();
+  const reloadCase = useReloadCase();
   const [filter, setFilter] = useState('');
 
   const openBlocked =
@@ -121,6 +122,11 @@ function Body() {
       : loadPending || loadingPath !== null
         ? 'Another case is loading.'
         : null;
+
+  // The open case read again from its file, which an example card has just replaced.
+  const onReload = () => {
+    if (sessionId !== null) reloadCase.mutate(sessionId);
+  };
 
   const onOpen = (example: ExampleListEntry) => {
     const primary = primaryFileName(example);
@@ -245,6 +251,7 @@ function Body() {
                             openPath={openPath}
                             openBlocked={openBlocked}
                             onOpen={onOpen}
+                            onReload={onReload}
                           />
                         </li>
                       ))}

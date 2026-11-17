@@ -84,7 +84,7 @@ def list_workspace_files() -> Any:
 # comes with ``list_examples(example_id=...)``.
 _EXAMPLE_BRIEF = (
     "id", "title", "summary", "category", "size", "analyses", "default", "in_workspace",
-    "available",
+    "differs", "available",
 )
 
 
@@ -93,8 +93,9 @@ def list_examples(example_id: str | None = None) -> Any:
     """List the example cases TENSA can add to the workspace with add_example.
 
     Each has an id, a title, what it is for, its size, the analyses it supports (pf power
-    flow, tds time domain, eig eigenvalues), whether it is already in the workspace and
-    where its file comes from. With example_id, returns that one case in full: its
+    flow, tds time domain, eig eigenvalues), whether it is already in the workspace (and,
+    for a bundled case, whether that file differs from the one TENSA ships: add_example
+    with overwrite puts the shipped one in its place) and where its file comes from. With example_id, returns that one case in full: its
     citations (give them when the case is used in a result), licence, changes made to the
     data, caveats, and how its results were checked.
     """

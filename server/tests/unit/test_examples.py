@@ -12,6 +12,7 @@ import errno
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -605,6 +606,111 @@ def test_a_symlink_is_not_a_case_in_the_workspace(
     (workspace / "one.xlsx").symlink_to(target)
     flags = {s.example.id: s.in_workspace for s in example_statuses(workspace, catalog)}
     assert flags["one"] is False
+
+
+def _bundled_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: bytes) -> Catalog:
+    """A bundled case whose shipped file is ``content``, and the catalog that names it."""
+    bundled = tmp_path / "bundled"
+    (bundled / "b").mkdir(parents=True)
+    (bundled / "b" / "b.m").write_bytes(content)
+    monkeypatch.setattr(examples, "bundled_cases_dir", lambda: bundled)
+    return _catalog(_bundled_entry(content))
+
+
+def _differs(workspace: Path, catalog: Catalog) -> tuple[bool, bool]:
+    (status,) = example_statuses(workspace, catalog)
+    return status.in_workspace, status.differs
+
+
+def test_a_bundled_file_in_the_workspace_is_the_shipped_one_unless_its_bytes_say_otherwise(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shipped = b"function mpc = b"
+    catalog = _bundled_tree(tmp_path, monkeypatch, shipped)
+    assert _differs(workspace, catalog) == (False, False)
+
+    add_example("b", workspace, catalog=catalog)
+    assert _differs(workspace, catalog) == (True, False)
+
+    # What an earlier release put under the name, or an edit: of another size, then of the same.
+    (workspace / "b.m").write_bytes(b"function mpc = an older b")
+    assert _differs(workspace, catalog) == (True, True)
+    (workspace / "b.m").write_bytes(b"function mpc = c")
+    assert len(b"function mpc = c") == len(shipped)
+    assert _differs(workspace, catalog) == (True, True)
+
+    # Adding it over the file puts the shipped one there, and the flag goes.
+    add_example("b", workspace, overwrite=True, catalog=catalog)
+    assert _differs(workspace, catalog) == (True, False)
+
+
+def test_a_file_of_another_size_than_the_shipped_one_is_not_opened(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = _bundled_tree(tmp_path, monkeypatch, b"small")
+    (workspace / "b.m").write_bytes(b"x" * 1_000_000)
+    reads: list[int] = []
+    real_open = open
+
+    def counting_open(*args: Any, **kwargs: Any) -> Any:
+        handle = real_open(*args, **kwargs)
+        reads.append(1)
+        return handle
+
+    monkeypatch.setattr("builtins.open", counting_open)
+    assert _differs(workspace, catalog) == (True, True)
+    # The sizes differ, so the file was not even opened.
+    assert reads == []
+
+
+def test_only_a_bundled_case_can_differ(
+    fake_cases_dir: Path, workspace: Path, catalog: Catalog
+) -> None:
+    """A copy from the user's own ANDES is whatever that installation has, and Add already says
+    when it is not the recorded file; a link has no file."""
+    (workspace / "one.xlsx").write_bytes(b"the user's own edit")
+    assert {s.example.id: s.differs for s in example_statuses(workspace, catalog)} == {
+        "one": False,
+        "two": False,
+        "three": False,
+    }
+    (status,) = example_statuses(workspace, _catalog(_EXTERNAL))
+    assert status.differs is False
+
+
+def test_a_bundled_file_that_is_not_in_the_workspace_does_not_differ(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = _bundled_tree(tmp_path, monkeypatch, b"function mpc = b")
+    (workspace / "unrelated.m").write_bytes(b"other")
+    assert _differs(workspace, catalog) == (False, False)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")
+def test_a_symlink_in_the_workspace_is_not_compared(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    catalog = _bundled_tree(tmp_path, monkeypatch, b"function mpc = b")
+    target = tmp_path / "elsewhere.m"
+    target.write_bytes(b"other")
+    (workspace / "b.m").symlink_to(target)
+    assert _differs(workspace, catalog) == (False, False)
+
+
+def test_the_bundled_wscc9_that_ships_is_not_the_file_an_earlier_release_seeded(
+    workspace: Path,
+) -> None:
+    """0.5.0 seeded ANDES's ``wscc9.xlsx`` (a network with no machines, other reactances on three
+    lines) under the name this release gives its own file."""
+    andes_cases = examples._andes_cases_dir()  # noqa: SLF001
+    if andes_cases is None or not (andes_cases / "wscc9" / "wscc9.xlsx").is_file():
+        pytest.skip("ANDES is not installed")
+    shutil.copy(andes_cases / "wscc9" / "wscc9.xlsx", workspace / "wscc9.xlsx")
+    flags = {s.example.id: s.differs for s in example_statuses(workspace, load_catalog())}
+    assert flags["wscc9"] is True
+    add_example("wscc9", workspace, overwrite=True)
+    flags = {s.example.id: s.differs for s in example_statuses(workspace, load_catalog())}
+    assert flags["wscc9"] is False
 
 
 # ---- citations --------------------------------------------------------------------------

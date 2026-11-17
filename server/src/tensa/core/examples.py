@@ -11,8 +11,8 @@ What the cases are, and where each one comes from, is in the catalog
   source, citations and licence of everything added, which is not a case file and so is
   not listed as one.
 - :func:`example_statuses` is the catalog with what is true of this workspace and this
-  machine: whether each case is already in the workspace and whether its file can be
-  found.
+  machine: whether each case is already in the workspace, whether that file is the one
+  TENSA ships (a bundled case only) and whether the file it would copy can be found.
 
 Seeding is best-effort by design: a missing ANDES install, a missing case or a copy that
 fails logs a warning and moves on, and server startup is never blocked by it.
@@ -145,6 +145,9 @@ class ExampleStatus:
     example: Example
     in_workspace: bool
     available: bool
+    # A bundled case whose file is in the workspace but holds other bytes than the one this
+    # TENSA ships under that name (see ``_differs_from_shipped``).
+    differs: bool = False
 
 
 def _andes_cases_dir() -> Path | None:
@@ -187,21 +190,55 @@ def _is_regular(path: Path) -> bool:
     return info is not None and stat.S_ISREG(info.st_mode)
 
 
+def _differs_from_shipped(example: Example, workspace: Path) -> bool:
+    """Whether a file of a bundled case that is in ``workspace`` is not the one TENSA ships.
+
+    A workspace made by an earlier TENSA holds whatever that release put under the name (the
+    WSCC 9 file of 0.5.0 is ANDES's, with no machines), and a user may have edited a copy.
+    Add leaves such a file alone, so the list has to say it is not this case's. Only a bundled
+    file is compared: a copy from the user's own ANDES is whatever that installation has, and
+    Add already says when it is not the recorded one. A file that is not the shipped size is
+    not read.
+    """
+    if example.provenance.kind != "bundled":
+        return False
+    source = bundled_cases_dir()
+    for file in example.files():
+        target = workspace / file.name
+        found = _lstat(target)
+        shipped = _lstat(source / file.path)
+        if found is None or not stat.S_ISREG(found.st_mode) or shipped is None:
+            continue
+        if found.st_size != shipped.st_size:
+            return True
+        try:
+            with open(target, "rb") as handle:
+                data = handle.read(shipped.st_size + 1)
+        except OSError:
+            continue
+        if hashlib.sha256(data).hexdigest() != file.sha256:
+            return True
+    return False
+
+
 def example_statuses(workspace: Path, catalog: Catalog | None = None) -> list[ExampleStatus]:
-    """Every entry of the catalog, with whether its primary file is in ``workspace`` and
-    whether every file it copies can be found (always false for an ``external`` entry)."""
+    """Every entry of the catalog, with whether its primary file is in ``workspace``, whether
+    a bundled file there differs from the one TENSA ships and whether every file it copies can
+    be found (always false for an ``external`` entry)."""
     catalog = catalog or load_catalog()
     statuses: list[ExampleStatus] = []
     for example in catalog.examples:
         files = example.files()
         source = _source_dir(example)
+        in_workspace = bool(files) and _is_regular(workspace / files[0].name)
         statuses.append(
             ExampleStatus(
                 example=example,
-                in_workspace=bool(files) and _is_regular(workspace / files[0].name),
+                in_workspace=in_workspace,
                 available=bool(files)
                 and source is not None
                 and all(_is_regular(source / file.path) for file in files),
+                differs=in_workspace and _differs_from_shipped(example, workspace),
             )
         )
     return statuses

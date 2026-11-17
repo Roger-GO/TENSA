@@ -47,6 +47,7 @@ export function makeExample(overrides: Partial<ExampleListEntry> = {}): ExampleL
     verification: null,
     links: [],
     in_workspace: false,
+    differs: false,
     available: true,
     ...overrides,
   };

@@ -124,6 +124,7 @@ def test_list_json_is_the_whole_catalog_with_the_state(catalog: Catalog, tmp_pat
     listed = json.loads(result.output)
     assert [e["id"] for e in listed] == ["a", "b", "texas"]
     assert [e["in_workspace"] for e in listed] == [True, False, False]
+    assert [e["differs"] for e in listed] == [False, False, False]
     assert [e["available"] for e in listed] == [True, True, False]
     assert listed[0]["citations"][0]["bibtex"] == "@misc{a}"
     assert listed[2]["links"][0]["url"] == "https://example.org/texas"
@@ -234,6 +235,22 @@ def test_the_shipped_catalog_is_what_list_shows(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert [e["id"] for e in json.loads(result.output)] == [e.id for e in load_catalog().examples]
+
+
+def test_list_says_when_a_bundled_file_in_the_workspace_is_not_the_one_tensa_ships(
+    tmp_path: Path,
+) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "wscc9.xlsx").write_bytes(b"what an earlier release put under the name")
+    table = runner.invoke(cli.app, ["examples", "list", "--workspace", str(ws)])
+    row = next(line for line in table.output.splitlines() if line.startswith("wscc9"))
+    assert row.endswith("added, differs")
+    listed = json.loads(
+        runner.invoke(cli.app, ["examples", "list", "--json", "--workspace", str(ws)]).output
+    )
+    assert {e["id"]: e["differs"] for e in listed}["wscc9"] is True
+    assert not any(e["differs"] for e in listed if e["id"] != "wscc9")
 
 
 @pytest.mark.parametrize("example_id", [e.id for e in load_catalog().examples])

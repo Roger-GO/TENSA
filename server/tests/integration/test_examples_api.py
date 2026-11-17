@@ -93,6 +93,38 @@ async def test_the_list_is_the_catalog_with_what_is_true_of_this_workspace(
     assert flags["ieee14"] is False
 
 
+async def test_a_bundled_file_in_the_workspace_that_is_not_the_shipped_one_is_listed_as_differing(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """A workspace made by TENSA 0.5.0 holds ANDES's ``wscc9.xlsx`` (a network with no machines)
+    under the name the bundled case has now: the list says it is not the case's file, and adding
+    the case over it puts the shipped one there."""
+    client, ws = client_workspace
+
+    async def flags() -> dict[str, tuple[bool, bool]]:
+        listed = (await client.get("/api/examples")).json()["examples"]
+        return {e["id"]: (e["in_workspace"], e["differs"]) for e in listed}
+
+    assert (await flags())["wscc9"] == (False, False)
+
+    (ws / "wscc9.xlsx").write_bytes(b"what an earlier release put under the name")
+    # ANDES's own case is an ANDES entry: what the user has under its name is theirs.
+    (ws / "ieee14_full.xlsx").write_bytes(b"an edited copy")
+    state = await flags()
+    assert state["wscc9"] == (True, True)
+    assert state["ieee14"] == (True, False)
+    assert state["kundur"] == (False, False)
+
+    refused = await client.post("/api/examples/wscc9/add")
+    assert refused.status_code == 409, refused.text
+    assert (await flags())["wscc9"] == (True, True)
+
+    replaced = await client.post("/api/examples/wscc9/add", params={"overwrite": "true"})
+    assert replaced.status_code == 201, replaced.text
+    assert [(f["name"], f["replaced"]) for f in replaced.json()["files"]] == [("wscc9.xlsx", True)]
+    assert (await flags())["wscc9"] == (True, False)
+
+
 async def test_what_the_mcp_listing_reads_of_each_entry_is_in_the_answer(
     client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -105,7 +137,9 @@ async def test_what_the_mcp_listing_reads_of_each_entry_is_in_the_answer(
     monkeypatch.setattr(mcp_server, "_api", lambda method, path, payload=None: body)
     brief = mcp_server.list_examples()
     assert [e["id"] for e in brief] == [e["id"] for e in body["examples"]]
-    assert {"title", "size", "analyses", "in_workspace", "source", "licence"} <= set(brief[0])
+    assert {"title", "size", "analyses", "in_workspace", "differs", "source", "licence"} <= set(
+        brief[0]
+    )
     assert mcp_server.list_examples("kundur")["id"] == "kundur"
     with pytest.raises(RuntimeError, match="the cases are"):
         mcp_server.list_examples("nope")
