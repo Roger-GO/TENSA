@@ -34,8 +34,13 @@ def _loaded(name: str = "ieee14/ieee14.raw") -> Wrapper:
     return w
 
 
-def _outputs(pf: PflowResult) -> dict[str, tuple[float, float, float]]:
-    return {k: (g.p, g.q, g.v) for k, g in pf.generator_outputs.items()}
+def _outputs(pf: PflowResult) -> dict[str, float]:
+    """Each generator's P, Q and V, flat: ``pytest.approx`` takes no nested values."""
+    return {
+        f"{k}.{name}": value
+        for k, g in pf.generator_outputs.items()
+        for name, value in (("p", g.p), ("q", g.q), ("v", g.v))
+    }
 
 
 def test_a_run_with_no_request_reports_andes_defaults() -> None:
