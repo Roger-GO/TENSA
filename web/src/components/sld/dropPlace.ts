@@ -56,6 +56,7 @@ import {
   BAR_LENGTH,
   BAR_THICKNESS,
   RUN_CLEARANCE,
+  SYMBOL_CLEAR,
   grown,
   type ConnectionEdge,
   type ConnectionLayout,
@@ -64,6 +65,7 @@ import {
   type Point,
   type Rect,
 } from './connections';
+import { LIMIT_MARKER } from './labels';
 import { GRID_STEP, MAX_OVERHANG } from './tidy';
 
 /** The room a symbol that is dropped keeps to another symbol and to a bar. */
@@ -99,7 +101,7 @@ export const DROP_OWN_TIP_ROOM = 2 * GRID_STEP;
 export const DROP_FOREIGN_ROOM = RUN_CLEARANCE;
 
 /** How near a connector may pass a symbol, and a bar, that is dropped beside it. */
-const CONNECTOR_CLEARANCE = 4;
+const CONNECTOR_CLEARANCE = SYMBOL_CLEAR;
 const CONNECTOR_BAR_CLEARANCE = 8;
 
 /** How far the straight way from a device to its bus keeps from the bar of another bus. */
@@ -205,6 +207,8 @@ interface Shape {
   id: string;
   bar: boolean;
   box: Rect;
+  /** The box with what is drawn on its corner: the limit mark of a generator. A connector keeps its distance from that. */
+  outer: Rect;
   /** The devices of a bus, by node id: what its bar may stand right beside. */
   devices: ReadonlySet<string>;
 }
@@ -293,29 +297,28 @@ export function dropRules<N extends ConnectionNode>(
     if ((node.type ?? 'bus') === 'bus') {
       const bar = connections.bars.get(node.id);
       const before = options.atRest?.bars.get(node.id);
-      return {
-        id: node.id,
-        devices: devicesOf.get(node.id) ?? none,
-        bar: true,
-        box: {
-          left: x + Math.min(bar?.start ?? 0, before?.start ?? Infinity),
-          right: x + Math.max(bar?.end ?? BAR_LENGTH, before?.end ?? -Infinity),
-          top: y,
-          bottom: y + BAR_THICKNESS,
-        },
+      const box = {
+        left: x + Math.min(bar?.start ?? 0, before?.start ?? Infinity),
+        right: x + Math.max(bar?.end ?? BAR_LENGTH, before?.end ?? -Infinity),
+        top: y,
+        bottom: y + BAR_THICKNESS,
       };
+      return { id: node.id, devices: devicesOf.get(node.id) ?? none, bar: true, box, outer: box };
     }
     const size = options.sizes?.get(node.id);
+    const box = {
+      left: x,
+      right: x + (size?.width ?? node.initialWidth ?? 0),
+      top: y,
+      bottom: y + (size?.height ?? node.initialHeight ?? 0),
+    };
+    const out = node.type === 'generator' ? LIMIT_MARKER.out : 0;
     return {
       id: node.id,
       devices: none,
       bar: false,
-      box: {
-        left: x,
-        right: x + (size?.width ?? node.initialWidth ?? 0),
-        top: y,
-        bottom: y + (size?.height ?? node.initialHeight ?? 0),
-      },
+      box,
+      outer: { ...box, right: box.right + out, top: box.top - out },
     };
   };
   const mine: Shape[] = [];
@@ -383,8 +386,8 @@ export function dropRules<N extends ConnectionNode>(
       [Math.min(bar.right, Math.max(bar.left, middle)), level],
     ];
   };
-  const roomFor = ({ bar, box }: Pick<Shape, 'bar' | 'box'>): Rect =>
-    grown(box, bar ? CONNECTOR_BAR_CLEARANCE : CONNECTOR_CLEARANCE);
+  const roomFor = ({ bar, outer }: Pick<Shape, 'bar' | 'outer'>): Rect =>
+    grown(outer, bar ? CONNECTOR_BAR_CLEARANCE : CONNECTOR_CLEARANCE);
   /** What the moved nodes are on, shifted by `dx`, `dy`; `null` when they are clear. */
   const inTheWayAt = (dx: number, dy: number): DropObstacle | null => {
     for (const own of mine) {
@@ -405,7 +408,7 @@ export function dropRules<N extends ConnectionNode>(
           return 'symbol-symbol';
         }
       }
-      const room = roomFor({ bar: own.bar, box });
+      const room = roomFor({ bar: own.bar, outer: moved(own.outer, dx, dy) });
       for (const [a, b] of fixed) if (crosses(a, b, room)) return 'connector';
       for (const other of keepOff) if (near(box, other, DROP_CLEARANCE)) return 'line';
       if (lines.length > 0) {
@@ -421,8 +424,14 @@ export function dropRules<N extends ConnectionNode>(
     for (const { device, bus } of alone) {
       const [p, q] = straight(moved(device.box, dx, dy), bus.box);
       for (const other of standing) {
-        if (!other.bar || other === bus) continue;
-        if (crosses(p, q, grown(other.box, BETWEEN_CLEARANCE))) return 'bar-between';
+        if (other === bus) continue;
+        if (other.bar) {
+          if (crosses(p, q, grown(other.box, BETWEEN_CLEARANCE))) return 'bar-between';
+        } else if (crosses(p, q, roomFor(other)) && !crosses(p, q, other.box)) {
+          // Past a symbol and not through it, the connector would run along
+          // its edge: through it, it goes round (`connections.ts`).
+          return 'connector';
+        }
       }
     }
     return null;

@@ -19,6 +19,7 @@ import {
   LABEL_ROOM,
   MIN_BAR_LENGTH,
   SLIDE_CLEARANCE,
+  SYMBOL_CLEAR,
   TAP_HOLD,
   TAP_INSET,
   TAP_SPACING,
@@ -3027,6 +3028,36 @@ describe('layoutConnections: a device connector and the bars of other buses', ()
       targetSide: 'north',
     });
     expect(bars.get('1')).toMatchObject({ start: 0, end: 142 + TAP_INSET });
+  });
+
+  it('steps round the symbol it would run along the edge of, and not only the one it would run through', () => {
+    // Load A stands over the bar of bus 1. The load above it drops square 3
+    // past the right edge of A: straight down, its connector would run along
+    // the edge of A for the whole height of the block, where the line and the
+    // border read as one.
+    const nodes = [bus('1', 0, 300), device('load-A', 46, 150), device('load-B', 69, 40)];
+    const { routes } = layoutConnections(nodes, [stub('load-A', '1'), stub('load-B', '1')]);
+    const block = { left: 26, right: 66, top: 130, bottom: 170 };
+    const points = routes.get('stub-load-B')!.points;
+    expect(points[0]).toEqual([69, 60]);
+    // It lands on the bar, and every run of it that is level with the block
+    // is SYMBOL_CLEAR or more off its edge.
+    expect(points[points.length - 1]![1]).toBe(303);
+    for (let i = 1; i < points.length; i += 1) {
+      const [[x1, y1], [x2, y2]] = [points[i - 1]!, points[i]!];
+      if (Math.max(y1, y2) <= block.top || Math.min(y1, y2) >= block.bottom) continue;
+      const off = Math.max(block.left - Math.max(x1, x2), Math.min(x1, x2) - block.right);
+      expect(off, `run ${i}`).toBeGreaterThanOrEqual(SYMBOL_CLEAR);
+    }
+    // The same connector 7 off the edge is clear as it is, and goes straight.
+    const clear = layoutConnections(
+      [bus('1', 0, 300), device('load-A', 46, 150), device('load-B', 73, 40)],
+      [stub('load-A', '1'), stub('load-B', '1')],
+    ).routes.get('stub-load-B')!.points;
+    expect(clear).toEqual([
+      [73, 60],
+      [73, 303],
+    ]);
   });
 
   it('keeps its straight line where no way round is near', () => {

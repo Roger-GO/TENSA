@@ -8,7 +8,7 @@
  * line is at `y + 3`.
  */
 import { describe, expect, it } from 'vitest';
-import type { ConnectionEdge, Point } from '@/components/sld/connections';
+import { SYMBOL_CLEAR, type ConnectionEdge, type Point } from '@/components/sld/connections';
 import type { LabelNode } from '@/components/sld/labels';
 import { pictureOf } from '@/components/sld/picture';
 import {
@@ -568,20 +568,22 @@ describe('routeChecker', () => {
   });
 
   it('lets a line that is nearer than that already stay as near, and come no nearer', () => {
-    // A layout that came with line L2 five clear of the load: as near as a
-    // route the diagram keeps may pass a symbol.
+    // A layout that came with line L2 SYMBOL_CLEAR clear of the load: as near
+    // as a route the diagram keeps may pass a symbol.
     const edges = EDGES.map((edge) =>
       edge.id === 'line-L2'
-        ? branch('line-L2', 'topology', '1', '2', overLoad(5), { source: A, target: B })
+        ? branch('line-L2', 'topology', '1', '2', overLoad(SYMBOL_CLEAR), { source: A, target: B })
         : edge,
     );
     const picture = pictureOf(NODES, edges, { values: false, steps: 0 });
-    expect(picture.connections.routes.get('line-L2')!.points).toEqual(overLoad(5));
+    expect(picture.connections.routes.get('line-L2')!.points).toEqual(overLoad(SYMBOL_CLEAR));
     const check = routeChecker(NODES, picture, edges[1]!, { values: false });
-    expect(check(overLoad(5))).toBeNull();
+    expect(check(overLoad(SYMBOL_CLEAR))).toBeNull();
     // Another run of it moved, with the one by the load where it was.
-    expect(check(overLoad(5).map(([x, y]): Point => [x === 120 ? 140 : x, y]))).toBeNull();
-    expect(check(overLoad(6))).toBeNull();
+    expect(
+      check(overLoad(SYMBOL_CLEAR).map(([x, y]): Point => [x === 120 ? 140 : x, y])),
+    ).toBeNull();
+    expect(check(overLoad(SYMBOL_CLEAR + 1))).toBeNull();
     expect(check(overLoad(3))).toBe('it would pass too close to the symbol of PQ_1');
   });
 

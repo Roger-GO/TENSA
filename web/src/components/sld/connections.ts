@@ -51,8 +51,10 @@
  *   when the device does not sit square to its tap, or one horizontal and
  *   one vertical run with a right angle between them (`elbow`). Neither
  *   runs through another device, a controller badge or the bar of another
- *   bus, nor along such a bar: where the way it would take does, it steps
- *   round what is in the way (`detourFor`), out of a side of the device or
+ *   bus, nor along such a bar, nor along the edge of another symbol nearer
+ *   than `SYMBOL_CLEAR` (where the line and the border read as one): where
+ *   the way it would take does, it steps round what is in the way
+ *   (`detourFor`), out of a side of the device or
  *   out of the face that looks at the bar, and lands square on the bar
  *   beside it, at a tap of its own. A device that was dropped under
  *   another device of its bus is still connected by a line that is on
@@ -134,6 +136,15 @@ export const TAP_CLEAR = TAP_DOT_RADIUS + 2;
 export const BAR_CLEAR = 6;
 
 /**
+ * How near a line may run to the symbol of a device it has no part in, or to
+ * a control chain that is drawn out, for a stretch of any length: nearer, the
+ * line and the border of the symbol read as one. What the overlap checker
+ * holds every line to (`overlapCheck.ts`), the connector of a device
+ * included, which steps round the symbol it passes this near.
+ */
+export const SYMBOL_CLEAR = 6;
+
+/**
  * The room two bars keep between them, tip to tip where they stand side by
  * side: as much as two lines side by side keep (`LINE_GAP` of the overlap
  * checker). Nearer, the two read as one bar with a break in it, and a line
@@ -166,6 +177,15 @@ export const READOUT_CLEAR = 2;
  * the router keeps its bends from (`tidy.ts`).
  */
 export const THROUGH_REACH = 2 * TAP_SPACING;
+
+/**
+ * The same, where the line that lands on the bar does so at a tip of it: a
+ * line comes down onto the end of a bar, and another goes on in its column
+ * under the bar, a little further off than `THROUGH_REACH`. Past the tip
+ * there is no bar beside the line for the eye to take it by, and the two
+ * read as one line that runs by the end of the bar all the same.
+ */
+export const TIP_THROUGH_REACH = 2 * THROUGH_REACH;
 
 /**
  * How near a bend of a line, or an end of it that is on no bar, may come to
@@ -214,12 +234,13 @@ const DETOUR_CLEARANCE = 8;
 const DETOUR_REACH = 64;
 
 /**
- * How near a device connector may come to another symbol, to the bar of
+ * How near a device connector may come to another symbol (along an edge of
+ * it: across a corner at an angle it need not be so far), to the bar of
  * another bus on any side, and past a tip of such a bar when it runs level
  * with it, before it counts as running through it: what the overlap checker
  * holds a line to (`overlapCheck.ts`), and a hair more.
  */
-const NEAR_SYMBOL = 1;
+const NEAR_SYMBOL = SYMBOL_CLEAR + 1;
 const NEAR_BAR = 7;
 const NEAR_TIP = 16.5;
 
@@ -1466,9 +1487,10 @@ function layoutPass(
   // ones along its way and not against every box of the diagram.
   interface Obstacle {
     of: Box | Bar;
-    /** The room it takes for a run at any angle, and for a level one. */
+    /** The room it takes for a run at any angle, for a level one, and for an upright one. */
     body: Box;
     level: Box;
+    upright: Box;
   }
   /** The tips of `bar`, as it is now or, with `early`, as it came to be drawn in the pass before. */
   const tipsOf = (bar: Bar, early: boolean): { start: number; end: number } => {
@@ -1485,19 +1507,19 @@ function layoutPass(
   ): ((own: Box, ownBar: Bar) => (points: Point[], ownBarToo?: boolean) => boolean) => {
     const list: Obstacle[] = [];
     for (const box of boxes.values()) {
-      const body = { ...box, hw: box.hw + NEAR_SYMBOL, hh: box.hh + NEAR_SYMBOL };
-      list.push({ of: box, body, level: body });
+      // A run along an edge of a symbol keeps `SYMBOL_CLEAR` from it; one that
+      // crosses a corner at an angle has only its end to be clear of.
+      const body = { ...box, hw: box.hw + 1, hh: box.hh + 1 };
+      const along = { ...box, hw: box.hw + NEAR_SYMBOL, hh: box.hh + NEAR_SYMBOL };
+      list.push({ of: box, body, level: along, upright: along });
     }
     for (const bar of bars.values()) {
       const { start, end } = tipsOf(bar, early);
       const cx = (start + end) / 2;
       const hw = (end - start) / 2;
       const hh = BAR_THICKNESS / 2 + NEAR_BAR;
-      list.push({
-        of: bar,
-        body: { cx, cy: bar.cy, hw: hw + NEAR_BAR, hh },
-        level: { cx, cy: bar.cy, hw: hw + NEAR_TIP, hh },
-      });
+      const body = { cx, cy: bar.cy, hw: hw + NEAR_BAR, hh };
+      list.push({ of: bar, body, level: { cx, cy: bar.cy, hw: hw + NEAR_TIP, hh }, upright: body });
     }
     list.sort((a, b) => a.body.cx - b.body.cx);
     const widest = list.reduce((most, { level }) => Math.max(most, level.hw), 0);
@@ -1520,7 +1542,7 @@ function layoutPass(
           else last = middle;
         }
         for (let i = first; i < list.length && list[i]!.body.cx <= right + widest; i += 1) {
-          const { of, body, level } = list[i]!;
+          const { of, body, level, upright } = list[i]!;
           if (of === own || (of === ownBar && !ownBarToo)) continue;
           const apart =
             level.cx + level.hw <= left ||
@@ -1531,7 +1553,7 @@ function layoutPass(
           const runs = of === ownBar ? points.length - 1 : points.length;
           for (let k = 1; k < runs; k += 1) {
             const [a, b] = [points[k - 1]!, points[k]!];
-            if (runsThrough(a, b, sameY(a, b) ? level : body)) return true;
+            if (runsThrough(a, b, sameY(a, b) ? level : sameX(a, b) ? upright : body)) return true;
           }
         }
         return false;

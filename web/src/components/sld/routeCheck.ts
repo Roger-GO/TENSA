@@ -301,6 +301,8 @@ function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): 
       return `it would run through or along ${other}`;
     case 'line-box':
       return `it would run through ${other}`;
+    case 'line-beside':
+      return `it would pass too close to ${other}`;
     default:
       return `it would be on ${other}`;
   }

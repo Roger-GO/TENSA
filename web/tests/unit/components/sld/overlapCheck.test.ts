@@ -9,7 +9,14 @@
  * checker, drawn whole.
  */
 import { describe, expect, it } from 'vitest';
-import { BAR_GAP, BEND_CLEAR, THROUGH_REACH, type Point } from '@/components/sld/connections';
+import {
+  BAR_GAP,
+  BEND_CLEAR,
+  SYMBOL_CLEAR,
+  THROUGH_REACH,
+  TIP_THROUGH_REACH,
+  type Point,
+} from '@/components/sld/connections';
 import {
   LINE_GAP,
   countCrossings,
@@ -722,6 +729,50 @@ describe('findOverlaps: a line that stops short of a bar, in line with one on it
     expect(check({ bars: [b], lines: [below(40), steps(53, 19, 70)] })).not.toEqual([]);
   });
 
+  it('reaches further where the line that lands is at a tip of the bar: TIP_THROUGH_REACH', () => {
+    // A line comes down onto the west tip, and another goes on in its column
+    // under the bar from 40 below it: past the tip there is no bar beside the
+    // line, and the two read as one although the break is wider than two spacings.
+    const lands = (x: number): DrawnLine =>
+      line(
+        'lands',
+        [
+          [x, 0],
+          [x, 100],
+        ],
+        'lands:from',
+        'bus',
+      );
+    const goesOn = (x: number, under: number): DrawnLine =>
+      line(
+        'goes-on',
+        [
+          [x - 20, 100 + under],
+          [x, 100 + under],
+          [x, 250],
+        ],
+        'goes-on:from',
+        'goes-on:to',
+      );
+    expect(THROUGH_REACH).toBeLessThan(40);
+    expect(check({ bars: [b], lines: [lands(3), goesOn(3, 40)] })).toEqual([
+      'through-bar goes-on lands',
+    ]);
+    expect(check({ bars: [b], lines: [lands(89), goesOn(89, 40)] })).toEqual([
+      'through-bar goes-on lands',
+    ]);
+    // Up to TIP_THROUGH_REACH and no further, and only at the tip: further in
+    // along the bar the reach is THROUGH_REACH.
+    expect(check({ bars: [b], lines: [lands(3), goesOn(3, TIP_THROUGH_REACH - 1)] })).not.toEqual(
+      [],
+    );
+    expect(check({ bars: [b], lines: [lands(3), goesOn(3, TIP_THROUGH_REACH)] })).toEqual([]);
+    expect(check({ bars: [b], lines: [lands(46), goesOn(46, 40)] })).toEqual([]);
+    expect(check({ bars: [b], lines: [lands(46), goesOn(46, THROUGH_REACH - 1)] })).not.toEqual([]);
+    // A column a tap spacing off the tip is a line of its own.
+    expect(check({ bars: [b], lines: [lands(3), goesOn(17, 40)] })).toEqual([]);
+  });
+
   it('leaves two ends on one bar to the rule about the taps, and a line to itself', () => {
     // Two lines that land in line from opposite sides are `shared-tap`.
     const down = line(
@@ -805,13 +856,106 @@ describe('findOverlaps: boxes', () => {
     }
   });
 
-  it('takes a line along the edge of a box, or past it, as clear of it', () => {
-    expect(check({ lines: [across], boxes: [box('box', 'symbol', [80, 50, 120, 90])] })).toEqual(
-      [],
-    );
+  it('takes a line past a box, SYMBOL_CLEAR off its edge or more, as clear of it', () => {
+    expect(
+      check({ lines: [across], boxes: [box('box', 'symbol', [80, 50 + SYMBOL_CLEAR, 120, 90])] }),
+    ).toEqual([]);
     expect(check({ lines: [across], boxes: [box('box', 'symbol', [80, 60, 120, 90])] })).toEqual(
       [],
     );
+  });
+
+  it('finds a line that runs along the edge of a symbol or a block, nearer than SYMBOL_CLEAR', () => {
+    // Along the edge, and a pixel or two off it: the line and the border read as one.
+    for (const kind of ['symbol', 'block'] as const) {
+      for (const top of [50, 51, 50 + SYMBOL_CLEAR - 1]) {
+        expect(check({ lines: [across], boxes: [box('box', kind, [80, top, 120, 90])] })).toEqual([
+          'line-beside a box',
+        ]);
+      }
+      // The same on the other side of the line, and up the side of a box.
+      expect(check({ lines: [across], boxes: [box('box', kind, [80, 10, 120, 48])] })).toEqual([
+        'line-beside a box',
+      ]);
+    }
+    const upright = line(
+      'u',
+      [
+        [100, 0],
+        [100, 200],
+      ],
+      'u:from',
+      'u:to',
+    );
+    expect(check({ lines: [upright], boxes: [box('box', 'symbol', [101, 40, 141, 80])] })).toEqual([
+      'line-beside u box',
+    ]);
+    expect(
+      check({ lines: [upright], boxes: [box('box', 'symbol', [100 + SYMBOL_CLEAR, 40, 140, 80])] }),
+    ).toEqual([]);
+  });
+
+  it('leaves out a line that only passes the corner of a box, and one that stops short of it', () => {
+    // Across the corner at an angle: the stretch that is near is shorter than the clearance.
+    const slant = line(
+      's',
+      [
+        [60, 100],
+        [100, 60],
+      ],
+      's:from',
+      's:to',
+    );
+    expect(check({ lines: [slant], boxes: [box('box', 'symbol', [100, 100, 140, 140])] })).toEqual(
+      [],
+    );
+    // An end that comes up to the clearance, and no further.
+    const stops = line(
+      'p',
+      [
+        [100, 0],
+        [100, 70 - SYMBOL_CLEAR],
+      ],
+      'p:from',
+      'p:to',
+    );
+    expect(check({ lines: [stops], boxes: [box('box', 'symbol', [80, 70, 120, 90])] })).toEqual([]);
+  });
+
+  it('holds a line to a symbol and a block only: a label, a readout and a transformer symbol are left out', () => {
+    for (const kind of ['label', 'readout'] as const) {
+      expect(check({ lines: [across], boxes: [box('box', kind, [80, 51, 120, 90])] })).toEqual([]);
+    }
+    expect(
+      check({ lines: [across], boxes: [box('symbol:t', 'symbol', [80, 51, 120, 90], ['t'])] }),
+    ).toEqual([]);
+    // Unless the clearance is asked for in full.
+    expect(
+      check(
+        { lines: [across], boxes: [box('box', 'symbol', [80, 51, 120, 90])] },
+        { symbolClear: 0 },
+      ),
+    ).toEqual([]);
+  });
+
+  it('lets a connector run beside the symbol of its own device, its chain, and the mark on its corner', () => {
+    // The line is drawn from `device`: the symbol, and what is drawn about it.
+    expect(check({ lines: [across], boxes: [box('device', 'symbol', [-40, 51, -1, 90])] })).toEqual(
+      [],
+    );
+    expect(
+      check({
+        lines: [across],
+        boxes: [
+          box('chain', 'block', [80, 51, 120, 90], ['device']),
+          box('marker', 'symbol', [130, 51, 140, 61], ['device']),
+        ],
+      }),
+    ).toEqual([]);
+    // The chain of another device is not its own.
+    expect(
+      check({ lines: [across], boxes: [box('chain', 'block', [80, 51, 120, 90], ['other'])] }),
+    ).toEqual(['line-beside a chain']);
   });
 
   it('lets a line run into the device it is drawn from, and through what is drawn on it', () => {

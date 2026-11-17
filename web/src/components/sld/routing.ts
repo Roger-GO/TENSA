@@ -78,6 +78,7 @@
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
+  SYMBOL_CLEAR,
   TAP_SPACING,
   TRANSFORMER_SYMBOL_SIZE,
   layoutConnections,
@@ -136,11 +137,14 @@ export const FOLLOW_ABOVE = 30;
 const ROUTING_REACH = 14 * GRID_STEP;
 
 /**
- * How near a stored route may pass a symbol and still be kept. The router
- * keeps twice as far; a symbol the browser measured a little wider than the
- * diagram took it to be does not send its neighbours round again.
+ * How near a stored route may pass a symbol and still be kept: as near as the
+ * overlap checker lets a line run along one (`SYMBOL_CLEAR`), so that a route
+ * that is kept is one the checker has nothing to say about. The router keeps
+ * further off (`DEVICE_CLEARANCE`); a symbol the browser measured a little
+ * wider than the diagram took it to be does not send its neighbours round
+ * again.
  */
-const SYMBOL_CLEARANCE = 4;
+const SYMBOL_CLEARANCE = SYMBOL_CLEAR;
 
 /** Where a route that was made here was made for: the positions of its two buses. */
 export interface RouteAnchors {
@@ -583,7 +587,8 @@ function routeOnce<E extends ConnectionEdge>(
     pass: ConnectionPass,
     boxes: ReadonlyMap<string, Rect>,
   ): Overlap[] =>
-    findOverlaps(structureOf(nodes, drawnNow, pass, options, boxes)).filter(
+    // The boxes of the symbols are grown by `SYMBOL_CLEARANCE` already.
+    findOverlaps(structureOf(nodes, drawnNow, pass, options, boxes), { symbolClear: 0 }).filter(
       (overlap) => overlap.kind !== 'box-box',
     );
   /** How far around the buses of `ids` a routing of them looks. */

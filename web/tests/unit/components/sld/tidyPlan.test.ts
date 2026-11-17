@@ -206,13 +206,14 @@ describe('a plan for a diagram that is on screen, held to the picture it gives',
     // The load of bus 11, set down far to the east of its bus: its
     // connector runs to the tip of the bar, which the lines that land on
     // the bar have drawn out. Routed afresh, they leave the bar shorter,
-    // and the connector runs through the load of bus 10 to reach it.
+    // and the connector runs along the edge of the load of bus 10 to reach
+    // it.
     const first = await opened(IEEE14);
-    const dropped = dragged(first, 'load-PQ_8', 320, -140);
+    const dropped = dragged(first, 'load-PQ_8', 320, -110);
     expect(overlapsOf(dropped)).toEqual([]);
     const routesAlone = withRoutes(dropped, planOf(dropped));
     expect(overlapsOf(routesAlone)).toEqual([
-      'line-box: stub-load-PQ_8 / load-PQ_7: runs through the symbol',
+      'line-beside: stub-load-PQ_8 / load-PQ_7: runs along the symbol for 27 px, less than 6 px off its edge',
     ]);
     // Held to its picture, the plan leaves the lines of bus 11 where they
     // are and routes the others around them.

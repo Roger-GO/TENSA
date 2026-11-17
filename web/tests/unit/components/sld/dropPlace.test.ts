@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  SYMBOL_CLEAR,
   layoutConnections,
   type ConnectionEdge,
   type ConnectionNode,
@@ -185,6 +186,24 @@ describe('clearDrop', () => {
     const pastTips = now.x + 20 < 0 - 16 || now.x + 20 > 92 + 16;
     const below = now.y > 26;
     expect(pastTips || below).toBe(true);
+  });
+
+  it('does not leave a device whose connector would run along the edge of a symbol past it', () => {
+    // Load N is dropped above load A, its middle 2 past the right edge of A:
+    // straight down to the bar its connector runs along the whole height of
+    // the block, where the line and the border read as one. Through the
+    // block it would go round (the connection pass); past it, nearer than
+    // SYMBOL_CLEAR, it is the drop that moves.
+    const [one, two] = [device('load-N', 200, -60), stub('load-N', '1')];
+    const { shift, at } = drop([...nodes, one], [...edges, two], 'load-N', -152, 0);
+    expect(shift).toMatchObject({ onto: 'connector' });
+    const middle = at('load-N').x + 20;
+    // Not in the band beside A (66 to 72, or 20 to 26): through the block, or clear of it.
+    expect(middle > 66 && middle < 66 + SYMBOL_CLEAR).toBe(false);
+    expect(middle < 26 && middle > 26 - SYMBOL_CLEAR).toBe(false);
+    // Where the connector is SYMBOL_CLEAR off already, the drop stands.
+    const clear = drop([...nodes, one], [...edges, two], 'load-N', -146, 0);
+    expect(clear.shift).toBeNull();
   });
 
   it('looks for the place on the grid the nodes snap to', () => {

@@ -31,12 +31,17 @@
  *   `THROUGH_REACH` of a bar, in line with an end on the other face to
  *   within `TAP_SPACING`, is that (`through-bar`). The two ends need not be
  *   taps: a branch that steps aside just short of its tap leaves its
- *   column in line with the connector on the far side of the bar.
+ *   column in line with the connector on the far side of the bar. Where the
+ *   end on the bar is at a tip of it, the reach is `TIP_THROUGH_REACH`.
  * - Two bars keep `BAR_GAP` between them, tip to tip where they stand side
  *   by side (`bar-bar`): nearer, they read as one bar with a break in it.
  * - A line runs through no box but the one it is drawn from (the device of
  *   a connector) and the ones that are drawn on it (its own label, the
  *   symbol of a transformer).
+ * - A line does not run along the symbol of a device it has no part in, or a
+ *   control chain that is drawn out, nearer than `SYMBOL_CLEAR` for more than
+ *   that: the line and the border of the box read as one (`line-beside`).
+ *   The symbol of a transformer, which stands on its own line, is left out.
  * - No two boxes reach into each other, and none reaches into a bar.
  *
  * The canvas holds the routes it keeps to the first four (`routing.ts`),
@@ -49,11 +54,14 @@ import {
   BAR_GAP,
   BAR_THICKNESS,
   BEND_CLEAR,
+  SYMBOL_CLEAR,
   TAP_CLEAR,
   TAP_INSET,
   TAP_SPACING,
   THROUGH_REACH,
+  TIP_THROUGH_REACH,
   distanceToRun,
+  grown,
   lengthInside,
   meetsBarFlat,
   type Point,
@@ -113,6 +121,7 @@ export type OverlapKind =
   | 'line-bar'
   | 'bar-bar'
   | 'line-box'
+  | 'line-beside'
   | 'box-box';
 
 /** One place where two things are drawn on each other. */
@@ -139,6 +148,12 @@ export interface OverlapOptions {
   tapSpacing?: number;
   /** The room two bars keep between them; default `BAR_GAP`. */
   barGap?: number;
+  /**
+   * How near a line may run along a symbol or a chain it has no part in;
+   * default `SYMBOL_CLEAR`. A diagram whose boxes are already grown by a
+   * clearance of their own (`routing.ts`) leaves it at 0.
+   */
+  symbolClear?: number;
   /**
    * How far two boxes may reach into each other, and a line into a box,
    * and still count as apart: half a pixel for a diagram that is worked
@@ -287,6 +302,7 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
   const tapSpacing = options.tapSpacing ?? TAP_SPACING;
   const slack = options.slack ?? 0.5;
   const barGap = options.barGap ?? BAR_GAP;
+  const symbolClear = options.symbolClear ?? SYMBOL_CLEAR;
   const found = new Map<string, Overlap>();
   const report = (kind: OverlapKind, a: string, b: string, detail: string): void => {
     const key = `${kind}|${a}|${b}`;
@@ -417,9 +433,12 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
     const reach: Rect = {
       left: bar.left - tapSpacing,
       right: bar.right + tapSpacing,
-      top: bar.y - THROUGH_REACH - 1,
-      bottom: bar.y + THROUGH_REACH + 1,
+      top: bar.y - TIP_THROUGH_REACH - 1,
+      bottom: bar.y + TIP_THROUGH_REACH + 1,
     };
+    /** Whether a column at `x` is on a tip of the bar: its end tap is there. */
+    const atTip = (x: number): boolean =>
+      Math.abs(x - bar.left) <= TAP_INSET + TOUCH || Math.abs(x - bar.right) <= TAP_INSET + TOUCH;
     const over: Column[] = [];
     const under: Column[] = [];
     for (const run of runsNear.around(reach)) {
@@ -430,9 +449,9 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
       const line = drawn.lines[run.line]!;
       const lands = (line.from === bar.id && run.first) || (line.to === bar.id && run.last);
       // Above the bar, or right on it: its lower end; below, its upper end.
-      if (bottom <= bar.y + TOUCH && bar.y - bottom <= THROUGH_REACH) {
+      if (bottom <= bar.y + TOUCH && bar.y - bottom <= TIP_THROUGH_REACH) {
         over.push({ x, gap: Math.max(0, bar.y - bottom), line: run.line, lands });
-      } else if (top >= bar.y - TOUCH && top - bar.y <= THROUGH_REACH) {
+      } else if (top >= bar.y - TOUCH && top - bar.y <= TIP_THROUGH_REACH) {
         under.push({ x, gap: Math.max(0, top - bar.y), line: run.line, lands });
       }
     }
@@ -440,7 +459,10 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
       for (const below of under) {
         if (above.line === below.line || (above.lands && below.lands)) continue;
         const across = Math.abs(above.x - below.x);
-        if (across >= tapSpacing - 0.5 || above.gap + below.gap >= THROUGH_REACH - 0.5) continue;
+        // The line that lands on a tip is read as one with a line in its column further off.
+        const tip = (above.lands && atTip(above.x)) || (below.lands && atTip(below.x));
+        const room = tip ? TIP_THROUGH_REACH : THROUGH_REACH;
+        if (across >= tapSpacing - 0.5 || above.gap + below.gap >= room - 0.5) continue;
         const [first, second] = [drawn.lines[above.line]!.id, drawn.lines[below.line]!.id];
         report(
           'through-bar',
@@ -542,6 +564,29 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
         report('line-box', line.id, box.id, `runs through the ${box.kind}`);
       }
     }
+    // The symbol of a device, and a chain: a line along it keeps its distance.
+    // (The symbol of a transformer is not one: it stands on its own line, where
+    // the router leaves it the room of its box and no more.)
+    const device = (box.kind === 'symbol' || box.kind === 'block') && !box.id.startsWith('symbol:');
+    if (symbolClear > 0 && device) {
+      const beside = grown(box.box, symbolClear - slack);
+      for (const run of runsNear.around(beside)) {
+        const line = drawn.lines[run.line]!;
+        if (line.from === box.id || line.to === box.id || box.of?.includes(line.id)) continue;
+        // A chain, or the mark on the corner of a symbol, is the device's: so is its connector.
+        if (box.of?.some((id) => id === line.from || id === line.to)) continue;
+        const along = lengthInside(run.a, run.b, beside);
+        if (along <= symbolClear) continue;
+        // Through it is `line-box`; this is for a line that stays outside.
+        if (lengthInside(run.a, run.b, room) > 0) continue;
+        report(
+          'line-beside',
+          line.id,
+          box.id,
+          `runs along the ${box.kind} for ${Math.round(along)} px, less than ${symbolClear} px off its edge`,
+        );
+      }
+    }
     for (const other of boxesNear.around(box.box)) {
       if (other.id <= box.id || box.of?.includes(other.id) || other.of?.includes(box.id)) continue;
       const across =
@@ -584,6 +629,7 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
     'line-bar',
     'bar-bar',
     'line-box',
+    'line-beside',
     'box-box',
   ];
   return [...found.values()].sort(
