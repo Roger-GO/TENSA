@@ -613,10 +613,27 @@ function elementKeys(topology: TopologySummary): Set<string> {
   fold(topology.generators, 'generator');
   fold(topology.loads, 'load');
   fold(topology.shunts, 'shunt');
-  fold(topology.lines, 'line');
-  fold(topology.transformers, 'transformer');
+  // A branch stays living under either kind of branch: what a layout filed
+  // under one of them when the other was drawn is still about the branch
+  // (`bucketsFrom`).
+  for (const bucket of BRANCH_BUCKETS) {
+    fold(topology.lines, bucket);
+    fold(topology.transformers, bucket);
+  }
   fold(topology.controllers, 'controller');
   return keys;
+}
+
+/**
+ * The kinds of branch a layout files routes under, `bucket` (the one the
+ * branch is drawn as now) first. A branch can change kind between the save
+ * and the read: a layout written when a step-up unit was read as a line
+ * holds its route under `line`, and the same unit is a transformer now (or
+ * the reverse). The idx stays, since a line and a transformer are rows of
+ * one model, so a route is still found under the other kind.
+ */
+function bucketsFrom(bucket: string): string[] {
+  return [bucket, ...[...BRANCH_BUCKETS].filter((other) => other !== bucket)];
 }
 
 /** `section` without the entries whose element is gone. */
@@ -643,6 +660,32 @@ export function barLengthsOf(layout: SidecarLayout | null): Map<string, number> 
     if (typeof bar.length === 'number') out.set(idx, bar.length);
   }
   return out;
+}
+
+/**
+ * What `layout` holds for the branch `idx` that is drawn as a `bucket` now,
+ * between the buses `bus1` and `bus2`: its entry under that kind, else the
+ * one a layout saved while the branch was read as the other kind holds
+ * (`bucketsFrom`), if that names the same two buses (or none).
+ */
+function heldBranch(
+  layout: SidecarLayout | null | undefined,
+  bucket: string,
+  idx: string,
+  bus1: string | undefined,
+  bus2: string | undefined,
+): LayoutBranchRoute | undefined {
+  for (const from of bucketsFrom(bucket)) {
+    const held = layout?.branches?.[from]?.[idx];
+    if (held === undefined) continue;
+    const named =
+      held.bus1 !== undefined &&
+      held.bus1 !== null &&
+      held.bus2 !== undefined &&
+      held.bus2 !== null;
+    if (from === bucket || !named || (held.bus1 === bus1 && held.bus2 === bus2)) return held;
+  }
+  return undefined;
 }
 
 /**
@@ -731,7 +774,7 @@ export function captureLayout(
     if (typeof bucket !== 'string' || !BRANCH_BUCKETS.has(bucket) || typeof idx !== 'string') {
       continue;
     }
-    const chosen = base?.branches?.[bucket]?.[idx];
+    const chosen = heldBranch(base, bucket, idx, e.source, e.target);
     const sourceFace = chosen?.source_face ?? null;
     const targetFace = chosen?.target_face ?? null;
     const polyline = e.data?.bendPoints as [number, number][] | undefined;
@@ -824,6 +867,14 @@ export function captureLayout(
  * was numbered afresh keep their routes. Two lines between the same buses
  * take the routes left for that pair in the order the layout lists them.
  *
+ * Both passes look under the kind the branch is drawn as, then under the
+ * other. A layout keeps its routes under `line` or `transformer` as the
+ * branch was read when it was saved, and what reads a branch as a
+ * transformer can change (a version that takes the ratings of its ends into
+ * account moves a step-up unit out of `line`), so a hand-drawn route filed
+ * under the old kind still belongs to its branch, and the next capture
+ * writes it under the new one.
+ *
  * `anchors` holds, for each route that names its two buses, where the layout
  * has those buses. Such a route was drawn for them at those places and
  * belongs on the branch for as long as they stand there, wherever on their
@@ -866,29 +917,40 @@ export function storedBranchRoutes(
   };
 
   const claimed = new Set<string>();
-  const unrouted: { id: string; slot: string; bus1: string; bus2: string }[] = [];
+  const unrouted: { id: string; bucket: string; bus1: string; bus2: string }[] = [];
   const collect = (entries: readonly TopologyEntry[], bucket: string) => {
-    const routes = layout.branches?.[bucket] ?? {};
     for (const e of entries) {
       const idx = String(e.idx);
       const id = `${bucket}-${idx}`;
       if (out.has(id)) continue;
       const bus1 = busOf(e, 'bus1');
       const bus2 = busOf(e, 'bus2');
-      const route = routes[idx];
-      if (drawable(route) && (!anchored(route) || (route.bus1 === bus1 && route.bus2 === bus2))) {
-        out.set(id, polyline(route));
-        claimed.add(`${bucket}|${idx}`);
-        if (bus1 !== null && bus2 !== null) anchor(id, route, bus1, bus2);
+      // Under the kind the branch is drawn as, else under the other: a branch
+      // can have changed kind since the layout was saved, and a route that
+      // names its buses is the branch's own only while they are still its
+      // ends.
+      let filed: { from: string; route: LayoutBranchRoute } | undefined;
+      for (const from of bucketsFrom(bucket)) {
+        const route = layout.branches?.[from]?.[idx];
+        if (drawable(route) && (!anchored(route) || (route.bus1 === bus1 && route.bus2 === bus2))) {
+          filed = { from, route };
+          break;
+        }
+      }
+      if (filed !== undefined) {
+        out.set(id, polyline(filed.route));
+        claimed.add(`${filed.from}|${idx}`);
+        if (bus1 !== null && bus2 !== null) anchor(id, filed.route, bus1, bus2);
       } else if (bus1 !== null && bus2 !== null) {
-        unrouted.push({ id, slot: `${bucket}|${bus1}|${bus2}`, bus1, bus2 });
+        unrouted.push({ id, bucket, bus1, bus2 });
       }
     }
   };
   collect(topology.lines, 'line');
   collect(topology.transformers, 'transformer');
 
-  // The routes nobody claimed, by the buses they run between.
+  // The routes nobody claimed, by the kind of branch they are filed under and
+  // the buses they run between.
   const free = new Map<string, LayoutBranchRoute[]>();
   for (const bucket of BRANCH_BUCKETS) {
     for (const [idx, route] of Object.entries(layout.branches[bucket] ?? {})) {
@@ -899,11 +961,16 @@ export function storedBranchRoutes(
       else free.set(slot, [route]);
     }
   }
-  for (const { id, slot, bus1, bus2 } of unrouted) {
-    const route = free.get(slot)?.shift();
-    if (route === undefined) continue;
-    out.set(id, polyline(route));
-    anchor(id, route, bus1, bus2);
+  // A branch takes the routes left for its pair under its own kind first, then
+  // under the other (it is the same pair of buses a layout was saved for).
+  for (const { id, bucket, bus1, bus2 } of unrouted) {
+    for (const from of bucketsFrom(bucket)) {
+      const route = free.get(`${from}|${bus1}|${bus2}`)?.shift();
+      if (route === undefined) continue;
+      out.set(id, polyline(route));
+      anchor(id, route, bus1, bus2);
+      break;
+    }
   }
   return { polylines: out, anchors, manual };
 }

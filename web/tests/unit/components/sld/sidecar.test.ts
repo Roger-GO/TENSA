@@ -1065,6 +1065,93 @@ describe('captureLayout', () => {
     });
   });
 
+  it('keeps what a layout filed under line for a branch that is drawn as a transformer now', () => {
+    // Saved while the step-up unit T1 was read as a line: its route, drawn by
+    // hand, and the faces chosen for it sit under `line`.
+    const byHand: [number, number][] = [
+      [30, 40],
+      [30, 90],
+      [230, 90],
+      [230, 40],
+    ];
+    const saved: SidecarLayout = {
+      ...fullLayout(),
+      branches: {
+        line: {
+          T1: {
+            routing: 'manual',
+            bend_points: byHand.map(([x, y]) => ({ x, y })),
+            bus1: '1',
+            bus2: '2',
+            source_face: 'south',
+            target_face: 'west',
+          },
+        },
+      },
+      label_offsets: { bus: { '1': { dx: 4, dy: -12 } }, line: { T1: { dx: 3, dy: 3 } } },
+    };
+    // What the canvas does with it: draws the transformer through the stored
+    // points, held as drawn by hand for where its buses stand.
+    const stored = storedBranchRoutes(saved, topology);
+    expect([...stored.polylines.keys()]).toEqual(['transformer-T1']);
+    const drawn: DiagramEdge[] = [
+      {
+        id: 'transformer-T1',
+        ...ends,
+        data: {
+          bucket: 'transformer',
+          idx: 'T1',
+          bendPoints: stored.polylines.get('transformer-T1'),
+          bendAnchors: stored.anchors.get('transformer-T1'),
+          bendManual: stored.manual.has('transformer-T1'),
+        },
+      },
+    ];
+    const layout = captureLayout({ nodes, edges: drawn }, topology, saved);
+    // Written under the kind it is drawn as now, by hand, with its faces.
+    expect(layout.branches).toEqual({
+      transformer: {
+        T1: {
+          routing: 'manual',
+          bend_points: byHand.map(([x, y]) => ({ x, y })),
+          bus1: '1',
+          bus2: '2',
+          source_face: 'south',
+          target_face: 'west',
+        },
+      },
+    });
+    // The offsets a layout kept for it do not go with the kind it was read as.
+    expect(layout.label_offsets).toEqual(saved.label_offsets);
+    // And it reads back, by hand, on the transformer.
+    const again = storedBranchRoutes(layout, topology);
+    expect([...again.polylines]).toEqual([['transformer-T1', byHand]]);
+    expect([...again.manual]).toEqual(['transformer-T1']);
+  });
+
+  it('does not take what is filed under the other kind for a branch between other buses', () => {
+    const saved: SidecarLayout = {
+      ...fullLayout(),
+      branches: {
+        line: {
+          T1: {
+            routing: 'auto',
+            bend_points: [],
+            bus1: '2',
+            bus2: '3',
+            source_face: 'south',
+            target_face: 'west',
+          },
+        },
+      },
+    };
+    const layout = captureLayout({ nodes, edges }, topology, saved);
+    expect(layout.branches.transformer?.T1).toMatchObject({
+      source_face: null,
+      target_face: null,
+    });
+  });
+
   it('drops a route once its branch is drawn from the live positions again', () => {
     const base = captureLayout({ nodes, edges }, topology, null);
     // A bus was moved: the canvas no longer draws L1 through its old points.
@@ -1431,6 +1518,76 @@ describe('branchPolylines', () => {
       });
       const { anchors } = storedBranchRoutes(saved, grid([line('Line_7', 1, 2)]));
       expect([...anchors.keys()]).toEqual(['line-Line_7']);
+    });
+
+    describe('a branch that was filed under the other kind', () => {
+      const byHand = (anchor: { bus1?: string; bus2?: string }, x = 1) => ({
+        ...route('polyline', 2, anchor, x),
+        routing: 'manual' as const,
+      });
+
+      it('finds the route of a line that is a transformer now, by hand and anchored', () => {
+        const saved = withRoutes({
+          line: { Line_11: byHand({ bus1: '1', bus2: '2' }, 10) },
+        });
+        const stored = storedBranchRoutes(saved, grid([], [line('Line_11', 1, 2)]));
+        expect([...stored.polylines.keys()]).toEqual(['transformer-Line_11']);
+        expect(stored.polylines.get('transformer-Line_11')?.[0]?.[0]).toBe(10);
+        expect(stored.anchors.get('transformer-Line_11')).toEqual({
+          source: { x: 0, y: 0 },
+          target: { x: 200, y: 0 },
+        });
+        expect([...stored.manual]).toEqual(['transformer-Line_11']);
+      });
+
+      it('finds the route of a transformer that is a line now', () => {
+        const saved = withRoutes({ transformer: { T1: byHand({ bus1: '1', bus2: '2' }, 10) } });
+        const stored = storedBranchRoutes(saved, grid([line('T1', 1, 2)]));
+        expect([...stored.polylines.keys()]).toEqual(['line-T1']);
+        expect([...stored.manual]).toEqual(['line-T1']);
+      });
+
+      it('trusts the idx of a route saved without its buses', () => {
+        const saved = withRoutes({ line: { Line_11: route('polyline', 2) } });
+        const stored = storedBranchRoutes(saved, grid([], [line('Line_11', 1, 2)]));
+        expect(stored.polylines.has('transformer-Line_11')).toBe(true);
+        expect(stored.anchors.size).toBe(0);
+      });
+
+      it('does not draw it on a branch of that idx between other buses', () => {
+        const saved = withRoutes({ line: { Line_11: byHand({ bus1: '1', bus2: '2' }) } });
+        const stored = storedBranchRoutes(saved, grid([], [line('Line_11', 2, 3)]));
+        expect(stored.polylines.size).toBe(0);
+      });
+
+      it('prefers the route filed under the kind the branch is drawn as', () => {
+        const saved = withRoutes({
+          line: { T1: byHand({ bus1: '1', bus2: '2' }, 10) },
+          transformer: { T1: byHand({ bus1: '1', bus2: '2' }, 20) },
+        });
+        const stored = storedBranchRoutes(saved, grid([], [line('T1', 1, 2)]));
+        expect(stored.polylines.get('transformer-T1')?.[0]?.[0]).toBe(20);
+      });
+
+      it('finds it by its buses when the system was numbered afresh, and gives it out once', () => {
+        // The step-up unit was Line_11 under `line`; now it is a transformer
+        // called Line_3 (a .raw read back), and a second one stands between
+        // the same buses with no route of its own.
+        const saved = withRoutes({ line: { Line_11: byHand({ bus1: '1', bus2: '2' }, 10) } });
+        const stored = storedBranchRoutes(
+          saved,
+          grid([], [line('Line_3', 1, 2), line('Line_4', 1, 2)]),
+        );
+        expect(stored.polylines.get('transformer-Line_3')?.[0]?.[0]).toBe(10);
+        expect(stored.polylines.has('transformer-Line_4')).toBe(false);
+      });
+
+      it('does not give a route another branch took by its idx to a branch between the same buses', () => {
+        const saved = withRoutes({ line: { A: byHand({ bus1: '1', bus2: '2' }, 10) } });
+        const stored = storedBranchRoutes(saved, grid([line('B', 1, 2)], [line('A', 1, 2)]));
+        expect(stored.polylines.get('transformer-A')?.[0]?.[0]).toBe(10);
+        expect(stored.polylines.has('line-B')).toBe(false);
+      });
     });
 
     it('reads nothing from no layout', () => {
