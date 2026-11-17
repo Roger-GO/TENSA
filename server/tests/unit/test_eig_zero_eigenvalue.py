@@ -8,6 +8,10 @@ and of the other -1, so the same case had a growing mode on some machines and
 none on others, and whatever read the result (the scatter's filter, the report's
 count of unstable modes, a test) went with the sign. ANDES counts an eigenvalue
 within ``EIG.config.tol`` as zero; the result now says zero too.
+
+The same goes for an oscillating eigenvalue of a system with no damping at all (machines
+on the classical model with ``D = 0``): it lies on the imaginary axis, and the solver
+returns it with a real part of about 1e-16 of either sign, so it is reported on the axis.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ from tensa.core.wrapper import Wrapper
 from tensa.core.wrapper.eig import (
     _ZERO_EIGENVALUE_TOL,
     _compute_damping_ratio,
+    _settle_axis,
     _settle_zero,
     _zero_tolerance,
 )
@@ -110,3 +115,59 @@ def test_a_mode_that_does_grow_is_still_reported_as_growing() -> None:
     result = wrapper.run_eig()
     assert [z.real for z in result.eigenvalues] == [1.033, 2e-6]
     assert result.damping_ratios == [-1.0, -1.0]
+
+
+# The undamped modes of the WSCC 9-bus case as two processors might return them: the same
+# frequencies, with a real part of rounding noise of either sign.
+UNDAMPED = [
+    complex(-5.36e-16, 13.3602),
+    complex(-5.36e-16, -13.3602),
+    complex(8.9e-16, 8.6898),
+    complex(8.9e-16, -8.6898),
+]
+
+
+@pytest.mark.parametrize("z", UNDAMPED)
+def test_an_undamped_mode_is_on_the_imaginary_axis(z: complex) -> None:
+    settled = _settle_axis(z)
+    assert settled == complex(0.0, z.imag)
+    assert str(settled.real) == "0.0"
+
+
+@pytest.mark.parametrize(
+    "z",
+    [
+        complex(-1e-9, 5.0),  # a real part that is 2e-10 of the size is damping, however light
+        complex(-1e-11, 5.0),
+        complex(2e-11, 5.0),  # and a growing one is growing
+        complex(-0.5, 0.0),  # a real mode has no axis to lie on
+        complex(3e-16, 0.0),
+        complex(-1.5, 6.0),
+        0j,
+    ],
+)
+def test_any_other_eigenvalue_is_not_moved_onto_the_axis(z: complex) -> None:
+    assert _settle_axis(z) == z
+
+
+def test_an_undamped_mode_has_a_damping_ratio_of_exactly_zero() -> None:
+    assert str(_compute_damping_ratio(complex(0.0, 13.36))) == "0.0"
+    assert str(_compute_damping_ratio(complex(-0.0, 13.36))) == "0.0"
+
+
+@pytest.mark.parametrize("sign", [-1.0, 1.0], ids=["negative", "positive"])
+def test_the_result_of_an_undamped_system_is_the_same_whatever_the_sign_of_the_noise(
+    sign: float,
+) -> None:
+    mu = [complex(sign * z.real, z.imag) for z in UNDAMPED]
+    wrapper = Wrapper()
+    wrapper._ss = _system([*mu, complex(2.7e-16, 2.1e-7), complex(2.7e-16, -2.1e-7)])  # type: ignore[assignment]
+    result = wrapper.run_eig()
+
+    assert result.mode_count == 6
+    # Four modes on the axis and the two zeros of the angle reference.
+    assert [z.real for z in result.eigenvalues] == [0.0] * 6
+    assert [z.imag for z in result.eigenvalues[:4]] == [z.imag for z in UNDAMPED]
+    assert [str(ratio) for ratio in result.damping_ratios[:4]] == ["0.0"] * 4
+    # Nothing is reported as growing, which is what the scatter and the report count by.
+    assert not any(z.real > 0.0 for z in result.eigenvalues)

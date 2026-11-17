@@ -63,7 +63,7 @@ class EigMixin(WrapperBase):
             except TypeError:
                 mu_iter = []
             for z in mu_iter:
-                z_complex = _settle_zero(complex(z), zero_tol)
+                z_complex = _settle_axis(_settle_zero(complex(z), zero_tol))
                 eigenvalues.append(ComplexNumber.from_complex(z_complex))
                 damping_ratios.append(_compute_damping_ratio(z_complex))
                 frequencies_hz.append(_compute_frequency_hz(z_complex))
@@ -186,6 +186,11 @@ class EigMixin(WrapperBase):
 
 # What ANDES counts as zero when its routine has no bound to give.
 _ZERO_EIGENVALUE_TOL = 1e-6
+# How small the real part of an oscillating eigenvalue is, next to the eigenvalue itself,
+# for it to be rounding noise (see ``_settle_axis``). The noise of a solver is some 1e-16 of
+# the size of the matrix it works on; a mode with real part this small has no damping that
+# means anything.
+_AXIS_NOISE = 1e-12
 
 
 def _zero_tolerance(ss: System) -> float:
@@ -212,6 +217,22 @@ def _settle_zero(z: complex, tol: float) -> complex:
     return 0j if abs(z) <= tol else z
 
 
+def _settle_axis(z: complex) -> complex:
+    """``z``, or its imaginary part alone when the real part is rounding noise beside it.
+
+    A system with no damping at all, such as machines on the classical model with ``D = 0``,
+    has eigenvalues on the imaginary axis, and the solver returns them with a real part of
+    some 1e-16 of either sign. Left as it came, the sign again decided whether the mode was
+    undamped (a damping ratio of 0) or growing (a positive real part, which the scatter and
+    the report count as unstable), and it can differ from one processor to the next, as for
+    the zero eigenvalue. An oscillating eigenvalue whose real part is under ``_AXIS_NOISE``
+    of its size is reported on the axis, with a damping ratio of exactly 0.
+    """
+    if z.imag != 0.0 and abs(z.real) <= _AXIS_NOISE * abs(z):
+        return complex(0.0, z.imag)
+    return z
+
+
 def _compute_damping_ratio(z: complex) -> float:
     """Per-mode damping ratio.
 
@@ -231,7 +252,8 @@ def _compute_damping_ratio(z: complex) -> float:
     zeta = -z.real / magnitude
     if not math.isfinite(zeta):
         return 0.0
-    return float(zeta)
+    # ``+ 0.0`` turns a negative zero (the ratio of an eigenvalue on the axis) into zero.
+    return float(zeta + 0.0)
 
 
 def _compute_frequency_hz(z: complex) -> float:
