@@ -9,6 +9,7 @@ from a checkout.
 from __future__ import annotations
 
 import io
+import json
 import tarfile
 import zipfile
 from pathlib import Path
@@ -29,16 +30,21 @@ def _metadata(version: str, name: str = "tensa") -> str:
     return f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n\nA long description.\n"
 
 
+_CATALOG = json.dumps({"version": 1, "examples": []})
 _WHEEL_FILES = {
     "tensa/__init__.py": "",
     "tensa/static/index.html": "<html></html>",
     "tensa/static/assets/index-abc.js": "//",
+    "tensa/examples/catalog.json": _CATALOG,
+    "tensa/examples/NOTICE.md": "notice",
     "tensa-{v}.dist-info/licenses/LICENSE": "license",
 }
 _SDIST_FILES = {
     "src/tensa/__init__.py": "",
     "src/tensa/static/index.html": "<html></html>",
     "src/tensa/static/assets/index-abc.js": "//",
+    "src/tensa/examples/catalog.json": _CATALOG,
+    "src/tensa/examples/NOTICE.md": "notice",
     "LICENSE": "license",
     "hatch_build.py": "",
     "pyproject.toml": "",
@@ -197,3 +203,94 @@ def test_another_distribution_is_refused(tmp_path: Path) -> None:
     _sdist(out)
     (problem,) = _script().check(out)
     assert "not the tensa distribution" in problem
+
+
+def _catalog_bundling(*paths: str, extra: tuple[str, ...] = ()) -> str:
+    """A catalog with one bundled entry (its file and any extra files) and one of the user's ANDES."""
+    entries = [
+        {
+            "provenance": {"kind": "bundled", "path": path},
+            "extra_files": [{"path": e} for e in extra],
+        }
+        for path in paths
+    ]
+    entries.append({"provenance": {"kind": "andes", "path": "ieee14/ieee14_full.xlsx"}})
+    return json.dumps({"version": 1, "examples": entries})
+
+
+@pytest.mark.parametrize(
+    "missing", ["tensa/examples/catalog.json", "tensa/examples/NOTICE.md"]
+)
+def test_a_wheel_without_the_example_catalog_or_its_notice_is_refused(
+    tmp_path: Path, missing: str
+) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out, drop=(missing,))
+    _sdist(out)
+    (problem,) = _script().check(out)
+    assert missing in problem
+    assert ".whl" in problem
+
+
+@pytest.mark.parametrize(
+    "missing", ["src/tensa/examples/catalog.json", "src/tensa/examples/NOTICE.md"]
+)
+def test_an_sdist_without_the_example_catalog_or_its_notice_is_refused(
+    tmp_path: Path, missing: str
+) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out)
+    _sdist(out, drop=(missing,))
+    (problem,) = _script().check(out)
+    assert missing in problem
+    assert ".tar.gz" in problem
+
+
+def test_every_file_the_catalog_bundles_must_be_in_both_archives(tmp_path: Path) -> None:
+    catalog = _catalog_bundling("a/a.m", extra=("a/a.dyr",))
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out, extra={"tensa/examples/catalog.json": catalog})
+    _sdist(out, extra={"src/tensa/examples/catalog.json": catalog})
+    problems = _script().check(out)
+    assert len(problems) == 4
+    assert any("tensa/examples/cases/a/a.m" in p and ".whl" in p for p in problems)
+    assert any("src/tensa/examples/cases/a/a.dyr" in p and ".tar.gz" in p for p in problems)
+    # The file of an entry that is not bundled (the user's ANDES holds it) is not asked for.
+    assert not any("ieee14" in p for p in problems)
+
+
+def test_an_archive_with_every_bundled_file_passes(tmp_path: Path) -> None:
+    catalog = _catalog_bundling("a/a.m", extra=("a/a.dyr",))
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(
+        out,
+        extra={
+            "tensa/examples/catalog.json": catalog,
+            "tensa/examples/cases/a/a.m": "m",
+            "tensa/examples/cases/a/a.dyr": "dyr",
+        },
+    )
+    _sdist(
+        out,
+        extra={
+            "src/tensa/examples/catalog.json": catalog,
+            "src/tensa/examples/cases/a/a.m": "m",
+            "src/tensa/examples/cases/a/a.dyr": "dyr",
+        },
+    )
+    assert _script().check(out) == []
+
+
+def test_a_catalog_that_cannot_be_read_is_refused(tmp_path: Path) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out, extra={"tensa/examples/catalog.json": "{not json"})
+    _sdist(out, extra={"src/tensa/examples/catalog.json": '{"examples": [{}]}'})
+    problems = _script().check(out)
+    assert len(problems) == 2
+    assert all("unreadable" in p for p in problems)
+

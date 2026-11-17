@@ -60,6 +60,11 @@ def _repository(root: Path, *, built_ui: bool = True) -> Path:
         shutil.copy2(SERVER_DIR / name, server / name)
     _write(server / "src" / "tensa" / "__init__.py", '"""Stand-in package."""\n')
     _write(server / "src" / "tensa" / "py.typed", "")
+    # The example catalog, its notice and any case file it bundles are package data that the
+    # release check asks for.
+    shutil.copytree(
+        SERVER_DIR / "src" / "tensa" / "examples", server / "src" / "tensa" / "examples"
+    )
     # Hatchling reads the repository's .gitignore, and the sdist carries it into
     # the wheel build, so use the real one.
     if (REPO_ROOT / ".gitignore").is_file():
@@ -127,6 +132,13 @@ def test_the_wheel_built_from_the_sdist_serves_the_ui(built: Built) -> None:
     assert "tensa/static/favicon.svg" in names
     assert "tensa/static/assets/index-abc.js" in names
     assert "tensa/__init__.py" in names
+
+
+def test_both_archives_carry_the_example_catalog_and_its_notice(built: Built) -> None:
+    for archive, prefix in ((built.wheel, "tensa"), (built.sdist, "src/tensa")):
+        names = _names(archive)
+        assert f"{prefix}/examples/catalog.json" in names, archive.name
+        assert f"{prefix}/examples/NOTICE.md" in names, archive.name
 
 
 def test_the_sdist_carries_the_ui_the_license_and_the_hook(built: Built) -> None:

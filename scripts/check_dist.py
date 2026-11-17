@@ -12,6 +12,8 @@ checks are the ones a release must not skip:
   ignored and the comparison is PEP 440, so ``v0.5.0-rc.1`` is ``0.5.0rc1``);
 * the wheel and the sdist carry the built web UI (``index.html`` and its
   assets), so the package serves a page instead of a 404;
+* both carry the example catalog and its ``NOTICE.md``, and every case file the
+  catalog bundles (kind ``bundled``), so a case it offers is never missing;
 * neither carries a source map (``*.map``), which would add about 10 MB for
   nothing;
 * both carry the license text, and the sdist the build hook it needs to be built
@@ -24,6 +26,7 @@ usage, and 0 otherwise.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import tarfile
 import zipfile
@@ -35,6 +38,8 @@ from packaging.version import InvalidVersion, Version
 
 WHEEL_UI = "tensa/static"
 SDIST_UI = "src/tensa/static"
+WHEEL_EXAMPLES = "tensa/examples"
+SDIST_EXAMPLES = "src/tensa/examples"
 
 
 def _metadata_field(text: str, field: str) -> str | None:
@@ -54,6 +59,39 @@ def _ui_problems(kind: str, names: Iterable[str], ui_dir: str) -> list[str]:
     return problems
 
 
+def _example_problems(
+    kind: str, names: Iterable[str], catalog_text: str | None, examples_dir: str
+) -> list[str]:
+    """The catalog, its notice and every file it bundles must be in the archive."""
+    names = set(names)
+    problems = [
+        f"{kind} has no {examples_dir}/{required}: the example cases are not packaged"
+        for required in ("catalog.json", "NOTICE.md")
+        if f"{examples_dir}/{required}" not in names
+    ]
+    if catalog_text is None:
+        return problems
+    try:
+        entries = json.loads(catalog_text)["examples"]
+        bundled = [
+            path
+            for entry in entries
+            if entry["provenance"]["kind"] == "bundled"
+            for path in [
+                entry["provenance"]["path"],
+                *(extra["path"] for extra in entry.get("extra_files", [])),
+            ]
+        ]
+    except (ValueError, KeyError, TypeError):
+        return [*problems, f"{kind} has an unreadable {examples_dir}/catalog.json"]
+    problems += [
+        f"{kind} has no {examples_dir}/cases/{path}, which the example catalog bundles"
+        for path in bundled
+        if f"{examples_dir}/cases/{path}" not in names
+    ]
+    return problems
+
+
 def _check_wheel(path: Path) -> tuple[str | None, list[str]]:
     """Return the wheel's version and its problems."""
     with zipfile.ZipFile(path) as wheel:
@@ -62,7 +100,10 @@ def _check_wheel(path: Path) -> tuple[str | None, list[str]]:
         if len(metadata_names) != 1:
             return None, [f"{path.name} has no single .dist-info/METADATA"]
         metadata = wheel.read(metadata_names[0]).decode("utf-8")
+        catalog = f"{WHEEL_EXAMPLES}/catalog.json"
+        catalog_text = wheel.read(catalog).decode("utf-8") if catalog in names else None
     problems = _ui_problems(path.name, names, WHEEL_UI)
+    problems += _example_problems(path.name, names, catalog_text, WHEEL_EXAMPLES)
     if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
         problems.append(f"{path.name} has no license file under .dist-info/licenses/")
     if _metadata_field(metadata, "Name") != "tensa":
@@ -79,8 +120,12 @@ def _check_sdist(path: Path) -> tuple[str | None, list[str]]:
         if info is None or (stream := sdist.extractfile(info)) is None:
             return None, [f"{path.name} has no PKG-INFO"]
         metadata = stream.read().decode("utf-8")
+        catalog = members.get(f"{SDIST_EXAMPLES}/catalog.json")
+        catalog_stream = sdist.extractfile(catalog) if catalog is not None else None
+        catalog_text = catalog_stream.read().decode("utf-8") if catalog_stream else None
     names = list(members)
     problems = _ui_problems(path.name, names, SDIST_UI)
+    problems += _example_problems(path.name, names, catalog_text, SDIST_EXAMPLES)
     for required in ("LICENSE", "hatch_build.py", "pyproject.toml"):
         if required not in members:
             problems.append(f"{path.name} has no {required}")
