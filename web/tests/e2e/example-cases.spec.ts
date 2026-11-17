@@ -146,6 +146,11 @@ test('the command palette finds the dialog, and Escape closes it and gives the k
 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  // The dialog hands the keyboard back a tick after it has left the page, from the one place
+  // where it keeps what had the focus when it opened, which the next opening writes too. Press
+  // Enter before that tick and the first close takes the button's place there, so the second
+  // close finds nothing and sends the keyboard to the Project tab. Wait until it is back.
+  await page.waitForFunction(() => document.activeElement !== document.body);
 
   // The same dialog from the keyboard on the Project tab: the key that opened it opens it
   // again, and the focus comes back to the button.
