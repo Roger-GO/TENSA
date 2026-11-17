@@ -29,6 +29,14 @@
  *   bar in line with one on its other face, and nothing is drawn over
  *   anything else; the placement is what it was after the reload
  *
+ *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
+ *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
+ *   bar of bus 12 that is drawn out to its tap keeps its gap to bar 13
+ *
+ *   in IEEE 14, a load dragged straight up past a generator -> its connector
+ *   keeps clear of the block of the generator, and nothing is drawn over
+ *   anything else, before and after a reload
+ *
  * What is on screen is read off the page (`drawnOnScreen` in
  * `sldDrawing.ts`) and handed to the checker the diagram itself routes by
  * (`findOverlaps` in `overlapCheck.ts`), so the boxes are the ones the
@@ -286,12 +294,13 @@ test('kundur_full.xlsx: bars keep their gap and no line reads as going through a
 
   // Generator 3 stands level with the bar of its bus (12), past its east tip,
   // towards bus 13 on the same row: its bar is drawn out to hold the tap.
+  // (50 past the end of the bar as it is drawn, which the taps made longer than the node.)
   const [generator, bus] = [opened.nodes['generator-3']!, opened.nodes['3']!];
   await dragInDiagram(
     page,
     'generator-3',
-    bus.x + bus.width + 50 - generator.x,
-    bus.y - generator.height / 2 - generator.y,
+    bus.x + (bus.barLeft ?? 0) + (bus.barLength ?? bus.width) + 50 - generator.x,
+    bus.y + 3 - generator.height / 2 - generator.y,
   );
   const aside = await settled(page);
   expect(problems(aside)).toEqual([]);
@@ -320,4 +329,74 @@ test('kundur_full.xlsx: bars keep their gap and no line reads as going through a
   for (const [id, edge] of Object.entries(tidy.edges)) {
     expect(again.edges[id]?.points, id).toEqual(edge.points);
   }
+});
+
+test('kundur_full.xlsx: a load pulled down beside bars 12 and 13 stays where it is dropped, and the bars keep their gap', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await openCase(page, 'kundur_full.xlsx');
+  await settled(page);
+  await openCopy(page, `no-overlap-kundur-bars-${Date.now()}`);
+  await settled(page);
+  await runPowerFlow(page);
+  const opened = await settled(page);
+  const [before, west, east] = [opened.nodes['load-PQ_0']!, opened.nodes['3']!, opened.nodes['8']!];
+  const gap = (d: typeof opened): number =>
+    d.nodes['8']!.x +
+    (d.nodes['8']!.barLeft ?? 0) -
+    (d.nodes['3']!.x + (d.nodes['3']!.barLeft ?? 0) + (d.nodes['3']!.barLength ?? 0));
+  expect(gap(opened)).toBeGreaterThan(20);
+  expect([west.y, east.y]).toEqual([560, 560]);
+
+  // Down to the row of the two buses and 24 west of where it hangs: the bar of
+  // bus 12 is drawn out to the tap of its connector, nearly to bar 13.
+  await dropInDiagram(page, 'load-PQ_0', -24, 148);
+  const moved = await settled(page);
+  expect(problems(moved)).toEqual([]);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  // Where it was dropped, to a pixel of the pointer: not in the nearest free place.
+  const load = moved.nodes['load-PQ_0']!;
+  expect(Math.abs(load.x - (before.x - 24))).toBeLessThan(1);
+  expect(Math.abs(load.y - (before.y + 148))).toBeLessThan(1);
+  await expect(page.getByText('Moved to the nearest free place')).toHaveCount(0);
+  expect(gap(moved)).toBeLessThan(gap(opened));
+  expect(gap(moved)).toBeGreaterThanOrEqual(12 - NEAR);
+});
+
+test('ieee14_full.xlsx: a load dragged straight up past a generator keeps its connector off the block, and after a reload', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await openCase(page, 'ieee14_full.xlsx');
+  await settled(page);
+  await openCopy(page, `no-overlap-ieee14-connector-${Date.now()}`);
+  await settled(page);
+  await runPowerFlow(page);
+  await settled(page);
+
+  await dropInDiagram(page, 'load-PQ_1', 0, -150);
+  const moved = await settled(page);
+  expect(problems(moved)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'with the load above the generator').toEqual([]);
+  // Whichever run of its connector is level with the block of generator 1, it
+  // is 6 or more from its edge (the rule of the checker, less the pixel of
+  // slack the screen reading is given).
+  const block = moved.nodes['generator-1']!;
+  const points = moved.edges['stub-load-PQ_1']!.points;
+  for (let i = 1; i < points.length; i += 1) {
+    const [[x1, y1], [x2, y2]] = [points[i - 1]!, points[i]!];
+    if (Math.max(y1, y2) <= block.y || Math.min(y1, y2) >= block.y + block.height) continue;
+    const off = Math.max(block.x - Math.max(x1, x2), Math.min(x1, x2) - (block.x + block.width), 0);
+    expect(off, `run ${i} of the connector`).toBeGreaterThanOrEqual(6 - NEAR);
+  }
+
+  await page.reload();
+  await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 90_000 });
+  const again = await settled(page);
+  expect(problems(again)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'after the reload').toEqual([]);
+  expect(again.edges['stub-load-PQ_1']!.points).toEqual(moved.edges['stub-load-PQ_1']!.points);
 });

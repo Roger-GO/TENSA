@@ -44,6 +44,7 @@
  * Everything is done in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
  */
+import { SYMBOL_CLEAR } from '../../src/components/sld/connections';
 import { test, expect, type Page, reloadWithCase } from './fixtures';
 import {
   drawing,
@@ -385,8 +386,28 @@ test('a component is connected by a drop on a bus, a line drawn from bus to bus,
   expect(now.edges['stub-generator-2']?.label).toMatch(/connection to bus 5$/);
   // No line of the system runs another way for it: the generator is drawn
   // for a moment where it stood, on a connector across the diagram to bus 5,
-  // and what goes round that connector is not kept.
-  expect(routesOfSystem(now)).toEqual(routesOfSystem(beforeUnit));
+  // and what goes round that connector is not kept. The one that ran along the
+  // edge of the place the generator comes to stand in, nearer than a line may
+  // run to a symbol, goes aside.
+  const placed = now.nodes['generator-2']!;
+  const along = (points: readonly [number, number][]): boolean =>
+    points.slice(1).some(([x2, y2], i) => {
+      const [x1, y1] = points[i]!;
+      const across = Math.max(
+        placed.x - Math.max(x1, x2),
+        Math.min(x1, x2) - (placed.x + placed.width),
+      );
+      return (
+        Math.max(y1, y2) > placed.y &&
+        Math.min(y1, y2) < placed.y + placed.height &&
+        across < SYMBOL_CLEAR
+      );
+    });
+  const [was, is] = [routesOfSystem(beforeUnit), routesOfSystem(now)];
+  for (const [id, points] of Object.entries(was)) {
+    if (!along(points)) expect(is[id], id).toEqual(points);
+  }
+  expect(Object.keys(is).sort()).toEqual(Object.keys(was).sort());
   // One symbol still: the machine did not come apart from its generator.
   expect(Object.keys(now.nodes).filter((id) => id.startsWith('generator-'))).toHaveLength(5);
   // One Undo for each of the two edits, the newest first.

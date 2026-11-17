@@ -6,8 +6,9 @@
  *
  * The rules of the overlap checker that hold it (`overlapCheck.ts`): two
  * bars keep `BAR_GAP` between them, a line does not end or turn short of a
- * bar in line with one on its other face, and no two lines share an end on a
- * bar. Each state is made the way the canvas makes it (`diagramStates.ts`).
+ * bar in line with one on its other face, a line does not run along the edge
+ * of a symbol, and no two lines share an end on a bar. Each state is made
+ * the way the canvas makes it (`diagramStates.ts`).
  *
  * jsdom has no `Worker`, so the worker client is replaced by the same ELK
  * engine run in-thread, as in `layout.test.ts`.
@@ -15,7 +16,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ElkNode } from 'elkjs/lib/elk-api';
 import type { TopologySummary } from '@/api/types';
-import { BAR_GAP, BAR_LENGTH } from '@/components/sld/connections';
+import { BAR_GAP, BAR_THICKNESS, SYMBOL_CLEAR } from '@/components/sld/connections';
 import {
   bothWays,
   dragged,
@@ -58,15 +59,40 @@ function nearestBars(diagram: Diagram): { apart: number; of: string } {
   return least;
 }
 
-/** How far a node of `diagram` goes to stand beside the east end of its bus, level with the bar. */
+/**
+ * How far a node of `diagram` goes to stand beside the east end of its bus,
+ * level with the bar: 50 past the end of the bar as it is drawn, which is as
+ * long as its taps have made it, and not as long as the node of the bus is
+ * wide.
+ */
 function beside(diagram: Diagram, id: string): [number, number] {
   const node = diagram.nodes.find((n) => n.id === id)!;
   const bus = diagram.nodes.find((n) => n.id === (node.data as { parentBus: string }).parentBus)!;
+  const bar = drawn(diagram).connections.bars.get(bus.id)!;
   const height = node.initialHeight ?? 41;
   return [
-    bus.position.x + BAR_LENGTH + 50 - node.position.x,
-    bus.position.y - height / 2 - node.position.y,
+    bus.position.x + bar.end + 50 - node.position.x,
+    bus.position.y + BAR_THICKNESS / 2 - height / 2 - node.position.y,
   ];
+}
+
+/** Whether the node `id` of `diagram` stands level with the bar of its bus, past its east end. */
+function levelPastTheTip(diagram: Diagram, id: string): boolean {
+  const node = diagram.nodes.find((n) => n.id === id)!;
+  const bus = diagram.nodes.find((n) => n.id === (node.data as { parentBus: string }).parentBus)!;
+  const bar = drawn(diagram).connections.bars.get(bus.id)!;
+  const middle = node.position.y + (node.initialHeight ?? 41) / 2;
+  return (
+    Math.abs(middle - (bus.position.y + BAR_THICKNESS / 2)) < 1 &&
+    node.position.x >= bus.position.x + bar.end
+  );
+}
+
+/** The room between the east end of the bar of bus `west` and the west end of the bar of bus `east`. */
+function gapBetween(diagram: Diagram, west: string, east: string): number {
+  const bars = drawn(diagram).connections.bars;
+  const at = (id: string) => diagram.nodes.find((n) => n.id === id)!.position.x;
+  return at(east) + bars.get(east)!.start - (at(west) + bars.get(west)!.end);
 }
 
 describe('nothing is nearer to anything else than it is told apart by', () => {
@@ -78,12 +104,20 @@ describe('nothing is nearer to anything else than it is told apart by', () => {
       states.push(['as it opens', first]);
       let diagram = tidied(first, false);
       states.push(['tidied', diagram]);
+      let level = 0;
       for (const id of diagram.nodes.filter((n) => n.type === 'generator').map((n) => n.id)) {
         const [dx, dy] = beside(diagram, id);
         const aside = dragged(diagram, id, dx, dy);
+        // Where it stands level with its bar and past its end, it was put where
+        // it was dragged to: the bar is drawn out to its tap. Where a bar of
+        // another bus is in the way, it stands as near as it can instead.
+        if (levelPastTheTip(aside, id)) level += 1;
         states.push([`${id} beside its bus`, aside]);
         states.push([`${id} beside its bus, tidied`, tidied(aside, false)]);
       }
+      // A generator really did stand beside its bus in some of the states, so
+      // that a drop shifted away from it cannot leave the sweep with nothing.
+      expect(level, `${name}: generators beside their bus`).toBeGreaterThan(0);
       // The two drags one after the other, as the review made them.
       const generators = diagram.nodes.filter((n) => n.type === 'generator');
       const loads = diagram.nodes.filter((n) => n.type === 'load');
@@ -106,18 +140,53 @@ describe('nothing is nearer to anything else than it is told apart by', () => {
     }, 300_000);
   }
 
-  it('Kundur: bars 12 and 13 stand clear of each other with a generator beside bus 12', async () => {
-    // The generator of bus 12 stands level with its bar, past its east tip,
-    // towards bus 13 on the same row: the bar is drawn out to its tap, and no
-    // nearer to bus 13 than BAR_GAP.
+  it('Kundur: a load pulled down beside the bars of buses 12 and 13 is left where it was dropped, and the bars keep their gap', async () => {
+    // The load of bus 3 dropped level with the row of bus 12 and bus 13, west
+    // of the bar of bus 13: bus 12's bar is drawn out to the tap of its
+    // connector, and no nearer to bar 13 than BAR_GAP. Drawn out to within 8 of
+    // it, the two read as one bar with a break in it, and the drop was refused
+    // for that: it went back 24 to the east, with a notice.
     const first = await opened(KUNDUR);
-    const [dx, dy] = beside(first, 'generator-3');
-    const aside = dragged(first, 'generator-3', dx, dy);
-    const bars = drawn(aside).connections.bars;
-    const at = (id: string) => aside.nodes.find((n) => n.id === id)!.position.x;
-    expect(at('8') + bars.get('8')!.start - (at('3') + bars.get('3')!.end)).toBeGreaterThanOrEqual(
-      BAR_GAP,
-    );
+    const was = first.nodes.find((n) => n.id === 'load-PQ_0')!.position;
+    const aside = dragged(first, 'load-PQ_0', -24, 148);
+    const now = aside.nodes.find((n) => n.id === 'load-PQ_0')!.position;
+    expect(now).toEqual({ x: was.x - 24, y: was.y + 148 });
+    // The bar did grow towards the load, which is what the test is about.
+    expect(gapBetween(aside, '3', '8')).toBeLessThan(gapBetween(first, '3', '8'));
+    expect(gapBetween(aside, '3', '8')).toBeGreaterThanOrEqual(BAR_GAP);
     expect(bothWays(aside)).toEqual([]);
+    expect(bothWays(tidied(aside, false))).toEqual([]);
+  });
+
+  it('IEEE 14: a load dragged straight up past a generator keeps its connector off the block, drop, tidy and all', async () => {
+    // The load of bus 2 set down above generator 1, whose block it overlaps by a
+    // few pixels across: the nearest free place put its connector 2.5 beside
+    // the block for the whole of its height, where line and border read as one.
+    const first = await opened(IEEE14);
+    const generator = first.nodes.find((n) => n.id === 'generator-1')!;
+    const [width, height] = [generator.initialWidth ?? 0, generator.initialHeight ?? 0];
+    const states: [string, Diagram][] = [];
+    const dropped = dragged(first, 'load-PQ_1', 0, -150);
+    states.push(['dropped', dropped]);
+    states.push(['tidied', tidied(dropped, false)]);
+    states.push(['drawn as it is kept', settled(tidied(dropped, false))]);
+    for (const [what, state] of states) {
+      expect(bothWays(state), what).toEqual([]);
+      const [x, y] = [generator.position.x, generator.position.y];
+      const stub = drawn(state).connections.routes.get('stub-load-PQ_1')!.points;
+      // Wherever a run of the connector is level with the block, it is as far
+      // from the edge as a line keeps from a symbol.
+      for (let i = 1; i < stub.length; i += 1) {
+        const [a, b] = [stub[i - 1]!, stub[i]!];
+        if (
+          Math.max(a[1], b[1]) <= y - SYMBOL_CLEAR ||
+          Math.min(a[1], b[1]) >= y + height + SYMBOL_CLEAR
+        ) {
+          continue;
+        }
+        const near = Math.min(...[a[0], b[0]].map((px) => Math.max(x - px, px - (x + width), 0)));
+        expect(near, `${what}: run ${i} of the connector`).toBeGreaterThanOrEqual(SYMBOL_CLEAR);
+      }
+    }
   });
 });
