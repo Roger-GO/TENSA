@@ -116,6 +116,8 @@ test('Open on a card closes the dialog and puts the case on the diagram', async 
   // The 14 buses of the case are drawn, and the Project tab names it as the loaded case.
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(14, { timeout: 90_000 });
   await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('ieee14_full.xlsx');
+  // ... and says how large it is, as the card did before it was opened.
+  await expect(page.getByTestId('case-nav-loaded-size')).toHaveText('14 buses');
 
   // Asked again, the dialog says which case is the open one.
   await page.getByTestId('example-cases-open').click();

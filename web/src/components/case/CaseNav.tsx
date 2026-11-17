@@ -31,8 +31,8 @@ import type { TopologySummary } from '@/api/types';
  *   `WorkspaceFilePicker`. The picker creates a session lazily and
  *   wires the case-load mutation.
  * - **Case loaded** (`case.selection !== null`): renders a summary card
- *   with the case name, addfiles, topology state badge, a "Change
- *   case" button and an "Add element" button. Change case opens
+ *   with the case name, how many buses it has, addfiles, topology state
+ *   badge, a "Change case" button and an "Add element" button. Change case opens
  *   `ChangeCaseConfirmDialog` (R18: this is the appropriate use of a
  *   modal — destructive confirmation). Add element opens the Add element
  *   panel; while nothing can be added, it is greyed out and the card says
@@ -107,6 +107,14 @@ function SummaryCard({ selection, topology, pflowRunning, onChangeCase }: Summar
         >
           {isBlank ? '— blank —' : (openName ?? '')}
         </p>
+        {/* How big it is, as the example cases say before it is opened: the buses are the
+            count a first look at a case wants (the generators are counted twice once a case has
+            machines, a static one and a dynamic one, so they are left out). */}
+        {topology !== null && !isBlank ? (
+          <p className="text-muted-foreground text-xs" data-testid="case-nav-loaded-size">
+            {topology.buses.length} {topology.buses.length === 1 ? 'bus' : 'buses'}
+          </p>
+        ) : null}
         {savedCopy !== null ? (
           <div
             role="status"

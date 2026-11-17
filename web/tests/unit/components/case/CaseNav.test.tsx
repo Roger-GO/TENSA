@@ -167,6 +167,38 @@ describe('<CaseNav />', () => {
     expect(screen.getByRole('button', { name: /change case/i })).toBeEnabled();
   });
 
+  it('says how many buses the loaded case has, once its topology is known', () => {
+    seedLoadedCase();
+    const buses = Array.from({ length: 9 }, (_, i) => ({
+      idx: i + 1,
+      name: `Bus ${i + 1}`,
+      kind: 'Bus',
+      params: {},
+      job_id: null,
+    }));
+    useCaseStore.setState({ topology: { ...loadedTopology('pre-setup'), buses } });
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { Wrapper } = makeWrapper();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    expect(screen.getByTestId('case-nav-loaded-size')).toHaveTextContent('9 buses');
+  });
+
+  it('says "1 bus" for a one-bus case, and nothing before the topology is known', () => {
+    seedLoadedCase();
+    const bus = { idx: 1, name: 'Bus 1', kind: 'Bus', params: {}, job_id: null };
+    useCaseStore.setState({ topology: { ...loadedTopology('pre-setup'), buses: [bus] } });
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { Wrapper } = makeWrapper();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+    expect(screen.getByTestId('case-nav-loaded-size')).toHaveTextContent(/^1 bus$/);
+
+    act(() => useCaseStore.setState({ topology: null }));
+    expect(screen.queryByTestId('case-nav-loaded-size')).toBeNull();
+  });
+
   it('Change case opens the confirm dialog; Cancel closes it without side effects', async () => {
     seedLoadedCase();
     fetchSpy.mockImplementation(() => new Promise(() => {}));
@@ -333,7 +365,7 @@ describe('<CaseNav />', () => {
       const user = userEvent.setup();
       seedLoadedCase();
       useCaseStore.setState({ savedCopy: 'ieee14-walk.xlsx' });
-      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({})));
+      fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse(loadedTopology('pre-setup'))));
       const { Wrapper } = makeWrapper();
       render(<CaseNav />, { wrapper: Wrapper });
 
