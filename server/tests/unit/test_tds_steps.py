@@ -18,19 +18,25 @@ from typing import Any
 import numpy as np
 import pytest
 
-from tensa.core.tds_steps import StepClock, land_on_time, solved_instant, stored_step
+from tensa.core.tds_steps import (
+    StepClock,
+    land_on_time,
+    landing_slack,
+    solved_instant,
+    stored_step,
+)
 
 pytestmark = pytest.mark.unit
 
 # The shortest step the scripted solver takes. ANDES's own gives up between
-# 1e-8 s and 1e-10 s (measured on IEEE 14).
+# 1e-8 s and 1e-10 s (measured on IEEE 14) and below about 1e-7 s on IEEE 39.
 _SHORTEST_STEP = 1e-9
 
 
 def _system(tf: float, step: float, *, start: float = 0.0, events: Collection[float] = ()) -> Any:
     """What the hook is handed: the clock, the step, and the solution's label."""
     return SimpleNamespace(
-        dae=SimpleNamespace(t=np.array(start)),
+        dae=SimpleNamespace(t=np.array(start), kcount=0),
         TDS=SimpleNamespace(
             h=0.0, deltat=step, busted=False, callpert=None, config=SimpleNamespace(tf=tf)
         ),
@@ -50,9 +56,11 @@ def _calc_h(system: Any) -> None:
         tds.h = later[0] - now
 
 
-def _run(system: Any, *, failing: Collection[int] = ()) -> None:
+def _run(
+    system: Any, *, failing: Collection[int] = (), shortest: float = _SHORTEST_STEP
+) -> None:
     """``TDS.run``: ``failing`` are the calls (counted from 0) whose step the
-    solver does not converge on, besides any step shorter than it can take."""
+    solver does not converge on, besides any step shorter than ``shortest``."""
     tds, dae = system.TDS, system.dae
     _calc_h(system)
     if float(dae.t) > 0:  # ``init_resume``
@@ -60,17 +68,18 @@ def _run(system: Any, *, failing: Collection[int] = ()) -> None:
     call = 0
     while float(dae.t) - tds.h < tds.config.tf and not tds.busted:
         tds.callpert(dae.t, system)
-        solved = call not in failing and tds.h >= _SHORTEST_STEP
+        solved = call not in failing and tds.h >= shortest
         call += 1
         if solved:
             system.holds = float(dae.t)
             system.stored.append(float(dae.t))
+            dae.kcount += 1
             _calc_h(system)
             dae.t += tds.h
         else:
             dae.t -= tds.h
             tds.deltat *= 0.5
-            if tds.deltat < _SHORTEST_STEP:
+            if tds.deltat < shortest:
                 tds.deltat = 0.0
             _calc_h(system)
             if tds.h == 0:
@@ -85,6 +94,7 @@ def _record(
     landing: bool = True,
     stop_at_call: int | None = None,
     failing: Collection[int] = (),
+    shortest: float = _SHORTEST_STEP,
 ) -> list[tuple[float, float]]:
     """Run with the hook the worker installs; return ``(label, what the System held)``."""
     clock = StepClock()
@@ -103,7 +113,7 @@ def _record(
             rows.append((at, system.holds))
 
     system.TDS.callpert = hook
-    _run(system, failing=failing)
+    _run(system, failing=failing, shortest=shortest)
     at = clock.end(system)
     if at is not None:
         rows.append((at, system.holds))
@@ -365,3 +375,69 @@ def test_a_system_without_events_lands_on_tf_alone() -> None:
     system.TDS.h = 1 / 30
     land_on_time(system)
     assert float(system.dae.t) == 0.5
+
+
+@pytest.mark.parametrize("tf", [5.0, 10.0])
+def test_a_run_of_the_default_step_to_5_or_10_s_does_not_end_on_a_step_andes_cannot_take(
+    tf: float,
+) -> None:
+    """IEEE 39 and the WECC case ended "not converged" a few 1e-14 s short of
+    ``tf`` when run to 5 s or 10 s (300 steps of 1/30 s add up to
+    9.999999999999975 s), and not when run to 2 s or 20 s."""
+    without = _system(tf=tf, step=1 / 30)
+    _record(without, landing=False)
+    assert without.TDS.busted
+    assert 0.0 < tf - float(without.dae.t) < 3e-14
+
+    system = _system(tf=tf, step=1 / 30)
+    rows = _record(system)
+    labels = [label for label, _ in rows]
+    assert not system.TDS.busted
+    assert float(system.dae.t) == tf
+    assert labels[-1] == tf
+    assert len(labels) == round(tf * 30) + 1
+    # The last step is the default one a few 1e-14 s longer, not a step of its own.
+    assert min(np.diff(labels)) > 0.0333
+    assert labels == system.stored
+
+
+def test_a_run_of_an_hour_ends_on_a_sliver_of_nanoseconds_which_it_lands_on() -> None:
+    """The rounding grows with the run: 3600 s of 1/30 s steps end 2.6e-9 s
+    short, more than ``_EPS``, and as much a step IEEE 39 cannot take as a
+    shorter one."""
+    without = _system(tf=3600.0, step=1 / 30)
+    _record(without, landing=False, shortest=1e-7)
+    assert without.TDS.busted
+    assert 1e-9 < 3600.0 - float(without.dae.t) < 1e-8
+
+    system = _system(tf=3600.0, step=1 / 30)
+    rows = _record(system, shortest=1e-7)
+    assert not system.TDS.busted
+    assert float(system.dae.t) == 3600.0
+    assert rows[-1] == (3600.0, 3600.0)
+
+
+def test_the_slack_is_a_nanosecond_for_a_short_run_and_grows_with_the_steps_taken() -> None:
+    system = _system(tf=10.0, step=1 / 30)
+    assert landing_slack(system, 10.0) == 1e-9
+    system.dae.kcount = 300
+    assert landing_slack(system, 10.0) == 1e-9
+
+    # An hour of 1/30 s steps: more than the rounding it came to (2.6e-9 s) and
+    # far under a step the solver takes.
+    system.dae.kcount = 108_000
+    assert 2.7e-9 < landing_slack(system, 3600.0) < 1e-6
+
+    # A System that does not count its steps keeps the nanosecond.
+    del system.dae.kcount
+    assert landing_slack(system, 3600.0) == 1e-9
+
+
+def test_a_step_a_microsecond_short_of_tf_is_left_alone_however_long_the_run() -> None:
+    system = _system(tf=3600.0, step=1 / 30)
+    system.dae.kcount = 108_000
+    system.dae.t += 3600.0 - 1e-6
+    system.TDS.h = 1 / 30
+    land_on_time(system)
+    assert float(system.dae.t) == pytest.approx(3600.0 - 1e-6)
+    assert float(system.dae.t) != 3600.0

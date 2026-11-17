@@ -31,12 +31,15 @@ as the row is read.
 
 **The step ANDES cannot take.** ANDES clips a step that would pass ``tf`` or an
 event time, and compares by subtraction: steps that add up to a rounding error
-short of that time (fifteen steps of 1/30 s towards 0.5 s) are not clipped, and
-what is left is a last step of some 1e-17 s. The solver cannot take a step
-shorter than about a nanosecond, so it shrinks the step until it gives up and
-the run ends "not converged" on the time it was asked to reach.
+short of that time (fifteen steps of 1/30 s towards 0.5 s, three hundred
+towards 10 s) are not clipped, and what is left is a last step of 1e-17 s to
+1e-14 s. The solver cannot take a step that short (IEEE 39 and the WECC case
+fail below about 1e-7 s), so it shrinks the step until it gives up and the run
+ends "not converged" on the time it was asked to reach. The shrinking never
+helps, because the step is clipped to the time left and that does not change.
 :func:`land_on_time` lets the step about to be solved run that rounding error
-further, onto the time itself.
+further, onto the time itself. Every run of the server goes through it, from
+the hook ``Wrapper.run_tds`` installs, the one place a System is run.
 
 The rules rest on how ANDES 2.0.0 runs its loop (contract 13 in
 ``server/ANDES_VERSIONS.md``).
@@ -155,6 +158,22 @@ def stored_step(system: Any, at: float) -> Iterator[None]:
         system.vars_to_models()
 
 
+def landing_slack(system: Any, at: float) -> float:
+    """The most a step end can lie short of ``at`` and still be meant for it.
+
+    ANDES reaches a time by adding step sizes to ``dae.t``, and each addition
+    rounds to the numbers near the sum, which are ``numpy.spacing(at)`` apart:
+    by half a spacing at most. A run of ``dae.kcount`` steps is so off by half
+    that many spacings at most, and the whole of them leaves room for the
+    additions of the steps ANDES retries. Over a run of a few hundred seconds
+    that is far under ``_EPS``, which then holds; 3600 s of 1/30 s steps end
+    2.6e-9 s short, and IEEE 39 run to 4100 s with 0.2 s steps stops 1.5e-9 s
+    short, where its solver cannot take a step of that size either.
+    """
+    steps = int(getattr(system.dae, "kcount", 0) or 0)
+    return max(_EPS, steps * float(np.spacing(at)))
+
+
 def land_on_time(system: Any) -> None:
     """Let the step about to be solved end on ``tf`` or on the next event time
     when it would end a rounding error before it (the module docstring says
@@ -169,9 +188,9 @@ def land_on_time(system: Any) -> None:
     if following < len(switch_times):
         landing = min(landing, float(switch_times[following]))
     gap = landing - end
-    if 0.0 < gap <= _EPS:
+    if 0.0 < gap <= landing_slack(system, landing):
         system.dae.t += gap
         tds.h += gap
 
 
-__all__ = ["StepClock", "land_on_time", "solved_instant", "stored_step"]
+__all__ = ["StepClock", "land_on_time", "landing_slack", "solved_instant", "stored_step"]
