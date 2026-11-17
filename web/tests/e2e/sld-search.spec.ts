@@ -7,22 +7,42 @@
  *   one -> type "exciter" -> the one exciter -> press it -> the symbol of its
  *   generating unit is selected, in the middle of the pane -> Search again,
  *   press Governors -> the five governors, nothing typed -> type "pss" -> the
- *   diagram has none, and which dynamic models it has -> open WSCC 9, which
- *   has no dynamic models -> no button for a controller -> type "exciter" ->
- *   the case is static-only
+ *   diagram has none, and which dynamic models it has -> add a three-bus
+ *   MATPOWER case, which has no dynamic models, and open it -> no button for
+ *   a controller -> type "exciter" -> the case is static-only
  *
  * It drives the real UI against a real `tensa serve` (see `playwright.config.ts`).
  * The unit tests check the words and the buttons against a stand-in for React
  * Flow; this one checks them on the cases the server reads, where the rows are
- * the nodes the diagram really draws. It moves nothing, so both cases keep
- * their layout for the other specs.
+ * the nodes the diagram really draws. It moves nothing, so the seeded case
+ * keeps its layout for the other specs. The cases of a first run all have
+ * machines, so the case with none is a small one the spec adds to the workspace.
  */
 import { test, expect, type Page } from './fixtures';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
 const DYNAMIC_CASE = 'ieee14_full.xlsx';
-const STATIC_CASE = 'wscc9.xlsx';
+
+/** A three-bus MATPOWER case: ANDES loads and solves it, and it holds no dynamic model. */
+const STATIC_CASE_TEXT = `function mpc = static3
+mpc.version = '2';
+mpc.baseMVA = 100;
+mpc.bus = [
+  1 3 0 0 0 0 1 1.0 0 110 1 1.1 0.9;
+  2 2 0 0 0 0 1 1.0 0 110 1 1.1 0.9;
+  3 1 90 30 0 0 1 1.0 0 110 1 1.1 0.9;
+];
+mpc.gen = [
+  1 0 0 300 -300 1.0 100 1 250 10 0 0 0 0 0 0 0 0 0 0 0;
+  2 80 0 300 -300 1.0 100 1 250 10 0 0 0 0 0 0 0 0 0 0 0;
+];
+mpc.branch = [
+  1 2 0.01 0.1 0.02 250 250 250 0 0 1 -360 360;
+  2 3 0.01 0.1 0.02 250 250 250 0 0 1 -360 360;
+  1 3 0.01 0.1 0.02 250 250 250 0 0 1 -360 360;
+];
+`;
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -127,9 +147,15 @@ test('the search finds the controllers of a case by what they are', async ({ pag
   await expect(input).toBeHidden();
 
   // ---- A case with no dynamic models --------------------------------------
-  await openCase(page, STATIC_CASE, 9);
+  const staticCase = `static3-${Date.now().toString(36)}.m`;
+  await page.getByTestId('add-case-files-input').setInputFiles({
+    name: staticCase,
+    mimeType: 'text/plain',
+    buffer: Buffer.from(STATIC_CASE_TEXT),
+  });
+  await openCase(page, staticCase, 3);
   await openSearch(page);
-  await expect(filters).toHaveText(['All 15', 'Buses 9', 'Generators 3', 'Loads 3']);
+  await expect(filters).toHaveText(['All 6', 'Buses 3', 'Generators 2', 'Loads 1']);
   await input.fill('exciter');
   await expect(page.getByTestId('sld-node-search-empty')).toContainText(
     'This case is static-only: it has no machines, exciters, governors or other dynamic models.',

@@ -18,4 +18,4 @@ vi.mock('@/components/sld/elkClient', async () => {
   return { elkLayout: vi.fn((graph: ElkNode) => elk.layout(graph)) };
 });
 
-holdTidy('WSCC 9', WSCC9, { device: 'load-PQ_0', dx: -112, dy: 0 });
+holdTidy('WSCC 9', WSCC9, { device: 'load-PQ_1', dx: -112, dy: 0 });

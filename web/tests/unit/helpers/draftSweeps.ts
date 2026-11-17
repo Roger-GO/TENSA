@@ -240,8 +240,18 @@ const DRAFT_MOVES: readonly (readonly [number, number])[] = [
   [240, -180],
 ];
 
-/** The sweeps, for the example case `name` whose topology is `topology`. */
-export function holdDrafts(name: string, topology: TopologySummary): void {
+/**
+ * The sweeps, for the example case `name` whose topology is `topology`. One of them
+ * drags a draft onto the longest run of each line and holds the diagram to what a draft
+ * leaves behind; it also holds that some line had to go round the draft, which is a
+ * fact of where the symbols of a case stand, so a case where none does says
+ * `linesGoRound: false`.
+ */
+export function holdDrafts(
+  name: string,
+  topology: TopologySummary,
+  { linesGoRound = true }: { linesGoRound?: boolean } = {},
+): void {
   describe(`nothing overlaps on ${name} with drafts on it`, () => {
     it('wherever a draft is dropped: on free ground, on a bar, on a symbol, on a line', async () => {
       const first = settled(await opened(topology));
@@ -331,7 +341,7 @@ export function holdDrafts(name: string, topology: TopologySummary): void {
       }
       expect(found).toEqual([]);
       // Some of the lines did have to go round it.
-      expect(wentRound).toBeGreaterThan(0);
+      if (linesGoRound) expect(wentRound).toBeGreaterThan(0);
     }, 240_000);
 
     it('when a draft is given any bus from its form, from near that bus and from far', async () => {

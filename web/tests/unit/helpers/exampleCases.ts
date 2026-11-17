@@ -1,7 +1,7 @@
 /**
  * The three example cases the server seeds a workspace with, as the diagram
  * reads them: the buses, the branches between them, and the devices on them.
- * Each is the topology ANDES gives for the file of that name, cut down to
+ * Each is the topology the server gives for the file of that name, cut down to
  * what places and routes a diagram (no electrical parameters).
  */
 import type { TopologyEntry, TopologySummary } from '@/api/types';
@@ -71,8 +71,51 @@ export const IEEE14: TopologySummary = {
   ],
 };
 
-/** `wscc9.xlsx` of ANDES. */
+/**
+ * `wscc9.xlsx` of TENSA (the file `scripts/build_wscc9.py` writes): the network of the book
+ * and a classical machine on each of its three generators. The three step-up transformers
+ * are lines at their nominal ratio, as the server's topology lists them. The branches and
+ * the loads are numbered as ANDES numbers those of its own `wscc9.xlsx` (the six lines, then
+ * the three transformers, and the loads at buses 5, 6 and 8), and the buses at the ends of a
+ * line are the order the book gives them in.
+ */
 export const WSCC9: TopologySummary = {
+  state: 'pre-setup',
+  buses: Array.from({ length: 9 }, (_, i) => entry(i + 1, 'Bus', {}, `Bus ${i + 1}`)),
+  lines: branches(
+    [
+      [4, 5],
+      [4, 6],
+      [5, 7],
+      [6, 9],
+      [7, 8],
+      [8, 9],
+      [1, 4],
+      [2, 7],
+      [3, 9],
+    ],
+    0,
+  ),
+  transformers: [],
+  generators: [
+    entry(2, 'PV', { bus: 2 }),
+    entry(3, 'PV', { bus: 3 }),
+    entry(1, 'Slack', { bus: 1 }),
+    ...[1, 2, 3].map((n) => entry(n, 'GENCLS', { bus: n, gen: n })),
+  ],
+  loads: loads([5, 6, 8], 0),
+  shunts: [],
+  controllers: [],
+};
+
+/**
+ * The network of ANDES's own `wscc9.xlsx`, which has no machines: the case an earlier TENSA
+ * seeded under the name `wscc9.xlsx`, and that a workspace made then still holds. The tests
+ * of a drag, a draft or a bend that were found on its drawing keep it, since where a line
+ * goes round something depends on where the symbols stand, and the generators of
+ * `WSCC9` stand in other places.
+ */
+export const WSCC9_NETWORK: TopologySummary = {
   state: 'pre-setup',
   buses: Array.from({ length: 9 }, (_, i) => entry(i + 1, 'Bus', {}, `Bus ${i + 1}`)),
   lines: branches(

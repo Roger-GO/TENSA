@@ -1,11 +1,20 @@
 {
   "version": 1,
   "id": "wscc9",
+  "disturbance": {
+    "description": "Example 2.6 of the book: a three-phase fault at bus 7, at the end of line 5-7, cleared after 5 cycles by opening line 5-7",
+    "specs": [
+      {"kind": "fault", "bus_idx": 7, "tf": 1.0, "tc": 1.0833333333333333, "xf": 0.0001, "rf": 0.0},
+      {"kind": "toggle", "model": "Line", "dev_idx": "Line_2", "t": 1.0833333333333333}
+    ],
+    "tf": 10.0,
+    "h": 0.008333333333333333
+  },
   "checks": [
     {
       "name": "Bus voltage magnitudes against pandapower",
       "quantity": "pf.bus_voltage_pu",
-      "expected": {"1": 1.04, "2": 1.025, "3": 1.025, "4": 1.025307246, "5": 0.99972314, "6": 1.012254969, "7": 1.026831711, "8": 1.017266115, "9": 1.032689368},
+      "expected": {"1": 1.04, "2": 1.025, "3": 1.025, "4": 1.025788384, "5": 0.995630847, "6": 1.012654314, "7": 1.025769358, "8": 1.015882571, "9": 1.032352939},
       "tolerance": {"abs": 0.0001},
       "kind": "independent-solver",
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
@@ -14,7 +23,7 @@
     {
       "name": "Bus voltage angles against pandapower",
       "quantity": "pf.bus_angle_deg",
-      "expected": {"1": 0.0, "2": 9.3506703, "3": 5.1419786, "4": -2.2174086, "5": -3.6801508, "6": -3.5665554, "7": 3.7961366, "8": 1.3372657, "9": 2.444823},
+      "expected": {"1": 0.0, "2": 9.2800055, "3": 4.6647513, "4": -2.2167878, "5": -3.9888054, "6": -3.6873962, "7": 3.7197011, "8": 0.727536, "9": 1.966716},
       "tolerance": {"abs": 0.01},
       "kind": "independent-solver",
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
@@ -23,7 +32,7 @@
     {
       "name": "Network losses against pandapower",
       "quantity": "pf.loss_mw",
-      "expected": 4.627461,
+      "expected": 4.641025,
       "tolerance": {"abs": 0.01, "rel": 0.001},
       "kind": "independent-solver",
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
@@ -32,11 +41,111 @@
     {
       "name": "Slack active power against pandapower",
       "quantity": "pf.slack_p_mw",
-      "expected": 71.627461,
+      "expected": 71.641025,
       "tolerance": {"abs": 0.01, "rel": 0.001},
       "kind": "independent-solver",
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
       "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Frequency of mode 1 of 2, 1.383 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 1.383025,
+      "tolerance": {"abs": 0.001},
+      "window_hz": [1.106, 1.66],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Damping ratio of mode 1 of 2, 1.383 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.0,
+      "tolerance": {"abs": 0.0001},
+      "window_hz": [1.106, 1.66],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Frequency of mode 2 of 2, 2.126 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 2.126344,
+      "tolerance": {"abs": 0.001},
+      "window_hz": [1.755, 2.498],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Damping ratio of mode 2 of 2, 2.126 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.0,
+      "tolerance": {"abs": 0.0001},
+      "window_hz": [1.755, 2.498],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Largest rotor angle spread in the disturbance run",
+      "quantity": "tds.max_angle_spread_deg",
+      "expected": 85.787409,
+      "tolerance": {"abs": 0.05},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Rotor angle spread at the end of the disturbance run",
+      "quantity": "tds.final_angle_spread_deg",
+      "expected": 74.617142,
+      "tolerance": {"abs": 0.5},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Lowest bus voltage in the disturbance run",
+      "quantity": "tds.min_voltage_pu",
+      "expected": 0.001093,
+      "tolerance": {"abs": 5e-05},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Lowest machine frequency in the disturbance run",
+      "quantity": "tds.frequency_nadir_hz",
+      "expected": 59.962257,
+      "tolerance": {"abs": 0.002},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Bus voltage magnitudes against the solution printed in the book",
+      "quantity": "pf.bus_voltage_pu",
+      "expected": {"1": 1.04, "2": 1.025, "3": 1.025, "4": 1.026, "5": 0.996, "6": 1.013, "7": 1.026, "8": 1.016, "9": 1.032},
+      "tolerance": {"abs": 0.0006},
+      "kind": "published",
+      "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints the magnitudes to three decimals, so the tolerance is the rounding (0.0005) and a little over."
+    },
+    {
+      "name": "Angles of the generator buses against the solution printed in the book",
+      "quantity": "pf.bus_angle_deg",
+      "expected": {"2": 9.3, "3": 4.7},
+      "tolerance": {"abs": 0.06},
+      "kind": "published",
+      "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints the angles to 0.1 degree, so the tolerance is the rounding (0.05) and a little over. The quoted table gives no usable angle for the other buses."
+    },
+    {
+      "name": "Slack active power against the solution printed in the book",
+      "quantity": "pf.slack_p_mw",
+      "expected": 71.6,
+      "tolerance": {"abs": 0.1},
+      "kind": "published",
+      "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints 71.6 MW for the generator at bus 1."
     }
   ]
 }

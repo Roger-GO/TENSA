@@ -37,6 +37,11 @@
           "url": "https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm"
         },
         {
+          "text": "ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_ieee14_readme,\n  title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},\n  howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},\n  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md"
+        },
+        {
           "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
           "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
           "doi": "10.1109/TPWRS.2020.3017019",
@@ -49,9 +54,96 @@
         "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
       },
       "caveats": [
-        "The dynamic data was written for ANDES (by H. Cui, according to the ANDES cases README) and is not published by the IEEE.",
-        "The power flow data is a PSS/E version prepared by J. Conto and distributed with ANDES. It has not been compared with the data of the University of Washington archive."
-      ]
+        "The dynamic data (round-rotor machines, a TGOV1 governor on each, an EXST1 exciter on one machine and an ESST3A on each of the other four) was written for ANDES by H. Cui, according to the ANDES cases README, and is not published by the IEEE.",
+        "This is not the IEEE 14-bus case as the University of Washington archive distributes it. The line and transformer reactances, the line charging and the shunt at bus 9 are the archive's. The rest was changed in the PSS/E version prepared by J. Conto: the loads at buses 3, 4, 6 and 14 (bus 3 takes 50 MW and 25 MVAr where the archive has 94.2 MW and 19.0 MVAr), a 15 MVAr shunt at bus 14, the dispatch (generators at buses 2, 3, 6 and 8 deliver 40, 40, 30 and 35 MW, where the archive has power at buses 1 and 2 only), the voltage set-points (1.03 pu at buses 1, 2, 6 and 8 and 1.01 at bus 3, where the archive has 1.060, 1.045, 1.010, 1.070 and 1.090), the reactive limits, and the ratio of the four transformers (0.99677 on each, where the archive has 0.978, 0.969, 0.932 and none).",
+        "The power flow solution therefore differs from the one the archive stores, by up to 0.06 pu in voltage and 11.8 degrees in angle (bus 8). Do not compare results of this file with published IEEE 14-bus results.",
+        "No event is built in. The fault used for the verification is added through the API: a three-phase fault at bus 9 from 1.0 s to 1.1 s."
+      ],
+      "verification": {
+        "summary": "Compared with independent references: the power flow (bus voltages, angles, losses and the slack's power) agrees with pandapower's solution of the same network to 6e-9 pu and 8.5e-7 degrees. TENSA's power flow was also run on the archive's own data (MATPOWER's case14, which ANDES ships) and reproduces the solution the archive stores to 1.3e-3 pu and 0.017 degrees, which is the precision the archive stores it in (server/tests/integration/test_example_archive_solution.py). That checks the solver, not this file, whose data differ from the archive's. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution, and the ring-down of a 2% load step has the frequencies and damping ratios of the eigenvalues, within 0.025 Hz and 0.027. Not verified: the fault run and the mode values are TENSA's own earlier output, kept as regression baselines to catch a change. No published result exists for this data.",
+        "checks": [
+          {
+            "name": "Ring-down of a small disturbance has the frequency and damping of eigenvalues",
+            "kind": "ring-down",
+            "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_2, run to 20 s",
+            "tolerance": "0.05 Hz and 0.05 in damping ratio",
+            "result": "1.012 Hz, damping 0.248 is eigenvalue 1.019 Hz, 0.275 (0.006 Hz and 0.027 apart); 0.952 Hz, damping 0.229 is eigenvalue 0.949 Hz, 0.245 (0.004 Hz and 0.015 apart); 1.078 Hz, damping 0.270 is eigenvalue 1.053 Hz, 0.261 (0.025 Hz and 0.009 apart)",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 5.51e-09 pu (bus 9) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 8.46e-07 deg (bus 14) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 2.72721, expected 2.72721, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 81.4272, expected 81.4272, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Largest rotor angle spread in the disturbance run (fault at bus 9)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.05 deg",
+            "result": "measured 60.2428, expected 60.2428, difference 2.19e-07 deg",
+            "passed": true
+          },
+          {
+            "name": "Lowest bus voltage in the disturbance run (fault at bus 9)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.0001 pu",
+            "result": "measured 0.000444015, expected 0.000444015, difference 1.63e-13 pu",
+            "passed": true
+          },
+          {
+            "name": "Lowest machine frequency in the disturbance run (fault at bus 9)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 59.9556, expected 59.9556, difference 1.85e-07 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 0.948748, expected 0.948748, difference 3.92e-09 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.244586, expected 0.244586, difference 5.43e-10",
+            "passed": true
+          }
+        ]
+      }
     },
     {
       "id": "kundur",
@@ -94,55 +186,9 @@
           "url": "https://doi.org/10.1109/59.119229"
         },
         {
-          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
-          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
-          "doi": "10.1109/TPWRS.2020.3017019",
-          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
-        }
-      ],
-      "licence": {
-        "name": "GPL-3.0-or-later",
-        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
-        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
-      },
-      "caveats": [
-        "This is not the system of the book as printed. The file's own title is \"Modified Kundur's two-area test system, distributed with ANDES\", and it has 10 buses where the book's system has 11. Do not compare its results with the book's without checking the data.",
-        "One event is built into the file: Line_8 is switched out at 2 s."
-      ]
-    },
-    {
-      "id": "wscc9",
-      "title": "WSCC 9-bus, network only",
-      "summary": "The WSCC 3-machine, 9-bus network with its loads and generator set-points, for power flow. The file has no machine models, so there is nothing to simulate in the time domain.",
-      "category": "steady-state",
-      "tags": [
-        "wscc",
-        "9-bus",
-        "3-machine",
-        "power flow"
-      ],
-      "size": {
-        "buses": 9,
-        "generators": 3
-      },
-      "analyses": [
-        "pf"
-      ],
-      "default": true,
-      "provenance": {
-        "kind": "andes",
-        "path": "wscc9/wscc9.xlsx",
-        "sha256": "1e994b2b4c67bdcccf52b9007cf03c5c010f6ff72bcfe055c4c3b776baf51de8",
-        "release": "ANDES 2.0.0",
-        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/wscc9/wscc9.xlsx",
-        "retrieved": "2026-11-17"
-      },
-      "citations": [
-        {
-          "text": "P. M. Anderson and A. A. Fouad, Power System Control and Stability. IEEE Press, 2002, doi:10.1109/9780470545577.",
-          "bibtex": "@book{anderson2002power,\n  author    = {Anderson, Paul M. and Fouad, A. A.},\n  title     = {Power System Control and Stability},\n  publisher = {IEEE Press},\n  year      = {2002},\n  doi       = {10.1109/9780470545577}\n}",
-          "doi": "10.1109/9780470545577",
-          "url": "https://doi.org/10.1109/9780470545577"
+          "text": "CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data.",
+          "bibtex": "@misc{colib_kundur_two_area,\n  title        = {Kundur two-area system},\n  howpublished = {CRESYM Colib, test cases},\n  url          = {https://colib.net/testCases/kundur_two_area_system/index.html},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://colib.net/testCases/kundur_two_area_system/index.html"
         },
         {
           "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
@@ -157,8 +203,316 @@
         "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
       },
       "caveats": [
-        "ANDES does not say where the data of this file comes from. The first citation names the book the WSCC 9-bus system is taken from, not the file."
-      ]
+        "This is not the system of the book as printed, and its results must not be compared with the book's. The file's own title is \"Modified Kundur's two-area test system, distributed with ANDES\". It has 10 buses where the book's system has 11, the tie is three parallel lines of 0.22 per unit reactance on 100 MVA, the loads are 1159 MW at bus 7 and 1575 MW at bus 8 with a small net reactive power (-73.5 and -89.9 MVAr), where the book has 967 MW with 100 MVAr and a 200 MVAr capacitor and 1767 MW with 100 MVAr and a 350 MVAr capacitor, and the step-up transformers are 0.012 per unit on 100 MVA where the book's are 0.15 on 900 MVA.",
+        "The dispatch and the voltages differ from the book's operating point as well: three generators deliver 700 MW with a set-point of 1.00 pu and the fourth is the slack (about 727 MW in the power flow solution), where the book has 700, 700, 719 and 700 MW and terminal voltages of 1.03, 1.01, 1.03 and 1.01 pu.",
+        "The machines match the book's table in their inertia (6.5 s and 6.175 s), reactances (Xd 1.8, Xq 1.7, X'd 0.3, X'q 0.55, X''d and X''q 0.25 per unit) and open-circuit time constants (8, 0.03, 0.4 and 0.05 s), and differ in the leakage reactance (0.06 where the book has 0.2), the armature resistance (0 where the book has 0.0025) and the saturation (none where the book has A = 0.015 and B = 9.6). Each machine has a DC type 2 exciter and a TGOV1 governor, which the book's examples do not.",
+        "One event is built into the file: Line_8 is switched out at 2 s.",
+        "The eigenvalues the book gives for its system could not be read from any source opened for this entry, and they belong to another network and other exciters in any case, so no published mode is compared."
+      ],
+      "verification": {
+        "summary": "Compared with an independent reference: the power flow agrees with pandapower's solution of the same network to 2.3e-7 pu and 4.4e-5 degrees. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution (largest change 3.5e-6), and the ring-down of a 2% load step has the frequencies and damping ratios of the eigenvalues, within 0.007 Hz and 0.005: the inter-area mode at 0.647 Hz with a damping ratio of 0.034 and a local mode at 1.141 Hz. Not verified: the Line_8 trip and the mode values are TENSA's own earlier output, kept as regression baselines to catch a change. No published value is compared, because the file is not the system of the book (see the caveats).",
+        "checks": [
+          {
+            "name": "Ring-down of a small disturbance has the frequency and damping of eigenvalues",
+            "kind": "ring-down",
+            "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_1, run to 20 s",
+            "tolerance": "0.05 Hz and 0.05 in damping ratio",
+            "result": "0.649 Hz, damping 0.034 is eigenvalue 0.647 Hz, 0.034 (0.002 Hz and 0.000 apart); 1.134 Hz, damping 0.093 is eigenvalue 1.141 Hz, 0.089 (0.007 Hz and 0.005 apart)",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 2.33e-07 pu (bus 7) over 10 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 4.41e-05 deg (bus 8) over 10 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 92.8029, expected 92.8024, difference 0.000533 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_full.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 726.803, expected 726.802, difference 0.000526 MW",
+            "passed": true
+          },
+          {
+            "name": "Largest rotor angle spread in the disturbance run (Line_8 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.05 deg",
+            "result": "measured 30.7114, expected 30.7114, difference 3.63e-07 deg",
+            "passed": true
+          },
+          {
+            "name": "Lowest bus voltage in the disturbance run (Line_8 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.0001 pu",
+            "result": "measured 0.871601, expected 0.871601, difference 3.13e-09 pu",
+            "passed": true
+          },
+          {
+            "name": "Lowest machine frequency in the disturbance run (Line_8 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 59.9992, expected 59.9992, difference 5.04e-08 Hz",
+            "passed": true
+          },
+          {
+            "name": "Inter-area mode between 0.3 and 0.9 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 0.646897, expected 0.646897, difference 2.36e-09 Hz",
+            "passed": true
+          },
+          {
+            "name": "Inter-area mode between 0.3 and 0.9 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.0343092, expected 0.0343092, difference 2.78e-10",
+            "passed": true
+          },
+          {
+            "name": "Least damped local mode between 0.9 and 1.5 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 1.10779, expected 1.10779, difference 6.38e-09 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped local mode between 0.9 and 1.5 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.086553, expected 0.086553, difference 2.5e-10",
+            "passed": true
+          }
+        ]
+      },
+      "modifications": []
+    },
+    {
+      "id": "wscc9",
+      "title": "WSCC 9-bus, with classical machines",
+      "summary": "The 3-machine, 9-bus system of Anderson and Fouad with its three machines on the classical model, as in Example 2.6 of the book: the smallest case for a fault, a swing curve and the electromechanical modes of three machines. It has no exciter and no governor.",
+      "category": "dynamic",
+      "tags": [
+        "wscc",
+        "9-bus",
+        "3-machine",
+        "gencls",
+        "classical model",
+        "transient stability"
+      ],
+      "size": {
+        "buses": 9,
+        "generators": 3
+      },
+      "analyses": [
+        "pf",
+        "tds",
+        "eig"
+      ],
+      "default": true,
+      "provenance": {
+        "kind": "bundled",
+        "path": "wscc9.xlsx",
+        "sha256": "ce980cc07d6dfc133fe66473610fa6e3a3962c4ccd09734d2d6d951df525c758",
+        "release": null,
+        "source_url": "https://github.com/Roger-GO/TENSA/blob/778a06d7396f1ccde31b48955fcb4072e731716d/scripts/build_wscc9.py",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. Piscataway, NJ: IEEE Press; Hoboken, NJ: Wiley-Interscience, 2003, ISBN 0-471-23862-7, doi:10.1109/9780470545577. The system is the one of Chapter 2 and its Example 2.6.",
+          "bibtex": "@book{anderson2003power,\n  author    = {Anderson, Paul M. and Fouad, A. A.},\n  title     = {Power System Control and Stability},\n  edition   = {2nd},\n  publisher = {IEEE Press and Wiley-Interscience},\n  address   = {Piscataway, NJ},\n  year      = {2003},\n  isbn      = {0471238627},\n  doi       = {10.1109/9780470545577}\n}",
+          "doi": "10.1109/9780470545577",
+          "url": "https://doi.org/10.1109/9780470545577"
+        },
+        {
+          "text": "B. Wang, Y. Liu and K. Sun, \"Power System Differential-Algebraic Equations,\" arXiv:1512.05185, 2015. It prints the classical-model data of this system (H, x'd, the mechanical powers, the internal voltages and the reduced admittance matrix of Example 2.6) that the build of this case is checked against.",
+          "bibtex": "@misc{wang2015dae,\n  author        = {Wang, Bin and Liu, Yang and Sun, Kai},\n  title         = {Power System Differential-Algebraic Equations},\n  year          = {2015},\n  eprint        = {1512.05185},\n  archivePrefix = {arXiv},\n  url           = {https://arxiv.org/abs/1512.05185}\n}",
+          "url": "https://arxiv.org/abs/1512.05185"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/Roger-GO/TENSA/blob/main/LICENSE",
+        "attribution": "The file is written by TENSA's scripts/build_wscc9.py and is distributed with TENSA under its licence. The numbers in it are those of the book in the first citation, which is the work to cite for the system."
+      },
+      "modifications": [
+        "The file is written by scripts/build_wscc9.py from the data of the book, not copied from ANDES: the network and the loads are the book's, and the three machines are added as classical models (GENCLS) with the book's inertia constants and transient reactances on the 100 MVA base, no damping and no armature resistance",
+        "The power flow solution is stored in the file as the initial state, rounded to six places, as the ANDES example cases do",
+        "The transformers are lines with a reactance and the nominal ratio (the book gives a reactance only), flagged as transformers",
+        "No fault or other event is built in"
+      ],
+      "caveats": [
+        "ANDES ships a file of the same network, wscc9/wscc9.xlsx, with no machines. It is not this system: its reactances of lines 4-5, 6-9 and 7-8 (0.068, 0.1738 and 0.0576 per unit) are not the book's (0.085, 0.170 and 0.072), and its power flow differs (the angle of bus 3 is 5.14 degrees against the book's 4.66). Results from the two files must not be compared.",
+        "Classical model: constant voltage behind the transient reactance, constant mechanical power, loads as constant impedances and no damping. Its modes lie on the imaginary axis (a damping ratio of 0) and a swing after a fault does not die out.",
+        "To run the book's fault, add it in the app: a three-phase fault at bus 7 from 1.0 s to 1.0833 s (5 cycles at 60 Hz) and a trip of line 5-7 (Line_2) at 1.0833 s. With the default step the faster mode swings 1.6 percent slow (the trapezoidal rule's lag, 0.034 Hz at 2.1 Hz); a step of 1/120 s reproduces a continuous solution to a fraction of a degree.",
+        "The inertia constants and reactances are per unit on 100 MVA, as the book tabulates them, so each machine is rated at 100 MVA here; the book's machine ratings (247.5, 192 and 128 MVA) are not in the file.",
+        "A workspace made by an earlier TENSA holds ANDES's steady-state wscc9.xlsx under this name. Adding this case does not replace that file unless you ask (the force option), and the card says Added for it, though it is not this case."
+      ],
+      "verification": {
+        "summary": "The data was checked against the book: the power flow solution (bus voltages, the generator angles and the slack's power) agrees with the one the book prints, to its printed precision, and the reduced admittance matrix and the initial state of the machines computed from the file agree with those of Example 2.6 as printed by Wang, Liu and Sun, to four decimals (server/tests/unit/test_wscc9_build.py). The power flow agrees with pandapower's solution of the same network to 2e-8 pu. The modes and the book's fault (a three-phase fault at bus 7, cleared after 5 cycles by opening line 5-7) were also computed independently of TENSA and ANDES (Kron reduction, the linearised swing equations, scipy's DOP853 integration), and TENSA agrees: the modes (1.383 and 2.126 Hz, undamped) to 5e-7 Hz, the largest rotor angle spread (85.8 degrees) to 0.004 degrees, the lowest bus voltage to 4e-6 pu and the lowest machine frequency to 1.1e-4 Hz. The undisturbed 10 s run does not move, and the ring-down of a load step has the frequencies of the eigenvalues within 0.034 Hz, which is what the trapezoidal rule's error at TENSA's default step comes to. Not compared: the swing curves of the book's figures, which no source opened gives as numbers. The run is stable, as the book's is.",
+        "checks": [
+          {
+            "name": "Ring-down of a small disturbance has the frequency and damping of eigenvalues",
+            "kind": "ring-down",
+            "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_0, run to 20 s",
+            "tolerance": "0.05 Hz and 0.05 in damping ratio",
+            "result": "1.374 Hz, damping 0.000 is eigenvalue 1.383 Hz, 0.000 (0.009 Hz and 0.000 apart); 2.093 Hz, damping -0.000 is eigenvalue 2.126 Hz, 0.000 (0.034 Hz and 0.000 apart)",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 2.19e-08 pu (bus 5) over 9 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 7.88e-07 deg (bus 2) over 9 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 4.64103, expected 4.64102, difference 6.07e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for wscc9.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 71.641, expected 71.641, difference 6.07e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Frequency of mode 1 of 2, 1.383 Hz, against the linearised swing equations",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+            "tolerance": "0.001 Hz",
+            "result": "measured 1.38302, expected 1.38302, difference 4.54e-07 Hz",
+            "passed": true
+          },
+          {
+            "name": "Damping ratio of mode 1 of 2, 1.383 Hz, against the linearised swing equations",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+            "tolerance": "0.0001",
+            "result": "measured 0, expected 0, difference 0",
+            "passed": true
+          },
+          {
+            "name": "Frequency of mode 2 of 2, 2.126 Hz, against the linearised swing equations",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+            "tolerance": "0.001 Hz",
+            "result": "measured 2.12634, expected 2.12634, difference 4.31e-07 Hz",
+            "passed": true
+          },
+          {
+            "name": "Damping ratio of mode 2 of 2, 2.126 Hz, against the linearised swing equations",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+            "tolerance": "0.0001",
+            "result": "measured 0, expected 0, difference 0",
+            "passed": true
+          },
+          {
+            "name": "Largest rotor angle spread in the disturbance run",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+            "tolerance": "0.05 deg",
+            "result": "measured 85.7914, expected 85.7874, difference 0.00399 deg",
+            "passed": true
+          },
+          {
+            "name": "Rotor angle spread at the end of the disturbance run",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+            "tolerance": "0.5 deg",
+            "result": "measured 74.3698, expected 74.6171, difference 0.247 deg",
+            "passed": true
+          },
+          {
+            "name": "Lowest bus voltage in the disturbance run",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+            "tolerance": "5e-05 pu",
+            "result": "measured 0.00108951, expected 0.001093, difference 3.49e-06 pu",
+            "passed": true
+          },
+          {
+            "name": "Lowest machine frequency in the disturbance run",
+            "kind": "independent-solver",
+            "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for wscc9.xlsx: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.00833333 s",
+            "tolerance": "0.002 Hz",
+            "result": "measured 59.9624, expected 59.9623, difference 0.000111 Hz",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against the solution printed in the book",
+            "kind": "published",
+            "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints the magnitudes to three decimals, so the tolerance is the rounding (0.0005) and a little over.",
+            "tolerance": "0.0006 pu",
+            "result": "largest difference 0.000369 pu (bus 5) over 9 buses",
+            "passed": true
+          },
+          {
+            "name": "Angles of the generator buses against the solution printed in the book",
+            "kind": "published",
+            "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints the angles to 0.1 degree, so the tolerance is the rounding (0.05) and a little over. The quoted table gives no usable angle for the other buses.",
+            "tolerance": "0.06 deg",
+            "result": "largest difference 0.0352 deg (bus 3) over 2 buses",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against the solution printed in the book",
+            "kind": "published",
+            "reference": "P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. (2003), Chapter 2, the nine-bus power flow solution (page 38), as quoted in Table 1 of ETAP's validation case TCS-LF-008, Load Flow Comparison Case 2 (https://etap.com/docs/default-source/validation-case-documents/etap_comparisonresults_lf2.pdf, retrieved 2026-11-17). The book prints 71.6 MW for the generator at bus 1.",
+            "tolerance": "0.1 MW",
+            "result": "measured 71.641, expected 71.6, difference 0.041 MW",
+            "passed": true
+          }
+        ]
+      }
     }
   ]
 }

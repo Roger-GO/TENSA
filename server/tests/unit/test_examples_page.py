@@ -3,7 +3,7 @@
 The page is written from ``catalog.json`` by ``scripts/gen_examples_page.py``. A catalog entry
 that is edited without the page being written again fails here, and so does a page that is
 edited by hand. The renderer is also fed small catalogs of its own, since the shipped one has
-neither a link-only entry nor a bundled file nor a verification yet. The tests skip when run
+no link-only entry yet and every one of its entries has a verification. The tests skip when run
 away from a checkout.
 """
 
@@ -190,7 +190,8 @@ def test_a_check_against_the_cases_own_earlier_output_is_labelled_as_no_verifica
 
 
 def test_a_case_with_no_verification_says_so(script: ModuleType) -> None:
-    page = script.render_page(load_catalog())
+    unchecked = {key: value for key, value in _BUNDLED.items() if key != "verification"}
+    page = script.render_page(_catalog(unchecked))
     assert "**Verification.** No verification is recorded for this case yet." in page
 
 

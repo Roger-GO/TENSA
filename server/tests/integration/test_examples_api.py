@@ -146,6 +146,23 @@ async def test_an_added_case_is_in_the_workspace_and_loads_into_a_session(
     assert solved.json()["converged"] is True
 
 
+async def test_a_case_tensa_carries_is_added_without_andes_and_is_the_file_the_catalog_names(
+    client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The WSCC 9-bus case is a file of the package, so it needs no ANDES to be added."""
+    client, ws = client_workspace
+    monkeypatch.setattr(examples, "_andes_cases_dir", lambda: None)
+    resp = await client.post("/api/examples/wscc9/add")
+    assert resp.status_code == 201, resp.text
+    added = AddedExample.model_validate(resp.json())
+    assert added.warnings == []
+    recorded = load_catalog().get("wscc9")
+    assert recorded is not None
+    assert hashlib.sha256((ws / "wscc9.xlsx").read_bytes()).hexdigest() == recorded.provenance.sha256
+    assert "(`wscc9`)" in (ws / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "scripts/build_wscc9.py" in (ws / SOURCES_FILE).read_text(encoding="utf-8")
+
+
 async def test_a_dynamic_example_added_from_andes_loads_with_its_machines(
     client_workspace: tuple[httpx.AsyncClient, Path],
 ) -> None:
@@ -224,11 +241,12 @@ async def test_a_case_the_installed_andes_does_not_hold_is_a_404(
     empty = tmp_path / "andes_without_cases"
     empty.mkdir()
     monkeypatch.setattr(examples, "_andes_cases_dir", lambda: empty)
-    resp = await client.post("/api/examples/wscc9/add")
+    resp = await client.post("/api/examples/kundur/add")
     assert resp.status_code == 404, resp.text
-    assert "wscc9/wscc9.xlsx" in resp.json()["detail"]
-    listed = (await client.get("/api/examples")).json()["examples"]
-    assert not any(e["available"] for e in listed)
+    assert "kundur/kundur_full.xlsx" in resp.json()["detail"]
+    listed = {e["id"]: e["available"] for e in (await client.get("/api/examples")).json()["examples"]}
+    # What the user's ANDES must hold is what is missing; a case TENSA carries is still there.
+    assert listed == {"ieee14": False, "kundur": False, "wscc9": True}
     assert _names(ws) == []
 
 
@@ -239,14 +257,14 @@ async def test_an_andes_file_that_differs_from_the_recorded_one_is_added_with_a_
 ) -> None:
     client, ws = client_workspace
     cases = tmp_path / "andes_cases"
-    (cases / "wscc9").mkdir(parents=True)
-    (cases / "wscc9" / "wscc9.xlsx").write_bytes(b"another release")
+    (cases / "kundur").mkdir(parents=True)
+    (cases / "kundur" / "kundur_full.xlsx").write_bytes(b"another release")
     monkeypatch.setattr(examples, "_andes_cases_dir", lambda: cases)
-    resp = await client.post("/api/examples/wscc9/add")
+    resp = await client.post("/api/examples/kundur/add")
     assert resp.status_code == 201, resp.text
     (warning,) = resp.json()["warnings"]
     assert hashlib.sha256(b"another release").hexdigest() in warning
-    assert (ws / "wscc9.xlsx").read_bytes() == b"another release"
+    assert (ws / "kundur_full.xlsx").read_bytes() == b"another release"
 
 
 async def test_a_link_only_entry_has_no_file_to_add(

@@ -69,7 +69,7 @@ import {
   type Diagram,
 } from '../../helpers/diagramStates';
 import { CASE118 } from '../../helpers/case118';
-import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
+import { IEEE14, KUNDUR, WSCC9, WSCC9_NETWORK } from '../../helpers/exampleCases';
 
 vi.mock('@/components/sld/elkClient', async () => {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
@@ -616,8 +616,10 @@ function savedByHand(diagram: Diagram, id: string, points: readonly Point[]): Di
 }
 
 describe('a bend of a line moved by hand keeps off the lines beside it', () => {
-  it('WSCC 9: a bend pulled out of Line_8 is not put on Line_3, short of it or just past it', async () => {
-    const diagram = await opened(WSCC9);
+  it('WSCC 9, the network alone: a bend pulled out of Line_8 is not put on Line_3, short of it or just past it', async () => {
+    // The two lines drop square side by side in the drawing of the network alone; with the
+    // machines the units stand elsewhere and the lines do not.
+    const diagram = await opened(WSCC9_NETWORK);
     const { edge, route, ends, check } = checkOf(diagram, 'line-Line_8');
     const beside = routesOf(diagram).get('line-Line_3')!.points;
     // Both drop square from the bar of one bus to the next, side by side.
@@ -728,8 +730,8 @@ describe('a bend of a line moved by hand keeps off the lines beside it', () => {
   }, 240_000);
 
   it.each([
-    ['WSCC 9', WSCC9, 'line-Line_8', 'line-Line_3', 2],
-    ['WSCC 9', WSCC9, 'line-Line_8', 'line-Line_3', -1],
+    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'line-Line_8', 'line-Line_3', 2],
+    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'line-Line_8', 'line-Line_3', -1],
     ['Kundur', KUNDUR, 'stub-load-PQ_1', 'line-Line_7', 2],
   ] as const)(
     '%s: a layout saved with a bend of %s on %s has that line routed again around the bend (%i beside it)',

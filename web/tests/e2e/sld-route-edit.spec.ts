@@ -36,8 +36,8 @@
  *   tab strip: a click on the Lines tab opens it again, and a row picks
  *   its line
  *
- *   open WSCC 9 -> pull a bend out of a line to two short of the line
- *   beside it: it comes to stand a gap short of that line, and the bar
+ *   open Kundur -> pull a bend out of a line to two short of the parallel
+ *   circuit beside it: it comes to stand a gap short of that line, and the bar
  *   says why -> move the bend alone to one past that line: it goes on to
  *   where its two runs cross the line clear of the bend -> nothing on the
  *   diagram is drawn over anything else, with and without the values of a
@@ -424,7 +424,8 @@ test('WSCC 9: a line is picked by its row in the Lines table and with the keys, 
   await page.getByTestId('lines-grid-row-line-Line_8').click();
   const editor = page.getByTestId('sld-route-editor');
   await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_8');
-  await expect(page.getByTestId('sld-route-name')).toContainText('Line_8');
+  // The bar names the line by the name the file gives it.
+  await expect(page.getByTestId('sld-route-name')).toContainText('Transformer 3-9');
   await expect(page.getByTestId('sld-route-status')).toHaveText('Routed automatically');
   // Let go of, the same row picks it again.
   await page.getByTestId('sld-route-done').click();
@@ -568,20 +569,21 @@ test('IEEE 14: every line is picked by a click on the middle of its element, a c
   expect(drawer.height).toBeGreaterThan(150);
 });
 
-test('WSCC 9: a bend of a line moved by hand is not put on the line beside it, short of it or just past it', async ({
+test('Kundur: a bend of a line moved by hand is not put on the line beside it, short of it or just past it', async ({
   page,
 }) => {
   const stem = `route-e2e-bend-${Date.now()}`;
 
   await page.goto('/');
-  await openCase(page, 'wscc9.xlsx');
+  await openCase(page, 'kundur_full.xlsx');
   await settled(page);
   await openCopy(page, stem);
   const opened = await settled(page);
-  const id = 'line-Line_8';
+  const id = 'line-Line_4';
   const before = opened.edges[id]!.points;
-  const beside = opened.edges['line-Line_3']!.points;
-  // Both drop square from one bar to the next, side by side.
+  const besideId = 'line-Line_6';
+  const beside = opened.edges[besideId]!.points;
+  // Both drop square from one bar to the next, side by side, some 50 apart.
   expect(before).toHaveLength(2);
   expect(beside).toHaveLength(2);
   expect(beside[0]![0]).toBe(beside[1]![0]);
@@ -601,7 +603,7 @@ test('WSCC 9: a bend of a line moved by hand is not put on the line beside it, s
   // Held there, it is shown where it is clear, and the bar says what is in the way.
   const note = page.getByTestId('sld-route-note');
   await expect(note).toHaveAttribute('data-tone', 'refused');
-  await expect(note).toContainText('a bend of it would be too close to line Line_3');
+  await expect(note).toContainText('a bend of it would be too close to line Line_6');
   await expect(page.getByTestId('sld-route-refused')).toBeVisible();
   await Promise.all([layoutWritten(page), page.mouse.up()]);
   const pulled = (await settled(page)).edges[id]!.points;
@@ -612,7 +614,7 @@ test('WSCC 9: a bend of a line moved by hand is not put on the line beside it, s
   await expect(note).toContainText('Nearest clear place');
   expect(await overlapsOnScreen(page)).toEqual([]);
   // The line beside it did not have to give way.
-  expect((await drawing(page)).edges['line-Line_3']!.points).toEqual(beside);
+  expect((await drawing(page)).edges[besideId]!.points).toEqual(beside);
 
   // ---- the bend moved alone to one past that line ----
   await page.keyboard.down('Shift');

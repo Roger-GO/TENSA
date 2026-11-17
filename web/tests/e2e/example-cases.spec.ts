@@ -7,9 +7,10 @@
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
  *
  * It drives the real UI against a real `tensa serve` (nothing but the one list in the last test is
- * answered by the test), on a workspace the server seeded with the three first-run cases. The
- * catalog is the server's own, so what is held of the three cases is what the dialog shows of any
- * case: the size, the analyses, the links that open in a new tab, the references and the buttons.
+ * answered by the test), on a workspace the server seeded with the three first-run cases, all of
+ * which have machines. The catalog is the server's own, so what is held of the three cases is what
+ * the dialog shows of any case: the size, the analyses, the links that open in a new tab, the
+ * references and the buttons.
  */
 import { test, expect, type Page } from './fixtures';
 
@@ -53,10 +54,10 @@ test('the Project tab opens the example cases, with their sources, licences and 
   // The cursor is in the filter, ready to type.
   await expect(page.getByRole('searchbox', { name: 'Filter the example cases' })).toBeFocused();
 
-  // The three cases of a first run are in the workspace, so each says so; the two with
-  // machines are dynamic and the third is a network for power flow.
+  // The three cases of a first run are in the workspace, so each says so. All three have
+  // machines, so the list has the one group of dynamic cases and none of steady-state ones.
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
-  await expect(dialog.getByTestId('example-group-steady-state')).toBeVisible();
+  await expect(dialog.getByTestId('example-group-steady-state')).toHaveCount(0);
   for (const id of ['ieee14', 'kundur', 'wscc9']) {
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
@@ -67,7 +68,9 @@ test('the Project tab opens the example cases, with their sources, licences and 
   );
   await expect(dialog.getByTestId('example-size-ieee14')).toHaveText('14 buses, 5 generators');
   await expect(dialog.getByTestId('example-analysis-ieee14-eig')).toHaveText('Eigenvalues');
-  await expect(dialog.getByTestId('example-analysis-wscc9-tds')).toHaveCount(0);
+  await expect(dialog.getByTestId('example-size-wscc9')).toHaveText('9 buses, 3 generators');
+  await expect(dialog.getByTestId('example-analysis-wscc9-tds')).toHaveText('Time domain');
+  await expect(dialog.getByTestId('example-analysis-wscc9-eig')).toHaveText('Eigenvalues');
 
   // What a link leaves of the window it is followed from: a new tab, with no hold on this one.
   for (const link of [

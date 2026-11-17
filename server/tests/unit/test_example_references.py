@@ -66,7 +66,11 @@ def test_a_per_bus_value_is_given_for_every_bus_of_the_case() -> None:
         for check in reference.checks:
             if isinstance(check.expected, dict):
                 seen += 1
-                assert len(check.expected) == example.size.buses, check.name
+                if check.kind == "published":
+                    # A source may print the values of some of the buses only.
+                    assert 0 < len(check.expected) <= example.size.buses, check.name
+                else:
+                    assert len(check.expected) == example.size.buses, check.name
     assert seen
 
 
@@ -174,6 +178,33 @@ def test_a_disturbance_is_checked_the_way_the_disturbances_route_checks_it() -> 
     reference = parse_reference(json.dumps(good))
     assert reference.disturbance is not None and reference.disturbance.specs[0].kind == "fault"
     assert reference.remove_events[0].idx == 1
+
+
+def test_a_run_may_ask_for_a_step_and_it_must_be_one() -> None:
+    plan = {"description": "a fault", "specs": [], "h": 0.0125}
+    reference = parse_reference(json.dumps(_document(disturbance=plan)))
+    assert reference.disturbance is not None and reference.disturbance.h == 0.0125
+    default = parse_reference(json.dumps(_document(disturbance={"description": "a fault"})))
+    assert default.disturbance is not None and default.disturbance.h is None
+    for bad in (0, -0.01):
+        with pytest.raises(ReferenceFileError, match="h"):
+            parse_reference(json.dumps(_document(disturbance={**plan, "h": bad})))
+
+
+def test_the_wscc_9_disturbance_is_the_fault_of_the_books_example() -> None:
+    """A fault at bus 7 for 5 cycles at 60 Hz, cleared by opening line 5-7, run with a step
+    small enough for the trapezoidal rule to agree with a continuous solution."""
+    reference = load_reference("wscc9")
+    assert reference is not None and reference.disturbance is not None
+    fault, trip = reference.disturbance.specs
+    assert (fault.kind, fault.bus_idx) == ("fault", 7)
+    assert fault.tc - fault.tf == pytest.approx(5 / 60)
+    # Line_2 is the line between buses 5 and 7 (the third line of the file).
+    assert (trip.kind, trip.model, trip.dev_idx) == ("toggle", "Line", "Line_2")
+    assert trip.t == pytest.approx(fault.tc)
+    assert reference.disturbance.h is not None and reference.disturbance.h <= 1 / 100
+    # Nothing in the file acts by itself, so nothing is taken out for the other runs.
+    assert reference.remove_events == []
 
 
 def test_an_unknown_field_is_refused() -> None:
