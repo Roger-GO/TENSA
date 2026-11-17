@@ -307,3 +307,16 @@ async def test_the_routes_are_described_with_their_errors(
             "/ProblemDetails"
         )
     assert {p["name"] for p in add["parameters"]} == {"example_id", "overwrite"}
+
+
+async def test_the_routes_are_tagged_for_the_dialog_that_uses_them(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+) -> None:
+    """The web UI's Example cases dialog lists and adds the cases, so the parity ledger names
+    it and neither route carries a deferral any more."""
+    client, _ = client_workspace
+    spec: dict[str, Any] = (await client.get("/openapi.json")).json()
+    for path, verb in (("/api/examples", "get"), ("/api/examples/{example_id}/add", "post")):
+        operation = spec["paths"][path][verb]
+        assert operation["x-tensa-gui-location"] == "example-dialog"
+        assert "x-tensa-parity-deferred" not in operation

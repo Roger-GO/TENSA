@@ -14,6 +14,7 @@ import type { ReactNode } from 'react';
 
 import { CommandPalette } from '@/components/shell/CommandPalette';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
@@ -175,6 +176,20 @@ describe('<CommandPalette /> Open case page', () => {
     filesState = files('ieee14.raw.layout.json');
     rerender(withClient(<CommandPalette />));
     expect(await screen.findByTestId('command-palette-open-case-none')).toBeInTheDocument();
+  });
+
+  it('offers the example cases when the workspace has no case file, and opens their dialog', async () => {
+    filesState = files();
+    useExampleCasesStore.setState({ dialogOpen: false });
+    const user = userEvent.setup();
+    render(withClient(<CommandPalette />));
+    const none = await screen.findByTestId('command-palette-open-case-none');
+    expect(none).toHaveTextContent('or add an example case');
+    await user.click(screen.getByRole('button', { name: 'Browse example cases' }));
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+    // The palette gave way to it.
+    expect(useCommandPaletteStore.getState().open).toBe(false);
+    useExampleCasesStore.setState({ dialogOpen: false });
   });
 });
 

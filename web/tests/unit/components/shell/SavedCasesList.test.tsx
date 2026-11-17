@@ -17,7 +17,7 @@
  *    `saved-cases-files-empty` test id).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -27,6 +27,7 @@ import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useRecentCasesStore } from '@/store/recentCases';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useUploadNoticeStore } from '@/store/uploadNotice';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 
@@ -300,8 +301,35 @@ describe('<SavedCasesList />', () => {
     render(withClient(<SavedCasesList />));
     expect(screen.getByTestId('add-case-files')).toBeInTheDocument();
     expect(screen.getByTestId('saved-cases-files-empty')).toHaveTextContent(
-      'Drop a .raw / .xlsx / .json / .m file anywhere in this window, or use Add files.',
+      'Drop a .raw / .xlsx / .json / .m file anywhere in this window, use Add files, or add an example case.',
     );
+  });
+
+  it('has an Example cases button in the Workspace group, beside Add files, that opens the dialog', async () => {
+    useExampleCasesStore.setState({ dialogOpen: false });
+    const user = userEvent.setup();
+    render(withClient(<SavedCasesList />));
+    const button = screen.getByRole('button', { name: 'Example cases…' });
+    expect(button.compareDocumentPosition(screen.getByTestId('add-case-files'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    await user.click(button);
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+    useExampleCasesStore.setState({ dialogOpen: false });
+  });
+
+  it('offers to browse the example cases from the empty state, and opens the dialog', async () => {
+    mockFiles = [];
+    useExampleCasesStore.setState({ dialogOpen: false });
+    const user = userEvent.setup();
+    render(withClient(<SavedCasesList />));
+    await user.click(
+      within(screen.getByTestId('saved-cases-files-empty')).getByRole('button', {
+        name: 'Browse example cases',
+      }),
+    );
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+    useExampleCasesStore.setState({ dialogOpen: false });
   });
 
   it('says under the list that files can be dropped on the window, and which kinds', () => {

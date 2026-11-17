@@ -119,6 +119,8 @@ const LAZY_MODULES = [
   'components/messages/MessagesPanel.tsx',
   // Dialogs of the first screen's menus and lists.
   'components/case/SaveSystemDialog.tsx',
+  'components/examples/ExampleCasesDialog.tsx',
+  'components/examples/ExampleCard.tsx',
   'components/disturbance/AddEventDialog.tsx',
   'components/disturbance/DisturbanceForm.tsx',
   // What answers a failed run, fetched once a case is open.

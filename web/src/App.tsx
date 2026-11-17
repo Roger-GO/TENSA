@@ -42,6 +42,7 @@ import { useCaseStore } from '@/store/case';
 import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
@@ -49,8 +50,8 @@ import { lazyNamed } from '@/lib/lazyNamed';
 // Code split out of the first load: the diagram (React Flow and the layout
 // code) is fetched when a case is first shown, the Inspector when it is first
 // opened (the shell mounts it for a selection, or when it is toggled on), the
-// Add element panel when an element is first added, and the snapshot dialogs
-// when one is first opened.
+// Add element panel when an element is first added, and the snapshot and Example
+// cases dialogs when one is first opened.
 const SldCanvas = lazyNamed(() => import('@/components/sld/SldCanvas'), 'SldCanvas');
 const RightInspector = lazyNamed(
   () => import('@/components/inspector/RightInspector'),
@@ -69,6 +70,11 @@ const SaveSnapshotDialog = lazyNamed(
 const LoadSnapshotDialog = lazyNamed(
   () => import('@/components/snapshot/LoadSnapshotDialog'),
   'LoadSnapshotDialog',
+  'overlay',
+);
+const ExampleCasesDialog = lazyNamed(
+  () => import('@/components/examples/ExampleCasesDialog'),
+  'ExampleCasesDialog',
   'overlay',
 );
 // What a run that failed is answered with. Each draws nothing until a run of
@@ -174,7 +180,8 @@ function AppInner({ children }: { children: React.ReactNode }) {
 /**
  * Default ``canvas`` slot content depends on whether a case is loaded:
  *
- * - no case → EmptyState ("No case loaded"), wrapped in a
+ * - no case → EmptyState ("No case loaded", with a button that opens the Example
+ *   cases dialog), wrapped in a
  *   ComponentDropZone — directs the user to the left sidebar AND accepts
  *   a row dragged from the Components palette, which spins up a blank system and
  *   places a draft of that kind on its diagram (the build-from-scratch entry the
@@ -190,6 +197,7 @@ function CanvasSlot() {
   // After a reload: the case the tab had open, while it is being opened again.
   const reopening = useReloadedCaseStore((s) => s.closed);
   const { place: placeComponent } = useAddComponent();
+  const openExampleCases = useExampleCasesStore((s) => s.openDialog);
   const [dropError, setDropError] = useState<string | null>(null);
 
   if (caseSelection !== null) {
@@ -248,6 +256,7 @@ function CanvasSlot() {
             dropError ??
             'Pick a case file in the Project tab of the left sidebar, drop one anywhere in this window, or click or drag a component from its Components tab to start a blank system.'
           }
+          action={{ label: 'Browse example cases', onClick: openExampleCases }}
           emptyStateKey="app-shell-no-case"
         >
           {/* What the browser kept from before a reload, which needs no case. */}
@@ -287,6 +296,21 @@ function SnapshotDialogs() {
         <LoadSnapshotDialog />
       </LazyMount>
     </>
+  );
+}
+
+/**
+ * The Example cases dialog, opened from the Project tab, the empty states and the
+ * command palette through its store flag. Fetched and mounted the first time it is
+ * opened.
+ */
+function ExampleCasesHost() {
+  const open = useExampleCasesStore((s) => s.dialogOpen);
+  const closeDialog = useExampleCasesStore((s) => s.closeDialog);
+  return (
+    <LazyMount when={open} onLoadFailed={closeDialog}>
+      <ExampleCasesDialog />
+    </LazyMount>
   );
 }
 
@@ -370,6 +394,7 @@ export function App() {
                   nothing rendered (and Sweep, which needs a snapshot, was
                   unreachable). Mount them at the app root so the actions work. */}
               <SnapshotDialogs />
+              <ExampleCasesHost />
             </>
           }
         />

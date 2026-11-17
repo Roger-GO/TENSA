@@ -1,0 +1,237 @@
+import { useRef, useState } from 'react';
+import { useListExamples } from '@/api/queries';
+import type { ExampleListEntry } from '@/api/types';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/Input';
+import {
+  CASE_CATEGORIES,
+  companionFileNames,
+  matchesFilter,
+  primaryFileName,
+} from '@/lib/exampleCases';
+import { describeError } from '@/lib/describeError';
+import { useOpenCase } from '@/lib/openCase';
+import { useCaseStore } from '@/store/case';
+import { useExampleCasesStore } from '@/store/exampleCases';
+import { useSessionStore } from '@/store/session';
+import { ExampleCard } from './ExampleCard';
+
+/**
+ * ExampleCasesDialog: the example cases of the catalog, to add to the workspace and open.
+ *
+ * Opened from the Project tab, the empty states and the command palette (all through
+ * `useExampleCasesStore`). The catalog is read from the server each time it opens, since
+ * the workspace may have changed, and the cards are grouped by what the case supports:
+ * dynamic cases (with machine models) and steady-state ones (a network, for power flow).
+ * A filter narrows them by name, size or analysis. Adding a case copies its file into the
+ * workspace and writes where it came from beside it; opening one loads it as the case of
+ * the session, exactly as a click on its row in the Project tab does, and closes the
+ * dialog so the diagram is what the user sees.
+ *
+ * When it closes, the keyboard focus goes back to what had it when it opened (Radix
+ * returns it to a trigger, and this dialog has none), else to the Project tab.
+ */
+export function ExampleCasesDialog() {
+  const open = useExampleCasesStore((s) => s.dialogOpen);
+  const closeDialog = useExampleCasesStore((s) => s.closeDialog);
+  const opener = useRef<HTMLElement | null>(null);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) closeDialog();
+      }}
+    >
+      <DialogContent
+        data-testid="example-cases-dialog"
+        // The width goes through ``widthClassName`` (as a class it would tie with the
+        // default width). The dialog has the one height, held to the window's, and its
+        // cards scroll inside it: the title, the filter and Close stay in reach, and the
+        // filter does not move as the list under it shrinks to what was typed.
+        widthClassName="max-w-[min(48rem,calc(100vw-2rem))]"
+        className="flex h-[min(48rem,calc(100vh-2rem))] flex-col"
+        onOpenAutoFocus={() => {
+          // Before the focus moves into the dialog: what has it now.
+          const active = document.activeElement;
+          opener.current =
+            active instanceof HTMLElement && active !== document.body ? active : null;
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const back = opener.current;
+          opener.current = null;
+          const target =
+            back !== null && back.isConnected
+              ? back
+              : document.querySelector<HTMLElement>('[data-testid="left-sidebar-tab-project"]');
+          target?.focus();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Example cases</DialogTitle>
+          <DialogDescription>
+            Ready-made power systems to study. Add one to copy its file into your workspace, then
+            open it. Where each came from, how to cite it and its licence are written to{' '}
+            <code className="font-mono text-xs">EXAMPLE-SOURCES.md</code> beside it.
+          </DialogDescription>
+        </DialogHeader>
+        <Body />
+        <DialogFooter className="mt-4">
+          <DialogClose asChild>
+            <Button type="button" variant="outline" data-testid="example-cases-close">
+              Close
+            </Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The part that needs the server: mounted with the dialog's content, so the catalog is read
+ * afresh each time. The filter is drawn before the catalog arrives, so the dialog opens with
+ * the keyboard focus in it, ready to type, whether or not the list has come yet.
+ */
+function Body() {
+  const list = useListExamples();
+  const closeDialog = useExampleCasesStore((s) => s.closeDialog);
+  const sessionId = useSessionStore((s) => s.sessionId);
+  const openPath = useCaseStore((s) => s.selection?.primaryPath ?? null);
+  const loadingPath = useCaseStore((s) => s.loadingPath);
+  const { openCase, isPending: loadPending } = useOpenCase();
+  const [filter, setFilter] = useState('');
+
+  const openBlocked =
+    sessionId === null
+      ? 'Waiting for the server to start a session, which opening a case needs.'
+      : loadPending || loadingPath !== null
+        ? 'Another case is loading.'
+        : null;
+
+  const onOpen = (example: ExampleListEntry) => {
+    const primary = primaryFileName(example);
+    if (primary === null) return;
+    openCase(primary, companionFileNames(example));
+    // The case loads while the diagram is shown: the notice says it is open.
+    closeDialog();
+  };
+
+  const examples = list.data?.examples ?? [];
+  const shown = examples.filter((example) => matchesFilter(example, filter));
+
+  return (
+    <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <Input
+          type="search"
+          value={filter}
+          onChange={setFilter}
+          aria-label="Filter the example cases"
+          placeholder="Filter by name, size or analysis"
+          data-testid="example-cases-filter"
+          className="min-w-0 flex-1"
+        />
+        <p
+          role="status"
+          data-testid="example-cases-count"
+          className="text-muted-foreground shrink-0 text-xs"
+        >
+          {list.data === undefined
+            ? ''
+            : filter.trim() === ''
+              ? `${examples.length} ${examples.length === 1 ? 'case' : 'cases'}`
+              : `${shown.length} of ${examples.length}`}
+        </p>
+      </div>
+
+      <div data-testid="example-cases-scroll" className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {list.isPending ? (
+          <p
+            role="status"
+            data-testid="example-cases-loading"
+            className="text-muted-foreground py-8 text-center text-sm"
+          >
+            Loading the example cases…
+          </p>
+        ) : list.isError ? (
+          <div
+            role="alert"
+            data-testid="example-cases-error"
+            className="flex flex-col items-center gap-2 py-8 text-center text-sm"
+          >
+            <p className="text-foreground">
+              Could not load the example cases: {describeError(list.error)}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void list.refetch()}>
+              Try again
+            </Button>
+          </div>
+        ) : shown.length === 0 ? (
+          <div
+            data-testid="example-cases-none"
+            className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-center text-sm"
+          >
+            <p>
+              {examples.length === 0
+                ? 'This server has no example cases.'
+                : `No example case matches “${filter.trim()}”.`}
+            </p>
+            {examples.length > 0 ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setFilter('')}>
+                Clear the filter
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-5">
+            {CASE_CATEGORIES.map((category) => {
+              const inCategory = shown.filter((example) => example.category === category.value);
+              if (inCategory.length === 0) return null;
+              return (
+                <section
+                  key={category.value}
+                  aria-labelledby={`example-group-${category.value}`}
+                  data-testid={`example-group-${category.value}`}
+                  className="flex flex-col gap-2"
+                >
+                  <div>
+                    <h3
+                      id={`example-group-${category.value}`}
+                      className="text-foreground text-sm font-semibold"
+                    >
+                      {category.heading}
+                    </h3>
+                    <p className="text-muted-foreground text-xs">{category.blurb}</p>
+                  </div>
+                  <ul className="flex flex-col gap-2" role="list">
+                    {inCategory.map((example) => (
+                      <li key={example.id}>
+                        <ExampleCard
+                          example={example}
+                          openPath={openPath}
+                          openBlocked={openBlocked}
+                          onOpen={onOpen}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

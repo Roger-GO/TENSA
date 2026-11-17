@@ -12,6 +12,7 @@ import * as queries from '@/api/queries';
 import { parseSessionId } from '@/api/types';
 import type {
   AddElementVars,
+  AddExampleVars,
   AddPmuVars,
   AddProfileVars,
   BundleCaseMetadataDiff,
@@ -61,6 +62,7 @@ import type {
  */
 export type PublicTypes = [
   AddElementVars,
+  AddExampleVars,
   AddPmuVars,
   AddProfileVars,
   BundleCaseMetadataDiff,
@@ -118,6 +120,7 @@ const PUBLIC_VALUES = [
   'queryKeys',
   'useAbortRun',
   'useAddElement',
+  'useAddExample',
   'useAddPmu',
   'useAddProfile',
   'useAlterableParams',
@@ -150,6 +153,7 @@ const PUBLIC_VALUES = [
   'useGetSidecar',
   'useImportBundle',
   'useInitClone',
+  'useListExamples',
   'useListPmus',
   'useListProfiles',
   'useListSnapshots',

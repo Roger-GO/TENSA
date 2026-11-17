@@ -21,6 +21,8 @@ export const queryKeys = {
   sessionHeartbeat: (id: SessionId) => ['session-heartbeat', id] as const,
   topology: (id: SessionId) => ['topology', id] as const,
   workspaceFiles: ['workspace-files'] as const,
+  /** The catalog of example cases with what is true of this workspace (``GET /examples``). */
+  examples: ['examples'] as const,
   sidecar: (casePath: WorkspacePath) => ['sidecar', casePath] as const,
   /** Every layout sidecar read, whatever its case: the prefix of ``sidecar``. */
   sidecars: ['sidecar'] as const,

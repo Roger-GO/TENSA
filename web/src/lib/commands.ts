@@ -49,6 +49,7 @@ import { useRunModeStore } from '@/store/runMode';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useEditJournalStore } from '@/store/editJournal';
@@ -236,6 +237,7 @@ function useCommandSets(): CommandSets {
   const setActiveCpfSubMode = useAnalyzeStore((s) => s.setActiveCpfSubMode);
   const togglePalette = useCommandPaletteStore((s) => s.togglePalette);
   const openPalettePage = useCommandPaletteStore((s) => s.openPage);
+  const openExampleCasesDialog = useExampleCasesStore((s) => s.openDialog);
   const toggleCheatsheet = useShortcutCheatsheetStore((s) => s.toggleCheatsheet);
   const startRenamingRun = useHistoryStore((s) => s.startRenaming);
   // The run "Rename run" acts on: the active one, else the latest started. A
@@ -438,6 +440,33 @@ function useCommandSets(): CommandSets {
         when: () => sessionId !== null,
         shortcut: SHORTCUTS.openCase,
         keepPaletteOpen: true,
+      },
+      // The example cases of the catalog, to add to the workspace and open. It needs no
+      // case and no session: adding is a request to the server, and opening says why it
+      // cannot yet when there is no session.
+      {
+        id: 'workspace.example-cases',
+        label: 'Example cases…',
+        description:
+          'Ready-made power systems to add to the workspace and open, with their sources, citations and licences.',
+        group: 'workspace',
+        keywords: [
+          'example',
+          'examples',
+          'sample',
+          'demo',
+          'gallery',
+          'test case',
+          'benchmark',
+          'ieee',
+          'kundur',
+          'wscc',
+          'cite',
+          'citation',
+          'bibtex',
+          'add case',
+        ],
+        action: () => openExampleCasesDialog(),
       },
       {
         id: 'workspace.add-element',
@@ -1425,6 +1454,7 @@ function useCommandSets(): CommandSets {
     setActiveCpfSubMode,
     togglePalette,
     openPalettePage,
+    openExampleCasesDialog,
     toggleCheatsheet,
     startRenamingRun,
     renameTargetRunId,

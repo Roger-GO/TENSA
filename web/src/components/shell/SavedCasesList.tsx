@@ -8,11 +8,13 @@ import { useSnapshotStore } from '@/store/snapshot';
 import { ProblemDetailsError } from '@/api/client';
 import type { WorkspaceFile } from '@/api/types';
 import { AddCaseFilesButton } from '@/components/case/AddCaseFilesButton';
+import { ExampleCasesButton } from '@/components/examples/ExampleCasesButton';
 import { CASE_FILE_EXTENSIONS } from '@/lib/caseUpload';
 import { isPrimaryCase, useOpenCase } from '@/lib/openCase';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/cn';
 import { useRecentCasesStore } from '@/store/recentCases';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useUploadNoticeStore } from '@/store/uploadNotice';
 
 /**
@@ -34,7 +36,9 @@ import { useUploadNoticeStore } from '@/store/uploadNotice';
  *    too. It parses the workspace path and skips the load for the case
  *    already open, so a click on that one is a no-op rather than a
  *    destructive reload. The group's header has the button that adds
- *    files to the workspace (dropping them on the window does the same).
+ *    files to the workspace (dropping them on the window does the same)
+ *    and the one that opens the Example cases dialog, which adds a
+ *    ready-made case; an empty list offers it as well.
  *  - **Snapshots** — only renders when a case is loaded. Lists the
  *    substrate's snapshot listing for the active session. Click a row
  *    to restore via ``useRestoreSnapshot`` (replays the snapshot's
@@ -81,6 +85,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
   const markRestoreSuccess = useSnapshotStore((s) => s.markRestoreSuccess);
   const markRestoreError = useSnapshotStore((s) => s.markRestoreError);
   const openSaveSnapshot = useSnapshotStore((s) => s.openSaveDialog);
+  const openExampleCases = useExampleCasesStore((s) => s.openDialog);
 
   const files = (filesQuery.data?.files ?? []).filter(isPrimaryCase);
   const recentCases = useRecentCasesStore((s) => s.cases);
@@ -178,14 +183,17 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
 
       {/* Workspace files group ------------------------------------------- */}
       <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
           <p
             className="text-muted-foreground/70 px-1 pb-0.5 text-[9px] font-medium tracking-[0.08em] uppercase"
             data-testid="saved-cases-files-heading"
           >
             Workspace
           </p>
-          <AddCaseFilesButton />
+          <div className="flex items-center gap-1.5">
+            <ExampleCasesButton />
+            <AddCaseFilesButton />
+          </div>
         </div>
         {refused.length > 0 ? (
           <div
@@ -224,7 +232,8 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
             <EmptyState
               icon={<FolderIcon />}
               title="No case files"
-              description="Drop a .raw / .xlsx / .json / .m file anywhere in this window, or use Add files."
+              description="Drop a .raw / .xlsx / .json / .m file anywhere in this window, use Add files, or add an example case."
+              action={{ label: 'Browse example cases', onClick: openExampleCases }}
               emptyStateKey="saved-cases-files-empty"
             />
           </div>

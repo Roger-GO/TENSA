@@ -30,6 +30,7 @@ export * from './queryClient';
 export * from './session';
 export * from './serverInfo';
 export * from './workspace';
+export * from './examples';
 export * from './topology';
 export * from './case';
 export * from './elements';

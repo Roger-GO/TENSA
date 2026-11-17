@@ -14,6 +14,7 @@ import { useCaseStore } from '@/store/case';
 import { useSessionStore } from '@/store/session';
 import { usePflowStore } from '@/store/pflow';
 import { useLayoutStore } from '@/store/layout';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useDeleteSession } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { useOpenCase } from '@/lib/openCase';
@@ -229,6 +230,7 @@ export function CaseNav({ className }: CaseNavProps) {
   const pflowRunning = usePflowStore((s) => s.isRunning);
   const clearPflow = usePflowStore((s) => s.clearPflow);
   const showLeftSidebarTab = useLayoutStore((s) => s.showLeftSidebarTab);
+  const openExampleCases = useExampleCasesStore((s) => s.openDialog);
 
   const deleteSession = useDeleteSession();
 
@@ -280,9 +282,9 @@ export function CaseNav({ className }: CaseNavProps) {
         // v3 LeftSidebar mounts SavedCasesList in a sibling section, so
         // the full WorkspaceFilePicker UI here would duplicate the file
         // list. Render a brief inline hint instead — the user finds the
-        // canonical loader in the Saved Cases section below, and the
-        // palette that starts a blank system on the sidebar's other tab,
-        // which the hint's last words open.
+        // canonical loader in the Saved Cases section below, the palette that
+        // starts a blank system on the sidebar's other tab, and the dialog of
+        // example cases to add; the hint has a button for each of the last two.
         <div
           data-testid="case-nav-empty"
           aria-busy={loadingPath !== null ? 'true' : undefined}
@@ -297,7 +299,7 @@ export function CaseNav({ className }: CaseNavProps) {
             <>
               <p>
                 No case loaded. Pick a file from <span className="font-medium">Saved cases</span>{' '}
-                below, drop a case file anywhere in this window, or start a blank system with a
+                below, drop a case file anywhere in this window, start a blank system with a
                 component from the{' '}
                 <button
                   type="button"
@@ -311,6 +313,20 @@ export function CaseNav({ className }: CaseNavProps) {
                   )}
                 >
                   Components tab
+                </button>
+                , or look through the{' '}
+                <button
+                  type="button"
+                  onClick={openExampleCases}
+                  data-testid="case-nav-open-examples"
+                  className={cn(
+                    'text-foreground underline underline-offset-2',
+                    'hover:text-primary focus-visible:outline-none',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                    'rounded-[var(--radius-sm)]',
+                  )}
+                >
+                  example cases
                 </button>
                 .
               </p>

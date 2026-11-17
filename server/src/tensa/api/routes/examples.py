@@ -43,15 +43,6 @@ router = APIRouter()
 
 log = logging.getLogger("tensa.examples")
 
-# The web client's Example cases dialog is not built yet; until it is, the list and the add
-# are reached from the command line (``tensa examples``), the MCP tools and this API.
-_PARITY_DEFERRED = (
-    "The web UI's Example cases dialog, which will list and add these cases, is not built "
-    "yet. Until it is, they are reached with `tensa examples`, the MCP tools list_examples "
-    "and add_example, and this API."
-)
-
-
 def _workspace(request: Request) -> Path:
     workspace = getattr(request.app.state, "workspace", None)
     if not isinstance(workspace, Path):
@@ -64,10 +55,7 @@ def _workspace(request: Request) -> Path:
 
 @router.get(
     "/examples",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": _PARITY_DEFERRED,
-    },
+    openapi_extra={"x-tensa-gui-location": "example-dialog"},
     operation_id="listExamples",
     summary="List the example cases TENSA can add to the workspace.",
     response_model=ExampleList,
@@ -99,10 +87,7 @@ async def list_examples(request: Request) -> ExampleList:
 
 @router.post(
     "/examples/{example_id}/add",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": _PARITY_DEFERRED,
-    },
+    openapi_extra={"x-tensa-gui-location": "example-dialog"},
     operation_id="addExample",
     summary="Add an example case to the workspace.",
     response_model=AddedExample,

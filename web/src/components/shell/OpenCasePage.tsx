@@ -17,6 +17,7 @@ import { cn } from '@/lib/cn';
 import { isPrimaryCase, useOpenCase } from '@/lib/openCase';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useExampleCasesStore } from '@/store/exampleCases';
 
 export function OpenCasePage() {
   const filesQuery = useListWorkspaceFiles();
@@ -24,6 +25,7 @@ export function OpenCasePage() {
   const current = useCaseStore((s) => s.selection?.primaryPath ?? null);
   const setPage = useCommandPaletteStore((s) => s.setPage);
   const closePalette = useCommandPaletteStore((s) => s.closePalette);
+  const openExampleCases = useExampleCasesStore((s) => s.openDialog);
 
   const files = (filesQuery.data?.files ?? []).filter(isPrimaryCase);
 
@@ -83,10 +85,28 @@ export function OpenCasePage() {
         ) : files.length === 0 ? (
           <div
             data-testid="command-palette-open-case-none"
-            className="text-muted-foreground px-3 py-6 text-center text-sm"
+            className="text-muted-foreground flex flex-col items-center gap-2 px-3 py-6 text-center text-sm"
           >
-            No case files in the workspace. Drop a .raw, .xlsx, .json or .m file on the window, or
-            put one in the workspace folder.
+            <p>
+              No case files in the workspace. Drop a .raw, .xlsx, .json or .m file on the window,
+              put one in the workspace folder, or add an example case.
+            </p>
+            <button
+              type="button"
+              data-testid="command-palette-open-examples"
+              onClick={() => {
+                // The palette goes first: the dialog takes the focus the palette gives up.
+                closePalette();
+                openExampleCases();
+              }}
+              className={cn(
+                'border-border text-primary rounded-[var(--radius-sm)] border px-2.5 py-1',
+                'hover:bg-muted text-xs font-medium',
+                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+              )}
+            >
+              Browse example cases
+            </button>
           </div>
         ) : (
           <>

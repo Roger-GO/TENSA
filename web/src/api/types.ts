@@ -36,6 +36,11 @@ export type LineFlow = components['schemas']['LineFlow'];
 export type WorkspaceFile = components['schemas']['WorkspaceFile'];
 export type WorkspaceFileList = components['schemas']['WorkspaceFileList'];
 export type UploadedWorkspaceFile = components['schemas']['UploadedWorkspaceFile'];
+/** The example cases, from `GET /examples`: each with its source, citations and licence. */
+export type ExampleList = components['schemas']['ExampleList'];
+export type ExampleListEntry = components['schemas']['ExampleListEntry'];
+/** What `POST /examples/{id}/add` answers: the files written and what to know about them. */
+export type AddedExample = components['schemas']['AddedExample'];
 export type SidecarLayout = components['schemas']['SidecarLayout'];
 export type BusCoord = components['schemas']['BusCoord'];
 /** Where a generator, load or shunt is drawn, with the bus it hangs off. */

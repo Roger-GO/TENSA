@@ -1,12 +1,18 @@
 import { render, screen, act, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/App';
 import { useCaseStore } from '@/store/case';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { usePflowStore } from '@/store/pflow';
 import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { useRunsStore } from '@/store/runs';
 import { useSnapshotStore } from '@/store/snapshot';
 import { parseWorkspacePath } from '@/api/types';
+
+// The Example cases dialog is a chunk of its own, which would read the catalog from a server
+// this test does not have; the test only holds that the page offers it.
+vi.mock('@/components/examples/ExampleCasesDialog', () => ({ ExampleCasesDialog: () => null }));
 
 describe('App scaffold', () => {
   afterEach(() => {
@@ -82,6 +88,19 @@ describe('App scaffold', () => {
     // The sidebar has the tabs the page names, and is on the one with the case files.
     expect(screen.getByRole('tab', { name: 'Project' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Components' })).toBeInTheDocument();
+  });
+
+  it('offers the example cases on the "No case loaded" page, and the button opens their dialog', async () => {
+    useExampleCasesStore.setState({ dialogOpen: false });
+    render(<App />);
+    const page = screen
+      .getAllByTestId('empty-state')
+      .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-no-case')!;
+    await userEvent
+      .setup()
+      .click(within(page).getByRole('button', { name: 'Browse example cases' }));
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+    useExampleCasesStore.setState({ dialogOpen: false });
   });
 
   it('says after a reload that the case it had open is being opened again, not "No case loaded"', async () => {

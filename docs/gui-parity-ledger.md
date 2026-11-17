@@ -18,10 +18,11 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `command-palette` | 6 |
 | `data-grid` | 1 |
 | `disturbance-panel` | 2 |
+| `example-dialog` | 2 |
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 6 |
+| `none` | 4 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -36,8 +37,8 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | Method | Path | GUI location | Deferral reason |
 | --- | --- | --- | --- |
 | `POST` | `/api/comtrade` | `analysis-panel` |  |
-| `GET` | `/api/examples` | `none` | The web UI's Example cases dialog, which will list and add these cases, is not built yet. Until it is, they are reached with `tensa examples`, the MCP tools list_examples and add_example, and this API. |
-| `POST` | `/api/examples/{example_id}/add` | `none` | The web UI's Example cases dialog, which will list and add these cases, is not built yet. Until it is, they are reached with `tensa examples`, the MCP tools list_examples and add_example, and this API. |
+| `GET` | `/api/examples` | `example-dialog` |  |
+| `POST` | `/api/examples/{example_id}/add` | `example-dialog` |  |
 | `GET` | `/api/health` | `none` | Operations probe for scripts, process supervisors and container health checks. The UI reads GET /version for its About dialog and GET /sessions/{id} for session liveness. |
 | `POST` | `/api/response-metrics` | `analysis-panel` |  |
 | `GET` | `/api/sessions` | `auto` |  |

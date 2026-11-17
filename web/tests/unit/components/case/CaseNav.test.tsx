@@ -19,6 +19,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { useLayoutStore } from '@/store/layout';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import type { TopologySummary } from '@/api/types';
 
@@ -114,10 +115,25 @@ describe('<CaseNav />', () => {
 
     const hint = screen.getByTestId('case-nav-empty');
     expect(hint).toHaveTextContent(
-      'No case loaded. Pick a file from Saved cases below, drop a case file anywhere in this window, or start a blank system with a component from the Components tab.',
+      'No case loaded. Pick a file from Saved cases below, drop a case file anywhere in this window, start a blank system with a component from the Components tab, or look through the example cases.',
     );
     await user.click(within(hint).getByRole('button', { name: 'Components tab' }));
     expect(useLayoutStore.getState().leftSidebarTab).toBe('components');
+  });
+
+  it('opens the Example cases dialog from the hint', async () => {
+    useExampleCasesStore.setState({ dialogOpen: false });
+    fetchSpy.mockImplementation(() => new Promise(() => {}));
+    const { Wrapper } = makeWrapper();
+    const user = userEvent.setup();
+
+    render(<CaseNav />, { wrapper: Wrapper });
+
+    await user.click(
+      within(screen.getByTestId('case-nav-empty')).getByRole('button', { name: 'example cases' }),
+    );
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+    useExampleCasesStore.setState({ dialogOpen: false });
   });
 
   it('says which case is loading, instead of "No case loaded", while a load runs', () => {

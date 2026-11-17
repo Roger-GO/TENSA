@@ -34,6 +34,7 @@ import {
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
+import { useExampleCasesStore } from '@/store/exampleCases';
 import { useRunsStore } from '@/store/runs';
 import { useHistoryStore } from '@/store/history';
 import { subscribeSldCommand, useSldStore } from '@/store/sld';
@@ -714,6 +715,33 @@ describe('useCommandRegistry: the tabs of the left sidebar', () => {
     const ids = result.current.map((c) => c.id);
     expect(ids).toContain('view.openProject');
     expect(ids).toContain('view.openComponents');
+  });
+});
+
+describe('useCommandRegistry: Example cases command', () => {
+  afterEach(() => useExampleCasesStore.setState({ dialogOpen: false }));
+
+  it('is a workspace command, found by what a user would type, that opens the dialog', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'workspace.example-cases');
+    expect(cmd?.group).toBe('workspace');
+    expect(cmd?.label).toBe('Example cases…');
+    expect(cmd?.keywords).toEqual(
+      expect.arrayContaining(['example', 'sample', 'demo', 'cite', 'bibtex']),
+    );
+    expect(cmd?.description).toMatch(/add to the workspace and open/);
+    // It keeps the palette's usual behaviour: the dialog takes over, so the palette closes.
+    expect(cmd?.keepPaletteOpen).toBeUndefined();
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(false);
+    cmd?.action();
+    expect(useExampleCasesStore.getState().dialogOpen).toBe(true);
+  });
+
+  it('is there with no session and no case, the state of a first visit', () => {
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({ selection: null, topology: null });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(result.current.map((c) => c.id)).toContain('workspace.example-cases');
   });
 });
 

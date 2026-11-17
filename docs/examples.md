@@ -11,7 +11,12 @@ This page is written from the catalog (`server/src/tensa/examples/catalog.json`)
 ## Adding a case
 
 The cases marked as first run are copied into an empty workspace the first time the server
-starts. Any case can be added later, from the command line:
+starts. Any case can be added later. In the app, **Example cases** lists them: it is the button
+in the Workspace part of the Project tab, an item of the Workspace menu and a command in the
+command palette. The cases are grouped by what they support. **Add to workspace** copies a
+case's file in and **Open** loads it. **Cite** shows its references and copies them as text or
+as BibTeX, and the links to its source and licence open in a new tab. A case that is only links
+to data TENSA does not hold has an **Open source page** link instead. From the command line:
 
 ```bash
 tensa examples list
