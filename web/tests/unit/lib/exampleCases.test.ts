@@ -131,7 +131,7 @@ describe('what is said of the workspace', () => {
 
   it('counts the cases that are there, and says why they say Added', () => {
     expect(workspaceNote([inWorkspace(ieee14), wscc9])).toBe(
-      '1 of 2 cases are already in your workspace and say Added (a new workspace starts with the default set). Add to workspace copies the file of another one there; Open loads a case.',
+      '1 of 2 cases is already in your workspace and says Added (a new workspace starts with the default set). Add to workspace copies the file of another one there; Open loads a case.',
     );
   });
 

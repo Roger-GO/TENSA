@@ -76,7 +76,8 @@ export function workspaceNote(examples: readonly ExampleListEntry[]): string | n
       : 'None of these cases is in your workspace yet. Add to workspace copies the file of a case there, and Open then loads it.';
   }
   if (inWorkspace < withFile.length) {
-    return `${inWorkspace} of ${withFile.length} cases are already in your workspace and say Added ${starts}. Add to workspace copies the file of another one there; Open loads a case.`;
+    const one = inWorkspace === 1;
+    return `${inWorkspace} of ${withFile.length} cases ${one ? 'is' : 'are'} already in your workspace and ${one ? 'says' : 'say'} Added ${starts}. Add to workspace copies the file of another one there; Open loads a case.`;
   }
   return single
     ? `This case is already in your workspace and says Added ${starts}, so there is nothing to add: choose Open to load it. If its file is deleted from the workspace folder, the card offers Add to workspace again.`

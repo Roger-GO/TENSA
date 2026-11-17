@@ -667,7 +667,7 @@ describe('what the dialog says of the workspace', () => {
     await openDialog();
     // The entry that is only links has no file, so it is not counted.
     expect(note()).toHaveTextContent(
-      '1 of 2 cases are already in your workspace and say Added (a new workspace starts with the default set).',
+      '1 of 2 cases is already in your workspace and says Added (a new workspace starts with the default set).',
     );
   });
 
@@ -683,7 +683,7 @@ describe('what the dialog says of the workspace', () => {
   it('follows an add: the count is read again once the case is in', async () => {
     inWorkspace('ieee14');
     const user = await openDialog();
-    expect(note()).toHaveTextContent('1 of 2 cases are already in your workspace');
+    expect(note()).toHaveTextContent('1 of 2 cases is already in your workspace');
     await user.click(card('wscc9').getByRole('button', { name: /^Add to workspace/ }));
     await waitFor(() =>
       expect(note()).toHaveTextContent('All 2 cases are already in your workspace'),
@@ -694,7 +694,7 @@ describe('what the dialog says of the workspace', () => {
     inWorkspace('ieee14');
     const user = await openDialog();
     await user.type(screen.getByRole('searchbox'), 'wscc');
-    expect(note()).toHaveTextContent('1 of 2 cases are already in your workspace');
+    expect(note()).toHaveTextContent('1 of 2 cases is already in your workspace');
   });
 
   it('is not there when no case has a file', async () => {
