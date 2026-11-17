@@ -696,6 +696,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/examples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the example cases TENSA can add to the workspace.
+         * @description Every entry of the example catalog, in the catalog's order.
+         *
+         *     An entry says what the case is for, its size and the analyses it supports, where its
+         *     file comes from (``provenance``), how to cite it, its licence, what was changed in the
+         *     data (``modifications``), what to know before relying on it (``caveats``) and how its
+         *     results were checked (``verification``, where that has been done). ``in_workspace`` and
+         *     ``available`` are about this server: whether the case's file is already in the
+         *     workspace, and whether the file it would copy can be found. An entry of kind
+         *     ``external`` has no file, only ``links``.
+         */
+        get: operations["listExamples"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/examples/{example_id}/add": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add an example case to the workspace.
+         * @description Copy the case's file or files into the workspace root.
+         *
+         *     The files go in as an upload does (written whole, never over a name that is taken
+         *     unless ``overwrite`` is true). The source, citations and licence of the case are added
+         *     to ``EXAMPLE-SOURCES.md`` in the workspace root, which is not a case file and is not
+         *     listed as one. An ANDES case is copied from the ANDES installed on the server; when
+         *     that file is not the one the catalog was written against, the case is added anyway and
+         *     ``warnings`` says so.
+         */
+        post: operations["addExample"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/version": {
         parameters: {
             query?: never;
@@ -1539,6 +1594,58 @@ export interface components {
             mode: number;
         };
         /**
+         * AddedExample
+         * @description Response shape for ``POST /examples/{example_id}/add``.
+         */
+        AddedExample: {
+            /**
+             * Id
+             * @description The id of the example case that was added.
+             */
+            id: string;
+            /**
+             * Primary
+             * @description Name of the case file to open (the first of ``files``).
+             */
+            primary: string;
+            /**
+             * Files
+             * @description Every file written, the case file first.
+             */
+            files: components["schemas"]["AddedExampleFile"][];
+            /**
+             * Warnings
+             * @description Things to know about what was added: an ANDES file that is not the one the catalog was written against, or a sources file that could not be updated.
+             */
+            warnings: string[];
+            /**
+             * Sources File
+             * @description Name of the file in the workspace root that records the source, citations and licence of every example added.
+             */
+            sources_file: string;
+        };
+        /**
+         * AddedExampleFile
+         * @description One file ``POST /examples/{example_id}/add`` wrote.
+         */
+        AddedExampleFile: {
+            /**
+             * Name
+             * @description The file name in the workspace root.
+             */
+            name: string;
+            /**
+             * Size Bytes
+             * @description Size of the file in bytes.
+             */
+            size_bytes: number;
+            /**
+             * Replaced
+             * @description Whether the file replaced one of the same name (``overwrite`` was set).
+             */
+            replaced: boolean;
+        };
+        /**
          * AlterSpec
          * @description Parameter alteration at a scheduled time — used for load steps,
          *     parameter ramps, set-point changes, etc.
@@ -1949,6 +2056,42 @@ export interface components {
              * @description Alter only: the operand applied via ``method``.
              */
             amount?: number | null;
+        };
+        /** CaseSize */
+        CaseSize: {
+            /**
+             * Buses
+             * @description Number of buses.
+             */
+            buses: number;
+            /**
+             * Generators
+             * @description Number of generators (static generators, slack included).
+             */
+            generators: number;
+        };
+        /** Citation */
+        Citation: {
+            /**
+             * Text
+             * @description The reference as plain text.
+             */
+            text: string;
+            /**
+             * Bibtex
+             * @description The same reference as a BibTeX entry.
+             */
+            bibtex: string;
+            /**
+             * Doi
+             * @description The DOI, where the work has one.
+             */
+            doi?: string | null;
+            /**
+             * Url
+             * @description Where the work can be read or found.
+             */
+            url?: string | null;
         };
         /**
          * CloneDiffPair
@@ -2995,6 +3138,121 @@ export interface components {
             job_id?: string | null;
         };
         /**
+         * ExampleList
+         * @description Response shape for ``GET /examples``.
+         */
+        ExampleList: {
+            /**
+             * Examples
+             * @description Every example case, in the order the catalog gives.
+             */
+            examples: components["schemas"]["ExampleListEntry"][];
+        };
+        /**
+         * ExampleListEntry
+         * @description One example case, as the catalog describes it, with its state on this machine.
+         */
+        ExampleListEntry: {
+            /**
+             * Id
+             * @description Short name of the case, used by every command and route.
+             */
+            id: string;
+            /**
+             * Title
+             * @description The case's name as it is shown.
+             */
+            title: string;
+            /**
+             * Summary
+             * @description What the case is for, in a sentence or two.
+             */
+            summary: string;
+            /**
+             * Category
+             * @description ``dynamic`` cases carry machine models and can be simulated in the time domain; ``steady-state`` cases hold a network and its loading only.
+             * @enum {string}
+             */
+            category: "dynamic" | "steady-state";
+            /**
+             * Tags
+             * @description Words the case is found by.
+             */
+            tags?: string[];
+            /** @description Buses and generators. Required for an entry that has a file. */
+            size?: components["schemas"]["CaseSize"] | null;
+            /**
+             * Analyses
+             * @description What the case supports: ``pf`` power flow, ``tds`` time domain, ``eig`` eigenvalues.
+             */
+            analyses?: ("pf" | "tds" | "eig")[];
+            /**
+             * Default
+             * @description Whether the case is put in an empty workspace when the server starts.
+             * @default false
+             */
+            default: boolean;
+            /** @description Where the file comes from. */
+            provenance: components["schemas"]["Provenance"];
+            /**
+             * Extra Files
+             * @description Files the case is loaded with, besides the primary.
+             */
+            extra_files?: components["schemas"]["ExtraFile"][];
+            /**
+             * Citations
+             * @description The publications of the system and of the dataset the file comes from.
+             */
+            citations?: components["schemas"]["Citation"][];
+            /** @description The terms the data is distributed under. */
+            licence: components["schemas"]["Licence"];
+            /**
+             * Modifications
+             * @description Every change made to the data of the source.
+             */
+            modifications?: string[];
+            /**
+             * Caveats
+             * @description What a user should know before relying on the case.
+             */
+            caveats?: string[];
+            /** @description How the case's results were checked, where that has been done. */
+            verification?: components["schemas"]["Verification"] | null;
+            /**
+             * Links
+             * @description Where to get the data of an ``external`` entry.
+             */
+            links?: components["schemas"]["Link"][];
+            /**
+             * In Workspace
+             * @description Whether the case's primary file is already in the workspace (a regular file of that name, which may be one the user wrote). Always ``false`` for a case with no file.
+             */
+            in_workspace: boolean;
+            /**
+             * Available
+             * @description Whether every file the case copies can be found: in the installed ANDES, or in this package. ``false`` for a case that has no file (``external``), and for an ANDES case the installed release does not hold.
+             */
+            available: boolean;
+        };
+        /** ExtraFile */
+        ExtraFile: {
+            /**
+             * Path
+             * @description A file the case is loaded with (a ``.dyr`` beside a ``.raw``), relative to the same folder as the primary file.
+             */
+            path: string;
+            /**
+             * Sha256
+             * @description SHA-256 of the file.
+             */
+            sha256: string;
+            /**
+             * Role
+             * @description What the file adds, such as ``dynamic data``.
+             */
+            role: string;
+        };
+        /**
          * FaultSpec
          * @description 3-phase-to-ground fault on a bus.
          *
@@ -3420,6 +3678,24 @@ export interface components {
              */
             bus?: string | null;
         };
+        /** Licence */
+        Licence: {
+            /**
+             * Name
+             * @description The licence, as its own text names it.
+             */
+            name: string;
+            /**
+             * Url
+             * @description Where the licence text is.
+             */
+            url?: string | null;
+            /**
+             * Attribution
+             * @description The credit the licence asks a user of the data to give.
+             */
+            attribution?: string | null;
+        };
         /**
          * LineFlow
          * @description Per-line active and reactive power flow at both terminals: ``p`` / ``q``
@@ -3480,6 +3756,24 @@ export interface components {
              * @description The larger of the apparent powers at the two terminals, ``sqrt(p^2 + q^2)`` and ``sqrt(p_to^2 + q_to^2)``, as a percentage of ``rate_a``. Above 100 is an overload. ``null`` when the line has no rating.
              */
             loading_pct?: number | null;
+        };
+        /** Link */
+        Link: {
+            /**
+             * Title
+             * @description What the link points at.
+             */
+            title: string;
+            /**
+             * Url
+             * @description The address.
+             */
+            url: string;
+            /**
+             * Note
+             * @description What to know before following it.
+             */
+            note?: string | null;
         };
         /**
          * ListDisturbancesResponse
@@ -3848,6 +4142,40 @@ export interface components {
             recovery?: components["schemas"]["RecoveryDescriptor"] | null;
         } & {
             [key: string]: unknown;
+        };
+        /** Provenance */
+        Provenance: {
+            /**
+             * Kind
+             * @description Where the case file is: ``andes`` is the user's own installed ANDES, ``bundled`` ships with TENSA, ``external`` is no file at all, only links.
+             * @enum {string}
+             */
+            kind: "bundled" | "andes" | "external";
+            /**
+             * Path
+             * @description The case file, relative to ``andes/cases`` of the installed ANDES (``andes``) or to the bundled cases folder of the package (``bundled``). ``null`` for ``external``.
+             */
+            path?: string | null;
+            /**
+             * Sha256
+             * @description SHA-256 of the file as it was when the entry was written. TENSA warns when an installed ANDES holds a different file and refuses a bundled file that differs.
+             */
+            sha256?: string | null;
+            /**
+             * Release
+             * @description The release or tag the checksum was taken from, such as ``ANDES 2.0.0``.
+             */
+            release?: string | null;
+            /**
+             * Source Url
+             * @description Where the file comes from, pinned to a release or a commit where the host allows it.
+             */
+            source_url?: string | null;
+            /**
+             * Retrieved
+             * @description The day the file was retrieved from ``source_url``.
+             */
+            retrieved?: string | null;
         };
         /**
          * RecoveryDescriptor
@@ -5257,6 +5585,53 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** Verification */
+        Verification: {
+            /**
+             * Summary
+             * @description What was verified and how, in a few sentences.
+             */
+            summary: string;
+            /**
+             * Checks
+             * @description Each check, with its reference, tolerance and result.
+             */
+            checks?: components["schemas"]["VerificationCheck"][];
+        };
+        /** VerificationCheck */
+        VerificationCheck: {
+            /**
+             * Name
+             * @description What was checked.
+             */
+            name: string;
+            /**
+             * Kind
+             * @description What the outputs were compared with: ``independent-solver``, ``published``, ``stored-solution``, ``ring-down`` (a mode seen in a time-domain run) or ``regression-baseline`` (TENSA's own earlier output, so not a verification).
+             * @enum {string}
+             */
+            kind: "independent-solver" | "published" | "stored-solution" | "ring-down" | "regression-baseline";
+            /**
+             * Reference
+             * @description The reference, named so it can be found.
+             */
+            reference: string;
+            /**
+             * Tolerance
+             * @description How close the outputs had to be.
+             */
+            tolerance: string;
+            /**
+             * Result
+             * @description What was found.
+             */
+            result: string;
+            /**
+             * Passed
+             * @description Whether the result is inside the tolerance.
+             */
+            passed: boolean;
         };
         /**
          * VersionInfo
@@ -7132,6 +7507,97 @@ export interface operations {
             };
             /** @description Body did not validate against SidecarLayout. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listExamples: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExampleList"];
+                };
+            };
+        };
+    };
+    addExample: {
+        parameters: {
+            query?: {
+                /** @description Replace the files of the case that are already in the workspace. When ``false`` (the default) an existing file is left alone and the request answers 409. */
+                overwrite?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Id of the example case, as ``GET /examples`` lists it. */
+                example_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddedExample"];
+                };
+            };
+            /** @description The entry is a link to data TENSA does not hold (kind ``external``), so there is no file to add, or a path in the workspace was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The catalog has no entry of that id, or the file it names cannot be found: the installed ANDES does not hold it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A file of the case is already in the workspace and ``overwrite`` was not set (or the name is a directory). Nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The file could not be written (full disk, permissions), or a bundled file is not the one TENSA shipped. */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
