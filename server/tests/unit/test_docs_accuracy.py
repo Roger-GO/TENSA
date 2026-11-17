@@ -43,6 +43,12 @@ def _command_options(command: str) -> dict[str, Any]:
     return {opt: param for param in found.params for opt in param.opts if opt.startswith("--")}
 
 
+def _least(option: Any) -> Any:
+    """The least value an option accepts: on its click type, or on the option itself in Typer
+    0.29 and later, which have no click types."""
+    return option.type.min if hasattr(option, "type") else option.min
+
+
 def _serve_options() -> dict[str, Any]:
     return _command_options("serve")
 
@@ -116,8 +122,8 @@ def test_server_readme_states_the_real_desktop_defaults() -> None:
     home_relative = "~/" + Path(workspace).relative_to(Path.home()).as_posix()
     assert stated("--workspace", home_relative), bullets["--workspace"]
     # The window sizes the readme gives as least are the ones the command refuses to go below.
-    assert f"at least `{options['--width'].type.min}`" in bullets["--width"]
-    assert f"at least `{options['--height'].type.min}`" in bullets["--height"]
+    assert f"at least `{_least(options['--width'])}`" in bullets["--width"]
+    assert f"at least `{_least(options['--height'])}`" in bullets["--height"]
 
 
 def test_server_readme_gives_the_linux_fixes_the_desktop_command_gives() -> None:

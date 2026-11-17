@@ -20,12 +20,13 @@ read as markup, and the long dash the documentation does not use.
 
 from __future__ import annotations
 
+import enum
 import re
 import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_SRC = REPO_ROOT / "server" / "src"
@@ -423,9 +424,26 @@ def _option_value(param: Any) -> str:
     """What an option takes, as the `--help` table writes it."""
     if getattr(param, "is_flag", False):
         return "flag"
-    name = str(getattr(param.type, "name", "text")).lower().removesuffix(" range")
-    low = getattr(param.type, "min", None)
+    click_type = getattr(param, "type", None)
+    if click_type is not None:
+        name = str(getattr(click_type, "name", "text")).lower().removesuffix(" range")
+        low = getattr(click_type, "min", None)
+    else:
+        # Typer 0.29 and later have their own parameter classes and no click type: the
+        # annotation says what an option takes, and its least value is on the option.
+        name = _annotation_word(param.type_descriptor.annotation)
+        low = getattr(param, "min", None)
     return f"{name} (min {low:g})" if low is not None else name
+
+
+def _annotation_word(annotation: Any) -> str:
+    """The word click's types give an annotation (``list[str]`` takes text, an enum a choice)."""
+    args = get_args(annotation)
+    if args:
+        return _annotation_word(args[0])
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return "choice"
+    return {int: "integer", float: "float", Path: "path"}.get(annotation, "text")
 
 
 def _option_default(param: Any) -> str:
