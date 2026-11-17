@@ -48,6 +48,7 @@ from tensa.api.routes.cpf import router as cpf_router
 from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
+from tensa.api.routes.examples import router as examples_router
 from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
 from tensa.api.routes.messages import router as messages_router
@@ -364,6 +365,7 @@ def make_app(
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
+    app.include_router(examples_router, prefix="/api", tags=["examples"])
     app.include_router(version_router, prefix="/api", tags=["version"])
     app.include_router(health_router, prefix="/api", tags=["health"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7

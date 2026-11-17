@@ -125,6 +125,7 @@ async def test_every_route_declares_problem_details_for_4xx(
         ("get", "/api/version"),            # package metadata, no input
         ("get", "/api/health"),             # server state, no input
         ("get", "/api/workspace/files"),    # directory listing
+        ("get", "/api/examples"),           # the example catalog, read from the package
     }
     spec = (await client.get("/openapi.json")).json()
     schemas = spec.get("components", {}).get("schemas", {})

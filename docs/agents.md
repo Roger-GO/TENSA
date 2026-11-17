@@ -58,6 +58,8 @@ On Windows the command is the `tensa.exe` in the environment's `Scripts` folder,
 | Tool | What it does |
 | --- | --- |
 | `list_workspace_files` | Lists the case files in the workspace |
+| `list_examples` | Lists the example cases TENSA can add, or describes one in full: citations, licence, caveats and checks |
+| `add_example` | Copies an example case into the workspace, to be opened with `load_case` |
 | `create_session` | Creates a session, an isolated ANDES system, and returns its id |
 | `close_session` | Closes a session and frees its worker process |
 | `load_case` | Loads a case file by its path in the workspace, with optional additional files such as a `.dyr` |
@@ -80,7 +82,7 @@ On Windows the command is the `tensa.exe` in the environment's `Scripts` folder,
 
 The server tells the client the usual order itself:
 
-1. `list_workspace_files`, then `create_session`, then `load_case`.
+1. `list_workspace_files` (or `list_examples` and `add_example` to put an [example case](examples.md) in the workspace), then `create_session`, then `load_case`.
 2. Optionally `add_fault`, `add_toggle` or `add_alter`. These work only before the first run.
 3. `run_pflow`, then `run_tds`, then `get_operating_point`.
 4. `close_session` when done.

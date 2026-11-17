@@ -7,7 +7,7 @@ response is shaped as ``ProblemDetails`` per RFC 7807.
 The models live in one module per domain, beside this file and named for the
 routes that use them where there is one: ``errors``, ``jobs``, ``messages``,
 ``sessions``, ``topology``, ``cases``, ``elements``, ``pflow``, ``disturbances``,
-``clone``, ``tds``, ``metrics``, ``comtrade``, ``workspace`` and ``version``. A model
+``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``workspace`` and ``version``. A model
 that another domain builds on (``TopologySummary``, ``ProblemDetails``) is imported
 from the module that defines it. Every name the single-file module defined is
 importable from here.
@@ -57,6 +57,12 @@ from tensa.api.schemas.errors import (
     ProblemDetails,
     RecoveryDescriptor,
     RecoveryKind,
+)
+from tensa.api.schemas.examples import (
+    AddedExample,
+    AddedExampleFile,
+    ExampleList,
+    ExampleListEntry,
 )
 from tensa.api.schemas.jobs import (
     JobKindSchema,
@@ -132,6 +138,8 @@ __all__ = [
     "AddDisturbancesRequest",
     "AddDisturbancesResponse",
     "AddElementRequest",
+    "AddedExample",
+    "AddedExampleFile",
     "AlterSpec",
     "AlterableParamsResponse",
     "BlankSystemResponse",
@@ -158,6 +166,8 @@ __all__ = [
     "EditElementRequest",
     "EditStep",
     "ElementCreated",
+    "ExampleList",
+    "ExampleListEntry",
     "FaultSpec",
     "GeneratorOutput",
     "JobKindSchema",

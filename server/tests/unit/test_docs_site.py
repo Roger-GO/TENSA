@@ -449,10 +449,21 @@ def test_pages_name_only_commands_and_options_that_tensa_has(mkdocs: dict[str, A
                 if word not in commands:
                     problems.append(f"{name}: `tensa {word}` is not a command")
                     continue
-                used = set(re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", line[match.end() :]))
-                unknown = used - _options(commands[word]) - {"--help"}
+                command, rest, shown = commands[word], line[match.end() :], f"tensa {word}"
+                # A command that holds commands (`tensa examples`) is followed by one of them.
+                subcommands = getattr(command, "commands", None)
+                if subcommands:
+                    sub = re.match(r"[ \t]+([a-z][\w-]*)", rest)
+                    if sub is not None:
+                        if sub.group(1) not in subcommands:
+                            problems.append(f"{name}: `{shown} {sub.group(1)}` is not a command")
+                            continue
+                        command, rest = subcommands[sub.group(1)], rest[sub.end() :]
+                        shown += f" {sub.group(1)}"
+                used = set(re.findall(r"(?<![\w-])(--[a-z][a-z-]*)", rest))
+                unknown = used - _options(command) - {"--help"}
                 if unknown:
-                    problems.append(f"{name}: `tensa {word}` is given {sorted(unknown)}")
+                    problems.append(f"{name}: `{shown}` is given {sorted(unknown)}")
     assert not problems, "\n".join(problems)
 
 
@@ -806,7 +817,49 @@ def test_the_command_line_reference_lists_every_command_and_option(
         assert f"## `tensa {name}`" in page, name
         for option in _options(command):
             assert f"`{option}`" in page, f"{name} {option}"
+        # The commands of a command that holds commands have sections of their own.
+        for sub_name, sub_command in getattr(command, "commands", {}).items():
+            assert f"## `tensa {name} {sub_name}`" in page, f"{name} {sub_name}"
+            for option in _options(sub_command):
+                assert f"`{option}`" in page, f"{name} {sub_name} {option}"
     assert "`--version`" in page
+
+
+def test_a_command_that_holds_commands_gets_a_section_for_each_of_them(
+    reference: ModuleType,
+) -> None:
+    import click
+
+    listing = click.Command(
+        "list",
+        help="List the cases.",
+        params=[click.Option(["--json", "as_json"], is_flag=True, help="Print JSON.")],
+    )
+    adding = click.Command(
+        "add",
+        help="Add a case.",
+        params=[
+            click.Argument(["ids"], nargs=-1),
+            click.Option(["--force"], is_flag=True, help="Replace what is there."),
+        ],
+    )
+    citing = click.Command("cite", params=[click.Argument(["example_id"])])
+    examples = click.Group(
+        "examples", help="Work with the cases.", commands=[listing, adding, citing]
+    )
+    page = reference.render_cli(click.Group("tensa", commands=[examples]))
+    assert "## `tensa examples`" in page
+    assert "Usage: `tensa examples COMMAND [ARGS]...`" in page
+    assert "## `tensa examples list`" in page
+    assert "## `tensa examples add`" in page
+    assert "`--json`" in page and "`--force`" in page
+    # A positional argument is an argument: in the usage line, in a table of its own, and not
+    # an option.
+    assert "Usage: `tensa examples add [OPTIONS] IDS...`" in page
+    assert "Usage: `tensa examples cite EXAMPLE_ID`" in page
+    assert "| Argument | Description |\n| --- | --- |\n| `IDS` |" in page
+    assert "| `ids` |" not in page
+    assert page.index("## `tensa examples`") < page.index("## `tensa examples list`")
 
 
 def test_the_command_line_reference_does_not_print_the_home_directory(

@@ -153,6 +153,17 @@ Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<re
                  POST /workspace/files?name=<file>[&overwrite=true]  (adds a case file; the body IS the file's bytes
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
                  409 if the name exists and overwrite is not true; a <case>.layout.json name is refused, PUT /workspace/layout writes those)
+Examples:        GET /examples  → {"examples": [...]}: the catalog of example cases, each with "id", "title", "summary",
+                 "category" (dynamic | steady-state), "size", "analyses" (pf, tds, eig), "default", "provenance" (kind andes |
+                 bundled | external, file path, sha256, source URL), "citations" ({text, bibtex, doi, url}), "licence",
+                 "modifications", "caveats", "verification", "links" (for an external entry, which has no file), and
+                 "in_workspace" / "available" for this server
+                 POST /examples/{id}/add[?overwrite=true]  → 201 {"id", "primary", "files": [{name, size_bytes, replaced}],
+                 "warnings", "sources_file"}: copies the case into the workspace root (an ANDES case from the ANDES installed
+                 on the server), then load "primary" with POST /sessions/{id}/case. 404 for an unknown id or a file the
+                 installed ANDES lacks, 409 if a file exists and overwrite is not true (nothing is written), 400 for an
+                 external entry. EXAMPLE-SOURCES.md in the workspace root records source, citations and licence of what was added
+                 (not a case file, not listed). Cite the case when you use it: the "citations" say how.
 Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
 Health:          GET /health  → {"status": "ok", "version", "andes_version", "sessions": {"active", "max"},
                  "cache": {"state": ready|unchecked|missing, "warm", "generating"}}  (poll it; no session, never waits for a worker;
@@ -229,5 +240,6 @@ An MCP (Model Context Protocol) stdio server ships as an optional extra:
   pip install "tensa[mcp]"          (from a source checkout: pip install -e "./server[mcp]")
   tensa mcp --workspace ~/tensa-cases
 It wraps the golden workflow (create_session, load_case, run_pflow, run_tds,
-add_disturbance, get_topology, get_operating_point, list_workspace_files, ...) so MCP
+add_disturbance, get_topology, get_operating_point, list_workspace_files, list_examples,
+add_example, ...) so MCP
 clients (Claude Code, etc.) can drive simulations as native tools.

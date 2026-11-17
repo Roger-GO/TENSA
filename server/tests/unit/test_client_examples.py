@@ -288,6 +288,60 @@ def test_the_mcp_tds_tool_sends_its_controllers_and_lists_what_they_can_command(
     assert (listing["method"], listing["path"]) == ("GET", "/api/sessions/abc/tds/controllers")
 
 
+def test_the_mcp_add_example_tool_posts_to_the_route_and_escapes_the_id(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.add_example("ieee14")
+    mcp_server.add_example("a b/../c", overwrite=True)
+
+    plain, escaped = seen
+    assert (plain["method"], plain["path"]) == ("POST", "/api/examples/ieee14/add?overwrite=false")
+    # An id is one path segment whatever it holds, and overwrite is asked for in so many words.
+    assert escaped["path"] == "/api/examples/a%20b%2F..%2Fc/add?overwrite=true"
+
+
+def test_the_mcp_list_examples_tool_shortens_the_catalog_and_gives_one_entry_in_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    from tensa import mcp_server
+
+    full = {
+        "id": "a",
+        "title": "Case A",
+        "summary": "For tests.",
+        "category": "dynamic",
+        "size": {"buses": 3, "generators": 1},
+        "analyses": ["pf"],
+        "default": True,
+        "in_workspace": False,
+        "available": True,
+        "provenance": {"kind": "andes"},
+        "licence": {"name": "GPL-3.0-or-later"},
+        "citations": [{"text": "A long citation", "bibtex": "@misc{a}"}],
+    }
+    asked: list[tuple[str, str]] = []
+
+    def api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
+        asked.append((method, path))
+        return {"examples": [full]}
+
+    monkeypatch.setattr(mcp_server, "_api", api)
+    (brief,) = mcp_server.list_examples()
+    # The listing leaves out what an agent reads only for one case: the citations and the rest.
+    assert "citations" not in brief
+    assert brief["source"] == "andes" and brief["licence"] == "GPL-3.0-or-later"
+    assert brief["id"] == "a" and brief["in_workspace"] is False
+    assert mcp_server.list_examples("a") == full
+    assert asked == [("GET", "/examples")] * 2
+
+
 def test_the_mcp_messages_tool_asks_for_warnings_unless_told_otherwise(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -15,6 +15,8 @@ Subcommands:
 - ``desktop``: the same server in a native window (the optional ``desktop``
   extra, pywebview) instead of a browser tab, on a free loopback port; closing
   the window stops the server (see ``desktop.py``).
+- ``examples``: list, add and cite the example cases of the catalog (see
+  ``core/examples.py``): ``tensa examples list``, ``add`` and ``cite``.
 - ``--version`` — print the tensa and ANDES versions and exit.
 - ``warm-cache`` — run ANDES's symbolic-equation code generation
   (``andes.prepare()``) so the cache is populated; ``serve`` runs it in the
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import json
 import logging
 import multiprocessing
 import os
@@ -56,7 +59,17 @@ from tensa.core.codegen_cache import (
     pycode_dir,
     start_background_warm,
 )
-from tensa.core.examples import seed_example_cases
+from tensa.core.example_catalog import Catalog, Example, load_catalog
+from tensa.core.examples import (
+    SOURCES_FILE,
+    ExampleError,
+    ExampleExistsError,
+    ExampleStatus,
+    add_example,
+    example_statuses,
+    format_citations,
+    seed_example_cases,
+)
 from tensa.core.logging_setup import configure_logging, resolve_log_file
 from tensa.desktop import (
     MIN_HEIGHT,
@@ -69,7 +82,7 @@ from tensa.desktop import (
     run_window,
     toolkit_help,
 )
-from tensa.security.paths import ensure_workspace
+from tensa.security.paths import WorkspacePathError, ensure_workspace
 
 
 def _on_a_terminal() -> bool:
@@ -1003,6 +1016,150 @@ def mcp(
     from tensa.mcp_server import run as run_mcp
 
     run_mcp(url=url, workspace=str(workspace) if workspace is not None else None)
+
+
+examples_app = typer.Typer(
+    name="examples",
+    help="List, add and cite the example cases.",
+    no_args_is_help=True,
+)
+app.add_typer(examples_app, name="examples")
+
+
+def _known_example(catalog: Catalog, example_id: str) -> Example:
+    """The catalog's entry for ``example_id``, else a usage error naming the ids it has."""
+    example = catalog.get(example_id)
+    if example is None:
+        known = ", ".join(e.id for e in catalog.examples)
+        raise typer.BadParameter(f"no example case {example_id!r}; the cases are: {known}")
+    return example
+
+
+def _example_state(status: ExampleStatus) -> str:
+    if not status.example.has_file:
+        return "link only"
+    if status.in_workspace:
+        return "added"
+    return "not added" if status.available else "unavailable"
+
+
+@examples_app.command("list")
+def examples_list(
+    workspace: _WorkspaceOption = Path.home() / ".tensa" / "cases",
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help=(
+                "Print the whole catalog as JSON (every field, with in_workspace and "
+                "available) instead of a table."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """List the example cases, and which are already in the workspace."""
+    statuses = example_statuses(workspace.expanduser())
+    if as_json:
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        **s.example.model_dump(mode="json"),
+                        "in_workspace": s.in_workspace,
+                        "available": s.available,
+                    }
+                    for s in statuses
+                ],
+                indent=2,
+            )
+        )
+        return
+    rows = [
+        (
+            s.example.id,
+            s.example.title,
+            f"{s.example.size.buses} buses, {s.example.size.generators} gens"
+            if s.example.size
+            else "-",
+            " ".join(s.example.analyses) or "-",
+            "yes" if s.example.default else "no",
+            _example_state(s),
+        )
+        for s in statuses
+    ]
+    header = ("ID", "TITLE", "SIZE", "ANALYSES", "FIRST RUN", "STATE")
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
+    for row in [header, *rows]:
+        cells = (cell.ljust(width) for cell, width in zip(row, widths, strict=True))
+        typer.echo("  ".join(cells).rstrip())
+
+
+@examples_app.command("add")
+def examples_add(
+    ids: Annotated[
+        list[str],
+        typer.Argument(metavar="ID", help="Ids of the cases to add (see `tensa examples list`)."),
+    ],
+    workspace: _WorkspaceOption = Path.home() / ".tensa" / "cases",
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Replace files of a case that are already in the workspace."),
+    ] = False,
+) -> None:
+    """Copy example cases into the workspace.
+
+    A file that is already there is left alone unless --force is given. The source,
+    citations and licence of what is added are recorded in EXAMPLE-SOURCES.md in the
+    workspace. A running server lists the new files at once.
+    """
+    catalog = load_catalog()
+    for example_id in ids:
+        if not _known_example(catalog, example_id).has_file:
+            raise typer.BadParameter(
+                f"{example_id!r} is a link to data TENSA does not hold, not a file to add; "
+                "`tensa examples list --json` has its links"
+            )
+    try:
+        canonical_workspace = ensure_workspace(workspace)
+    except WorkspacePathError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    failed = False
+    for example_id in ids:
+        try:
+            result = add_example(example_id, canonical_workspace, force, catalog=catalog)
+        except (ExampleError, WorkspacePathError) as exc:
+            replaceable = isinstance(exc, ExampleExistsError) and exc.replaceable
+            hint = " (--force replaces it)" if replaceable else ""
+            typer.echo(f"error: {example_id}: {exc}{hint}", err=True)
+            failed = True
+            continue
+        for file in result.files:
+            typer.echo(f"{example_id}: {'replaced' if file.replaced else 'added'} {file.name}")
+        for warning in result.warnings:
+            typer.echo(f"warning: {example_id}: {warning}", err=True)
+    if not failed:
+        typer.echo(f"Source, citations and licence: {canonical_workspace / SOURCES_FILE}")
+    raise typer.Exit(code=1 if failed else 0)
+
+
+@examples_app.command("cite")
+def examples_cite(
+    example_id: Annotated[
+        str, typer.Argument(metavar="ID", help="Id of the case (see `tensa examples list`).")
+    ],
+    bibtex: Annotated[
+        bool, typer.Option("--bibtex", help="Print BibTeX entries instead of plain text.")
+    ] = False,
+) -> None:
+    """Print the citations of an example case: its system, and the dataset it comes from."""
+    catalog = load_catalog()
+    example = _known_example(catalog, example_id)
+    text = format_citations(example, bibtex=bibtex)
+    if not text:
+        typer.echo(f"error: no citations are recorded for {example_id!r}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(text)
 
 
 @app.command(name="warm-cache")

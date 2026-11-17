@@ -6,7 +6,8 @@ This site is built with [MkDocs](https://www.mkdocs.org/) and the [Material](htt
 
 | Path | What it is |
 | --- | --- |
-| `docs/*.md` | The pages written by hand |
+| `docs/*.md` | The pages written by hand, except `docs/examples.md` |
+| `docs/examples.md` | The example cases, written from the catalog by `scripts/gen_examples_page.py` |
 | `docs/img/` | Images: the screenshots of the UI tour, the logo and favicon, and the hero image |
 | `docs/requirements.txt` | The packages the build needs besides TENSA itself |
 | `mkdocs.yml` | The site's configuration and navigation |
@@ -15,6 +16,8 @@ This site is built with [MkDocs](https://www.mkdocs.org/) and the [Material](htt
 | `.github/workflows/docs.yml` | Builds the site in CI, and publishes it from `main` |
 
 The three pages under **Reference** (the command line, the API routes and the API models) are not files in `docs/`. The hook renders them while the site builds, from `tensa --help` and from the OpenAPI schema of the server, so they cannot drift from the code. To change one, change the help text of an option, or the description of a route or a field, in the source of the server, and not the page.
+
+The **Example cases** page is a file in `docs/`, but it is written, not edited. Each case is an entry of the catalog, `server/src/tensa/examples/catalog.json`. To change a case, change its entry and run `python scripts/gen_examples_page.py`, which writes the page again. A test fails when the page is not what the catalog gives.
 
 ## Build the site
 

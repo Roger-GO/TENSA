@@ -13,7 +13,7 @@ A **session** is one ANDES system in a process of its own. The server starts tha
 
 ## The workspace
 
-The **workspace** is the directory the server reads case files from and writes saved ones to. It is `--workspace`, or `~/.tensa/cases` when that is left out, and the server creates it, with permissions that keep other users out, if it is missing. An empty workspace is filled with the three example cases the first time the server starts.
+The **workspace** is the directory the server reads case files from and writes saved ones to. It is `--workspace`, or `~/.tensa/cases` when that is left out, and the server creates it, with permissions that keep other users out, if it is missing. An empty workspace is filled with the three example cases the first time the server starts, and the [example cases](examples.md) page says where each comes from, how to cite it and how to add it again.
 
 Case paths in the API are relative to the workspace. An absolute path or a `..` in one is refused with a 400.
 

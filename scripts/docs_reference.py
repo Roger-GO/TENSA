@@ -45,6 +45,7 @@ TAG_TITLES = {
     "clone": "Parameter editing (clone)",
     "tds": "Time-domain simulation",
     "workspace": "Workspace",
+    "examples": "Example cases",
     "version": "Version",
     "snapshot": "Snapshots",
     "bundle": "Bundles",
@@ -442,17 +443,28 @@ def _render_command(name: str, command: Any) -> list[str]:
     out = [f"## {_code(name)}", ""]
     if command.help:
         out += [_prose(command.help), ""]
+    # An argument has `opts` too (its own name), so the two are told apart by what they are.
+    arguments = [p for p in command.params if getattr(p, "param_type_name", "") == "argument"]
     options = [
         param
         for param in command.params
         if getattr(param, "opts", None)
+        and param not in arguments
         and not set(param.opts) & _BUILT_IN_OPTIONS
         and not getattr(param, "hidden", False)
     ]
     usage = name + (" [OPTIONS]" if options else "")
+    usage += "".join(
+        f" {arg.name.upper()}" + ("..." if getattr(arg, "nargs", 1) == -1 else "")
+        for arg in arguments
+    )
     if getattr(command, "commands", None):
         usage += " COMMAND [ARGS]..."
     out += [f"Usage: {_code(usage)}", ""]
+    if arguments:
+        out += ["| Argument | Description |", "| --- | --- |"]
+        out += [f"| {_code(arg.name.upper())} | {_cell(getattr(arg, 'help', None) or '')} |" for arg in arguments]
+        out.append("")
     if options:
         out += ["| Option | Value | Default | Description |", "| --- | --- | --- | --- |"]
         for param in options:
@@ -479,6 +491,9 @@ def render_cli(group: Any, *, program: str = "tensa") -> str:
     ]
     for name, command in group.commands.items():
         out += _render_command(f"{program} {name}", command)
+        # A command that holds commands (``tensa examples``) has its own sections.
+        for sub_name, sub_command in getattr(command, "commands", {}).items():
+            out += _render_command(f"{program} {name} {sub_name}", sub_command)
     return "\n".join(out).rstrip() + "\n"
 
 

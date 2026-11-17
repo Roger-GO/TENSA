@@ -64,7 +64,8 @@ mcp = FastMCP(
     "tensa",
     instructions=(
         "Tools for the ANDES power-system simulator. Typical flow: "
-        "list_workspace_files -> create_session -> load_case -> "
+        "list_workspace_files (list_examples and add_example put a ready-made case "
+        "in the workspace first) -> create_session -> load_case -> "
         "add_fault/add_toggle/add_alter (optional, pre-setup only) -> run_pflow "
         "-> run_tds -> get_operating_point -> close_session. After the first "
         "run the session is 'setup'; call reload_case before adding more "
@@ -77,6 +78,54 @@ mcp = FastMCP(
 def list_workspace_files() -> Any:
     """List case files (xlsx/raw/dyr/json/m) available in the server workspace."""
     return _api("GET", "/workspace/files")
+
+
+# What ``list_examples`` shows of each case; the rest (citations, licence terms, the checks)
+# comes with ``list_examples(example_id=...)``.
+_EXAMPLE_BRIEF = (
+    "id", "title", "summary", "category", "size", "analyses", "default", "in_workspace",
+    "available",
+)
+
+
+@mcp.tool()
+def list_examples(example_id: str | None = None) -> Any:
+    """List the example cases TENSA can add to the workspace with add_example.
+
+    Each has an id, a title, what it is for, its size, the analyses it supports (pf power
+    flow, tds time domain, eig eigenvalues), whether it is already in the workspace and
+    where its file comes from. With example_id, returns that one case in full: its
+    citations (give them when the case is used in a result), licence, changes made to the
+    data, caveats, and how its results were checked.
+    """
+    entries = _api("GET", "/examples")["examples"]
+    if example_id is not None:
+        for entry in entries:
+            if entry["id"] == example_id:
+                return entry
+        known = ", ".join(entry["id"] for entry in entries)
+        raise RuntimeError(f"no example case {example_id!r}; the cases are: {known}")
+    return [
+        {
+            **{key: entry[key] for key in _EXAMPLE_BRIEF},
+            "source": entry["provenance"]["kind"],
+            "licence": entry["licence"]["name"],
+        }
+        for entry in entries
+    ]
+
+
+@mcp.tool()
+def add_example(example_id: str, overwrite: bool = False) -> Any:
+    """Copy an example case into the workspace, then load it with load_case.
+
+    Returns the files written (the case file first, as 'primary') and any warnings. A file
+    that is already in the workspace is left alone and the call fails unless overwrite is
+    true. The case's source, citations and licence are recorded in EXAMPLE-SOURCES.md in
+    the workspace.
+    """
+    quoted = urllib.parse.quote(example_id, safe="")
+    return _api("POST", f"/examples/{quoted}/add?overwrite={'true' if overwrite else 'false'}")
 
 
 @mcp.tool()
