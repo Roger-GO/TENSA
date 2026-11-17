@@ -161,10 +161,11 @@ class TopologySummary(BaseModel):
     transformers: list[TopologyEntry] = Field(
         ...,
         description=(
-            "Transformer elements split out from the ANDES ``Line`` bucket "
-            "via the ``tap != 1.0 OR phi != 0.0`` heuristic. Pure "
-            "transmission lines remain in ``lines``; off-nominal-tap and "
-            "phase-shifting branches move here."
+            "Transformer elements split out from the ANDES ``Line`` bucket: "
+            "a branch with ``tap != 1.0`` or ``phi != 0.0``, one the case "
+            "flags as a transformer (``trans``) and one whose two ends are "
+            "rated at different voltages (``Vn1`` and ``Vn2``). Pure "
+            "transmission lines remain in ``lines``."
         ),
     )
     generators: list[TopologyEntry] = Field(

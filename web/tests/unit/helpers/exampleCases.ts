@@ -74,10 +74,11 @@ export const IEEE14: TopologySummary = {
 /**
  * `wscc9.xlsx` of TENSA (the file `scripts/build_wscc9.py` writes): the network of the book
  * and a classical machine on each of its three generators. The three step-up transformers
- * are lines at their nominal ratio, as the server's topology lists them. The branches and
- * the loads are numbered as ANDES numbers those of its own `wscc9.xlsx` (the six lines, then
- * the three transformers, and the loads at buses 5, 6 and 8), and the buses at the ends of a
- * line are the order the book gives them in.
+ * are at their nominal ratio, and the server lists them as transformers because the file
+ * flags them and rates their two ends at different voltages. The branches and the loads are
+ * numbered as ANDES numbers those of its own `wscc9.xlsx` (the six lines, then the three
+ * transformers, and the loads at buses 5, 6 and 8), and the buses at the ends of a line are
+ * the order the book gives them in.
  */
 export const WSCC9: TopologySummary = {
   state: 'pre-setup',
@@ -90,13 +91,17 @@ export const WSCC9: TopologySummary = {
       [6, 9],
       [7, 8],
       [8, 9],
+    ],
+    0,
+  ),
+  transformers: branches(
+    [
       [1, 4],
       [2, 7],
       [3, 9],
     ],
-    0,
+    6,
   ),
-  transformers: [],
   generators: [
     entry(2, 'PV', { bus: 2 }),
     entry(3, 'PV', { bus: 3 }),
@@ -126,13 +131,17 @@ export const WSCC9_NETWORK: TopologySummary = {
       [9, 6],
       [7, 8],
       [8, 9],
+    ],
+    0,
+  ),
+  transformers: branches(
+    [
       [4, 1],
       [2, 7],
       [9, 3],
     ],
-    0,
+    6,
   ),
-  transformers: [],
   generators: [
     entry(2, 'PV', { bus: 2 }),
     entry(3, 'PV', { bus: 3 }),
@@ -145,7 +154,9 @@ export const WSCC9_NETWORK: TopologySummary = {
 
 /**
  * `kundur_full.xlsx` of ANDES: two areas of two machines each, joined by a
- * double line. Its buses are numbered 1 to 10 and named after the textbook.
+ * double line. Its buses are numbered 1 to 10 and named after the textbook. Each machine
+ * has a step-up transformer at its nominal ratio (20 and 230 kV), which the server lists
+ * as a transformer for its two rated voltages.
  */
 export const KUNDUR: TopologySummary = {
   state: 'pre-setup',
@@ -165,14 +176,18 @@ export const KUNDUR: TopologySummary = {
       [8, 9],
       [9, 10],
       [9, 10],
+    ],
+    0,
+  ),
+  transformers: branches(
+    [
       [1, 5],
       [2, 6],
       [3, 9],
       [4, 10],
     ],
-    0,
+    11,
   ),
-  transformers: [],
   generators: [
     entry(2, 'PV', { bus: 2 }),
     entry(3, 'PV', { bus: 3 }),

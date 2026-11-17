@@ -29,11 +29,10 @@ class TopologyMixin(WrapperBase):
     def _topology_snapshot_locked(self) -> TopologySnapshot:
         """Build the topology snapshot from the loaded System.
 
-        Lines and transformers are both backed by ANDES's ``Line`` model;
-        the substrate splits them at the boundary using the ANDES-default
-        heuristic ``tap != 1.0 OR phi != 0.0``. Pure transmission lines stay
-        in ``lines``; off-nominal-tap or phase-shifting branches move to
-        ``transformers``.
+        Lines and transformers are both backed by ANDES's ``Line`` model; the
+        substrate splits them at the boundary (see :func:`_split_lines_transformers`).
+        Pure transmission lines stay in ``lines``; branches that carry a transformer's
+        marks move to ``transformers``.
         """
         assert self._ss is not None
         ss = self._ss
@@ -41,7 +40,7 @@ class TopologyMixin(WrapperBase):
             "committed" if ss.is_setup else "pre-setup"
         )
         all_lines = _collect_models(ss, ["Line"])
-        lines, transformers = _split_lines_transformers(all_lines)
+        lines, transformers = _split_lines_transformers(all_lines, _marked_as_transformers(ss))
         return TopologySnapshot(
             state=state,
             buses=_collect_models(ss, ["Bus"]),
@@ -229,18 +228,77 @@ def _system_base_mva(ss: System) -> float | None:
     return mva if math.isfinite(mva) and mva > 0 else None
 
 
+# Two ends of a branch rated further apart than this (as a fraction of the larger) are
+# two voltage levels, which only a transformer joins. A level that a case rounds
+# differently at the two ends stays a line; the closest two levels a transformer joins in
+# the example cases of ANDES are 1 % apart (20.7 and 20.9 kV).
+_LEVEL_GAP = 0.001
+
+
+def _marked_as_transformers(ss: System) -> frozenset[int | str]:
+    """The idx of every ``Line`` that the case marks as a transformer.
+
+    ANDES flags a transformer with ``trans`` (a PSS/E reader sets it; so does a case
+    written for it) and gives it the rated voltage of each end in ``Vn1`` and ``Vn2``,
+    so a branch joining two voltage levels is one whether or not it carries a flag. A
+    transformer at its nominal ratio has neither a tap nor a phase shift to tell it
+    apart, which is how every step-up unit of the WSCC 9 and Kundur cases looked.
+    """
+    model = getattr(ss, "Line", None)
+    if model is None:
+        return frozenset()
+    columns: dict[str, list[Any]] = {}
+    for name in ("idx", "trans", "Vn1", "Vn2"):
+        values = getattr(getattr(model, name, None), "v", None)
+        try:
+            columns[name] = [] if values is None else list(values)
+        except TypeError:
+            columns[name] = []
+    marked: set[int | str] = set()
+    for i, idx in enumerate(columns["idx"]):
+        if _is_set(columns["trans"], i) or _joins_two_levels(
+            _number(columns["Vn1"], i), _number(columns["Vn2"], i)
+        ):
+            marked.add(idx)
+    return frozenset(marked)
+
+
+def _number(values: list[Any], i: int) -> float | None:
+    """``values[i]`` as a finite number, or ``None``."""
+    try:
+        number = float(values[i])
+    except (IndexError, TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _is_set(values: list[Any], i: int) -> bool:
+    """Whether ``values[i]`` is a set ANDES flag (a ``trans`` of 1)."""
+    number = _number(values, i)
+    return number is not None and number != 0.0
+
+
+def _joins_two_levels(vn1: float | None, vn2: float | None) -> bool:
+    """Whether the rated voltages of the two ends of a branch are two different levels."""
+    if vn1 is None or vn2 is None or vn1 <= 0.0 or vn2 <= 0.0:
+        return False
+    return abs(vn1 - vn2) > _LEVEL_GAP * max(vn1, vn2)
+
+
 def _split_lines_transformers(
     line_entries: list[TopologyEntry],
+    marked: frozenset[int | str] = frozenset(),
 ) -> tuple[list[TopologyEntry], list[TopologyEntry]]:
     """Partition ANDES Line entries into pure lines vs. transformers.
 
-    Heuristic: a Line is a transformer if its tap is non-default
-    (|tap - 1.0| > 1e-9) or its phase shift is non-zero (|phi| > 1e-9).
-    Tolerant of float drift from PSS/E .raw imports where tap is stored as
-    1.0 + epsilon.
+    A Line is a transformer if its tap is non-default (|tap - 1.0| > 1e-9) or its
+    phase shift is non-zero (|phi| > 1e-9), tolerant of float drift from PSS/E .raw
+    imports where tap is stored as 1.0 + epsilon, or if its idx is in ``marked``
+    (ANDES's ``trans`` flag, or two rated voltages that differ: see
+    :func:`_marked_as_transformers`).
 
     Devices without a readable ``tap``/``phi`` (older ANDES models, custom
-    extensions) default to the ``lines`` bucket.
+    extensions) and not marked default to the ``lines`` bucket.
     """
     lines: list[TopologyEntry] = []
     transformers: list[TopologyEntry] = []
@@ -255,7 +313,7 @@ def _split_lines_transformers(
             phi_abs = abs(float(phi)) if phi is not None else 0.0
         except (TypeError, ValueError):
             phi_abs = 0.0
-        if tap_offset > 1e-9 or phi_abs > 1e-9:
+        if tap_offset > 1e-9 or phi_abs > 1e-9 or entry.idx in marked:
             transformers.append(entry)
         else:
             lines.append(entry)

@@ -617,10 +617,10 @@ function savedByHand(diagram: Diagram, id: string, points: readonly Point[]): Di
 
 describe('a bend of a line moved by hand keeps off the lines beside it', () => {
   it('WSCC 9, the network alone: a bend pulled out of Line_8 is not put on Line_3, short of it or just past it', async () => {
-    // The two lines drop square side by side in the drawing of the network alone; with the
-    // machines the units stand elsewhere and the lines do not.
+    // The line and the transformer of the generator unit (Line_8) drop square side by side in
+    // the drawing of the network alone; with the machines the units stand elsewhere and they do not.
     const diagram = await opened(WSCC9_NETWORK);
-    const { edge, route, ends, check } = checkOf(diagram, 'line-Line_8');
+    const { edge, route, ends, check } = checkOf(diagram, 'transformer-Line_8');
     const beside = routesOf(diagram).get('line-Line_3')!.points;
     // Both drop square from the bar of one bus to the next, side by side.
     expect(route).toHaveLength(2);
@@ -730,8 +730,8 @@ describe('a bend of a line moved by hand keeps off the lines beside it', () => {
   }, 240_000);
 
   it.each([
-    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'line-Line_8', 'line-Line_3', 2],
-    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'line-Line_8', 'line-Line_3', -1],
+    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'transformer-Line_8', 'line-Line_3', 2],
+    ['WSCC 9, the network alone,', WSCC9_NETWORK, 'transformer-Line_8', 'line-Line_3', -1],
     ['Kundur', KUNDUR, 'stub-load-PQ_1', 'line-Line_7', 2],
   ] as const)(
     '%s: a layout saved with a bend of %s on %s has that line routed again around the bend (%i beside it)',

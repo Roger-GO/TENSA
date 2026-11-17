@@ -421,20 +421,20 @@ test('WSCC 9: a line is picked by its row in the Lines table and with the keys, 
 
   // ---- its row in the Lines table picks a line ----
   await page.getByRole('tab', { name: 'Lines' }).click();
-  await page.getByTestId('lines-grid-row-line-Line_8').click();
+  await page.getByTestId('lines-grid-row-line-Line_5').click();
   const editor = page.getByTestId('sld-route-editor');
-  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_8');
+  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_5');
   // The bar names the line by the name the file gives it.
-  await expect(page.getByTestId('sld-route-name')).toContainText('Transformer 3-9');
+  await expect(page.getByTestId('sld-route-name')).toContainText('Line 8-9');
   await expect(page.getByTestId('sld-route-status')).toHaveText('Routed automatically');
   // Let go of, the same row picks it again.
   await page.getByTestId('sld-route-done').click();
   await expect(editor).toHaveCount(0);
-  await page.getByTestId('lines-grid-row-line-Line_8').click();
-  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_8');
+  await page.getByTestId('lines-grid-row-line-Line_5').click();
+  await expect(editor).toHaveAttribute('data-edge-id', 'line-Line_5');
 
   // ---- a bend that is added takes the arrow keys, and turns the line ----
-  const before = opened.edges['line-Line_8']!.points;
+  const before = opened.edges['line-Line_5']!.points;
   await page.getByTestId('sld-route-add-bend').click();
   await expect(page.getByTestId('sld-route-note')).toContainText('press the arrow keys');
   await expect(page.locator('[data-testid^="sld-route-bend-"]:focus')).toHaveCount(1);
@@ -442,7 +442,7 @@ test('WSCC 9: a line is picked by its row in the Lines table and with the keys, 
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowLeft');
   await expect(page.getByTestId('sld-route-status')).toHaveText('Routed by hand');
-  const turned = (await settled(page)).edges['line-Line_8']!.points;
+  const turned = (await settled(page)).edges['line-Line_5']!.points;
   expect(turned).toHaveLength(before.length + 1);
   // Its ends are where they were, on their taps.
   expect(turned[0]).toEqual(before[0]);
@@ -461,7 +461,7 @@ test('WSCC 9: a line is picked by its row in the Lines table and with the keys, 
 
   // ---- Enter picks the line that has the keyboard focus ----
   const other = Object.keys(opened.edges).find(
-    (edge) => edge.startsWith('line-') && edge !== 'line-Line_8',
+    (edge) => edge.startsWith('line-') && edge !== 'line-Line_5',
   )!;
   await page.locator(`.react-flow__edge[data-id="${other}"]`).focus();
   await page.keyboard.press('Enter');

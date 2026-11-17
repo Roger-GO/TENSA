@@ -34,9 +34,10 @@ class TopologySnapshot:
     fields are pre-setup-stable vs post-setup-required.
 
     Lines vs transformers split (Unit 2): ANDES models 2-winding transformers
-    within the ``Line`` model class with a non-default ``tap`` or ``phi``.
-    The substrate splits them into two buckets at the boundary so the SLD
-    can render the transformer-2w icon at the line midpoint.
+    within the ``Line`` model class, with a non-default ``tap`` or ``phi``, a
+    ``trans`` flag, or two rated voltages that differ. The substrate splits them
+    into two buckets at the boundary so the SLD can render the transformer-2w
+    icon at the line midpoint.
     """
 
     state: Literal["pre-setup", "committed"]

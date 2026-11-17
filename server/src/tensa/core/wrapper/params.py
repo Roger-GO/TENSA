@@ -101,7 +101,8 @@ _ALTERABLE_SERVICES: dict[str, tuple[str, ...]] = {
 # transformers live in the ``Line`` model with non-default ``tap`` (and
 # optionally ``phi``). The Add panel's "Transformer 2W" form maps to
 # ``model='Line'`` with ``tap`` required; downstream ``_topology_snapshot``
-# splits them via the ``tap != 1.0 OR phi != 0.0`` heuristic.
+# splits them by ``tap``, ``phi``, ANDES's ``trans`` flag and the rated voltages of
+# the two ends (``trans``, ``Vn1`` and ``Vn2`` are read from the System, not listed here).
 ParamKind = Literal["string", "number", "bus_idx", "gen_idx", "syn_idx", "bool"]
 
 
