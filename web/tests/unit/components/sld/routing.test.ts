@@ -180,6 +180,50 @@ describe('routeDiagram: a route that holds', () => {
   });
 });
 
+describe('routeDiagram: a route that steps aside in line with a connector across the bar', () => {
+  // A line comes down onto bus 2, steps aside 19 over its bar and lands at 78;
+  // the load under the bar drops its connector at 62, in line with the column
+  // the line came down by. The two read as one line through the bar.
+  const nodes = [bus('1', 0, 0), bus('2', 0, 200), device('load-x', 42, 260)];
+  const stepped: Point[] = [
+    [62, 3],
+    [62, 184],
+    [78, 184],
+    [78, 203],
+  ];
+
+  function through(drawn: ReturnType<typeof routeDiagram>, edges: readonly ConnectionEdge[]) {
+    return findOverlaps(structure(nodes, edges, drawn.connections))
+      .filter(({ kind }) => kind === 'through-bar')
+      .map(({ a, b }) => `${a} ${b}`);
+  }
+
+  it('is found to be one, as the diagram is drawn', () => {
+    const edges = [routed('l', '1', '2', stepped, nodes), stub('load-x', '2')];
+    const held = layoutConnections(nodes, edges);
+    expect(held.routes.get('l')!.points).toEqual(stepped);
+    expect(held.routes.get('stub-load-x')!.points[0]).toEqual([62, 260]);
+    expect(
+      findOverlaps(structure(nodes, edges, held)).map(({ kind, a, b }) => `${kind} ${a} ${b}`),
+    ).toEqual(['through-bar l stub-load-x']);
+  });
+
+  it('is routed again, to a way that does not', () => {
+    const edges = [routed('l', '1', '2', stepped, nodes), stub('load-x', '2')];
+    const result = routeDiagram(nodes, edges);
+    expect(result.unrouted).toEqual([]);
+    expect(result.changed.has('l')).toBe(true);
+    expect(
+      through(
+        result,
+        edges.map((e) => result.edges.find((d) => d.id === e.id) ?? e),
+      ),
+    ).toEqual([]);
+    // The connector of the device stays where it dropped.
+    expect(result.connections.routes.get('stub-load-x')!.points[0]).toEqual([62, 260]);
+  });
+});
+
 describe('routeDiagram: a route that does not hold any more', () => {
   it('routes the branches of a bus that was moved, and leaves every other where it was', () => {
     const before = [bus('1', 0, 0), bus('2', 0, 160), bus('3', 300, 0), bus('4', 300, 160)];

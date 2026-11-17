@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BAR_GAP,
   BAR_LENGTH,
   BAR_THICKNESS,
   LABEL_ROOM,
@@ -3068,6 +3069,142 @@ describe('layoutConnections: a device connector and the bars of other buses', ()
     );
     expect(alone.routes.get('stub-load-x')!.points[1]).toEqual([89 + TAP_SPACING, 203]);
     expect(alone.bars.get('1')!.end).toBe(89 + TAP_SPACING + TAP_INSET);
+  });
+
+  it('draws a bar out for the devices past its tip no nearer than BAR_GAP to the bar of the next bus', () => {
+    // Bus 2 stands level with bus 1, 38 past its tip. The line from bus 3 ends
+    // on that tip, and two loads stand past it: each asks for a place a spacing
+    // further out than the one before, which takes the bar of bus 1 to
+    // within 10 of bus 2 (8 short of it was as near as it came). The bar is
+    // drawn out to hold the first, and the second stands inside the line's end.
+    const nodes = [
+      bus('1', 0, 200),
+      bus('2', 130, 200),
+      bus('3', 43, 0),
+      device('load-x', 140, 100),
+      device('load-y', 160, 100),
+    ];
+    const routed = line('line-L', '3', '1', {
+      bendPoints: [
+        [89, 3],
+        [89, 203],
+      ],
+      bendAnchors: { source: { x: 43, y: 0 }, target: { x: 0, y: 200 } },
+    });
+    const { bars, routes } = layoutConnections(nodes, [
+      routed,
+      stub('load-x', '1'),
+      stub('load-y', '1'),
+    ]);
+    const first = bars.get('1')!;
+    expect(130 - first.end).toBeGreaterThanOrEqual(BAR_GAP);
+    // The line keeps its end, the first load is drawn out to its tap, and the
+    // second has a place of its own inside it: no two taps nearer than a spacing.
+    expect(routes.get('line-L')!.points[0]).toEqual([89, 3]);
+    expect(first.end).toBe(89 + TAP_SPACING + TAP_INSET);
+    const xs = first.taps.map((tap) => tap.x);
+    expect(xs).toEqual([89 - TAP_SPACING, 89, 89 + TAP_SPACING]);
+    expect(routes.get('stub-load-x')!.points[1]).toEqual([89 + TAP_SPACING, 203]);
+    expect(routes.get('stub-load-y')!.points[1]).toEqual([89 - TAP_SPACING, 203]);
+    // With no bar beside it the second goes where it asked.
+    const alone = layoutConnections(
+      nodes.filter((n) => n.id !== '2'),
+      [routed, stub('load-x', '1'), stub('load-y', '1')],
+    );
+    expect(alone.bars.get('1')!.end).toBe(89 + 2 * TAP_SPACING + TAP_INSET);
+  });
+
+  it('holds the length a layout gives a bar to BAR_GAP from the bar of the bus beside it', () => {
+    // Bus 2 was drawn out to the east when its layout was written, and the
+    // length it was given about its middle (200) reaches 4 short of bus 1.
+    const nodes = [bus('1', 0, 200), bus('2', 150, 200)];
+    const long = layoutConnections(nodes, [], { barLengths: new Map([['2', 200]]) });
+    expect(150 + long.bars.get('2')!.start - long.bars.get('1')!.end).toBe(BAR_GAP);
+    // It is cut about its middle, as it was given: 46 either side of 92.
+    expect(long.bars.get('2')).toMatchObject({ start: 46 - 92, end: 46 + 92 });
+    // A length that leaves the gap, and a bar on another row, are as asked.
+    const fits = layoutConnections(nodes, [], { barLengths: new Map([['2', 180]]) });
+    expect(fits.bars.get('2')).toMatchObject({ start: 46 - 90, end: 46 + 90 });
+    const apart = layoutConnections([bus('1', 0, 200), bus('2', 150, 260)], [], {
+      barLengths: new Map([['2', 200]]),
+    });
+    expect(apart.bars.get('2')).toMatchObject({ start: 46 - 100, end: 46 + 100 });
+    // A bar that is nearer than the gap already, for want of anything else
+    // (the two overlap) is cut to the gap, the longer of the two, and no more.
+    const near = layoutConnections([bus('1', 0, 200), bus('2', 100, 200)], [], {
+      barLengths: new Map([['2', 200]]),
+    });
+    expect(100 + near.bars.get('2')!.start - near.bars.get('1')!.end).toBe(BAR_GAP);
+    expect(near.bars.get('1')).toMatchObject({ start: 0, end: 92 });
+  });
+
+  it('draws a bar that needs room for its taps out away from the bar beside it', () => {
+    // Bus 2 stands 12 past the tip of bus 1, and eight loads stand over it:
+    // its bar needs 104, which about its middle would reach 6 short of bus 1.
+    // It is drawn out to the east instead, and the taps keep their spacing.
+    const loads = Array.from({ length: 8 }, (_, i) => device(`load-${i}`, 120 + i * 20, 100));
+    const nodes = [bus('1', 0, 200), bus('2', 104, 200), ...loads];
+    const { bars } = layoutConnections(
+      nodes,
+      loads.map((l) => stub(l.id, '2')),
+    );
+    const two = bars.get('2')!;
+    expect(104 + two.start - 92).toBeGreaterThanOrEqual(BAR_GAP);
+    expect(two.end - two.start).toBeGreaterThanOrEqual(barLengthFor(8));
+    const xs = two.taps.map((tap) => tap.x);
+    expect(xs).toHaveLength(8);
+    for (let i = 1; i < xs.length; i += 1) {
+      expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(TAP_SPACING - 0.01);
+    }
+  });
+
+  it('counts the bar of the next bus as far as the routes that hold their ends have drawn it out', () => {
+    // The route of the line from bus 3 ends 8 past the tip of bus 1 and draws
+    // its bar out to 103; eight loads stand over bus 2, 24 past that tip as
+    // it was, and its bar needs 104. About its middle it would start 7 from
+    // bus 1's bar as drawn, so it is drawn out to the east instead.
+    const loads = Array.from({ length: 8 }, (_, i) => device(`load-${i}`, 140 + i * 20, 100));
+    const nodes = [bus('1', 0, 200), bus('2', 116, 200), bus('3', 82, 0), ...loads];
+    const routed = line('line-L', '3', '1', {
+      bendPoints: [
+        [128, 3],
+        [128, 120],
+        [100, 120],
+        [100, 203],
+      ],
+      bendAnchors: { source: { x: 82, y: 0 }, target: { x: 0, y: 200 } },
+    });
+    const { bars } = layoutConnections(nodes, [routed, ...loads.map((l) => stub(l.id, '2'))]);
+    expect(bars.get('1')!.end).toBe(100 + TAP_INSET);
+    expect(116 + bars.get('2')!.start - bars.get('1')!.end).toBeGreaterThanOrEqual(BAR_GAP);
+    expect(bars.get('2')!.taps).toHaveLength(8);
+  });
+
+  it('cuts the length a layout gives a bar where the bar beside it is drawn out into it by a route', () => {
+    // The route of the line from bus 3 ends 36 past the tip of bus 1 and draws
+    // its bar out to 131. Bus 2 stands 68 past that tip as it was, with the
+    // length it was drawn out to (140) about its middle, which would start it
+    // 5 from the bar of bus 1 as it is drawn.
+    const nodes = [
+      bus('1', 0, 200),
+      bus('2', 160, 200),
+      bus('3', 104, 0),
+      device('load-x', 230, 100),
+    ];
+    const routed = line('line-L', '3', '1', {
+      bendPoints: [
+        [150, 3],
+        [150, 120],
+        [128, 120],
+        [128, 203],
+      ],
+      bendAnchors: { source: { x: 104, y: 0 }, target: { x: 0, y: 200 } },
+    });
+    const { bars } = layoutConnections(nodes, [routed, stub('load-x', '2')], {
+      barLengths: new Map([['2', 140]]),
+    });
+    expect(bars.get('1')!.end).toBe(128 + TAP_INSET);
+    expect(160 + bars.get('2')!.start - bars.get('1')!.end).toBeGreaterThanOrEqual(BAR_GAP);
   });
 
   it('says which branches are drawn along the route stored for them', () => {

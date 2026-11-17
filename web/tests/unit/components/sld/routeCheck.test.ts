@@ -402,9 +402,46 @@ describe('routeChecker', () => {
   });
 
   it('keeps a slanted end off the dot of the end beside its own', () => {
-    const check = checkerFor('stub-load-PQ_1');
+    // The load stands higher here, so that a connector can come down at an
+    // angle from further off than the reach of the lines on the far side of
+    // the bar (`THROUGH_REACH`): a column that ends nearer than that, in line
+    // with the end of one of them, reads as the same line.
+    const high: LabelNode = { ...LOAD, position: { x: 60, y: -120 } };
+    const nodes = [bus('1', A.x, A.y), bus('2', B.x, B.y), bus('3', C.x, C.y), high];
+    const picture = pictureOf(nodes, EDGES, { values: false });
+    const check = routeChecker(
+      nodes,
+      picture,
+      EDGES.find((edge) => edge.id === 'stub-load-PQ_1')!,
+      { values: false },
+    );
     expect(HAND_TAP_CLEARANCE).toBe(10);
-    // Down to its tap at 34 degrees, right past the end of the transformer 16 along the bar.
+    // Down to its tap at 32 degrees, past the end of the transformer 16 along the bar.
+    expect(
+      check([
+        [80, -80],
+        [80, -60],
+        [32, -60],
+        [32, -27],
+        [80, 3],
+      ]),
+    ).toBe('it would pass too close to the end of transformer T1 on the bar');
+    // At 45 degrees it keeps off it.
+    expect(
+      check([
+        [80, -80],
+        [80, -60],
+        [50, -60],
+        [50, -27],
+        [80, 3],
+      ]),
+    ).toBeNull();
+  });
+
+  it('refuses a column that stops short of the bar in line with the end of a line on the far side of it', () => {
+    const check = checkerFor('stub-load-PQ_1');
+    // Down at x = 50, 20 over the bar, and across to the tap at 80: the line
+    // that leaves the bar at 48 on the other side reads as its continuation.
     expect(
       check([
         [80, -40],
@@ -413,17 +450,9 @@ describe('routeChecker', () => {
         [50, -17],
         [80, 3],
       ]),
-    ).toBe('it would pass too close to the end of transformer T1 on the bar');
-    // At 45 degrees it keeps off it.
-    expect(
-      check([
-        [80, -40],
-        [80, -28],
-        [62, -28],
-        [62, -15],
-        [80, 3],
-      ]),
-    ).toBeNull();
+    ).toBe(
+      'it would read as one line with line L2, which leaves the other side of the bar in line with it',
+    );
   });
 
   it('refuses a route that doubles back on the run before', () => {

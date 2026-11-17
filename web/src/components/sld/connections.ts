@@ -134,6 +134,40 @@ export const TAP_CLEAR = TAP_DOT_RADIUS + 2;
 export const BAR_CLEAR = 6;
 
 /**
+ * The room two bars keep between them, tip to tip where they stand side by
+ * side: as much as two lines side by side keep (`LINE_GAP` of the overlap
+ * checker). Nearer, the two read as one bar with a break in it, and a line
+ * that lands in the break cannot be told from one that lands on either. A
+ * bar is not drawn out for a tap to within this of the bar beside it
+ * (`growLimit`, and `tidy.ts` for the taps of a route), a bar that is
+ * dropped keeps it (`DROP_ROW_GAP`), and the overlap checker holds every
+ * pair of bars to it.
+ */
+export const BAR_GAP = 12;
+
+/**
+ * How near a line may come to the box of a readout (the P / Q values of a
+ * device) for the readout to stand there by choice: nearer, the line runs
+ * along the edge of the halo the values are drawn on and reads as part of
+ * it. Where the readouts are placed (`labels.ts`), which takes such a
+ * place only after every place that has this much room. The device's own
+ * connector stands further off than this.
+ */
+export const READOUT_CLEAR = 2;
+
+/**
+ * How far from a bar a line that stops short of it, or turns, is held to
+ * the line that leaves the bar on its other face: with the two ends
+ * together nearer than this and the two lines in line to within
+ * `TAP_SPACING`, the eye takes them for one line that runs through the
+ * bar. Two spacings: with the bend as far from the bar as that, the break
+ * between the two lines is wider than the step the line takes aside. What
+ * the overlap checker holds every line to (`overlapCheck.ts`), and what
+ * the router keeps its bends from (`tidy.ts`).
+ */
+export const THROUGH_REACH = 2 * TAP_SPACING;
+
+/**
  * How near a bend of a line, or an end of it that is on no bar, may come to
  * another line: nearer, the corner is drawn onto that line and the two read
  * as meeting there, which two lines that cross do not. What the overlap
@@ -946,11 +980,11 @@ const TURN_BASE = 1e7;
  * connection runs into, which lands on that very spot.
  */
 function lo(bar: Bar): number {
-  return bar.cx - bar.half + TAP_INSET + (bar.westTaken ? TAP_SPACING : 0);
+  return bar.start + TAP_INSET + (bar.westTaken ? TAP_SPACING : 0);
 }
 
 function hi(bar: Bar): number {
-  return bar.cx + bar.half - TAP_INSET - (bar.eastTaken ? TAP_SPACING : 0);
+  return bar.end - TAP_INSET - (bar.eastTaken ? TAP_SPACING : 0);
 }
 
 /**
@@ -1717,11 +1751,13 @@ function layoutPass(
 
   /**
    * How far `bar` may be drawn out past its east tip, or its west: up to
-   * `SLIDE_CLEARANCE` short of the bar of another bus that stands level
-   * with it there, or of a symbol that does. A tap does not take the bar
-   * further than that.
+   * `BAR_GAP` short of the bar of another bus that stands level with it
+   * there, and `SLIDE_CLEARANCE` short of a symbol that does. A tap does
+   * not take the bar further than that.
    */
   const limits = new Map<string, number>();
+  /** How far the routes that hold their ends take each bar, by bar id (read once the bars are sized). */
+  const heldOut = new Map<string, { start: number; end: number }>();
   const growLimit = (bar: Bar, east: boolean): number => {
     const key = `${bar.id}|${east ? 'east' : 'west'}`;
     const known = limits.get(key);
@@ -1729,18 +1765,23 @@ function layoutPass(
     let limit = east ? Infinity : -Infinity;
     // Never short of where the bar ends as it is.
     const tip = east ? bar.cx + bar.half : bar.cx - bar.half;
-    const meet = (start: number, end: number): void => {
-      if (east && start >= bar.cx) limit = Math.max(tip, Math.min(limit, start - SLIDE_CLEARANCE));
-      if (!east && end <= bar.cx) limit = Math.min(tip, Math.max(limit, end + SLIDE_CLEARANCE));
+    const meet = (start: number, end: number, room: number): void => {
+      if (east && start >= bar.cx) limit = Math.max(tip, Math.min(limit, start - room));
+      if (!east && end <= bar.cx) limit = Math.min(tip, Math.max(limit, end + room));
     };
     for (const other of bars.values()) {
       if (other === bar || Math.abs(other.cy - bar.cy) >= LEVEL_BARS) continue;
       const tips = tipsOf(other, true);
-      meet(tips.start, tips.end);
+      const held = heldOut.get(other.id);
+      meet(
+        Math.min(tips.start, held?.start ?? Infinity),
+        Math.max(tips.end, held?.end ?? -Infinity),
+        BAR_GAP,
+      );
     }
     for (const box of boxes.values()) {
       const level = Math.abs(box.cy - bar.cy) < box.hh + BAR_THICKNESS / 2 + SLIDE_CLEARANCE;
-      if (level) meet(box.cx - box.hw, box.cx + box.hw);
+      if (level) meet(box.cx - box.hw, box.cx + box.hw, SLIDE_CLEARANCE);
     }
     limits.set(key, limit);
     return limit;
@@ -1883,6 +1924,55 @@ function layoutPass(
     if (list) list.push(r);
     else onFaces.set(r.bar, [r]);
   }
+  // How far the routes that hold their ends take each bar, and from that how
+  // far each may be drawn out, before the bars are sized.
+  for (const [bar, list] of onFaces) {
+    for (const r of list) {
+      const wish = r.wish(bar);
+      if (wish.hold !== TAP_HOLD.route && wish.hold !== TAP_HOLD.straight) continue;
+      const held = heldOut.get(bar.id);
+      heldOut.set(bar.id, {
+        start: Math.min(held?.start ?? Infinity, wish.desired - TAP_INSET),
+        end: Math.max(held?.end ?? -Infinity, wish.desired + TAP_INSET),
+      });
+    }
+  }
+  // A bar that a layout gives a length (`ConnectionOptions.barLengths`, the
+  // length it was drawn out to when the layout was written) is held to
+  // `BAR_GAP` from the bar of the bus beside it, as that bar is drawn out by
+  // the routes that hold their ends: given a length that it had on one side
+  // only, about its middle it would reach the next bar on the other. Of the
+  // two the longer is cut first, and neither to less than its taps need.
+  const reach = (bar: Bar): { start: number; end: number } => {
+    const held = heldOut.get(bar.id);
+    return {
+      start: Math.min(bar.start, held?.start ?? Infinity),
+      end: Math.max(bar.end, held?.end ?? -Infinity),
+    };
+  };
+  const byEast = [...bars.values()].sort((a, b) => a.cx - b.cx || (a.id < b.id ? -1 : 1));
+  for (const west of byEast) {
+    for (const east of byEast) {
+      if (east === west || Math.abs(east.cy - west.cy) >= LEVEL_BARS || east.start < west.cx) {
+        continue;
+      }
+      let short = BAR_GAP - (reach(east).start - reach(west).end);
+      for (const bar of west.half >= east.half ? [west, east] : [east, west]) {
+        const least = Math.max(MIN_BAR_LENGTH, barLengthFor(onFaces.get(bar)?.length ?? 0)) / 2;
+        const cut = Math.min(short, Math.max(0, bar.half - least));
+        if (cut <= 0) continue;
+        bar.half -= cut;
+        bar.start = bar.cx - bar.half;
+        bar.end = bar.cx + bar.half;
+        short -= cut;
+      }
+    }
+  }
+  limits.clear();
+  for (const bar of onFaces.keys()) {
+    growLimit(bar, true);
+    growLimit(bar, false);
+  }
   for (const [bar, list] of onFaces) {
     // Room for the taps. Where an end is taken as well they do not all fit
     // between the two, run over both alike, and the bar is brought out to
@@ -1892,6 +1982,14 @@ function layoutPass(
   for (const bar of bars.values()) {
     bar.start = bar.cx - bar.half;
     bar.end = bar.cx + bar.half;
+  }
+  // A bar that is drawn out about its middle for its taps does not go into
+  // the room the bar beside it keeps (`BAR_GAP`): where it would, it is drawn
+  // out further on the other side.
+  for (const bar of onFaces.keys()) {
+    const [west, east] = [growLimit(bar, false), growLimit(bar, true)];
+    if (bar.start < west) [bar.start, bar.end] = [west, bar.end + west - bar.start];
+    if (bar.end > east) [bar.start, bar.end] = [bar.start - (bar.end - east), east];
   }
   for (const [bar, list] of onFaces) {
     // Where the routes that hold their ends take the bar: read first, since
@@ -1962,6 +2060,32 @@ function layoutPass(
   for (const { source, target } of stepped) straighten(source, target);
   for (const { straight, source, target } of routed) {
     if (straight) straighten(source.request, target.request);
+  }
+
+  // ---- keep the bars off one another ----
+  // A bar is drawn out to hold the taps that were pushed past its tip, and
+  // it is not to come within `BAR_GAP` of the bar beside it (`growLimit`). A
+  // tap of a connector that would take it there stands further in, at the
+  // outermost place a spacing clear of every other tap of the bar; the end
+  // of a route that holds its place stays where it is.
+  for (const [bar, list] of onFaces) {
+    for (const east of [true, false]) {
+      const limit = growLimit(bar, east);
+      if (!Number.isFinite(limit)) continue;
+      const edge = east ? limit - TAP_INSET : limit + TAP_INSET;
+      const past = list
+        .filter((r) => r.hold <= TAP_HOLD.free && (east ? r.tap[0] > edge : r.tap[0] < edge))
+        .sort((p, q) => (east ? q.tap[0] - p.tap[0] : p.tap[0] - q.tap[0]));
+      for (const r of past) {
+        const others = list.filter((o) => o !== r);
+        for (let x = edge; east ? x >= lo(bar) : x <= hi(bar); x += east ? -1 : 1) {
+          if (others.every((o) => Math.abs(o.tap[0] - x) >= TAP_SPACING - EPS)) {
+            r.tap = [x, r.tap[1]];
+            break;
+          }
+        }
+      }
+    }
   }
 
   // ---- the tips ----

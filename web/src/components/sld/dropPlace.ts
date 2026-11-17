@@ -52,10 +52,10 @@
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
+  BAR_GAP,
   BAR_LENGTH,
   BAR_THICKNESS,
   RUN_CLEARANCE,
-  SLIDE_CLEARANCE,
   grown,
   type ConnectionEdge,
   type ConnectionLayout,
@@ -76,10 +76,11 @@ export const DROP_CLEARANCE = 8;
 export const DROP_ROW = 3 * GRID_STEP;
 
 /**
- * The room two bars that stand side by side keep between their tips: as
- * much as a line keeps to the tip of a bar it passes (`SLIDE_CLEARANCE`).
+ * The room two bars that stand side by side keep between their tips: what
+ * the diagram keeps between any two bars (`BAR_GAP`), the bars as long as
+ * they are drawn out to be.
  */
-export const DROP_ROW_GAP = SLIDE_CLEARANCE;
+export const DROP_ROW_GAP = BAR_GAP;
 
 /**
  * The room a symbol keeps to a tip of a bar it stands level with: a bar is

@@ -26,23 +26,33 @@
  *   run that ends on a bar comes to it, at `MEET_ANGLE` or more, and does
  *   not lie along it on the way to its tap (`meetsBarFlat`); only into the
  *   tap at a tip, from beyond that tip, it may come flatter.
+ * - A line that comes to a bar from one side does not read as the same line
+ *   as one that leaves it on the other: a run that ends or turns within
+ *   `THROUGH_REACH` of a bar, in line with an end on the other face to
+ *   within `TAP_SPACING`, is that (`through-bar`). The two ends need not be
+ *   taps: a branch that steps aside just short of its tap leaves its
+ *   column in line with the connector on the far side of the bar.
+ * - Two bars keep `BAR_GAP` between them, tip to tip where they stand side
+ *   by side (`bar-bar`): nearer, they read as one bar with a break in it.
  * - A line runs through no box but the one it is drawn from (the device of
  *   a connector) and the ones that are drawn on it (its own label, the
  *   symbol of a transformer).
  * - No two boxes reach into each other, and none reaches into a bar.
  *
  * The canvas holds the routes it keeps to the first four (`routing.ts`),
- * and the tests hold every state of the example cases to all five.
+ * and the tests hold every state of the example cases to all of them.
  *
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
   BAR_CLEAR,
+  BAR_GAP,
   BAR_THICKNESS,
   BEND_CLEAR,
   TAP_CLEAR,
   TAP_INSET,
   TAP_SPACING,
+  THROUGH_REACH,
   distanceToRun,
   lengthInside,
   meetsBarFlat,
@@ -98,8 +108,10 @@ export type OverlapKind =
   | 'line-line'
   | 'shared-tap'
   | 'line-tap'
+  | 'through-bar'
   | 'loose-end'
   | 'line-bar'
+  | 'bar-bar'
   | 'line-box'
   | 'box-box';
 
@@ -125,6 +137,8 @@ export interface OverlapOptions {
   gap?: number;
   /** The room two ends on one bar keep; default `TAP_SPACING`. */
   tapSpacing?: number;
+  /** The room two bars keep between them; default `BAR_GAP`. */
+  barGap?: number;
   /**
    * How far two boxes may reach into each other, and a line into a box,
    * and still count as apart: half a pixel for a diagram that is worked
@@ -272,6 +286,7 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
   const gap = options.gap ?? LINE_GAP;
   const tapSpacing = options.tapSpacing ?? TAP_SPACING;
   const slack = options.slack ?? 0.5;
+  const barGap = options.barGap ?? BAR_GAP;
   const found = new Map<string, Overlap>();
   const report = (kind: OverlapKind, a: string, b: string, detail: string): void => {
     const key = `${kind}|${a}|${b}`;
@@ -385,6 +400,58 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
     }
   }
 
+  // ---- a line that stops short of a bar, in line with one on its other face ----
+  // A run that comes down to a bar and stops (or turns) just short of it, and
+  // a run that leaves the bar on the other side within a tap spacing of its
+  // column, read as one line with a break where the bar is. Each run that is
+  // upright, within reach of the bar and on one side of it, is a column.
+  interface Column {
+    x: number;
+    /** How far its end is from the line of the bar. */
+    gap: number;
+    line: number;
+    /** Whether it is the run that lands on this very bar. */
+    lands: boolean;
+  }
+  for (const bar of drawn.bars) {
+    const reach: Rect = {
+      left: bar.left - tapSpacing,
+      right: bar.right + tapSpacing,
+      top: bar.y - THROUGH_REACH - 1,
+      bottom: bar.y + THROUGH_REACH + 1,
+    };
+    const over: Column[] = [];
+    const under: Column[] = [];
+    for (const run of runsNear.around(reach)) {
+      if (Math.abs(run.a[0] - run.b[0]) > TOUCH) continue;
+      const x = (run.a[0] + run.b[0]) / 2;
+      if (x < reach.left || x > reach.right) continue;
+      const [top, bottom] = [Math.min(run.a[1], run.b[1]), Math.max(run.a[1], run.b[1])];
+      const line = drawn.lines[run.line]!;
+      const lands = (line.from === bar.id && run.first) || (line.to === bar.id && run.last);
+      // Above the bar, or right on it: its lower end; below, its upper end.
+      if (bottom <= bar.y + TOUCH && bar.y - bottom <= THROUGH_REACH) {
+        over.push({ x, gap: Math.max(0, bar.y - bottom), line: run.line, lands });
+      } else if (top >= bar.y - TOUCH && top - bar.y <= THROUGH_REACH) {
+        under.push({ x, gap: Math.max(0, top - bar.y), line: run.line, lands });
+      }
+    }
+    for (const above of over) {
+      for (const below of under) {
+        if (above.line === below.line || (above.lands && below.lands)) continue;
+        const across = Math.abs(above.x - below.x);
+        if (across >= tapSpacing - 0.5 || above.gap + below.gap >= THROUGH_REACH - 0.5) continue;
+        const [first, second] = [drawn.lines[above.line]!.id, drawn.lines[below.line]!.id];
+        report(
+          'through-bar',
+          first < second ? first : second,
+          first < second ? second : first,
+          `end ${Math.round(above.gap)} px over the bar of ${bar.id} and ${Math.round(below.gap)} px under it, ${across.toFixed(1)} px apart: they read as one line through it`,
+        );
+      }
+    }
+  }
+
   // ---- lines on bars ----
   for (const bar of drawn.bars) {
     const body: Rect = {
@@ -430,6 +497,30 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
         Math.min(run.a[0], run.b[0]) < bar.right + TIP_CLEAR;
       if (inLine)
         report('line-bar', line.id, bar.id, 'runs up to the tip of the bar, in line with it');
+    }
+  }
+
+  // ---- bars on bars ----
+  const byLeft = [...drawn.bars].sort((p, q) => p.left - q.left || (p.id < q.id ? -1 : 1));
+  for (let i = 0; i < byLeft.length; i += 1) {
+    const first = byLeft[i]!;
+    for (let k = i + 1; k < byLeft.length; k += 1) {
+      const second = byLeft[k]!;
+      // Sorted by their left tips, so no bar further on is any nearer.
+      if (second.left - first.right >= barGap) break;
+      const across = Math.max(0, second.left - first.right);
+      const down = Math.max(0, Math.abs(second.y - first.y) - BAR_THICKNESS);
+      const apart = Math.hypot(across, down);
+      if (apart >= barGap - slack) continue;
+      const [a, b] = first.id < second.id ? [first.id, second.id] : [second.id, first.id];
+      report(
+        'bar-bar',
+        a,
+        b,
+        apart < TOUCH
+          ? `the bars of ${a} and ${b} touch`
+          : `the bars of ${a} and ${b} are ${apart.toFixed(1)} px apart`,
+      );
     }
   }
 
@@ -488,8 +579,10 @@ export function findOverlaps(drawn: DrawnDiagram, options: OverlapOptions = {}):
     'line-line',
     'shared-tap',
     'line-tap',
+    'through-bar',
     'loose-end',
     'line-bar',
+    'bar-bar',
     'line-box',
     'box-box',
   ];

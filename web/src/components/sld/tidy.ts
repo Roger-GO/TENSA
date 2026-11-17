@@ -28,6 +28,15 @@
  *   one from below, where they would read as one line through the bus. So
  *   the connection pass leaves a tap where it is: what `tidyRoutes` answers
  *   is what gets drawn.
+ * - A bend, or the end of a column, within `THROUGH_REACH` of a bar is not
+ *   in line with a tap on the far face of that bar, to within `TAP_SPACING`:
+ *   a route that stepped aside just short of its own tap would leave its
+ *   column in line with the connector of a device on the other side of the
+ *   bar, and the two would read as one line running through the bus (the
+ *   overlap checker's `through-bar`). Nor is a tap given to a route in line
+ *   with such a bend.
+ * - A bar is not drawn out to a tap past its tip to within `BAR_GAP` of the
+ *   bar of another bus: the two would read as one bar with a break in it.
  * - It keeps clear of every generator, load and shunt, of the line of a bar
  *   it is not connected to, of the label of every bus but its own two
  *   (which it only passes on its way out of the south face), and of the
@@ -85,6 +94,7 @@
  * Pure: no React, no React Flow, nothing read but the arguments.
  */
 import {
+  BAR_GAP,
   BAR_LENGTH,
   BAR_THICKNESS,
   BEND_CLEAR,
@@ -92,6 +102,7 @@ import {
   SLIDE_CLEARANCE,
   TAP_INSET,
   TAP_SPACING,
+  THROUGH_REACH,
   TRANSFORMER_SYMBOL_SIZE,
   distanceToRun,
   faceSpan,
@@ -1001,6 +1012,17 @@ export function tidyRoutes(
   const colTo = (x: number): number => lineTo(cols, x);
   const rowFrom = (y: number): number => lineFrom(rws, y);
   const rowTo = (y: number): number => lineTo(rws, y);
+  /** The buses a row of the grid is within `THROUGH_REACH` of the bar of, by the index of the row. */
+  const throughRows = new Map<number, Bus[]>();
+  for (const bus of buses) {
+    const last = rowTo(bus.cy + THROUGH_REACH - EPS - 1e-6);
+    for (let r = rowFrom(bus.cy - THROUGH_REACH + EPS + 1e-6); r <= last; r += 1) {
+      if (r === bus.row) continue;
+      const list = throughRows.get(r);
+      if (list) list.push(bus);
+      else throughRows.set(r, [bus]);
+    }
+  }
   /** Every grid point inside `rect`, and not on its edge. */
   const inside = (rect: Rect, visit: (n: number) => void): void => {
     const c0 = colFrom(rect.left + 1e-6);
@@ -1098,6 +1120,13 @@ export function tidyRoutes(
   for (const boxes of options.preferFree ?? []) keepGroup(boxes, preferredPlaces, PREFER_FREE_COST);
   /** The place no route may run through, while the routes around a device are routed again to leave it one. */
   let barred = -1;
+  /**
+   * Whether the rule about a bend that would read as one line with another
+   * across a bar (`THROUGH_REACH`) is left off: for the last search for a
+   * branch that has no way, which is better drawn with such a fault than
+   * from tap to tap over whatever stands between.
+   */
+  let relaxed = false;
   /**
    * What stepping from one grid point to the next costs for the places
    * kept free: for each it goes into, more when that is the last one its
@@ -1350,18 +1379,61 @@ export function tidyRoutes(
    * Whether a tap at `x` on the bar of `bus` keeps its distance from every
    * other tap of the bar, whichever face each is on.
    */
-  const tapFree = (bus: Bus, x: number): boolean => {
+  const tapFree = (bus: Bus, x: number, face: 'north' | 'south'): boolean => {
     // To the last fraction: the connection pass parts two taps that are any
     // nearer than the spacing.
     const crowds = (t: number): boolean => Math.abs(t - x) < TAP_SPACING - 1e-6;
     for (const side of ['north', 'south'] as const) {
       if (bus.deviceTaps[side].some(crowds) || bus.taps[side].some(crowds)) return false;
     }
+    if (!relaxed && readsThroughTap(bus, x, face)) return false;
     // No tap past a tip that a device connector runs into: the taps keep a
     // spacing in from that end, as the connection pass has it.
     if (bus.endDevice.west && x < bus.lo - EPS) return false;
     if (bus.endDevice.east && x > bus.hi + EPS) return false;
     return true;
+  };
+  /**
+   * Whether a tap at `x` on `face` of the bar of `bus` would read as one
+   * line with a route that is there already (`through-bar` of the overlap
+   * checker): a bend of a route within `THROUGH_REACH` of the bar on the far
+   * face, in line with the tap.
+   */
+  const readsThroughTap = (bus: Bus, x: number, face: 'north' | 'south'): boolean => {
+    const [from, to] =
+      face === 'south'
+        ? [rowFrom(bus.cy - THROUGH_REACH + EPS + 1e-6), bus.row - 1]
+        : [bus.row + 1, rowTo(bus.cy + THROUGH_REACH - EPS - 1e-6)];
+    const c0 = colFrom(x - TAP_SPACING + EPS + 1e-6);
+    const c1 = colTo(x + TAP_SPACING - EPS - 1e-6);
+    for (let r = Math.max(0, from); r <= Math.min(nR - 1, to); r += 1) {
+      for (let c = c0; c <= c1; c += 1) if (occBend[r * nC + c] !== 0) return true;
+    }
+    return false;
+  };
+
+  /**
+   * Whether drawing the bar of `bus` out to a tap at `x` past its tip would
+   * bring it within `BAR_GAP` of the bar of another bus that it is not
+   * within now: the two would read as one bar with a break in it.
+   */
+  const closesOnABar = (bus: Bus, x: number): boolean => {
+    const east = x > bus.hi;
+    const [start, end] = east ? [bus.start, x + TAP_INSET] : [x - TAP_INSET, bus.end];
+    for (const other of buses) {
+      if (other === bus) continue;
+      const down = Math.max(0, Math.abs(other.cy - bus.cy) - BAR_THICKNESS);
+      if (down >= BAR_GAP) continue;
+      const apart = (from: number, to: number): number =>
+        Math.hypot(Math.max(0, Math.max(from, other.start) - Math.min(to, other.end)), down);
+      if (
+        apart(start, end) < BAR_GAP - EPS &&
+        apart(start, end) < apart(bus.start, bus.end) - EPS
+      ) {
+        return true;
+      }
+    }
+    return false;
   };
 
   /**
@@ -1369,6 +1441,7 @@ export function tidyRoutes(
    * out to a tap at `x` past its tip; `null` when something is there.
    */
   const growth = (bus: Bus, x: number): number[] | null => {
+    if (closesOnABar(bus, x)) return null;
     const rect: Rect =
       x > bus.hi
         ? { ...barRect(bus), left: bus.end, right: x + TAP_INSET + SLIDE_CLEARANCE }
@@ -1412,7 +1485,7 @@ export function tidyRoutes(
       const c1 = colTo((eastFree ? bus.drawn.hi + MAX_OVERHANG : bus.hi) + EPS);
       for (let c = c0; c <= c1; c += 1) {
         const x = xs[c]!;
-        if (!tapFree(bus, x)) continue;
+        if (!tapFree(bus, x, side)) continue;
         const over = Math.max(0, bus.lo - EPS - x, x - bus.hi - EPS);
         // The run from the bar to the first grid point clear of it: nothing
         // of another bus in it, and no other route.
@@ -1456,6 +1529,29 @@ export function tidyRoutes(
       }
     }
     return out;
+  };
+
+  /**
+   * Whether a bend at the grid point in column `c` and row `r`, within
+   * `THROUGH_REACH` of a bar, is in line with a tap on the far face of that
+   * bar to within `TAP_SPACING`: the column that ends there and the line
+   * that leaves the bar on the other side would read as one.
+   */
+  const readsThrough = (c: number, r: number): boolean => {
+    const near = throughRows.get(r);
+    if (near === undefined) return false;
+    const x = xs[c]!;
+    for (const bus of near) {
+      const far = bus.deviceTaps[ys[r]! < bus.cy ? 'south' : 'north'];
+      const taps = bus.taps[ys[r]! < bus.cy ? 'south' : 'north'];
+      if (
+        far.some((t) => Math.abs(t - x) < TAP_SPACING - EPS) ||
+        taps.some((t) => Math.abs(t - x) < TAP_SPACING - EPS)
+      ) {
+        return true;
+      }
+    }
+    return false;
   };
 
   // ---- the search ----
@@ -1539,7 +1635,7 @@ export function tidyRoutes(
       const c1 = colTo(Math.min(a.hi, b.hi) + EPS);
       for (let c = colFrom(Math.max(a.lo, b.lo) - EPS); c <= c1; c += 1) {
         const x = xs[c]!;
-        if (!tapFree(upper, x) || !tapFree(lower, x)) continue;
+        if (!tapFree(upper, x, 'south') || !tapFree(lower, x, 'north')) continue;
         if (roomy) {
           // Somewhere between the two bars, the symbol on the run and clear of both.
           const middle = (upper.cy + lower.cy) / 2;
@@ -1606,6 +1702,7 @@ export function tidyRoutes(
       if (!untouched(n) || wireNode[n] !== 0 || onLabel(n)) return false;
       const c = n % nC;
       const r = (n / nC) | 0;
+      if (!relaxed && readsThrough(c, r)) return false;
       return (
         rws.near[r]!.every((r3) => untouched(r3 * nC + c)) &&
         cols.near[c]!.every((c3) => untouched(r * nC + c3)) &&
@@ -2151,6 +2248,7 @@ export function tidyRoutes(
   // Those steps are a part of what the call was given: a call that was given
   // few (a pass of the canvas while a node is dragged) spends few here.
   anyWay = true;
+  relaxed = true;
   const lastChance = steps + Math.min(budget, LAST_CHANCE_STEPS * order.length);
   for (const branch of order) {
     if (branch.found !== null || steps >= lastChance) continue;
@@ -2163,6 +2261,7 @@ export function tidyRoutes(
     if (route !== null) take(branch, route);
   }
   anyWay = false;
+  relaxed = false;
   hurryFor = HURRY_STEPS;
   if (order.every((branch) => branch.found !== null)) delete result.outOfSteps;
 

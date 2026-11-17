@@ -23,6 +23,12 @@
  *   beyond the bar of another bus, where its connector has no way back ->
  *   it goes back where it stood, a notice says so, and nothing is written
  *
+ *   in a copy of Kundur, as a reviewer drags it: a generator beside the bar
+ *   of its bus, a load far above its own, Tidy diagram, and the page
+ *   reloaded -> the bars keep their gap, no line ends or turns short of a
+ *   bar in line with one on its other face, and nothing is drawn over
+ *   anything else; the placement is what it was after the reload
+ *
  * What is on screen is read off the page (`drawnOnScreen` in
  * `sldDrawing.ts`) and handed to the checker the diagram itself routes by
  * (`findOverlaps` in `overlapCheck.ts`), so the boxes are the ones the
@@ -263,4 +269,55 @@ test('kundur_full.xlsx: a tidy keeps the labels off the marks of the generators,
   expect({ x: back.x, y: back.y }).toEqual({ x: stood.x, y: stood.y });
   expect(await overlapsOnScreen(page)).toEqual([]);
   expect(written).toEqual([]);
+});
+
+test('kundur_full.xlsx: bars keep their gap and no line reads as going through a bar, after a generator is put beside its bus, a load far above its own, a tidy and a reload', async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await openCase(page, 'kundur_full.xlsx');
+  await settled(page);
+  await openCopy(page, `no-overlap-kundur-clearance-${Date.now()}`);
+  await settled(page);
+  await runPowerFlow(page);
+  const opened = await settled(page);
+  expect(problems(opened)).toEqual([]);
+
+  // Generator 3 stands level with the bar of its bus (12), past its east tip,
+  // towards bus 13 on the same row: its bar is drawn out to hold the tap.
+  const [generator, bus] = [opened.nodes['generator-3']!, opened.nodes['3']!];
+  await dragInDiagram(
+    page,
+    'generator-3',
+    bus.x + bus.width + 50 - generator.x,
+    bus.y - generator.height / 2 - generator.y,
+  );
+  const aside = await settled(page);
+  expect(problems(aside)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'with the generator beside its bus').toEqual([]);
+
+  // A load far above its bar, so that its connector comes a long way down.
+  await dragInDiagram(page, 'load-PQ_0', 0, -150);
+  const moved = await settled(page);
+  expect(problems(moved)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'with the load far above its bar').toEqual([]);
+
+  await page.getByTestId('sld-tidy').click();
+  const tidy = await settled(page);
+  expect(problems(tidy)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'after the tidy').toEqual([]);
+
+  // Reloaded, it is drawn as it was left.
+  await page.reload();
+  await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 90_000 });
+  const again = await settled(page);
+  expect(problems(again)).toEqual([]);
+  expect(await overlapsOnScreen(page), 'after the reload').toEqual([]);
+  for (const [id, node] of Object.entries(tidy.nodes)) {
+    expect({ x: again.nodes[id]?.x, y: again.nodes[id]?.y }, id).toEqual({ x: node.x, y: node.y });
+  }
+  for (const [id, edge] of Object.entries(tidy.edges)) {
+    expect(again.edges[id]?.points, id).toEqual(edge.points);
+  }
 });

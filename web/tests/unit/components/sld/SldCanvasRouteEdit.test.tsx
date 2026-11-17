@@ -988,9 +988,12 @@ describe('a route drawn by hand', () => {
     press('sld-route-run-0', 'ArrowLeft', true);
     const drawnAtHome = routeOf(G1_STUB);
     // Moved a little to the side: the connector follows, and is the user's still.
+    // To the left: to the right, the step of the connector would stand in line
+    // with the end of the line on the far side of the bar, which the drop is
+    // refused for (`through-bar`).
     const home = positionOf('generator-G1');
-    dragNodeTo('generator-G1', { x: home.x + 8, y: home.y });
-    await waitFor(() => expect(routeOf(G1_STUB)[0]![0]).toBe(drawnAtHome[0]![0] + 8));
+    dragNodeTo('generator-G1', { x: home.x - 8, y: home.y });
+    await waitFor(() => expect(routeOf(G1_STUB)[0]![0]).toBe(drawnAtHome[0]![0] - 8));
     expect(byHand(G1_STUB)).toBe(true);
 
     post('tidy-relayout');

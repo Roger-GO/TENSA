@@ -9,7 +9,7 @@
  * checker, drawn whole.
  */
 import { describe, expect, it } from 'vitest';
-import { BEND_CLEAR, type Point } from '@/components/sld/connections';
+import { BAR_GAP, BEND_CLEAR, THROUGH_REACH, type Point } from '@/components/sld/connections';
 import {
   LINE_GAP,
   countCrossings,
@@ -644,6 +644,145 @@ describe('findOverlaps: a line and a bar', () => {
         ],
       }),
     ).toEqual(['line-bar a bus']);
+  });
+});
+
+describe('findOverlaps: a line that stops short of a bar, in line with one on its other face', () => {
+  /** A bar of 92 with its centre line at 100. */
+  const b = bar('bus', 0, 92, 100);
+  /** The line that leaves the bar below, at `x`. */
+  const below = (x: number): DrawnLine =>
+    line(
+      'below',
+      [
+        [x, 100],
+        [x, 250],
+      ],
+      'bus',
+      'below:to',
+    );
+  /** A line that comes down, steps aside `over` short of the bar and lands at `to`. */
+  const steps = (column: number, over: number, to: number): DrawnLine =>
+    line(
+      'steps',
+      [
+        [column, 0],
+        [column, 100 - over],
+        [to, 100 - over],
+        [to, 100],
+      ],
+      'steps:from',
+      'bus',
+    );
+
+  it('finds a column that ends just short of the bar, in line with the line on the far face', () => {
+    // The step is 19 over the bar and the column is 2 off the line below.
+    expect(check({ bars: [b], lines: [below(40), steps(42, 19, 62)] })).toEqual([
+      'through-bar below steps',
+    ]);
+    expect(
+      describeOverlaps(
+        findOverlaps({ bars: [b], lines: [below(40), steps(42, 19, 62)], boxes: [] }),
+      ),
+    ).toEqual([
+      'through-bar: below / steps: end 19 px over the bar of bus and 0 px under it, 2.0 px apart: they read as one line through it',
+    ]);
+    // Either way round: the step under the bar and the line landing from above.
+    const under = line(
+      'under',
+      [
+        [42, 200],
+        [42, 119],
+        [62, 119],
+        [62, 100],
+      ],
+      'under:from',
+      'bus',
+    );
+    const above = line(
+      'above',
+      [
+        [40, 0],
+        [40, 100],
+      ],
+      'above:from',
+      'bus',
+    );
+    expect(check({ bars: [b], lines: [above, under] })).toEqual(['through-bar above under']);
+  });
+
+  it('lets the step stand THROUGH_REACH off the bar, or a tap spacing off the line on the far face', () => {
+    // 28 over the bar: the break between the two is wider than the step.
+    expect(check({ bars: [b], lines: [below(40), steps(42, THROUGH_REACH, 62)] })).toEqual([]);
+    expect(check({ bars: [b], lines: [below(40), steps(42, THROUGH_REACH - 1, 62)] })).not.toEqual(
+      [],
+    );
+    // The column a spacing from the line below reads as a line of its own.
+    expect(check({ bars: [b], lines: [below(40), steps(54, 19, 70)] })).toEqual([]);
+    expect(check({ bars: [b], lines: [below(40), steps(53, 19, 70)] })).not.toEqual([]);
+  });
+
+  it('leaves two ends on one bar to the rule about the taps, and a line to itself', () => {
+    // Two lines that land in line from opposite sides are `shared-tap`.
+    const down = line(
+      'down',
+      [
+        [40, 0],
+        [40, 100],
+      ],
+      'down:from',
+      'bus',
+    );
+    expect(check({ bars: [b], lines: [down, below(40)] })).toEqual(['shared-tap below down']);
+    // A line that comes down and goes on below the bar is one line.
+    const across = line(
+      'across',
+      [
+        [40, 0],
+        [40, 81],
+        [60, 81],
+        [60, 119],
+        [40, 119],
+        [40, 250],
+      ],
+      'across:from',
+      'across:to',
+    );
+    expect(check({ bars: [bar('far', 200, 292, 100)], lines: [across] })).toEqual([]);
+  });
+});
+
+describe('findOverlaps: two bars', () => {
+  it('finds two bars on one row nearer than BAR_GAP, tip to tip, and none at the gap', () => {
+    const at = (gap: number): string[] =>
+      check({ bars: [bar('a', 0, 92, 50), bar('b', 92 + gap, 184 + gap, 50)] });
+    expect(at(BAR_GAP)).toEqual([]);
+    expect(at(BAR_GAP - 1)).toEqual(['bar-bar a b']);
+    expect(at(7)).toEqual(['bar-bar a b']);
+    expect(at(0)).toEqual(['bar-bar a b']);
+    expect(
+      describeOverlaps(
+        findOverlaps({ lines: [], boxes: [], bars: [bar('a', 0, 92, 50), bar('b', 99, 191, 50)] }),
+      ),
+    ).toEqual(['bar-bar: a / b: the bars of a and b are 7.0 px apart']);
+  });
+
+  it('finds two that overlap, one over the other, and takes a bar a row off as apart', () => {
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 40, 132, 50)] })).toEqual(['bar-bar a b']);
+    // One over the other, close enough that the two read as one thick bar.
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 0, 92, 60)] })).toEqual(['bar-bar a b']);
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 0, 92, 50 + 6 + BAR_GAP)] })).toEqual([]);
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 0, 92, 98)] })).toEqual([]);
+    // Corner to corner: the distance is what counts.
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 108, 200, 62)] })).toEqual([]);
+    expect(check({ bars: [bar('a', 0, 92, 50), bar('b', 96, 188, 58)] })).toEqual(['bar-bar a b']);
+  });
+
+  it('finds a pair among many, in any order of the bars', () => {
+    const bars = [bar('c', 400, 492, 50), bar('a', 0, 92, 50), bar('b', 100, 192, 50)];
+    expect(check({ bars })).toEqual(['bar-bar a b']);
+    expect(check({ bars: [...bars].reverse() })).toEqual(['bar-bar a b']);
+    expect(check({ bars }, { barGap: 6 })).toEqual([]);
   });
 });
 

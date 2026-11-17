@@ -1493,9 +1493,11 @@ describe('picking several nodes, and lining them up', () => {
     open('square.xlsx');
     await draw();
     const before = { one: positionOf('1'), two: positionOf('2') };
-    // Bus 3 is put between buses 1 and 2, nearer the first.
-    dragTo('3', { x: before.one.x + 100, y: before.one.y });
-    await waitFor(() => expect(positionOf('3').x).toBe(before.one.x + 100));
+    // Bus 3 is put between buses 1 and 2, nearer the first: a bar of 92 and
+    // the room two bars keep between their tips (`BAR_GAP`) from bus 1, or a
+    // little more.
+    dragTo('3', { x: before.one.x + 108, y: before.one.y });
+    await waitFor(() => expect(positionOf('3').x).toBe(before.one.x + 108));
     pick('1', '2', '3');
     await waitFor(() => expect(screen.getByTestId('sld-distribute-horizontal')).toBeEnabled());
 

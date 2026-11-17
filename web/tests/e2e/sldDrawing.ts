@@ -10,6 +10,7 @@
  * Not a spec itself: `sld-connections.spec.ts`, `sld-tidy.spec.ts` and
  * `sld-no-overlap.spec.ts` import from it.
  */
+import { BAR_GAP } from '../../src/components/sld/connections';
 import {
   describeOverlaps,
   findOverlaps,
@@ -310,6 +311,27 @@ export function problems({ nodes, edges }: Drawing): string[] {
       const apart = dots[i]! - dots[i - 1]!;
       if (apart < TAP_SPACING - NEAR) {
         found.push(`bus ${id}: taps at ${dots[i - 1]} and ${dots[i]} run into each other`);
+      }
+    }
+  }
+  // Two bars keep a gap between them, tip to tip where they stand on one row:
+  // nearer, they read as one bar with a break in it.
+  const bars = Object.entries(nodes)
+    .filter(([, node]) => node.type === 'bus')
+    .map(([id, node]) => ({
+      id,
+      left: node.x + (node.barLeft ?? 0),
+      right: node.x + (node.barLeft ?? 0) + (node.barLength ?? 0),
+      y: node.y,
+    }));
+  for (let i = 0; i < bars.length; i += 1) {
+    for (let k = i + 1; k < bars.length; k += 1) {
+      const [a, b] = [bars[i]!, bars[k]!];
+      const across = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right));
+      const down = Math.max(0, Math.abs(a.y - b.y) - 6);
+      const apart = Math.hypot(across, down);
+      if (apart < BAR_GAP - NEAR) {
+        found.push(`bus ${a.id} and bus ${b.id}: bars ${apart.toFixed(1)} px apart`);
       }
     }
   }

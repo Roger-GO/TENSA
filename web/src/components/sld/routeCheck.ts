@@ -289,6 +289,8 @@ function inWords(overlap: Overlap, id: string, nameOf: (id: string) => string): 
       return `its end would be too close to the end of ${other}`;
     case 'line-tap':
       return `it would run over the end of ${other} on the bar`;
+    case 'through-bar':
+      return `it would read as one line with ${other}, which leaves the other side of the bar in line with it`;
     case 'loose-end':
       return `its end would leave ${other}`;
     case 'line-bar':

@@ -665,7 +665,10 @@ function routeOnce<E extends ConnectionEdge>(
       // route of its own, and is drawn from tap to tap for now, takes none
       // that has down with it. One that was drawn by hand stays, and the
       // other goes round it.
-      const lines = overlap.kind === 'line-line' || overlap.kind === 'shared-tap';
+      const lines =
+        overlap.kind === 'line-line' ||
+        overlap.kind === 'shared-tap' ||
+        overlap.kind === 'through-bar';
       const both = lines ? [overlap.a, overlap.b] : [overlap.a];
       if (both.some((id) => isBranch.has(id) && !connections.kept.has(id))) continue;
       for (const id of both) if (isBranch.has(id) && !fixed(id)) broken.add(id);

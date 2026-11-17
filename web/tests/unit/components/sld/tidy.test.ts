@@ -20,6 +20,7 @@ import type { TopologySummary } from '@/api/types';
 import { autoLayout } from '@/components/sld/layout';
 import { buildGraph } from '@/components/sld/graph';
 import {
+  BAR_GAP,
   BEND_CLEAR,
   RUN_CLEARANCE,
   SLIDE_CLEARANCE,
@@ -193,6 +194,23 @@ describe('tidyRoutes: one branch', () => {
       expect(Math.abs(points[1]![1] - 3), `${gap} apart`).toBeGreaterThanOrEqual(GRID_STEP);
       expect(points[2]![1], `${gap} apart`).toBe(points[1]![1]);
     }
+  });
+
+  it('draws a bar out to a tap past its tip no nearer than BAR_GAP to the bar of the bus beside it', () => {
+    // Bus 1 has more lines than its bar has places for, and bus 2 stands
+    // level with it, 30 past its east tip: a tap past that tip is as far as
+    // the gap allows (the bars would read as one with a break in it, 7 apart
+    // as they were drawn once), and the rest of the taps stand elsewhere.
+    const lower = Array.from({ length: 9 }, (_, i) => bus(`low${i}`, -250 + i * 80, 200));
+    const nodes = [bus('1', 0, 0), bus('2', 92 + 30, 0), ...lower];
+    const edges = lower.map((b, i) => line(`l${i}`, '1', b.id));
+    const { routes, unrouted } = tidyRoutes(nodes, edges);
+    expect(unrouted).toEqual([]);
+    const { bars } = layoutConnections(nodes, tidied(nodes, edges, routes));
+    expect(122 + bars.get('2')!.start - bars.get('1')!.end).toBeGreaterThanOrEqual(BAR_GAP);
+    // It did take a tap past the east tip: the gap is not left to the lines
+    // that stand clear of it for nothing.
+    expect(bars.get('1')!.end).toBeGreaterThan(92);
   });
 
   it('is routed from its source to its target, whichever stands first', () => {
@@ -880,19 +898,27 @@ function mesh(
 
 describe('tidyRoutes: how much work it does', () => {
   it('routes a diagram of over 200 branches within its steps', () => {
-    const { nodes, edges } = mesh(12, 10, 70);
+    // 62 far links: with a few more, two of them (far-62 and far-69) are left
+    // with no place for a tap on the bar at one end, where the lines of the
+    // mesh already take the places a spacing apart and a bend within reach of
+    // a bar keeps a tap on its far face a spacing off, and no search finds a
+    // way for them.
+    const { nodes, edges } = mesh(12, 10, 62);
     const branches = edges.filter((edge) => edge.type !== 'stub');
     expect(nodes.filter((node) => node.type === 'bus')).toHaveLength(120);
     expect(branches.length).toBeGreaterThan(200);
     const { routes, unrouted, steps } = tidyRoutes(nodes, edges);
     // The steps are what bounds the work, on any machine, and this diagram
-    // takes all it is given: routed until nothing could be bettered it
-    // takes several times as many. No time is held here, since a time says
-    // how fast the machine is: the steps are about a second on one core of
-    // a laptop, and 5 to 7 s on a CI runner, where coverage makes the
-    // search four to five times slower. The timeout below is the guard
-    // against a step that has come to cost many times what it did.
-    expect(steps).toBeGreaterThanOrEqual(TIDY_STEPS);
+    // takes nearly all it is given: routed until nothing could be bettered
+    // it takes several times as many (a little under all of them, since a
+    // route is not bent within reach of a bar where it would read as one
+    // line with the end of another on the far side, which leaves the search
+    // fewer ways to look at). No time is held here, since a time says how
+    // fast the machine is: the steps are about a second on one core of a
+    // laptop, and 5 to 7 s on a CI runner, where coverage makes the search
+    // four to five times slower. The timeout below is the guard against a
+    // step that has come to cost many times what it did.
+    expect(steps).toBeGreaterThanOrEqual(0.9 * TIDY_STEPS);
     expect(steps).toBeLessThanOrEqual(TIDY_STEPS + 20_000);
     expect(unrouted).toEqual([]);
     expect(routes.size).toBe(branches.length);
