@@ -423,6 +423,7 @@ class FakeApi:
         self.file_has_event = True
         self.machines = True
         self.tds_requests: list[list[str]] = []
+        self.tds_steps: list[float | None] = []
         self.drift = 0.0
         self.pf_converged = True
         self.tds_converged = True
@@ -541,6 +542,7 @@ class FakeApi:
 
     def tds(self, body: dict[str, Any]) -> dict[str, Any]:
         self.tds_requests.append(list(body["dae_vars"]))
+        self.tds_steps.append(body.get("h"))
         tf = float(body["tf"])
         t = np.arange(0, tf + 1e-9, 1 / 30)
         stepped = any(s.get("src") == "Req" for s in self.specs)
@@ -667,6 +669,21 @@ def test_the_undisturbed_runs_have_the_events_taken_out_and_the_disturbance_run_
     assert "".join(seen) == "RDTRDERDTRT"
     assert fake.log.count("POST /sessions/s1/pflow") == 5  # the open and one for each run
     assert fake.log[-1] == "DELETE /sessions/s1"
+
+
+def test_the_step_a_reference_asks_for_goes_to_the_disturbance_run_and_to_no_other(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    reference = _reference(disturbance={"description": "Line L1 trips at 2 s", "h": 0.005})
+    result, _ = _run(harness, fake, reference)
+    # The undisturbed run and the ring-down use TENSA's default step; the disturbance, the last
+    # run, the one the reference gives.
+    assert fake.tds_steps == [None, None, 0.005]
+    run = next(c for c in result.checks if c.name == "Disturbance run completes")
+    assert "at a step of 0.005 s" in run.reference
+    # With none given, no run is asked for a step.
+    _run(harness, fake)
+    assert fake.tds_steps[3:] == [None, None, None]
 
 
 def test_an_event_id_with_odd_characters_goes_into_the_path_quoted(
@@ -840,3 +857,73 @@ def test_a_file_the_workspace_already_holds_is_used_and_said_so(
     result, _ = harness.verify_case(fake, _example(), _reference(), replace_file=False)
     assert result.file == "demo.xlsx"
     assert any("already held" in n for n in result.notes)
+
+
+# ---- the checks of a case in the catalog ---------------------------------------------------
+
+
+def test_a_case_lists_in_the_catalog_the_checks_that_name_a_reference(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    from tensa.core.example_catalog import VerificationCheck
+
+    result, _ = _run(harness, fake)
+    checks = harness.catalog_checks(result)
+    # The sanity checks need no reference and the catalog has no kind for them.
+    assert len(checks) == len([c for c in result.checks if c.kind != "sanity"])
+    assert {c["kind"] for c in checks} == {
+        "ring-down",
+        "independent-solver",
+        "regression-baseline",
+        "published",
+    }
+    for check in checks:
+        assert set(check) == {"name", "kind", "reference", "tolerance", "result", "passed"}
+        VerificationCheck.model_validate(check)
+    baseline = next(c for c in checks if c["kind"] == "regression-baseline")
+    assert "not a verification" in baseline["reference"]
+
+
+def _catalog_file(tmp_path: Path, **verification: Any) -> Path:
+    entry = _example().model_dump(mode="json", exclude_none=True)
+    other = {**entry, "id": "other", "provenance": {**entry["provenance"], "path": "o/o.xlsx"}}
+    if verification:
+        entry["verification"] = verification
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"version": 1, "examples": [entry, other]}), encoding="utf-8")
+    return path
+
+
+def test_writing_the_catalog_puts_the_checks_in_the_entry_and_keeps_its_summary(
+    harness: ModuleType, fake: FakeApi, tmp_path: Path
+) -> None:
+    path = _catalog_file(tmp_path, summary="What the checks add up to.", checks=[])
+    result, _ = _run(harness, fake)
+    assert harness.update_catalog([result], path) == ["demo"]
+    written = json.loads(path.read_text(encoding="utf-8"))
+    demo, other = written["examples"]
+    assert demo["verification"]["summary"] == "What the checks add up to."
+    assert [c["name"] for c in demo["verification"]["checks"]] == [
+        c["name"] for c in harness.catalog_checks(result)
+    ]
+    assert "verification" not in other  # a case that was not run is not touched
+    parse_catalog(path.read_text(encoding="utf-8"))  # and it is still a catalog
+
+
+def test_the_catalog_is_not_written_for_a_case_without_a_summary_or_that_did_not_pass(
+    harness: ModuleType, fake: FakeApi, tmp_path: Path
+) -> None:
+    result, _ = _run(harness, fake)
+    without = _catalog_file(tmp_path)
+    before = without.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="no verification summary"):
+        harness.update_catalog([result], without)
+    assert without.read_text(encoding="utf-8") == before
+
+    failing = FakeApi(harness)
+    failing.tds_converged = False
+    bad, _ = _run(harness, failing)
+    assert not bad.passed
+    with_summary = _catalog_file(tmp_path, summary="x", checks=[])
+    with pytest.raises(ValueError, match="did not pass"):
+        harness.update_catalog([bad], with_summary)

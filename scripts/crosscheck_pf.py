@@ -269,11 +269,61 @@ def dump_network(system: Any) -> dict[str, Any]:
         "bus": rows,
         "gen": gens,
         "branch": branches,
+        "branch_idx": list(line.idx.v),
+        "machines": _classical_machines(system, pos),
         "columns": {
             "bus": list(MATPOWER_BUS),
             "gen": list(MATPOWER_GEN),
             "branch": list(MATPOWER_BRANCH),
         },
+    }
+
+
+# The groups whose devices the network of a dump stands for, or that change nothing in it.
+_NETWORK_GROUPS = frozenset(
+    {"ACLine", "ACNode", "ACTopology", "Collection", "StaticGen", "StaticLoad", "StaticShunt"}
+)
+_EVENT_GROUPS = frozenset({"TimedEvent"})
+
+
+def _classical_machines(system: Any, pos: Any) -> dict[str, Any]:
+    """The machines of the classical model (``GENCLS``) the case holds, per unit on the base.
+
+    ``scripts/crosscheck_classical.py`` reads them. ANDES converts a machine's ``M``, ``D``,
+    ``ra`` and ``xd1`` to the system base at ``setup()``, so the values are read as they are.
+    ``other_models`` names every other device model of the case that is not part of the
+    network (a round-rotor machine, an exciter, a governor), which the classical check cannot
+    represent; ``events`` names the events of the file.
+    """
+    machines = system.GENCLS
+    other = sorted(
+        name
+        for group, members in system.groups.items()
+        if group not in _NETWORK_GROUPS | _EVENT_GROUPS
+        for name, model in members.models.items()
+        if model.n and name != "GENCLS"
+    )
+    events = sorted(
+        name
+        for group in _EVENT_GROUPS
+        for name, model in system.groups[group].models.items()
+        if model.n
+    )
+    return {
+        "classical": [
+            {
+                "idx": machines.idx.v[k],
+                "bus": float(pos(machines.bus.v[k], f"machine {machines.idx.v[k]!r}") + 1),
+                "H": 0.5 * float(machines.M.v[k]),
+                "D": float(machines.D.v[k]),
+                "ra": float(machines.ra.v[k]),
+                "xd1": float(machines.xd1.v[k]),
+                "in_service": bool(machines.u.v[k]),
+            }
+            for k in range(machines.n)
+        ],
+        "other_models": other,
+        "events": events,
     }
 
 
@@ -547,15 +597,20 @@ def _reference_checks(result: dict[str, Any], source: str) -> list[dict[str, Any
     ]
 
 
-def write_reference(example_id: str, checks: list[dict[str, Any]], path: Path) -> None:
-    """Put ``checks`` in the reference file, replacing the ones this script wrote before."""
+def write_reference(
+    example_id: str,
+    checks: list[dict[str, Any]],
+    path: Path,
+    generated_by: str = GENERATED_BY,
+) -> None:
+    """Put ``checks`` in the reference file, replacing the ones ``generated_by`` wrote before."""
     if path.exists():
         document = json.loads(path.read_text(encoding="utf-8"))
         if document.get("id") != example_id:
             raise CrosscheckError(f"{path.name} is the reference of {document.get('id')!r}")
     else:
         document = {"version": 1, "id": example_id, "checks": []}
-    kept = [c for c in document.get("checks", []) if c.get("generated_by") != GENERATED_BY]
+    kept = [c for c in document.get("checks", []) if c.get("generated_by") != generated_by]
     document["checks"] = [*checks, *kept]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(format_json(document) + "\n", encoding="utf-8")

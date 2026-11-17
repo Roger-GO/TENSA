@@ -148,6 +148,15 @@ class DisturbancePlan(_Model):
         ),
     )
     tf: float = Field(10.0, gt=0, description="End time of the run, in seconds.")
+    h: float | None = Field(
+        None,
+        gt=0,
+        description=(
+            "Integration step of the run, in seconds. ``null`` is TENSA's default. A case whose "
+            "numbers are compared with a continuous solution gives a step small enough for "
+            "the trapezoidal rule's phase error to be far under the tolerance."
+        ),
+    )
     stable_below_deg: float = Field(
         180.0,
         gt=0,

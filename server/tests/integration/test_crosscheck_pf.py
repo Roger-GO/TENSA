@@ -221,7 +221,12 @@ def test_pandapower_gives_the_values_that_ship_in_the_reference_files(
     written = json.loads(target.read_text(encoding="utf-8"))["checks"]
     shipped = load_reference(example_id)
     assert shipped is not None
-    expected = {c.quantity: c.expected for c in shipped.checks if c.generated_by}
+    # Only what this script wrote: another script writes the classical model's checks.
+    expected = {
+        c.quantity: c.expected
+        for c in shipped.checks
+        if c.generated_by == "scripts/crosscheck_pf.py"
+    }
     assert {c["quantity"] for c in written} == set(expected)
     for check in written:
         want = expected[check["quantity"]]

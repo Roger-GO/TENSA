@@ -43,7 +43,9 @@ The reports are a JSON document and a Markdown page; the exit status is 1 when a
 failed or any case could not be run, and 2 when the arguments or a reference file are wrong
 or the server could not be started.
 ``--record-baselines`` writes what was measured into the ``regression-baseline`` values of the
-reference files (the other kinds are never touched).
+reference files (the other kinds are never touched). ``--write-catalog`` writes the checks of
+the cases that passed into the ``verification`` of their catalog entries (the entry's own
+summary stays as it is, since only a person can say what the checks add up to).
 """
 
 from __future__ import annotations
@@ -85,7 +87,7 @@ from crosscheck_pf import format_json  # noqa: E402
 
 from tensa.core.dae_vars import MAX_DAE_VARS  # noqa: E402
 from tensa.core.disturbance import AlterSpec  # noqa: E402
-from tensa.core.example_catalog import Example, load_catalog  # noqa: E402
+from tensa.core.example_catalog import Example, examples_dir, load_catalog  # noqa: E402
 from tensa.core.example_references import (  # noqa: E402
     MAP_QUANTITIES,
     DisturbancePlan,
@@ -617,8 +619,11 @@ class Session:
     def pflow(self) -> dict[str, Any]:
         return dict(self.api.post(f"/sessions/{self.id}/pflow"))
 
-    def tds(self, tf: float, names: Sequence[str]) -> dict[str, Any]:
-        return dict(self.api.post(f"/sessions/{self.id}/tds", {"tf": tf, "dae_vars": list(names)}))
+    def tds(self, tf: float, names: Sequence[str], h: float | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"tf": tf, "dae_vars": list(names)}
+        if h is not None:
+            body["h"] = h
+        return dict(self.api.post(f"/sessions/{self.id}/tds", body))
 
     def eig(self) -> dict[str, Any]:
         return dict(self.api.post(f"/sessions/{self.id}/eig"))
@@ -894,9 +899,9 @@ def _dynamic(
             f"The disturbance run records the voltage of the first {room} buses only "
             f"(the API records at most {MAX_DAE_VARS} variables)."
         )
-    run = session.tds(plan.tf, wanted)
+    run = session.tds(plan.tf, wanted, plan.h)
     ok, text = completes(run, plan.tf)
-    what = plan.description
+    what = plan.description + (f", at a step of {plan.h:.6g} s" if plan.h is not None else "")
     result.sanity(
         "Disturbance run completes",
         "tds",
@@ -1150,6 +1155,55 @@ def record_baselines(
     return written
 
 
+def catalog_checks(result: CaseResult) -> list[dict[str, Any]]:
+    """The checks of a case as the catalog's ``verification`` lists them.
+
+    The catalog's kinds do not include ``sanity``, so the checks that need no reference are
+    left out (the entry's summary says that they were made); a regression baseline stays, with
+    the report's words that it is TENSA's own earlier output.
+    """
+    return [
+        {
+            "name": c.name,
+            "kind": c.kind,
+            "reference": c.reference,
+            "tolerance": c.tolerance,
+            "result": c.result,
+            "passed": c.passed,
+        }
+        for c in result.checks
+        if c.kind != "sanity"
+    ]
+
+
+def update_catalog(results: Sequence[CaseResult], path: Path) -> list[str]:
+    """Put each passing case's checks into ``verification.checks`` of its catalog entry.
+
+    Returns the ids written. An entry with no ``verification.summary`` yet is refused, and so is
+    a case that did not pass: the catalog states what was found, and a failed run is no such
+    statement. The file is written the way it is kept (two-space JSON).
+    """
+    document = json.loads(path.read_text(encoding="utf-8"))
+    entries = {entry["id"]: entry for entry in document["examples"]}
+    written = []
+    for result in results:
+        entry = entries.get(result.id)
+        if entry is None:
+            continue
+        if not result.passed:
+            raise ValueError(f"{result.id} did not pass, so its catalog entry is not updated")
+        summary = (entry.get("verification") or {}).get("summary")
+        if not summary:
+            raise ValueError(
+                f"{result.id} has no verification summary: write it in the catalog, then run again"
+            )
+        entry["verification"] = {"summary": summary, "checks": catalog_checks(result)}
+        written.append(result.id)
+    if written:
+        path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return written
+
+
 # ----------------------------------------------------------------------------------------
 # Command line
 # ----------------------------------------------------------------------------------------
@@ -1183,6 +1237,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--record-baselines",
         action="store_true",
         help="write what was measured into the regression-baseline values of the reference files",
+    )
+    parser.add_argument(
+        "--write-catalog",
+        action="store_true",
+        help="write the checks of the cases that passed into their catalog entries",
     )
     return parser
 
@@ -1264,6 +1323,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.record_baselines:
         for name in record_baselines(results, measurements, references_dir()):
             print(f"recorded baselines in {name}", file=sys.stderr)
+    if args.write_catalog:
+        try:
+            for name in update_catalog(results, examples_dir() / "catalog.json"):
+                print(f"wrote the checks of {name} into the catalog", file=sys.stderr)
+        except ValueError as exc:
+            print(f"verify_example_cases: {exc}", file=sys.stderr)
+            return 2
     return 0 if report["passed"] else 1
 
 
