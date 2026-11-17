@@ -127,6 +127,12 @@ jobs:
       - name: Check ANDES generated code
         run: tensa warm-cache --quick --incremental
 
+      # A Playwright release installs its browser only on the Ubuntu versions it
+      # knows, and stops with "Playwright does not support chromium on
+      # ubuntu26.04-x64" on a newer one. `ubuntu-latest` has been moving to 26.04
+      # since 19 October 2026, so @playwright/test is 1.61 or later (the first
+      # release to support it), which a test of the server suite holds the
+      # lockfile to; a job pinned to an older image would not need that.
       - name: Install Chromium
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium

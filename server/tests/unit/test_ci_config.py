@@ -7,7 +7,10 @@ asked ``scripts/ci-matrix.sh`` for a stage the script does not have. The release
 workflow (``publish.yml``) is checked the same way: it must wait for the test
 workflows and must build, check, and smoke-test the packages before uploading
 them. The acceptance job and the web workflow's end-to-end job are checked for
-being real (a placeholder that only echoed once passed as green). These tests read
+being real (a placeholder that only echoed once passed as green). No workflow may ask
+for a runner image GitHub has retired, and the end-to-end job's Playwright must be one
+that installs its browser on the Ubuntu behind ``ubuntu-latest``: each of those fails a
+job before its first step, with nothing in the log of the first one. These tests read
 the repository files directly, so they skip when the tests run away from a checkout.
 The last one reads the test run itself: it keeps a test id that only Windows
 refuses from passing on the systems the whole suite runs on.
@@ -32,7 +35,26 @@ _SCRIPT = REPO_ROOT / "scripts" / "ci-matrix.sh"
 _E2E_DIR = REPO_ROOT / "web" / "tests" / "e2e"
 _PLAYWRIGHT_CONFIG = REPO_ROOT / "web" / "playwright.config.ts"
 
-_REQUIRED_OSES = {"ubuntu-latest", "macos-14", "windows-latest"}
+_REQUIRED_OSES = {"ubuntu-latest", "macos-15", "windows-latest"}
+
+# Runner images GitHub no longer provides (`macos-14` went on 2 November 2026). A job
+# that asks for one is cancelled at once with an annotation and no log, which is how
+# both macOS legs of the test matrix went red with no step to read.
+_RETIRED_RUNNER_IMAGES = (
+    "macos-11",
+    "macos-12",
+    "macos-13",
+    "macos-14",
+    "ubuntu-18.04",
+    "ubuntu-20.04",
+    "windows-2019",
+)
+
+# The first Playwright release that installs Chromium on Ubuntu 26.04 (its release notes
+# say "Playwright now supports Ubuntu 26.04"). `ubuntu-latest` has been moving to that
+# image since 19 October 2026, and 1.59 stops with "Playwright does not support chromium
+# on ubuntu26.04-x64".
+_PLAYWRIGHT_FOR_UBUNTU_26_04 = (1, 61)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -78,6 +100,44 @@ def test_workflow_triggers_cover_main_improve_branches_pull_requests_and_manual_
 def test_test_matrix_covers_three_operating_systems() -> None:
     matrix = _workflow()["jobs"]["test"]["strategy"]["matrix"]
     assert set(matrix["os"]).issuperset(_REQUIRED_OSES)
+
+
+def _runner_labels(workflow: dict[str, Any]) -> set[str]:
+    """Every runner label a workflow's jobs ask for, the entries of a matrix included."""
+    labels: set[str] = set()
+    for job in workflow.get("jobs", {}).values():
+        runs_on = job.get("runs-on", [])
+        asked = [runs_on] if isinstance(runs_on, str) else list(runs_on)
+        matrix = job.get("strategy", {}).get("matrix", {})
+        for label in asked:
+            if label == "${{ matrix.os }}":
+                labels.update(matrix["os"])
+                labels.update(entry["os"] for entry in matrix.get("include", []) if "os" in entry)
+            else:
+                # A label this does not read would let a retired image through unseen.
+                assert "${{" not in label, f"teach _runner_labels to read {label!r}"
+                labels.add(label)
+    return labels
+
+
+def test_no_workflow_asks_for_a_runner_image_that_is_retired() -> None:
+    """No job asks for an image GitHub has retired, a matrix entry included. The `-large`,
+    `-xlarge` and `-intel` forms of a retired image are retired with it."""
+    if not _WORKFLOW.is_file():
+        pytest.skip("the workflows are not next to the tests")
+    workflows = sorted(_WORKFLOWS.glob("*.yml"))
+    assert workflows, "no workflows found"
+    for path in workflows:
+        labels = _runner_labels(_load(path))
+        retired = sorted(
+            label
+            for label in labels
+            for image in _RETIRED_RUNNER_IMAGES
+            if label == image or label.startswith(image + "-")
+        )
+        assert retired == [], f"{path.name} asks for a retired runner image"
+    # Guards the reader: the matrix of the test job is among the labels it finds.
+    assert _runner_labels(_workflow()) >= _REQUIRED_OSES
 
 
 def test_test_matrix_pythons_match_the_package_classifiers() -> None:
@@ -303,6 +363,29 @@ def test_the_e2e_job_says_which_closed_page_keeps_its_session() -> None:
     )
     assert "a closed tab does not end it" not in comments
     assert "a page the test runner closes does not" in comments
+
+
+def test_the_locked_playwright_installs_its_browser_on_the_ubuntu_the_e2e_job_runs_on() -> None:
+    """The e2e job installs Chromium with ``playwright install --with-deps``, which an
+    older Playwright refuses on a newer Ubuntu before it installs anything. While the
+    job rides ``ubuntu-latest`` the lockfile's release (what ``--frozen-lockfile`` gets)
+    has to be one that knows the image the label moves to; a job pinned to an image has
+    nothing to check here."""
+    jobs = _load(_WORKFLOWS / "web.yml")["jobs"]
+    if jobs["e2e"]["runs-on"] != "ubuntu-latest":
+        pytest.skip("the e2e job is pinned to an image, so no Ubuntu moves under its Playwright")
+    lock = _read_required(REPO_ROOT / "web" / "pnpm-lock.yaml")
+    found = re.search(
+        r"^ {6}'@playwright/test':\n {8}specifier: \S+\n {8}version: (\d+)\.(\d+)\.\d+$",
+        lock,
+        re.MULTILINE,
+    )
+    assert found is not None, "web/pnpm-lock.yaml has no @playwright/test in its importer"
+    locked = (int(found.group(1)), int(found.group(2)))
+    assert locked >= _PLAYWRIGHT_FOR_UBUNTU_26_04, (
+        f"@playwright/test {found.group(1)}.{found.group(2)} cannot install Chromium on "
+        "Ubuntu 26.04: raise it, or pin the e2e job to an Ubuntu image Playwright supports"
+    )
 
 
 def test_the_test_workflows_can_be_called_from_the_release_workflow() -> None:

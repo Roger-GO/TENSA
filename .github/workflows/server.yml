@@ -106,7 +106,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # macOS is named by version, not `macos-latest`, so the leg does not
+        # change under the suite when GitHub moves the label. `macos-14` was
+        # retired on 2 November 2026: a job that asks for it is cancelled at
+        # once, with an annotation ("The configuration 'macos-14-arm64-us-default'
+        # is not supported") and no log. `macos-15` is Apple silicon (the Intel
+        # image is `macos-15-intel`). When GitHub retires it too, move to the
+        # next Apple silicon version in the image list at
+        # https://github.com/actions/runner-images#available-images.
+        os: [ubuntu-latest, macos-15, windows-latest]
         python: ["3.12", "3.13"]
         include:
           - os: ubuntu-latest
