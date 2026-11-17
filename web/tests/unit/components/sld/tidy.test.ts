@@ -898,11 +898,6 @@ function mesh(
 
 describe('tidyRoutes: how much work it does', () => {
   it('routes a diagram of over 200 branches within its steps', () => {
-    // 62 far links: with a few more, two of them (far-62 and far-69) are left
-    // with no place for a tap on the bar at one end, where the lines of the
-    // mesh already take the places a spacing apart and a bend within reach of
-    // a bar keeps a tap on its far face a spacing off, and no search finds a
-    // way for them.
     const { nodes, edges } = mesh(12, 10, 62);
     const branches = edges.filter((edge) => edge.type !== 'stub');
     expect(nodes.filter((node) => node.type === 'bus')).toHaveLength(120);
@@ -924,6 +919,26 @@ describe('tidyRoutes: how much work it does', () => {
     expect(routes.size).toBe(branches.length);
     expect(meetings(routes).shared).toEqual([]);
   }, 60_000);
+
+  // A known gap, kept in view: the same mesh with 70 far links of the 62 above
+  // routed every branch before a bend within reach of a bar was held off the
+  // column of a tap on its far face (`THROUGH_REACH`). Now two of them
+  // (far-62 and far-69, both from bus 0-8 to bus 3-9) are left without a tap
+  // place: the lines of the mesh already take the places a spacing apart on
+  // the bar of 3-9, and none of the places past its tips is free. With that
+  // rule left out of the search alone, both are routed. When a search finds
+  // them, this test fails: make it the test above, with 70 links.
+  it.fails(
+    'routes the same mesh with 70 far links',
+    () => {
+      const { nodes, edges } = mesh(12, 10, 70);
+      const branches = edges.filter((edge) => edge.type !== 'stub');
+      const { routes, unrouted } = tidyRoutes(nodes, edges);
+      expect(unrouted).toEqual([]);
+      expect(routes.size).toBe(branches.length);
+    },
+    60_000,
+  );
 
   it('stops when the steps it is given run out, and says so', () => {
     const { nodes, edges } = mesh(8, 6, 30);
