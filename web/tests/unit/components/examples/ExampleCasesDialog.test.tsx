@@ -499,6 +499,32 @@ describe('citing a case', () => {
     );
   });
 
+  it('says in the panel what was copied, until the panel is closed or a copy is refused', async () => {
+    const user = await openDialog();
+    stubClipboard({ writeText });
+    const cite = card('ieee14').getByRole('button', { name: /^Cite/ });
+    await user.click(cite);
+    const status = screen.getByTestId('example-copy-status-ieee14');
+    // A region that is in the page before anything is said, so a screen reader hears it.
+    expect(status).toHaveAttribute('role', 'status');
+    expect(status).toHaveTextContent('');
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as text/ }));
+    expect(status).toHaveTextContent('Copied as text.');
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as BibTeX/ }));
+    expect(status).toHaveTextContent('Copied as BibTeX.');
+    writeText.mockRejectedValue(new Error('denied'));
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as text/ }));
+    expect(status).toHaveTextContent('The browser did not let the citation be copied.');
+    expect(status).toHaveTextContent('copy it by hand');
+    writeText.mockResolvedValue(undefined);
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as text/ }));
+    expect(status).toHaveTextContent('Copied as text.');
+    // Closed and opened again, the panel does not claim a copy that was made before.
+    await user.click(cite);
+    await user.click(cite);
+    expect(screen.getByTestId('example-copy-status-ieee14')).toHaveTextContent('');
+  });
+
   it('copies them as BibTeX', async () => {
     const success = vi.spyOn(toast, 'success');
     const user = await openDialog();
@@ -546,11 +572,35 @@ describe('the filter and the states of the list', () => {
   it('narrows the cards to what is typed and counts them', async () => {
     const user = await openDialog();
     await user.type(screen.getByRole('searchbox', { name: 'Filter the example cases' }), 'wscc');
-    expect(screen.queryByTestId('example-card-ieee14')).not.toBeInTheDocument();
-    expect(screen.getByTestId('example-card-wscc9')).toBeInTheDocument();
+    expect(screen.getByTestId('example-card-ieee14')).not.toBeVisible();
+    expect(screen.getByTestId('example-card-wscc9')).toBeVisible();
     expect(screen.getByTestId('example-cases-count')).toHaveTextContent('1 of 3');
-    // A group with nothing left in it is gone, not an empty heading.
-    expect(screen.queryByTestId('example-group-dynamic')).not.toBeInTheDocument();
+    // A group with nothing left in it is not an empty heading.
+    expect(screen.getByTestId('example-group-dynamic')).not.toBeVisible();
+    expect(screen.getByTestId('example-group-steady-state')).toBeVisible();
+    // What is hidden is not in the reading order or the tab order either.
+    expect(screen.queryByRole('button', { name: /^Cite: IEEE 14-bus/ })).toBeNull();
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+  });
+
+  it('keeps what was opened in a card while the filter hides it, for when it is cleared', async () => {
+    const user = await openDialog();
+    await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));
+    await user.click(card('ieee14').getByText('Caveats, changes and checks'));
+    expect(screen.getByTestId('example-cite-panel-ieee14')).toBeVisible();
+    // A filter that leaves nothing to show, which is also what typing the text of a
+    // reference into it does, and one that leaves another case.
+    await user.type(screen.getByRole('searchbox'), 'zzz');
+    expect(screen.getByTestId('example-card-ieee14')).not.toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Clear the filter' }));
+    expect(screen.getByTestId('example-cite-panel-ieee14')).toBeVisible();
+    expect(screen.getByTestId('example-details-ieee14')).toHaveAttribute('open');
+    await user.type(screen.getByRole('searchbox'), 'wscc');
+    expect(screen.getByTestId('example-card-ieee14')).not.toBeVisible();
+    await user.clear(screen.getByRole('searchbox'));
+    expect(screen.getByTestId('example-card-ieee14')).toBeVisible();
+    expect(screen.getByTestId('example-cite-panel-ieee14')).toBeVisible();
+    expect(screen.getByTestId('example-details-ieee14')).toHaveAttribute('open');
   });
 
   it('says nothing matches, and Clear the filter brings the list back', async () => {
@@ -559,8 +609,10 @@ describe('the filter and the states of the list', () => {
     expect(screen.getByTestId('example-cases-none')).toHaveTextContent(
       'No example case matches “zzz”.',
     );
+    expect(screen.getByTestId('example-card-ieee14')).not.toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Clear the filter' }));
-    expect(screen.getByTestId('example-card-ieee14')).toBeInTheDocument();
+    expect(screen.getByTestId('example-card-ieee14')).toBeVisible();
+    expect(screen.queryByTestId('example-cases-none')).not.toBeInTheDocument();
     expect(screen.getByRole('searchbox')).toHaveValue('');
   });
 
@@ -593,6 +645,72 @@ describe('the filter and the states of the list', () => {
     server.listFails = false;
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('example-card-ieee14')).toBeInTheDocument();
+  });
+});
+
+describe('what the dialog says of the workspace', () => {
+  const note = () => screen.getByTestId('example-cases-workspace-note');
+  const inWorkspace = (...ids: string[]) => {
+    server.examples = server.examples.map((e) =>
+      ids.includes(e.id) ? { ...e, in_workspace: true } : e,
+    );
+  };
+
+  it('says nothing is added yet, and what Add and Open do, when no case is in the workspace', async () => {
+    await openDialog();
+    expect(note()).toHaveTextContent('None of these cases is in your workspace yet.');
+    expect(note()).toHaveTextContent('Add to workspace copies the file of a case there');
+  });
+
+  it('says how many are added, and why, when some are', async () => {
+    inWorkspace('ieee14');
+    await openDialog();
+    // The entry that is only links has no file, so it is not counted.
+    expect(note()).toHaveTextContent(
+      '1 of 2 cases are already in your workspace and say Added (a new workspace starts with the default set).',
+    );
+  });
+
+  it('says there is nothing to add, and how Add comes back, when all are', async () => {
+    inWorkspace('ieee14', 'wscc9');
+    await openDialog();
+    expect(note()).toHaveTextContent(
+      'All 2 cases are already in your workspace and say Added (a new workspace starts with the default set), so there is nothing to add: choose Open to load one.',
+    );
+    expect(note()).toHaveTextContent('offers Add to workspace again');
+  });
+
+  it('follows an add: the count is read again once the case is in', async () => {
+    inWorkspace('ieee14');
+    const user = await openDialog();
+    expect(note()).toHaveTextContent('1 of 2 cases are already in your workspace');
+    await user.click(card('wscc9').getByRole('button', { name: /^Add to workspace/ }));
+    await waitFor(() =>
+      expect(note()).toHaveTextContent('All 2 cases are already in your workspace'),
+    );
+  });
+
+  it('does not change with the filter, and is not shown before the list has come', async () => {
+    inWorkspace('ieee14');
+    const user = await openDialog();
+    await user.type(screen.getByRole('searchbox'), 'wscc');
+    expect(note()).toHaveTextContent('1 of 2 cases are already in your workspace');
+  });
+
+  it('is not there when no case has a file', async () => {
+    server.examples = server.examples.filter((e) => e.id === 'texas-dynamic');
+    await openDialog('texas-dynamic');
+    expect(screen.queryByTestId('example-cases-workspace-note')).not.toBeInTheDocument();
+  });
+
+  it('is not there while the list is loading', async () => {
+    vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch').mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+    renderDialog();
+    await userEvent.setup().click(screen.getByTestId('example-cases-open'));
+    await screen.findByTestId('example-cases-loading');
+    expect(screen.queryByTestId('example-cases-workspace-note')).not.toBeInTheDocument();
   });
 });
 

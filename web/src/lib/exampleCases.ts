@@ -1,7 +1,7 @@
 /**
  * What the Example cases dialog reads off a catalog entry, as pure functions: the file a
- * case opens as, how to describe its size and analyses, what its citations copy as, and
- * whether it matches the words typed in the filter.
+ * case opens as, how to describe its size and analyses, what the dialog says of the
+ * workspace, what its citations copy as, and whether it matches the words typed in the filter.
  */
 import type { ExampleListEntry } from '@/api/types';
 import { baseName } from '@/lib/paths';
@@ -56,6 +56,31 @@ export function sizeText(example: ExampleListEntry): string | null {
   const buses = `${size.buses} ${size.buses === 1 ? 'bus' : 'buses'}`;
   const generators = `${size.generators} ${size.generators === 1 ? 'generator' : 'generators'}`;
   return `${buses}, ${generators}`;
+}
+
+/**
+ * What the dialog says about the workspace under the filter, from how many of the cases that
+ * have a file are in it already, or `null` when none has a file. A new workspace starts with
+ * the default set, so a first-time user finds cards that say Added before anything was added:
+ * this says why, what to press, and (when every case is there) how a case offers Add again.
+ */
+export function workspaceNote(examples: readonly ExampleListEntry[]): string | null {
+  const withFile = examples.filter((example) => !isLinkOnly(example));
+  if (withFile.length === 0) return null;
+  const inWorkspace = withFile.filter((example) => example.in_workspace).length;
+  const single = withFile.length === 1;
+  const starts = '(a new workspace starts with the default set)';
+  if (inWorkspace === 0) {
+    return single
+      ? 'This case is not in your workspace yet. Add to workspace copies its file there, and Open then loads it.'
+      : 'None of these cases is in your workspace yet. Add to workspace copies the file of a case there, and Open then loads it.';
+  }
+  if (inWorkspace < withFile.length) {
+    return `${inWorkspace} of ${withFile.length} cases are already in your workspace and say Added ${starts}. Add to workspace copies the file of another one there; Open loads a case.`;
+  }
+  return single
+    ? `This case is already in your workspace and says Added ${starts}, so there is nothing to add: choose Open to load it. If its file is deleted from the workspace folder, the card offers Add to workspace again.`
+    : `All ${withFile.length} cases are already in your workspace and say Added ${starts}, so there is nothing to add: choose Open to load one. A case whose file is deleted from the workspace folder offers Add to workspace again.`;
 }
 
 /** The citations of a case as text to copy: plain, or BibTeX, one block after the other. */

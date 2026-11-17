@@ -17,6 +17,7 @@ import {
   companionFileNames,
   matchesFilter,
   primaryFileName,
+  workspaceNote,
 } from '@/lib/exampleCases';
 import { describeError } from '@/lib/describeError';
 import { useOpenCase } from '@/lib/openCase';
@@ -32,7 +33,9 @@ import { ExampleCard } from './ExampleCard';
  * `useExampleCasesStore`). The catalog is read from the server each time it opens, since
  * the workspace may have changed, and the cards are grouped by what the case supports:
  * dynamic cases (with machine models) and steady-state ones (a network, for power flow).
- * A filter narrows them by name, size or analysis. Adding a case copies its file into the
+ * A filter narrows them by name, size or analysis, and a line under it says how many are in
+ * the workspace already (a new workspace starts with the default set, so most cards open as
+ * Added, and the first-time user is told why and what to press). Adding a case copies its file into the
  * workspace and writes where it came from beside it; opening one loads it as the case of
  * the session, exactly as a click on its row in the Project tab does, and closes the
  * dialog so the diagram is what the user sees.
@@ -129,6 +132,10 @@ function Body() {
 
   const examples = list.data?.examples ?? [];
   const shown = examples.filter((example) => matchesFilter(example, filter));
+  // A card that does not match is hidden, not taken out of the page, so what a user had
+  // opened in it (its references, its notes) is still there when the filter lets it back.
+  const shownIds = new Set(shown.map((example) => example.id));
+  const note = workspaceNote(examples);
 
   return (
     <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
@@ -155,6 +162,17 @@ function Body() {
         </p>
       </div>
 
+      {/* Under the filter, not above it: the note comes with the list, and the filter, which has
+          the cursor, must not move when it arrives. */}
+      {list.data !== undefined && note !== null ? (
+        <p
+          data-testid="example-cases-workspace-note"
+          className="text-muted-foreground text-xs leading-snug"
+        >
+          {note}
+        </p>
+      ) : null}
+
       <div data-testid="example-cases-scroll" className="min-h-0 flex-1 overflow-y-auto pr-1">
         {list.isPending ? (
           <p
@@ -177,59 +195,65 @@ function Body() {
               Try again
             </Button>
           </div>
-        ) : shown.length === 0 ? (
-          <div
-            data-testid="example-cases-none"
-            className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-center text-sm"
-          >
-            <p>
-              {examples.length === 0
-                ? 'This server has no example cases.'
-                : `No example case matches “${filter.trim()}”.`}
-            </p>
-            {examples.length > 0 ? (
-              <Button type="button" variant="outline" size="sm" onClick={() => setFilter('')}>
-                Clear the filter
-              </Button>
-            ) : null}
-          </div>
         ) : (
-          <div className="flex flex-col gap-5">
-            {CASE_CATEGORIES.map((category) => {
-              const inCategory = shown.filter((example) => example.category === category.value);
-              if (inCategory.length === 0) return null;
-              return (
-                <section
-                  key={category.value}
-                  aria-labelledby={`example-group-${category.value}`}
-                  data-testid={`example-group-${category.value}`}
-                  className="flex flex-col gap-2"
-                >
-                  <div>
-                    <h3
-                      id={`example-group-${category.value}`}
-                      className="text-foreground text-sm font-semibold"
-                    >
-                      {category.heading}
-                    </h3>
-                    <p className="text-muted-foreground text-xs">{category.blurb}</p>
-                  </div>
-                  <ul className="flex flex-col gap-2" role="list">
-                    {inCategory.map((example) => (
-                      <li key={example.id}>
-                        <ExampleCard
-                          example={example}
-                          openPath={openPath}
-                          openBlocked={openBlocked}
-                          onOpen={onOpen}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
-          </div>
+          <>
+            {shown.length === 0 ? (
+              <div
+                data-testid="example-cases-none"
+                className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-center text-sm"
+              >
+                <p>
+                  {examples.length === 0
+                    ? 'This server has no example cases.'
+                    : `No example case matches “${filter.trim()}”.`}
+                </p>
+                {examples.length > 0 ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setFilter('')}>
+                    Clear the filter
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            <div hidden={shown.length === 0} className="flex flex-col gap-5">
+              {CASE_CATEGORIES.map((category) => {
+                const inCategory = examples.filter(
+                  (example) => example.category === category.value,
+                );
+                if (inCategory.length === 0) return null;
+                return (
+                  <section
+                    key={category.value}
+                    hidden={!inCategory.some((example) => shownIds.has(example.id))}
+                    aria-labelledby={`example-group-${category.value}`}
+                    data-testid={`example-group-${category.value}`}
+                    className="flex flex-col gap-2"
+                  >
+                    <div>
+                      <h3
+                        id={`example-group-${category.value}`}
+                        className="text-foreground text-sm font-semibold"
+                      >
+                        {category.heading}
+                      </h3>
+                      <p className="text-muted-foreground text-xs">{category.blurb}</p>
+                    </div>
+                    <ul className="flex flex-col gap-2" role="list">
+                      {inCategory.map((example) => (
+                        <li key={example.id} hidden={!shownIds.has(example.id)}>
+                          <ExampleCard
+                            example={example}
+                            openPath={openPath}
+                            openBlocked={openBlocked}
+                            onOpen={onOpen}
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>

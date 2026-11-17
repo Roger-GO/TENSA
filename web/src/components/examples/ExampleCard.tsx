@@ -47,6 +47,12 @@ interface Note {
   text: string;
 }
 
+/** What the last press of a Copy button did, said beside the buttons until the next press. */
+interface CopyResult {
+  ok: boolean;
+  text: string;
+}
+
 /** An address that opens in a new tab, the way the Help menu's links do. */
 function ExternalLink({
   href,
@@ -85,6 +91,7 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
   const add = useAddExample();
   const [citeOpen, setCiteOpen] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
+  const [copyResult, setCopyResult] = useState<CopyResult | null>(null);
   // This card put the case in the workspace (or found it there) since the dialog opened. The
   // list says so a moment later, when it has been read again, and until then the card must
   // not offer Add a second time. The keyboard focus was on the Add button, which the Open
@@ -152,12 +159,24 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
     );
   };
 
+  // The answer is said beside the buttons as well as in a notice: the notice is drawn at the
+  // corner of the window and is gone in a few seconds, and a press that seems to have done
+  // nothing is the one a user presses again.
   const copy = async (format: 'text' | 'bibtex') => {
     const what = format === 'bibtex' ? 'BibTeX' : 'citation';
+    setCopyResult(null);
     try {
       await navigator.clipboard.writeText(citationsText(example, format));
+      setCopyResult({
+        ok: true,
+        text: format === 'bibtex' ? 'Copied as BibTeX.' : 'Copied as text.',
+      });
       toast.success(`Copied the ${what} of ${example.title}`, { id: 'example-cite-copied' });
     } catch {
+      setCopyResult({
+        ok: false,
+        text: `The browser did not let the ${what} be copied. Select it below and copy it by hand.`,
+      });
       toast.error(`The browser did not let the ${what} be copied`, {
         id: 'example-cite-copied',
         description: 'Select the text in the Cite panel and copy it by hand.',
@@ -358,7 +377,10 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
             size="sm"
             aria-expanded={citeOpen}
             aria-controls={citeId}
-            onClick={() => setCiteOpen((open) => !open)}
+            onClick={() => {
+              setCiteOpen((open) => !open);
+              setCopyResult(null);
+            }}
             aria-label={`Cite: ${example.title}`}
             data-testid={`example-cite-${example.id}`}
             className="aria-expanded:bg-muted"
@@ -430,6 +452,18 @@ export function ExampleCard({ example, openPath, openBlocked, onOpen }: ExampleC
               >
                 Copy as BibTeX
               </Button>
+              {/* Always in the page, so a screen reader hears what is put into it. */}
+              <span
+                role="status"
+                data-testid={`example-copy-status-${example.id}`}
+                className={cn(
+                  'inline-flex items-center gap-1 text-xs',
+                  copyResult?.ok === false ? 'text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {copyResult?.ok === true ? <CheckGlyph /> : null}
+                {copyResult?.text}
+              </span>
             </div>
             <ol className="text-foreground flex list-decimal flex-col gap-1.5 pl-4 text-xs">
               {citations.map((c) => (

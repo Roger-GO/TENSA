@@ -14,6 +14,7 @@ import {
   matchesFilter,
   primaryFileName,
   sizeText,
+  workspaceNote,
 } from '@/lib/exampleCases';
 import { makeCatalog, makeExample } from '../helpers/exampleCatalog';
 
@@ -113,5 +114,45 @@ describe('the filter', () => {
     expect(matchesFilter(wscc9, 'eigenvalues')).toBe(false);
     expect(matchesFilter(wscc9, 'ieee')).toBe(false);
     expect(matchesFilter(texas, 'texas')).toBe(true);
+  });
+});
+
+describe('what is said of the workspace', () => {
+  const inWorkspace = (example: ReturnType<typeof makeExample>) => ({
+    ...example,
+    in_workspace: true,
+  });
+
+  it('says none is there, with what Add and Open do', () => {
+    expect(workspaceNote([ieee14, wscc9])).toBe(
+      'None of these cases is in your workspace yet. Add to workspace copies the file of a case there, and Open then loads it.',
+    );
+  });
+
+  it('counts the cases that are there, and says why they say Added', () => {
+    expect(workspaceNote([inWorkspace(ieee14), wscc9])).toBe(
+      '1 of 2 cases are already in your workspace and say Added (a new workspace starts with the default set). Add to workspace copies the file of another one there; Open loads a case.',
+    );
+  });
+
+  it('says there is nothing to add when all are there, and how a case offers Add again', () => {
+    expect(workspaceNote([inWorkspace(ieee14), inWorkspace(wscc9)])).toBe(
+      'All 2 cases are already in your workspace and say Added (a new workspace starts with the default set), so there is nothing to add: choose Open to load one. A case whose file is deleted from the workspace folder offers Add to workspace again.',
+    );
+  });
+
+  it('is worded for one case in the singular', () => {
+    expect(workspaceNote([ieee14])).toBe(
+      'This case is not in your workspace yet. Add to workspace copies its file there, and Open then loads it.',
+    );
+    expect(workspaceNote([inWorkspace(ieee14)])).toBe(
+      'This case is already in your workspace and says Added (a new workspace starts with the default set), so there is nothing to add: choose Open to load it. If its file is deleted from the workspace folder, the card offers Add to workspace again.',
+    );
+  });
+
+  it('leaves out an entry that is only links, and is nothing when there is no other', () => {
+    expect(workspaceNote([inWorkspace(ieee14), texas])).toContain('This case is already');
+    expect(workspaceNote([texas])).toBeNull();
+    expect(workspaceNote([])).toBeNull();
   });
 });

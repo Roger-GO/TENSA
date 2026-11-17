@@ -61,6 +61,10 @@ test('the Project tab opens the example cases, with their sources, licences and 
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
   }
+  // A line under the filter says why they do, though nothing was added in this session.
+  await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
+    'already in your workspace and say Added',
+  );
   await expect(dialog.getByTestId('example-size-ieee14')).toHaveText('14 buses, 5 generators');
   await expect(dialog.getByTestId('example-analysis-ieee14-eig')).toHaveText('Eigenvalues');
   await expect(dialog.getByTestId('example-analysis-wscc9-tds')).toHaveCount(0);
@@ -82,6 +86,8 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(
     page.locator('[data-sonner-toast]').filter({ hasText: 'Copied the BibTeX' }),
   ).toBeVisible();
+  // The panel says it too, in a region a screen reader hears, and keeps saying it.
+  await expect(dialog.getByTestId('example-copy-status-ieee14')).toHaveText('Copied as BibTeX.');
   const bibtex = await page.evaluate(() => navigator.clipboard.readText());
   expect(bibtex).toContain('@article{cui2021andes');
   expect(bibtex).toContain('10.1109/TPWRS.2020.3017019');
@@ -93,8 +99,11 @@ test('the Project tab opens the example cases, with their sources, licences and 
   // The filter narrows the list to what is typed.
   await page.getByRole('searchbox', { name: 'Filter the example cases' }).fill('kundur');
   await expect(dialog.getByTestId('example-card-kundur')).toBeVisible();
-  await expect(dialog.getByTestId('example-card-ieee14')).toHaveCount(0);
+  await expect(dialog.getByTestId('example-card-ieee14')).toBeHidden();
   await expect(dialog.getByTestId('example-cases-count')).toHaveText(/^1 of \d+$/);
+  // The card that was hidden has what was opened in it when the filter lets it back.
+  await page.getByRole('searchbox', { name: 'Filter the example cases' }).fill('');
+  await expect(dialog.getByTestId('example-cite-panel-ieee14')).toBeVisible();
   expect(uncaughtErrors).toEqual([]);
 });
 
