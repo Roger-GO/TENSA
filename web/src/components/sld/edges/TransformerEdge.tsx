@@ -26,6 +26,11 @@ import { EdgePickBox } from './EdgePickBox';
  * the canvas found room for it on a straight run of the route
  * (`data.labelAt`), and half way along without one.
  *
+ * The glyph is drawn for a run that goes up and down, with the line through
+ * the middle of both windings. Where the symbol stands on a level run it is
+ * turned a quarter, so that the line goes through the windings there as
+ * well (`data-turned`).
+ *
  * Click on the icon sets `selectedElement.kind = 'transformer'` so the
  * inspector shows transformer params (Unit 5b populated `_PARAMS_BY_MODEL`
  * for Lines, which carry tap/phi).
@@ -84,6 +89,10 @@ export const TransformerEdge = memo(function TransformerEdge({
   // is near or past its rating, and says so to assistive tooling.
   const loadingBand = overlay?.loading_band ?? 'neutral';
 
+  // On a level run the glyph is turned a quarter; on an upright run, or on
+  // one at an angle that is nearer upright, it is as drawn.
+  const turned = Math.abs(Math.sin((mid.angleDeg * Math.PI) / 180)) < Math.SQRT1_2;
+
   const winding = edgeData.winding ?? '2w';
   const iconSrc = iconForModel(winding === '3w' ? 'Transformer3W' : 'Transformer');
 
@@ -102,6 +111,7 @@ export const TransformerEdge = memo(function TransformerEdge({
         <div
           data-testid={`transformer-edge-icon-${id}`}
           data-winding={winding}
+          data-turned={turned ? 'true' : undefined}
           data-loading-band={loadingBand}
           data-draft={isDraft ? 'true' : undefined}
           title={
@@ -135,7 +145,12 @@ export const TransformerEdge = memo(function TransformerEdge({
             alt=""
             aria-hidden="true"
             draggable={false}
-            style={{ height: ICON_SIZE, width: ICON_SIZE, objectFit: 'contain' }}
+            style={{
+              height: ICON_SIZE,
+              width: ICON_SIZE,
+              objectFit: 'contain',
+              transform: turned ? 'rotate(90deg)' : undefined,
+            }}
           />
           {winding === '3w' ? (
             <span className="bg-warning/20 text-foreground absolute -top-1 -right-1 rounded-[var(--radius-sm)] px-1 font-mono text-[8px] leading-tight">

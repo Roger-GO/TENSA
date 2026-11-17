@@ -439,11 +439,14 @@ describe('while a node is dragged', () => {
     open('pair.xlsx');
     await draw();
     showValues();
-    dragTo('load-PQ', { x: 0, y: 120 });
-    expect(routeOf('stub-load-PQ').points[0]).toEqual([19, 161]);
+    // A little left of the middle of the left half of the bar: the line comes
+    // down 37 from its connector, and the readout on the far side of the
+    // symbol keeps clear of it (`READOUT_CLEAR`).
+    dragTo('load-PQ', { x: -8, y: 120 });
+    expect(routeOf('stub-load-PQ').points[0]).toEqual([11, 161]);
     const neighbour = routeOf('stub-load-PQ2').points;
-    expect(neighbour[0]![0]).toBeLessThan(19 - 4);
-    expect(neighbour[0]![0]).toBeGreaterThan(19 - 4 - 144);
+    expect(neighbour[0]![0]).toBeLessThan(11 - 4);
+    expect(neighbour[0]![0]).toBeGreaterThan(11 - 4 - 144);
     expect(node('load-PQ').data.readoutSpot).toBe('far');
   });
 

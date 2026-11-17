@@ -31,7 +31,9 @@
  *   that bus would hang.
  * - The readout of a device hangs off the face its connector leaves by,
  *   beside the connector: on its right, or on its left, whichever no
- *   connector runs through and nothing stands in. With neither it goes to
+ *   connector runs through and nothing stands in; of those that are free,
+ *   one that a line runs along the edge of (`READOUT_CLEAR`) comes after
+ *   every one that has room to spare. With neither it goes to
  *   the far side of the device, then beside its symbol, and with no place
  *   free it is left off (`placeReadouts`): the values are in the tables and
  *   in the Inspector, and a readout drawn over a line or a symbol can be
@@ -63,9 +65,11 @@
 import {
   BAR_LENGTH,
   BAR_THICKNESS,
+  READOUT_CLEAR,
   TRANSFORMER_SYMBOL_SIZE,
   branchLabelPlaces,
   busLabelPlace,
+  grown,
   labelBoxAt,
   routesThrough,
   runsIn,
@@ -951,17 +955,21 @@ export function placeReadouts(
         ];
     // Each as a place it can have: no connector runs through it, its own
     // included (one that steps round something leaves by a side of the
-    // device), and nothing stands in it.
-    const places = wanted.map((spot) => {
+    // device), and nothing stands in it. A place a line runs along the edge
+    // of (`READOUT_CLEAR`) comes after every place that has room to spare:
+    // the values are better beside a line than left off.
+    const free = (spot: Exclude<ReadoutSpot, 'none'>, room: number): Rect | null => {
       const place = spots[spot];
-      const free =
-        through(place) === 0 &&
+      const ok =
+        through(room === 0 ? place : grown(place, room)) === 0 &&
         inTheWay(place).every(
           ({ id, box }) => id === n.id || id === `chain:${n.id}` || !overlaps(box, place),
         );
-      return free ? place : null;
-    });
-    return { spots, wanted, places };
+      return ok ? place : null;
+    };
+    const roomy = wanted.map((spot) => free(spot, READOUT_CLEAR));
+    const tight = wanted.map((spot, k) => (roomy[k] === null ? free(spot, 0) : null));
+    return { spots, wanted: [...wanted, ...wanted], places: [...roomy, ...tight] };
   });
   const got = handOut(asked.map(({ places }) => places));
   const out = new Map<string, ReadoutPlace>();

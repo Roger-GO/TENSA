@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LABEL_ROOM,
+  READOUT_CLEAR,
   labelBoxAt,
   type BarGeometry,
   type ConnectionEdge,
@@ -271,6 +272,77 @@ describe('placeReadouts', () => {
     expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')).toEqual({
       spot: 'left',
       box: left,
+    });
+  });
+
+  it('stands it where a line does not run along its edge, when there is such a place', () => {
+    // A line 1 off the right edge of the place on the right (the halo would
+    // be drawn against it): the place on the left has room to spare.
+    const flush = layout(
+      {
+        '1': bar([
+          { x: 20, side: 'south' },
+          { x: 97, side: 'south' },
+        ]),
+      },
+      {
+        'stub-load-PQ': stub,
+        'line-l': route([
+          [97, 103],
+          [97, 400],
+        ]),
+      },
+    );
+    expect(placeReadouts(nodes, flush, NO_SIZES).get('load-PQ')).toEqual({
+      spot: 'left',
+      box: left,
+    });
+    // At READOUT_CLEAR off the edge it stands where it is first looked for.
+    const apart = layout(
+      {
+        '1': bar([
+          { x: 20, side: 'south' },
+          { x: 96 + READOUT_CLEAR + 1, side: 'south' },
+        ]),
+      },
+      {
+        'stub-load-PQ': stub,
+        'line-l': route([
+          [96 + READOUT_CLEAR + 1, 103],
+          [96 + READOUT_CLEAR + 1, 400],
+        ]),
+      },
+    );
+    expect(placeReadouts(nodes, apart, NO_SIZES).get('load-PQ')!.spot).toBe('right');
+  });
+
+  it('stands it beside a line it would run along the edge of before it leaves the values off', () => {
+    // As in the test below that leaves it off, with the line that ran through
+    // the place on the right 1 off its edge instead: the only place that has
+    // no line through it, and no room to spare.
+    const drawn = layout(
+      {
+        '1': bar([
+          { x: 20, side: 'south' },
+          { x: 97, side: 'south' },
+        ]),
+      },
+      {
+        'stub-load-PQ': stub,
+        'line-l': route([
+          [97, 103],
+          [97, 226],
+          [-200, 226],
+        ]),
+        'line-m': route([
+          [-20, 0],
+          [-20, 400],
+        ]),
+      },
+    );
+    expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')).toEqual({
+      spot: 'right',
+      box: right,
     });
   });
 

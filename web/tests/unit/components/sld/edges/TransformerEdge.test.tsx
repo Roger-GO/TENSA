@@ -161,6 +161,60 @@ describe('<TransformerEdge />', () => {
     );
   });
 
+  it('turns the glyph a quarter where the symbol stands on a level run, and not on an upright one', () => {
+    // The glyph has its windings one over the other, for a line that goes up
+    // and down: on a level run the line would pass between them.
+    const level = renderEdge({
+      id: 'tfm-level',
+      data: { route: STEPPED, labelAt: { x: 20, y: 3, angleDeg: 0 } },
+    });
+    const flat = level.getByTestId('transformer-edge-icon-tfm-level');
+    expect(flat).toHaveAttribute('data-turned', 'true');
+    expect(flat.querySelector('img')!.style.transform).toBe('rotate(90deg)');
+    level.unmount();
+
+    const back = renderEdge({
+      id: 'tfm-back',
+      data: { route: STEPPED, labelAt: { x: 20, y: 3, angleDeg: 180 } },
+    });
+    expect(back.getByTestId('transformer-edge-icon-tfm-back')).toHaveAttribute(
+      'data-turned',
+      'true',
+    );
+    back.unmount();
+
+    for (const angleDeg of [90, -90]) {
+      const upright = renderEdge({
+        id: `tfm-${angleDeg}`,
+        data: { route: STEPPED, labelAt: { x: 50, y: 28, angleDeg } },
+      });
+      const icon = upright.getByTestId(`transformer-edge-icon-tfm-${angleDeg}`);
+      expect(icon).not.toHaveAttribute('data-turned');
+      expect(icon.querySelector('img')!.style.transform).toBe('');
+      upright.unmount();
+    }
+  });
+
+  it('turns the glyph by the run half way along the route when the canvas has not placed it', () => {
+    // STEPPED goes across, down and across: the middle is on the run down.
+    const { getByTestId } = renderEdge({ id: 'tfm-mid', data: { route: STEPPED } });
+    expect(getByTestId('transformer-edge-icon-tfm-mid')).not.toHaveAttribute('data-turned');
+    const { getByTestId: along } = renderEdge({
+      id: 'tfm-along',
+      data: {
+        route: {
+          points: [
+            [0, 3],
+            [100, 3],
+          ],
+          sourceSide: 'south',
+          targetSide: 'north',
+        },
+      },
+    });
+    expect(along('transformer-edge-icon-tfm-along')).toHaveAttribute('data-turned', 'true');
+  });
+
   it('uses the muted border stroke when no PF data exists', () => {
     const { getByTestId } = renderEdge({
       data: { idx: 'L1' },
