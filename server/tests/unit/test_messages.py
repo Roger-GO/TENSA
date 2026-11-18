@@ -264,8 +264,12 @@ def test_nothing_is_printed_twice_when_something_else_handles_the_log(
 # ---- installing and removing --------------------------------------------------
 
 
-def test_install_lets_info_through_and_uninstall_puts_the_level_back() -> None:
+def test_install_lets_info_through_and_uninstall_puts_the_level_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     andes = logging.getLogger("andes")
+    # The level a process has before anything configures the logger, whatever ran before this.
+    monkeypatch.setattr(andes, "level", logging.NOTSET)
     before_level, before_handlers = andes.level, list(andes.handlers)
     cap = WorkerLogCapture()
     cap.install()
