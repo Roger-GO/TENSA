@@ -87,7 +87,7 @@ def test_the_default_cases_pass_their_verification(tmp_path: Path) -> None:
 
 @pytest.mark.acceptance
 def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
-    """The cases that are not seeded (the WECC 179-bus case and the smaller ones) are run the same way."""
+    """The cases that are not seeded (the WECC 179-bus case and the smaller ones, the steady-state ones included) are run the same way."""
     if not SCRIPT.is_file():
         pytest.skip("scripts/verify_example_cases.py is not next to the tests")
     if examples._andes_cases_dir() is None:  # noqa: SLF001
@@ -100,7 +100,10 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
         "pjm5bus",
         "ieee14_solar",
         "ieee14_wt3",
+        "ieee30",
+        "ieee57",
         "ieee118",
+        "ieee300",
     } <= set(gallery)
     report_json = tmp_path / "report.json"
     done = _run([*gallery, "--json", str(report_json), "--markdown", str(tmp_path / "r.md")], 900)
@@ -137,6 +140,17 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
         "stored-solution",
     }
     assert {c["analysis"] for c in case118["checks"]} == {"pf"}
+    # The 30, 57 and 300-bus cases are the same kind of case: a power flow only, checked against
+    # pandapower's solution of the file. The 300-bus file also holds a stored state, and the two
+    # bundled ones, which start flat, have none.
+    for steady, kinds in (
+        ("ieee30", {"sanity", "independent-solver"}),
+        ("ieee57", {"sanity", "independent-solver"}),
+        ("ieee300", {"sanity", "independent-solver", "stored-solution"}),
+    ):
+        case = next(c for c in report["cases"] if c["id"] == steady)
+        assert {c["kind"] for c in case["checks"]} == kinds, steady
+        assert {c["analysis"] for c in case["checks"]} == {"pf"}, steady
     # The renewable cases are checked against the solver for the power flow, and what they do in
     # the time domain is a regression baseline: nothing independent exists for it.
     for renewable in ("ieee14_solar", "ieee14_wt3"):

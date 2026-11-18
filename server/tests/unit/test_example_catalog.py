@@ -27,6 +27,7 @@ from tensa.core.example_catalog import (
     load_catalog,
     parse_catalog,
 )
+from tensa.core.example_references import load_reference
 from tests._repo import REPO_ROOT
 
 pytestmark = pytest.mark.unit
@@ -317,13 +318,184 @@ def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_i
         assert all(check.passed for check in example.verification.checks), example_id
         # Every case says where its data comes from: a source for the system and one for ANDES.
         assert example.citations and example.licence.name == "GPL-3.0-or-later"
-    # The 118-bus case is the only steady-state one: it is what the dialog's second group holds.
-    assert [e.id for e in catalog.examples if e.category == "steady-state"] == ["ieee118"]
+    # The steady-state cases are what the dialog's second group holds, the smallest first.
+    assert [e.id for e in catalog.examples if e.category == "steady-state"] == [
+        "ieee30",
+        "ieee57",
+        "ieee118",
+        "ieee300",
+    ]
     # The renewable cases are the IEEE 14-bus case with a converter, which says what it is not.
     for example_id in ("ieee14_solar", "ieee14_wt3"):
         example = catalog.get(example_id)
         assert example is not None
         assert any("not the IEEE 14-bus case as the University of Washington" in c for c in example.caveats)
+
+
+# The git blob ids of the two PGLib-OPF files in the repository's v23.07 release (a blob id is the
+# SHA-1 of ``blob <size>\0`` and the bytes): a bundled file that is not the library's own is
+# found by these without a download, whatever else changed in the catalog.
+PGLIB_BLOBS = {
+    "pglib_opf_case30_ieee.m": "d429394621c797fa3893d4e4b6d8efa220a4015a",
+    "pglib_opf_case57_ieee.m": "d8b0c9e8b45265e57f52b7ab96880ad3a874cde5",
+}
+PGLIB_COMMIT = "dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3"
+
+
+def test_the_gallery_has_the_ieee_30_57_and_300_bus_cases_and_none_is_seeded() -> None:
+    catalog = load_catalog()
+    expected = {
+        "ieee30": ("pglib_opf_case30_ieee.m", "bundled", 30, 6),
+        "ieee57": ("pglib_opf_case57_ieee.m", "bundled", 57, 7),
+        "ieee300": ("matpower/case300.m", "andes", 300, 69),
+    }
+    for example_id, (path, kind, buses, generators) in expected.items():
+        example = catalog.get(example_id)
+        assert example is not None, example_id
+        assert not example.default and example.category == "steady-state"
+        assert example.provenance.kind == kind and example.provenance.path == path
+        assert example.size is not None
+        assert (example.size.buses, example.size.generators) == (buses, generators)
+        assert example.analyses == ["pf"]
+        assert example.verification is not None and example.verification.checks
+        assert all(check.passed for check in example.verification.checks), example_id
+        # A power flow only: nothing of the case is TENSA's own earlier output.
+        assert {c.kind for c in example.verification.checks} <= {
+            "independent-solver",
+            "stored-solution",
+        }
+        # Every one of them is checked against a solver that shares no code with TENSA.
+        assert any(c.kind == "independent-solver" for c in example.verification.checks)
+    # The names the files take in a workspace are not the names of any other case's file.
+    names = [f.name for e in catalog.examples for f in e.files()]
+    assert len(names) == len({n.casefold() for n in names})
+
+
+def test_the_pglib_files_are_bundled_with_the_credit_the_licence_asks_for() -> None:
+    """CC BY 4.0: the creator and the copyright, the licence and its link, where the material is
+    from, and whether it was changed. The entry, the notice and the file's own header say it."""
+    catalog = load_catalog()
+    notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
+    for example_id, name in (
+        ("ieee30", "pglib_opf_case30_ieee.m"),
+        ("ieee57", "pglib_opf_case57_ieee.m"),
+    ):
+        example = catalog.get(example_id)
+        assert example is not None
+        prov = example.provenance
+        assert prov.release == "PGLib-OPF v23.07" and prov.retrieved is not None
+        # Pinned to the commit the tag names, which a later change to the repository cannot move.
+        assert prov.source_url == (
+            f"https://github.com/power-grid-lib/pglib-opf/blob/{PGLIB_COMMIT}/{name}"
+        )
+        assert example.licence.name == "CC BY 4.0"
+        assert example.licence.url == "https://creativecommons.org/licenses/by/4.0/"
+        credit = example.licence.attribution or ""
+        assert "Richard D. Christie" in credit and "University of Washington" in credit
+        assert "pglib-opf v23.07" in credit and "no change" in credit
+        # The modification is stated, and it is that there is none.
+        assert len(example.modifications) == 1
+        assert example.modifications[0].startswith("TENSA changed nothing")
+        # The citations name the archive the data is from, the library and its report.
+        text = " ".join(c.text for c in example.citations)
+        assert "labs.ece.uw.edu/pstca" in text and "arXiv:1908.02788" in text
+        assert any(c.url == "https://arxiv.org/abs/1908.02788" for c in example.citations)
+    # The notice copies the credit, the commit and the licence, once for the two files.
+    assert "Copyright (c) 1999 by Richard D. Christie" in notice
+    assert PGLIB_COMMIT in notice and "TENSA changed nothing" in notice
+    assert "https://creativecommons.org/licenses/by/4.0/" in notice
+
+
+@pytest.mark.parametrize("name", sorted(PGLIB_BLOBS))
+def test_a_bundled_pglib_file_is_the_librarys_own_with_its_header(name: str) -> None:
+    source = example_catalog.bundled_cases_dir() / name
+    data = source.read_bytes()
+    assert hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest() == PGLIB_BLOBS[name]
+    # LF only (git must not have touched it), and the header names its source and its licence.
+    assert b"\r" not in data
+    lines = data.decode("ascii").splitlines()
+    assert lines[1].startswith("%%%%") and "IEEE PES Power Grid Library" in lines[2]
+    assert "(https://github.com/power-grid-lib/pglib-opf)" in lines[3]
+    header = "\n".join(lines[:30])
+    assert "Copyright (c) 1999 by Richard D. Christie, University of Washington" in header
+    assert "Licensed under the Creative Commons Attribution 4.0" in header
+    assert "http://creativecommons.org/licenses/by/4.0/" in header
+
+
+def _matpower_rows(text: str, field: str) -> list[list[float]]:
+    """The numbers of one block of a MATPOWER case file (``bus``, ``gen`` or ``branch``)."""
+    block = re.search(rf"mpc\.{field} = \[(.*?)\];", text, re.S)
+    assert block is not None, field
+    rows = []
+    for line in block.group(1).splitlines():
+        line = line.split("%")[0].strip().rstrip(";")
+        if line:
+            rows.append([float(value) for value in line.split()])
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("example_id", "name", "counts", "load", "scheduled", "slack_pmax", "ratings"),
+    [
+        ("ieee30", "pglib_opf_case30_ieee.m", (30, 6, 41), 283.4, 181.5, 271.0, (20.0, 267.0)),
+        ("ieee57", "pglib_opf_case57_ieee.m", (57, 7, 80), 1250.8, 991.5, 245.0, (22.0, 1617.0)),
+    ],
+)
+def test_the_numbers_the_pglib_entries_quote_are_the_files(
+    example_id: str,
+    name: str,
+    counts: tuple[int, int, int],
+    load: float,
+    scheduled: float,
+    slack_pmax: float,
+    ratings: tuple[float, float],
+) -> None:
+    """What the caveats say of a PGLib file (a flat start, a set-point of 1.0 pu on every
+    generator, a dispatch that does not cover the load, a rating on every branch) is what the
+    file holds, and the slack of the reference solution is where they say it is against its
+    limit."""
+    text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="ascii")
+    bus, gen, branch = (_matpower_rows(text, field) for field in ("bus", "gen", "branch"))
+    assert (len(bus), len(gen), len(branch)) == counts
+    assert sum(row[2] for row in bus) == pytest.approx(load)
+    # Columns: Vm and Va of a bus, Vg and Pmax of a generator, rate A and the angle limits of a
+    # branch.
+    assert {row[7] for row in bus} == {1.0} and {row[8] for row in bus} == {0.0}
+    assert {row[5] for row in gen} == {1.0}
+    assert sum(row[1] for row in gen) == pytest.approx(scheduled) and scheduled < load
+    slack_bus = next(row[0] for row in bus if row[1] == 3)
+    assert next(row[8] for row in gen if row[0] == slack_bus) == slack_pmax
+    rated = [row[5] for row in branch]
+    assert (min(rated), max(rated)) == ratings
+    assert all(row[11:13] == [-30.0, 30.0] for row in branch)
+    # A power flow makes the slack take what the dispatch leaves: 257.8 MW inside its limit in
+    # the 30-bus case, and 411.7 MW, 167 MW over its limit, in the 57-bus one.
+    reference = load_reference(example_id)
+    assert reference is not None
+    solved = next(c.expected for c in reference.checks if c.quantity == "pf.slack_p_mw")
+    assert isinstance(solved, float)
+    assert (solved > slack_pmax) == (example_id == "ieee57")
+    entry = load_catalog().get(example_id)
+    assert entry is not None
+    assert f"{solved:.1f} MW" in " ".join(entry.caveats)
+    if example_id == "ieee57":
+        assert f"{solved - slack_pmax:.0f} MW over" in " ".join(entry.caveats)
+
+
+def test_the_ieee_300_file_is_the_one_matpower_8_0_holds_and_the_entry_says_what_it_lacks() -> None:
+    entry = load_catalog().get("ieee300")
+    assert entry is not None
+    prov = entry.provenance
+    assert prov.path == "matpower/case300.m" and prov.release == "ANDES 2.0.0"
+    text = " ".join(entry.caveats)
+    # The three ways it is not the archive's data, and what its stored state is not.
+    assert "buses 8, 10, 20, 138, 9002, 9051 and 9053" in text
+    assert "buses 196 and 2040" in text and "-11.4 degrees" in text
+    assert "bus 7049" in text and "2399.01 MW" in text
+    assert "not a solution of the file's data" in text
+    assert "base of 110 kV" in text and "no such bus" in text
+    assert entry.licence.name == "GPL-3.0-or-later"
+    assert any("MATPOWER/matpower/blob/8.0/data/case300.m" in (c.url or "") for c in entry.citations)
 
 
 def test_the_wind_turbine_entry_does_not_hide_its_growing_mode_and_the_118_entry_says_what_it_is_not() -> (

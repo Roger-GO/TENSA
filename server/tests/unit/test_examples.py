@@ -785,3 +785,33 @@ def test_every_shipped_example_has_a_source_file_in_the_installed_andes(tmp_path
     for status in example_statuses(tmp_path, load_catalog()):
         if status.example.has_file:
             assert status.available, status.example.id
+
+
+@pytest.mark.parametrize("example_id", ["ieee30", "ieee57"])
+def test_a_bundled_pglib_case_is_added_byte_for_byte_with_its_credit_beside_it(
+    workspace: Path, example_id: str
+) -> None:
+    """The two PGLib-OPF files need no ANDES: they are copied from the package as they were
+    taken, and the sources file names the creator, the licence with its link, where the file is
+    from and that nothing was changed, which is what CC BY 4.0 asks of whoever passes it on."""
+    example = load_catalog().get(example_id)
+    assert example is not None and example.provenance.path is not None
+    result = add_example(example_id, workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    source = examples.bundled_cases_dir() / example.provenance.path
+    assert (workspace / written.name).read_bytes() == source.read_bytes()
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert f"## {example.title} (`{example_id}`)" in text
+    assert f"bundled with TENSA as `{example.provenance.path}`" in text
+    assert "https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/" in text
+    assert f"sha256 `{example.provenance.sha256}`" in text
+    assert "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)" in text
+    assert "Richard D. Christie, University of Washington Electrical Engineering" in text
+    assert "- Modifications: TENSA changed nothing" in text
+    assert "arXiv:1908.02788" in text and "labs.ece.uw.edu/pstca/pf" in text
+    assert "ANDES installed" not in text
+    # It is a case the workspace lists, and the status says it is there and is the shipped one.
+    assert written.name in [p.name for p in list_workspace_files(workspace, SUPPORTED_CASE_EXTENSIONS)]
+    (status,) = [s for s in example_statuses(workspace, load_catalog()) if s.example.id == example_id]
+    assert status.in_workspace and not status.differs

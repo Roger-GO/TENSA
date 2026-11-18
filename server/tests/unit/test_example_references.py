@@ -9,6 +9,7 @@ default case with nothing to check it against), and hold the schema to what it p
 from __future__ import annotations
 
 import json
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -523,3 +524,87 @@ def test_the_ieee_118_case_is_a_steady_state_power_flow_case_with_no_dynamics_to
     assert entry is not None
     assert entry.category == "steady-state" and entry.analyses == ["pf"]
     assert entry.size is not None and (entry.size.buses, entry.size.generators) == (118, 54)
+
+
+@pytest.mark.parametrize(
+    ("example_id", "buses", "generators", "kinds"),
+    [
+        ("ieee30", 30, 6, {"independent-solver"}),
+        ("ieee57", 57, 7, {"independent-solver"}),
+        ("ieee300", 300, 69, {"independent-solver", "stored-solution"}),
+    ],
+)
+def test_the_ieee_30_57_and_300_cases_are_power_flow_cases_checked_against_a_solver_that_reads_the_file(
+    example_id: str, buses: int, generators: int, kinds: set[str]
+) -> None:
+    """Steady-state cases have a power flow and nothing in the time domain, so nothing is a
+    regression baseline, and the solver's solution is that of pandapower reading the ``.m``
+    file itself, which ANDES's reader does not touch."""
+    reference = load_reference(example_id)
+    assert reference is not None
+    assert reference.disturbance is None and reference.remove_events == []
+    assert {c.analysis for c in reference.checks} == {"pf"}
+    assert {c.kind for c in reference.checks} == kinds
+    solver = [c for c in reference.checks if c.kind == "independent-solver"]
+    assert [c.quantity for c in solver] == [
+        "pf.bus_voltage_pu",
+        "pf.bus_angle_deg",
+        "pf.loss_mw",
+        "pf.slack_p_mw",
+    ]
+    for check in solver:
+        assert "read by matpowercaseframes" in check.reference, example_id
+        if isinstance(check.expected, dict):
+            assert len(check.expected) == buses
+        # The tolerances every case's solver checks have, not a looser one for these.
+        assert check.tolerance.abs in (1e-4, 0.01), (example_id, check.name)
+    entry = load_catalog().get(example_id)
+    assert entry is not None and entry.size is not None
+    assert (entry.size.buses, entry.size.generators) == (buses, generators)
+    # The entry lists what the reference file holds, check by check.
+    assert entry.verification is not None
+    assert [c.name for c in entry.verification.checks] == [c.name for c in reference.checks]
+
+
+def test_the_ieee_300_stored_state_is_not_a_solution_and_its_tolerance_is_what_it_allows() -> None:
+    """The file's voltages and angles are the archive's, saved with data that has a phase
+    shifter the file lacks. TENSA's solution of the file (the solver's checks of the same file)
+    differs from them by up to 0.0085 pu at bus 193 and 9.76 degrees at bus 2040, with 18 buses
+    more than 1e-3 pu off and a median angle gap of 0.026 degrees. The entry quotes these, the
+    tolerances of the stored checks are those numbers rounded up, and the file stores no power
+    for its slack, so there is no check of it."""
+    reference = load_reference("ieee300")
+    assert reference is not None
+    by_kind = {(c.kind, c.quantity): c for c in reference.checks}
+    stored_v = by_kind[("stored-solution", "pf.bus_voltage_pu")]
+    solved_v = by_kind[("independent-solver", "pf.bus_voltage_pu")]
+    stored_a = by_kind[("stored-solution", "pf.bus_angle_deg")]
+    solved_a = by_kind[("independent-solver", "pf.bus_angle_deg")]
+    assert ("stored-solution", "pf.slack_p_mw") not in by_kind
+    assert isinstance(stored_v.expected, dict) and isinstance(solved_v.expected, dict)
+    assert isinstance(stored_a.expected, dict) and isinstance(solved_a.expected, dict)
+    assert set(stored_v.expected) == set(solved_v.expected) and len(stored_v.expected) == 300
+
+    dv = {k: abs(stored_v.expected[k] - solved_v.expected[k]) for k in stored_v.expected}
+    da = {k: abs(stored_a.expected[k] - solved_a.expected[k]) for k in stored_a.expected}
+    worst_v = max(dv, key=lambda k: dv[k])
+    worst_a = max(da, key=lambda k: da[k])
+    assert (worst_v, worst_a) == ("193", "2040")
+    assert dv[worst_v] == pytest.approx(0.0085, abs=5e-5)
+    assert da[worst_a] == pytest.approx(9.76, abs=5e-3)
+    assert statistics.median(da.values()) == pytest.approx(0.026, abs=5e-4)
+    assert sum(1 for gap in dv.values() if gap > 1e-3) == 18
+    # The gap is one corridor's: with the phase shifter of 196-2040 put back the stored state is a
+    # solution (the integration test repeats that), and the angle moves at bus 2040, which the
+    # shifter feeds, and hardly at bus 196, which it leaves.
+    assert da["2040"] > 9 and da["196"] < 1.5
+    # The tolerances are the largest gaps rounded up, and the solver's checks keep the tight ones.
+    assert stored_v.tolerance.abs == 0.01 and 0.0085 < 0.01 < 2 * 0.0085
+    assert stored_a.tolerance.abs == 10.0 and 9.76 < 10.0 < 2 * 9.76
+    assert solved_v.tolerance.abs == 1e-4 and solved_a.tolerance.abs == 0.01
+    entry = load_catalog().get("ieee300")
+    assert entry is not None
+    text = " ".join(entry.caveats)
+    assert "0.0085 pu (bus 193)" in text and "9.76 degrees (bus 2040)" in text
+    assert "18 of the 300 voltages" in text and "median angle gap 0.026 degrees" in text
+    assert "no output for the slack (0 MW)" in text

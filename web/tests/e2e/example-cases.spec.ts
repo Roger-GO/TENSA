@@ -11,9 +11,12 @@
  *   the wind turbine gallery case (IEEE 14-bus with a type-3 wind turbine): Add and Open put its 14 buses on
  *   the diagram, and the chain of the unit at bus 8 holds the converter, its two controls and the four models of
  *   the turbine, none of them an orphan badge
- *   the steady-state gallery case (IEEE 118-bus): the dialog lists it in a group of its own, Add and Open put its
- *   118 buses on the diagram as a static case, and a power flow leaves the six generators past a reactive limit
- *   that its catalog entry names
+ *   the steady-state gallery cases (IEEE 30, 57, 118 and 300-bus): the dialog lists them in a group of their own,
+ *   Add and Open put the 118 buses of IEEE 118 on the diagram as a static case, and a power flow leaves the six
+ *   generators past a reactive limit that its catalog entry names
+ *   a steady-state case bundled with TENSA (IEEE 30-bus, from the PGLib-OPF library): its card credits the library
+ *   and links the licence, Add copies it from the package, Open puts its 30 buses on the diagram, and a power
+ *   flow leaves the five violations its entry names
  *   the Exciters and Governors tables hold every exciter and governor the catalog counts for the case: the
  *   IEEE 39 governors (TGOV1N), the exciters of Kundur (EXDC2) and the 29 exciters and 29 governors of WECC
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
@@ -70,12 +73,14 @@ test('the Project tab opens the example cases, with their sources, licences and 
 
   // The five cases of a first run are in the workspace, so each says so. All of them have
   // machines, so they are in the group of dynamic cases with the gallery's other cases that do;
-  // the IEEE 118-bus case of the gallery has none, and is the one case of the steady-state group.
+  // the gallery's steady-state cases have none, and are the group of their own, smallest first.
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
   const steady = dialog.getByTestId('example-group-steady-state');
   await expect(steady).toBeVisible();
-  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(1);
-  await expect(steady.getByTestId('example-card-ieee118')).toBeVisible();
+  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(4);
+  for (const id of ['ieee30', 'ieee57', 'ieee118', 'ieee300']) {
+    await expect(steady.getByTestId(`example-card-${id}`)).toBeVisible();
+  }
   for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
@@ -93,6 +98,9 @@ test('the Project tab opens the example cases, with their sources, licences and 
   );
   await expect(dialog.getByTestId('example-size-ieee14_wt3')).toHaveText('14 buses, 5 generators');
   await expect(dialog.getByTestId('example-size-ieee118')).toHaveText('118 buses, 54 generators');
+  await expect(dialog.getByTestId('example-size-ieee30')).toHaveText('30 buses, 6 generators');
+  await expect(dialog.getByTestId('example-size-ieee57')).toHaveText('57 buses, 7 generators');
+  await expect(dialog.getByTestId('example-size-ieee300')).toHaveText('300 buses, 69 generators');
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
     'already in your workspace and say Added',
@@ -303,6 +311,57 @@ test('the steady-state gallery case is added and opened as a static case, and a 
 
   await page.getByTestId('run-pflow-button').click();
   await expect(page.getByTestId('bottom-drawer-tab-violations')).toContainText('6', {
+    timeout: 60_000,
+  });
+});
+
+test('a steady-state case bundled with TENSA credits its library, is added from the package and opened, and a power flow leaves five violations', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  const card = dialog.getByTestId('example-card-ieee30');
+  await expect(card).toContainText('Power flow');
+  await expect(card).not.toContainText('Time domain');
+  // The licence is the library's: CC BY 4.0, a link that opens in a new tab and keeps no hold on
+  // this one, and the source is pinned to the commit of the release the file was taken from.
+  const licence = dialog.getByTestId('example-licence-ieee30');
+  await expect(licence).toContainText('CC BY 4.0');
+  await expect(licence).toHaveAttribute('href', 'https://creativecommons.org/licenses/by/4.0/');
+  await expect(licence).toHaveAttribute('target', '_blank');
+  await expect(licence).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(dialog.getByTestId('example-source-ieee30')).toContainText('PGLib-OPF v23.07');
+  await expect(dialog.getByTestId('example-source-ieee30')).toHaveAttribute(
+    'href',
+    /pglib-opf\/blob\/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3\/pglib_opf_case30_ieee\.m$/,
+  );
+  // Not seeded: Add copies the file from the package. (A run on the same workspace may have added
+  // it already, and the card then says Added at once.)
+  const add = dialog.getByTestId('example-add-ieee30');
+  if ((await add.count()) > 0) {
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-ieee30')).toHaveText('Added');
+  const listed = (await (await page.request.get('/api/examples')).json()) as {
+    examples: { id: string; in_workspace: boolean; differs: boolean }[];
+  };
+  expect(listed.examples.find((example) => example.id === 'ieee30')).toMatchObject({
+    in_workspace: true,
+    differs: false,
+  });
+  await dialog.getByTestId('example-open-ieee30').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('pglib_opf_case30_ieee.m', {
+    timeout: 90_000,
+  });
+  await expect(page.getByText('30 buses', { exact: true })).toBeVisible();
+  await expect(page.getByText('Static-only')).toBeVisible();
+
+  // Line 1-2 over its rating, the slack below its reactive minimum and three generators above
+  // their maximum: what the entry's caveats list.
+  await page.getByTestId('run-pflow-button').click();
+  await expect(page.getByTestId('bottom-drawer-tab-violations')).toHaveText(/Violations\s*5$/, {
     timeout: 60_000,
   });
 });

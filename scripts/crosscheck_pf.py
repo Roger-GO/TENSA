@@ -43,7 +43,8 @@ work is in two steps that meet at a file:
            to fewer digits than a solver gives, or saved from a run that was not tight, has a
            basis of its own in ``STORED_BASES``, with the tolerance its source allows (the IEEE
            118-bus data carries the archive's three-decimal state, which is 0.017 pu from a
-           solution).
+           solution, and the IEEE 300-bus file the archive's state of data that has a phase
+           shifter the file has lost).
 
 What the network holds, and where it differs from what ANDES solves, is listed in
 ``MODELLING`` below. The bus numbers are the ANDES ``idx`` of the buses, which is what
@@ -444,12 +445,16 @@ def stored_solution(system: Any) -> dict[str, Any]:
 
 
 class StoredBasis(NamedTuple):
-    """Where a case file's stored state comes from and how close it is to a solution."""
+    """Where a case file's stored state comes from and how close it is to a solution.
+
+    ``slack_p`` is ``None`` for a file that stores no power for its slack (the IEEE 300-bus
+    file holds 0 there), and the check of it is then left out.
+    """
 
     origin: str
     voltage: float
     angle: float
-    slack_p: float
+    slack_p: float | None
 
 
 # A RAW file written by PSS/E after it solved the case: the digits the file keeps are the whole
@@ -481,6 +486,25 @@ STORED_BASES: dict[str, StoredBasis] = {
         angle=0.35,
         slack_p=3.0,
     ),
+    # The final voltages and angles of the archive's IEEE CDF file, as MATPOWER's case300.m carries
+    # them. The archive's data has a phase shifter of -11.4 degrees on branch 196-2040 that the
+    # file does not (its shift is 0), and that is why the stored state is off the file's solution: a
+    # power flow of the data with the shifter lands on it to 3.2e-4 pu and 0.042 degrees, one of the
+    # data as the file has it differs by up to 0.0085 pu and 9.76 degrees (bus 2040, with the
+    # median at 0.026 degrees). The file stores no output for the slack (0 MW), so there is no
+    # check of it.
+    "ieee300": StoredBasis(
+        origin=(
+            "the final voltages and angles of the University of Washington archive's "
+            "ieee300cdf.txt, which this file was converted from; a state saved with the "
+            "archive's data and not a solution of the file's, which lacks the archive's "
+            "-11.4 degree phase shifter on branch 196-2040, so it differs from the solution "
+            "of the file by up to 0.0085 pu and 9.8 degrees"
+        ),
+        voltage=0.01,
+        angle=10.0,
+        slack_p=None,
+    ),
 }
 
 
@@ -493,7 +517,7 @@ def _stored_checks(
         "written by scripts/crosscheck_pf.py stored"
     )
     common = {"kind": "stored-solution", "reference": why, "generated_by": STORED_BY}
-    return [
+    checks = [
         {
             "name": "Bus voltage magnitudes against the solution stored in the case file",
             "quantity": "pf.bus_voltage_pu",
@@ -508,14 +532,18 @@ def _stored_checks(
             "tolerance": {"abs": basis.angle},
             **common,
         },
-        {
-            "name": "Slack active power against the solution stored in the case file",
-            "quantity": "pf.slack_p_mw",
-            "expected": round(state["slack_p_mw"], 6),
-            "tolerance": {"abs": basis.slack_p},
-            **common,
-        },
     ]
+    if basis.slack_p is not None:
+        checks.append(
+            {
+                "name": "Slack active power against the solution stored in the case file",
+                "quantity": "pf.slack_p_mw",
+                "expected": round(state["slack_p_mw"], 6),
+                "tolerance": {"abs": basis.slack_p},
+                **common,
+            }
+        )
+    return checks
 
 
 def cmd_stored(args: argparse.Namespace) -> int:

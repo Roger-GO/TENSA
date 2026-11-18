@@ -54,6 +54,11 @@
  *   opens, after a tidy, with the values of a power flow and laid out again, nothing is drawn over
  *   anything else, and the generators' reactive limits that the power flow leaves are counted
  *
+ *   in IEEE 30 and 57 (bundled with TENSA from the PGLib-OPF library) and IEEE 300 (a steady-state gallery
+ *   case of 300 buses and 410 connectors), each added to the workspace first -> as it opens, after a tidy, with
+ *   the values of a power flow and laid out again, nothing is drawn over anything else, the device connectors
+ *   that do not drop square are those listed, and the Violations tab counts what the catalog's entry names
+ *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
  *   bar of bus 12 that is drawn out to its tap keeps its gap to bar 13
@@ -585,6 +590,75 @@ test('case118.m: a steady-state gallery case of 118 buses is drawn with nothing 
   expect(slantedConnectors(laidOut.edges)).toEqual(IEEE118_SLANTED);
   expect(await overlapsOnScreen(page)).toEqual([]);
 });
+
+/**
+ * The steady-state gallery cases besides IEEE 118: the example id, the file the gallery copies, the device
+ * connectors that do not drop square onto their bar as the diagram draws them, and what the Violations tab
+ * counts after a power flow, which is what the entry in the catalog names (a power flow does not enforce
+ * reactive limits, so the generators past one are in it, with the buses past a voltage limit and the lines
+ * past their rating where the file gives a rating).
+ */
+const STEADY_GALLERY: [string, string, string[], string][] = [
+  ['ieee30', 'pglib_opf_case30_ieee.m', ['stub-load-PQ_1'], '5'],
+  ['ieee57', 'pglib_opf_case57_ieee.m', [], '5'],
+  ['ieee300', 'case300.m', ['stub-load-PQ_137', 'stub-shunt-Shunt_9'], '21'],
+];
+
+for (const [id, file, slanted, violations] of STEADY_GALLERY) {
+  test(`${file}: a steady-state gallery case is drawn with nothing over anything else as it opens, tidied, with values and laid out again`, async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(400_000);
+    // Not seeded: add it to the workspace, as the gallery's Add does (a bundled case from the
+    // package, the others from the user's ANDES). A workspace another run already added it to
+    // answers with a conflict, which is the same.
+    const added = await request.post(`/api/examples/${id}/add`);
+    expect([201, 409]).toContain(added.status());
+    const written: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'PUT' && request.url().includes('/api/workspace/layout')) {
+        written.push(request.url());
+      }
+    });
+
+    await page.goto('/');
+    await openCase(page, file);
+    const opened = await settled(page);
+    expect(await overlapsOnScreen(page)).toEqual([]);
+    expect(problems(opened)).toEqual([]);
+    expect(branchesIntoDevices(opened)).toEqual([]);
+    expect(slantedConnectors(opened.edges)).toEqual(slanted);
+    // A static case has no machine control, so no badge of any kind.
+    await expect(page.locator('.react-flow__node-controller')).toHaveCount(0);
+    await expect(page.locator('[data-orphan="true"]')).toHaveCount(0);
+
+    await page.getByTestId('sld-tidy').click();
+    await expect(page.getByTestId('sld-tidy-note')).toHaveText(
+      'Already tidy: nothing was changed',
+      { timeout: 120_000 },
+    );
+
+    await runPowerFlow(page);
+    const shown = await settled(page);
+    expect(problems(shown)).toEqual([]);
+    expect(await overlapsOnScreen(page)).toEqual([]);
+    expect(await labelProblems(page)).toEqual([]);
+    await expect(page.getByTestId('bottom-drawer-tab-violations')).toHaveText(
+      new RegExp(`^Violations\\s*${violations}$`),
+    );
+    // Opening a case, tidying a tidy diagram and running a power flow write nothing beside it.
+    expect(written).toEqual([]);
+
+    await page.getByTestId('sld-arrange-trigger').click();
+    await page.getByTestId('sld-arrange-tidy-relayout').click();
+    const laidOut = await settled(page);
+    expect(problems(laidOut)).toEqual([]);
+    expect(branchesIntoDevices(laidOut)).toEqual([]);
+    expect(slantedConnectors(laidOut.edges)).toEqual(slanted);
+    expect(await overlapsOnScreen(page)).toEqual([]);
+  });
+}
 
 /**
  * The small cases of the gallery: the example id, the file the gallery copies, and what the

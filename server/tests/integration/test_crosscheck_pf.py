@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -239,7 +240,7 @@ def test_writing_the_stored_state_keeps_the_solvers_checks_and_replaces_its_own(
         )
 
 
-@pytest.mark.parametrize("example_id", ["npcc", "wecc", "ieee118"])
+@pytest.mark.parametrize("example_id", ["npcc", "wecc", "ieee118", "ieee300"])
 def test_the_stored_checks_that_ship_are_what_the_script_reads_from_the_file(
     script: ModuleType, example_id: str
 ) -> None:
@@ -247,12 +248,17 @@ def test_the_stored_checks_that_ship_are_what_the_script_reads_from_the_file(
         "npcc": "npcc/npcc.xlsx",
         "wecc": "wecc/wecc_full.xlsx",
         "ieee118": "matpower/case118.m",
+        "ieee300": "matpower/case300.m",
     }[example_id]
     state = _stored(script, relative)
     shipped = load_reference(example_id)
     assert shipped is not None
     mine = {c.quantity: c.expected for c in shipped.checks if c.generated_by == script.STORED_BY}
-    assert mine["pf.slack_p_mw"] == pytest.approx(state["slack_p_mw"], abs=1e-5)
+    if example_id == "ieee300":
+        # The file stores no power for its slack (0 MW), so no check of it is written.
+        assert state["slack_p_mw"] == 0.0 and "pf.slack_p_mw" not in mine
+    else:
+        assert mine["pf.slack_p_mw"] == pytest.approx(state["slack_p_mw"], abs=1e-5)
     assert mine["pf.bus_voltage_pu"] == pytest.approx(state["bus_voltage"], abs=1e-8)
     assert mine["pf.bus_angle_deg"] == pytest.approx(state["bus_angle"], abs=1e-6)
 
@@ -309,7 +315,10 @@ def test_the_interpreter_for_each_half_is_found_or_the_error_says_what_to_set(
         "pjm5bus",
         "ieee14_solar",
         "ieee14_wt3",
+        "ieee30",
+        "ieee57",
         "ieee118",
+        "ieee300",
     ],
 )
 def test_pandapower_gives_the_values_that_ship_in_the_reference_files(
@@ -399,7 +408,26 @@ def test_a_stored_state_has_a_basis_of_its_own_where_the_file_does_not_keep_a_so
     assert all("not a solution of it" in c["reference"] for c in mine)
     assert all("TENSA did not compute it" in c["reference"] for c in mine)
     # Only the cases that have a basis of their own do: a case that is not listed gets the RAW one.
-    assert set(script.STORED_BASES) == {"ieee118"}
+    assert set(script.STORED_BASES) == {"ieee118", "ieee300"}
+
+
+def test_a_stored_state_without_slack_power_has_no_check_of_it(script: ModuleType) -> None:
+    """The IEEE 300-bus file stores 0 MW for its slack, which is no output at all, so its basis
+    has no tolerance for it and the check is not written. Its state is the archive's, saved with
+    a phase shifter the file lacks, so the voltage and the angle are held to the gap that
+    leaves (0.0085 pu and 9.76 degrees found)."""
+    state = {"bus_voltage": {"1": 1.01}, "bus_angle": {"1": 0.5}, "slack_p_mw": 0.0}
+    basis = script.STORED_BASES["ieee300"]
+    assert basis.slack_p is None
+    mine = script._stored_checks(state, "case300.m", basis)  # noqa: SLF001
+    assert [c["quantity"] for c in mine] == ["pf.bus_voltage_pu", "pf.bus_angle_deg"]
+    assert [c["tolerance"]["abs"] for c in mine] == [0.01, 10.0]
+    assert all("ieee300cdf.txt" in c["reference"] and "case300.m" in c["reference"] for c in mine)
+    assert all("-11.4 degree phase shifter on branch 196-2040" in c["reference"] for c in mine)
+    assert all("TENSA did not compute it" in c["reference"] for c in mine)
+    # A basis that gives a tolerance for the slack still writes its check, after the other two.
+    both = script._stored_checks(state, "case.m", script.StoredBasis("x", 0.1, 1.0, 2.0))  # noqa: SLF001
+    assert [c["quantity"] for c in both][-1] == "pf.slack_p_mw"
 
 
 def test_the_stored_command_uses_the_basis_of_the_case_it_is_given(
@@ -415,3 +443,50 @@ def test_the_stored_command_uses_the_basis_of_the_case_it_is_given(
     assert script.cmd_stored(SimpleNamespace(id=str(path), write=False, reference=None)) == 0
     shown = json.loads(capsys.readouterr().out)
     assert [c["tolerance"]["abs"] for c in shown] == [5e-5, 0.005, 0.1]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TENSA_VERIFY_PYTHON"),
+    reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
+)
+def test_the_phase_shifter_the_300_bus_file_lacks_is_why_its_stored_state_is_not_a_solution(
+    tmp_path: Path,
+) -> None:
+    """The archive's data has a phase shifter of -11.4 degrees on branch 196-2040 (type 4, limits
+    -15 to 0) and the file has none. Solve the file as it is, and solve it with the shifter put back,
+    and hold both to the state the file stores: the first is 9.76 degrees off at bus 2040, the
+    second is within 0.05 degrees and 5e-4 pu of it everywhere, which is the cause the entry names."""
+    source = _case_path("matpower/case300.m")
+    text = source.read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if re.match(r"\s*196\s+2040\s", line)]
+    assert len(rows) == 1
+    fields = rows[0].rstrip(";").split()
+    assert fields[:2] == ["196", "2040"] and fields[8:10] == ["1", "0"]  # ratio 1, shift 0
+    fields[9] = "-11.4"
+    shifted = tmp_path / "case300_with_shifter.m"
+    shifted.write_text(text.replace(rows[0], "\t".join(fields) + ";"), encoding="utf-8")
+
+    def solve(path: Path) -> dict[str, Any]:
+        done = subprocess.run(
+            [os.environ["TENSA_VERIFY_PYTHON"], str(SCRIPTS_DIR / "crosscheck_pf.py"), "solve", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return json.loads(done.stdout)  # type: ignore[no-any-return]
+
+    reference = load_reference("ieee300")
+    assert reference is not None
+    stored = {c.quantity: c.expected for c in reference.checks if c.kind == "stored-solution"}
+    stored_v, stored_a = stored["pf.bus_voltage_pu"], stored["pf.bus_angle_deg"]
+    assert isinstance(stored_v, dict) and isinstance(stored_a, dict)
+    gaps = {}
+    for label, path in (("as it is", source), ("with the shifter", shifted)):
+        solved = solve(path)
+        gaps[label] = (
+            max(abs(solved["bus_voltage"][k] - v) for k, v in stored_v.items()),
+            max(abs(solved["bus_angle"][k] - a) for k, a in stored_a.items()),
+        )
+    assert gaps["as it is"][1] > 9.0
+    assert gaps["with the shifter"][0] < 5e-4 and gaps["with the shifter"][1] < 0.05

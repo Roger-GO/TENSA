@@ -61,7 +61,10 @@ file in its place once you have confirmed it, since that overwrites your copy.
 | [PJM 5-bus system with classical machines and a line trip](#pjm5bus) | 5 buses, 4 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
 | [IEEE 14-bus with a solar plant](#ieee14_solar) | 14 buses, 5 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
 | [IEEE 14-bus with a type-3 wind turbine](#ieee14_wt3) | 14 buses, 5 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
+| [IEEE 30-bus test case, as PGLib-OPF holds it](#ieee30) | 30 buses, 6 generators | Power flow | no | Bundled with TENSA |
+| [IEEE 57-bus test case, as PGLib-OPF holds it](#ieee57) | 57 buses, 7 generators | Power flow | no | Bundled with TENSA |
 | [IEEE 118-bus test case](#ieee118) | 118 buses, 54 generators | Power flow | no | Your ANDES install |
+| [IEEE 300-bus test case](#ieee300) | 300 buses, 69 generators | Power flow | no | Your ANDES install |
 
 ### IEEE 14-bus, with machines and controls { #ieee14 }
 
@@ -1227,6 +1230,210 @@ BibTeX:
 | Wind turbine mode between 0.13 and 0.2 Hz: frequency | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 0.155728, expected 0.155728, difference 4.6e-09 Hz | yes |
 | Wind turbine mode between 0.13 and 0.2 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.199734, expected 0.199734, difference 4.33e-09 | yes |
 
+### IEEE 30-bus test case, as PGLib-OPF holds it { #ieee30 }
+
+The IEEE 30-bus test case of the University of Washington archive as the PGLib-OPF library (v23.07) holds it: 30 buses, 6 generators and 41 branches, a network and its loading only. A small case for the power flow, and for working with the diagram and the tables. The library prepares the case for optimal power flow, so a power flow on it is not the archive's operating point (see the caveats). It has no machine models, so there is no time-domain run.
+
+- **Id:** `ieee30`
+- **Kind:** Steady state
+- **Size:** 30 buses, 6 generators
+- **Analyses:** Power flow
+- **First run:** no
+- **File:** `pglib_opf_case30_ieee.m`
+
+**Source.** Bundled with TENSA as `pglib_opf_case30_ieee.m` from <https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m>, retrieved 2026-11-18. SHA-256 `cae3290639d989731d32428aacf30c0b918bc91db73bc54791f3aa62d3f76c70`.
+
+**Licence.** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit: Richard D. Christie, University of Washington Electrical Engineering, whose copyright the file's header states ("Copyright (c) 1999 by Richard D. Christie, University of Washington Electrical Engineering Licensed under the Creative Commons Attribution 4.0 International license"), and the IEEE PES Power Grid Library, which curated the file (pglib-opf v23.07, https://github.com/power-grid-lib/pglib-opf, pglib_opf_case30_ieee.m). The licence is at the link above. TENSA made no change: the file is bundled byte for byte, with its header, and what the library and the archive's conversion changed is in the caveats. Anyone who passes the file on gives this credit, the licence link and the same statement. The library's code is under the MIT licence, which is not the licence of its data.
+
+**Citations**
+
+- 30 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1961, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, that the 11 kV and 1.0 kV base voltages are Christie's guess (the model has these buses at 132 or 33 kV), and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm)
+- IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case30_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m (accessed 2026-11-18). Its header names the archive's ieee30cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d429394621c797fa3893d4e4b6d8efa220a4015a, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m)
+- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca_ieee30,
+  title        = {30 Bus Power Flow Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{pglib_opf_case30_ieee,
+  title        = {{PGLib-OPF} v23.07, pglib\_opf\_case30\_ieee.m},
+  howpublished = {IEEE PES Power Grid Library},
+  url          = {https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{babaeinejadsarookolaee2019pglib,
+  author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
+  title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
+  year          = {2019},
+  eprint        = {1908.02788},
+  archivePrefix = {arXiv},
+  note          = {library version v23.07}
+}
+```
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** TENSA changed nothing: the file is the one of PGLib-OPF v23.07, byte for byte and with its header comments (what the library changed in the archive's data is in the caveats)
+
+**Caveats**
+
+- This is PGLib-OPF's version of the archive's data, and not the archive's solved case. The network is the archive's: compared with the archive's ieee30cdf.txt, the loads and shunts of all 30 buses, the base voltages, and the resistance, reactance, charging and phase shift of all 41 branches are equal, and three transformers (9-11, 9-10 and 12-13) have a ratio of 1 where the archive's is 0, which also means 1. It is also the network of MATPOWER 8.0's case_ieee30 (the same loads, shunts and branch data). MATPOWER's case30 is another case, a hybrid with other generator data, whose branch impedances differ (the reactance of 36 of the 41 branches) and one of whose loads does; it is not this one.
+- The library changed the generators and the limits, so a power flow on the file is not the archive's operating point. Every generator is set to 1.0 pu and every bus starts flat, so the file stores no solved state to compare with; the archive's set-points are 1.06, 1.045, 1.01, 1.01, 1.082 and 1.071 pu at buses 1, 2, 5, 8, 11 and 13. The dispatch is the library's, 135.5 MW at bus 1 and 46.0 MW at bus 2 where the archive has 260.2 and 40.0 MW: 181.5 MW for a load of 283.4 MW. A power flow therefore has the slack at bus 1 deliver 257.8 MW, not 135.5 (its limit in the file is 271 MW), and the losses are 20.4 MW. The generators at buses 5, 8, 11 and 13 have no active power (the library classes them as synchronous condensers).
+- What a power flow on the file means: its dispatch, generator limits and line ratings are the library's, set for the optimal power flow it benchmarks, which TENSA does not solve. A power flow holds the active power the file gives each generator (the slack takes up the difference) and the voltage at 1.0 pu. It is a solution of the network's equations (checked against pandapower), not an optimum and not a published operating point.
+- The archive's page says the case has no line limits. The ratings in the file (from 20 to 267 MVA, on all 41 branches) and its angle limits of 30 degrees are the library's, from its own model. After a power flow the Violations table reads 5, which is what the data gives and not an error: Line 1-2 loaded to 128.7% of its 138 MVA rating, the slack at bus 1 below its minimum reactive power of 0 (-55.8 MVAr), and the generators at buses 2, 5 and 8 above their maximum reactive power (52.1, 63.9 and 86.0 MVAr against 46, 40 and 40), since a power flow does not enforce reactive limits unless asked to. Buses 26 and 30 (0.956 and 0.954 pu) are within 0.02 pu of the 0.94 pu minimum.
+- The archive's page says the line impedances were hard to read on its source and may be wrong, and that the data was never run through a power flow to check the answers. It also says the 11 kV and 1.0 kV base voltages are its author's guess, and the file keeps them: 9 buses at 132 kV, 18 at 33 kV, 2 at 11 kV and bus 9 at 1 kV.
+- The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis.
+
+**Verification.** The power flow agrees with the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved (Newton-Raphson to 1e-8 MVA): bus voltages to 1.7e-8 pu, angles to 1.8e-6 degrees, and the losses (20.359 MW) and the slack's power (257.759 MW) to 6e-6 MW. That is the independent reference there is. No published or stored solution exists to compare with: the file starts from a flat state, and the archive's own stored solution belongs to its dispatch and its voltage set-points, which the library changed. The network data was compared with the archive's ieee30cdf.txt and with MATPOWER's case_ieee30 outside the harness, with the result the caveats give. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case30_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 1.68e-08 pu (bus 30) over 30 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case30_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 1.81e-06 deg (bus 5) over 30 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case30_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 20.3588, expected 20.3588, difference 6.16e-06 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case30_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 257.759, expected 257.759, difference 5.78e-06 MW | yes |
+
+### IEEE 57-bus test case, as PGLib-OPF holds it { #ieee57 }
+
+The IEEE 57-bus test case of the University of Washington archive as the PGLib-OPF library (v23.07) holds it: 57 buses, 7 generators and 80 branches, a network and its loading only. A small case for the power flow, with a heavier load than the 30-bus case. The library prepares the case for optimal power flow, so a power flow on it is not the archive's operating point (see the caveats). It has no machine models, so there is no time-domain run.
+
+- **Id:** `ieee57`
+- **Kind:** Steady state
+- **Size:** 57 buses, 7 generators
+- **Analyses:** Power flow
+- **First run:** no
+- **File:** `pglib_opf_case57_ieee.m`
+
+**Source.** Bundled with TENSA as `pglib_opf_case57_ieee.m` from <https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m>, retrieved 2026-11-18. SHA-256 `aa3b48f7cbaade2afd69cb3790ef72be981db8494dcef9277bee460f754bdb22`.
+
+**Licence.** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit: Richard D. Christie, University of Washington Electrical Engineering, whose copyright the file's header states ("Copyright (c) 1999 by Richard D. Christie, University of Washington Electrical Engineering Licensed under the Creative Commons Attribution 4.0 International license"), and the IEEE PES Power Grid Library, which curated the file (pglib-opf v23.07, https://github.com/power-grid-lib/pglib-opf, pglib_opf_case57_ieee.m). The licence is at the link above. TENSA made no change: the file is bundled byte for byte, with its header, and what the library and the archive's conversion changed is in the caveats. Anyone who passes the file on gives this credit, the licence link and the same statement. The library's code is under the MIT licence, which is not the licence of its data.
+
+**Citations**
+
+- 57 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as it was in the early 1960s, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm)
+- IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case57_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m (accessed 2026-11-18). Its header names the archive's ieee57cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d8b0c9e8b45265e57f52b7ab96880ad3a874cde5, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m)
+- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca_ieee57,
+  title        = {57 Bus Power Flow Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{pglib_opf_case57_ieee,
+  title        = {{PGLib-OPF} v23.07, pglib\_opf\_case57\_ieee.m},
+  howpublished = {IEEE PES Power Grid Library},
+  url          = {https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{babaeinejadsarookolaee2019pglib,
+  author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
+  title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
+  year          = {2019},
+  eprint        = {1908.02788},
+  archivePrefix = {arXiv},
+  note          = {library version v23.07}
+}
+```
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** TENSA changed nothing: the file is the one of PGLib-OPF v23.07, byte for byte and with its header comments (what the library changed in the archive's data is in the caveats)
+
+**Caveats**
+
+- This is PGLib-OPF's version of the archive's data, and not the archive's solved case. The network is the archive's: compared with the archive's ieee57cdf.txt, the loads (1250.8 MW in all) and shunts of all 57 buses and the resistance, reactance, charging, ratio and phase shift of all 80 branches are equal. It is also the network of MATPOWER 8.0's case57. The archive gives no base voltage, and the file gives every bus 1.0 kV, so a voltage in kV on the diagram or in a table is the per unit value again.
+- The library changed the generators and the limits, so a power flow on the file is not the archive's operating point. Every generator is set to 1.0 pu and every bus starts flat, so the file stores no solved state to compare with; the archive's set-points are 1.04, 1.01, 0.985, 0.98, 1.005, 0.98 and 1.015 pu at buses 1, 2, 3, 6, 8, 9 and 12. The dispatch is the library's, 122.5, 30.0, 579.5 and 259.5 MW at buses 1, 3, 8 and 12 where the archive has 128.9, 40, 450 and 310 MW: 991.5 MW for a load of 1250.8 MW. A power flow therefore has the slack at bus 1 deliver 411.7 MW against the 245 MW the file allows it, 167 MW over, and the losses are 29.9 MW. TENSA's power flow does not enforce active power limits, and the Violations table does not check them. The file's header says that the reactive limits of generator 1 were set by hand to 200 and -140 MVAr; that note is the archive conversion's, and the file's own limits for it are 123 and -123 MVAr, from the library's reactive capacity model.
+- What a power flow on the file means: its dispatch, generator limits and line ratings are the library's, set for the optimal power flow it benchmarks, which TENSA does not solve. A power flow holds the active power the file gives each generator (the slack takes up the difference) and the voltage at 1.0 pu. It is a solution of the network's equations (checked against pandapower), not an optimum and not a published operating point.
+- The archive's page says the case has no line limits. The ratings in the file (from 22 to 1617 MVA, on all 80 branches) and its angle limits of 30 degrees are the library's, from its own model; no line comes near its rating in a power flow. After a power flow the Violations table reads 5, which is what the data gives and not an error: bus 31 below its minimum (0.937 against 0.94 pu), and the generators at buses 2, 3, 6 and 9 above their maximum reactive power (78.2, 59.6, 30.2 and 111.2 MVAr against 50, 30, 25 and 9), since a power flow does not enforce reactive limits unless asked to. Six more buses are within 0.02 pu of a voltage limit.
+- The archive's page says the line impedances were hard to read on its source and may be wrong, and that the data was never run through a power flow to check the answers.
+- The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis.
+
+**Verification.** The power flow agrees with the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved (Newton-Raphson to 1e-8 MVA): bus voltages to 3.2e-8 pu, angles to 2.3e-6 degrees, and the losses (29.916 MW) and the slack's power (411.716 MW) to 2e-5 MW. That is the independent reference there is. No published or stored solution exists to compare with: the file starts from a flat state, and the archive's own stored solution belongs to its dispatch and its voltage set-points, which the library changed. The network data was compared with the archive's ieee57cdf.txt and with MATPOWER's case57 outside the harness, with the result the caveats give. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case57_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 3.2e-08 pu (bus 33) over 57 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case57_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 2.31e-06 deg (bus 33) over 57 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case57_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 29.9158, expected 29.9158, difference 1.88e-05 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case57_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 411.716, expected 411.716, difference 1.88e-05 MW | yes |
+
 ### IEEE 118-bus test case { #ieee118 }
 
 The IEEE 118-bus test case of the University of Washington archive as MATPOWER holds it (case118): 118 buses, 54 generators and 186 branches, a network and its loading only. A medium-size case for the power flow, and for how the diagram and the tables handle a hundred buses; it has no machine models, so there is no time-domain run.
@@ -1319,3 +1526,95 @@ BibTeX:
 | Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 9.48e-06 deg (bus 1) over 118 buses | yes |
 | Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 132.863, expected 132.863, difference 0.00014 MW | yes |
 | Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 513.863, expected 513.863, difference 0.00014 MW | yes |
+
+### IEEE 300-bus test case { #ieee300 }
+
+The IEEE 300-bus test case of the University of Washington archive as MATPOWER holds it (case300): 300 buses, 69 generators and 411 branches at thirteen voltage levels, a network and its loading only. The largest case of the gallery that is not synthetic, for the power flow and for how the diagram and the tables handle three hundred buses; it has no machine models, so there is no time-domain run.
+
+- **Id:** `ieee300`
+- **Kind:** Steady state
+- **Size:** 300 buses, 69 generators
+- **Analyses:** Power flow
+- **First run:** no
+- **File:** `case300.m`
+
+**Source.** Copied from your own ANDES installation (`andes/cases/matpower/case300.m`); TENSA does not redistribute it. The catalog recorded the file as of ANDES 2.0.0, with SHA-256 `2f79960409dccb9a47cb9de7c9c1173e6991875465f99b65b042d7c10197e12f`, and warns when the file on your machine is a different one. The recorded file is from <https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/matpower/case300.m>, retrieved 2026-11-18.
+
+**Licence.** [GPL-3.0-or-later](https://github.com/CURENT/andes/blob/v2.0.0/LICENSE). ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES). The data is the archive's, which states no licence, and MATPOWER's licence notice says that its case files are not covered by its BSD license and have in most cases been included with permission or converted from data available from a public source. TENSA does not redistribute the file: it copies it from the user's own ANDES.
+
+**Citations**
+
+- 300 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm (accessed 2026-11-18). The page says the case was developed by the IEEE Test Systems Task Force under the direction of Mike Adibi in 1993, that the IEEE Common Data Format version was obtained from Fernando Alvarado at the University of Wisconsin, and that the PTI format version was provided by Joan Staron of PTI. The title line of the data file reads "13/05/91 CYME INTERNATIONAL 100.0 1991 S IEEE 300-BUS TEST SYSTEM". No publication that describes the data was found. [Link](https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm)
+- MATPOWER, data/case300.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m (accessed 2026-11-18). Its header says it was converted from the archive's IEEE CDF file (ieee300cdf.txt) on 18 November 2014 by cdf2matp, and the warnings at its end list what the conversion did (the negative generator outputs treated as load, the limit it gave the slack generator). ANDES's copy of the file (andes/cases/matpower/case300.m) is byte for byte this one. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m)
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case300 file. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca_ieee300,
+  title        = {300 Bus Power Flow Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{matpower_case300,
+  title        = {{MATPOWER} data/case300.m},
+  howpublished = {MATPOWER release 8.0},
+  url          = {https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The system was developed by the IEEE Test Systems Task Force in 1993, the archive's page says, and no publication that describes its data was found, so there is no paper to cite for the system. The file carries no line ratings (all 411 are 0), so TENSA reports no loading for a line and the Violations table has no line limits to check.
+- The file is not the archive's data in three respects, found by comparing it with the archive's ieee300cdf.txt (the loads at the other buses, the shunts, the base voltages and the resistance, reactance, charging and ratio of all 411 branches are equal). First, the seven buses where the archive lists a generator with a negative output (buses 8, 10, 20, 138, 9002, 9051 and 9053: -5, -5, -10, -192.5, -4.2, -35.81 and -26.48 MW) have that output as extra load here, 279 MW in all, and the generator kept at 0 MW, so the net injection of each bus is the archive's; the warnings at the end of the file say so. Second, the phase shifter between buses 196 and 2040, a branch of the archive's type 4 with a shift of -11.4 degrees, has no shift in the file. Third, the slack generator at bus 7049 has a reactive range of 0 to 10 MVAr, which the converter made because the archive's limits were equal, and a limit of 2399.01 MW.
+- The voltages and angles the file carries are the archive's stored final state, and they are not a solution of the file's data, because of the lost phase shifter. TENSA's solution and pandapower's agree with each other to 1.6e-7 pu and 1.3e-4 degrees, and differ from the stored state by up to 0.0085 pu (bus 193) and 9.76 degrees (bus 2040), with 18 of the 300 voltages more than 1e-3 pu off and the median angle gap 0.026 degrees. A power flow of the data with the shifter put back (-11.4 degrees on 196-2040, solved by pandapower outside TENSA) lands on the stored state to 3.2e-4 pu and 0.042 degrees, which finds the cause, and a test repeats it. The file stores no output for the slack (0 MW), so there is no check of it. The check against the stored state has the tolerance that allows these gaps, 0.01 pu and 10 degrees, so it says only that TENSA is at the archive's operating point; the reference to hold TENSA to is pandapower's solution, to 1e-4 pu.
+- ANDES's MATPOWER reader gives a bus whose base voltage is 0 a base of 110 kV. This file has no such bus (its 300 buses are at thirteen levels from 0.6 to 345 kV), so the rule does not apply to it.
+- The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis.
+- A power flow, which does not enforce reactive limits unless asked to, leaves the Violations table at 21: 13 bus voltages (8 below the 0.94 pu minimum, the lowest 0.929 pu at buses 170 and 9033, and 5 above the 1.06 pu maximum, the highest 1.073 pu at bus 149) and 8 generators above their maximum reactive power (the slack at bus 7049 by 28.8 MVAr, which its converter-made limit explains, and seven others by 0.014 to 0.30 MVAr). Its diagram has 599 nodes and 710 connectors, and drawing it when the case first opens takes several seconds.
+
+**Verification.** The power flow agrees with the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved (Newton-Raphson to 1e-8 MVA): bus voltages to 1.6e-7 pu, angles to 1.3e-4 degrees, and the losses (408.316 MW) and the slack's power (455.946 MW) to 2.5e-3 MW. It also agrees with the state the University of Washington archive stores with the data, within what that state allows: the state is not a solution of the file's data (see the caveats, which give the cause), and the largest differences are 0.0085 pu and 9.76 degrees. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Bus voltage magnitudes against the solution stored in the case file | a solution stored with the source | the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored | 0.01 pu | largest difference 0.00854 pu (bus 193) over 300 buses | yes |
+| Bus voltage angles against the solution stored in the case file | a solution stored with the source | the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored | 10 deg | largest difference 9.76 deg (bus 2040) over 300 buses | yes |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 1.61e-07 pu (bus 9033) over 300 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 0.00013 deg (bus 1201) over 300 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 408.318, expected 408.316, difference 0.00244 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 455.949, expected 455.946, difference 0.00244 MW | yes |
