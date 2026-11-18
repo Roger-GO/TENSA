@@ -582,6 +582,8 @@ test('Add on a case the list calls missing says the server has it, and the card 
   );
   // Focus goes to the button that replaced the one that was pressed.
   await expect(page.getByRole('button', { name: /^Open: WSCC 9-bus/ })).toBeFocused();
+  // A read of the list that is still in flight when the test ends is not left to fail the next.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
 test('a WSCC 9 file that an earlier TENSA left in the workspace says it is a different file, and Replace puts this one there', async ({
