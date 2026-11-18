@@ -22,6 +22,9 @@ The bundle contract (KTD-5) is:
   the case as ``<case>.layout.json``; one that does not validate or is over
   the layout's cap is left out with a warning, never a reason to refuse the
   bundle.
+- ``NOTICE.md`` — the licence notice of an example case whose file the bundle
+  holds, for a source that asks that the notice appear, whole, in every copy
+  of its data (the NREL agreement of RTS-GMLC). Omitted for every other case.
 - ``manifest.json`` — ``{ andes_version, tensa_version, case_filename,
   case_sha256, disturbance_count, run_id, exported_at, files: [...] }``.
 
@@ -106,6 +109,10 @@ class BundleInputs:
     #: The diagram's layout as a plain dict (a validated ``SidecarLayout``),
     #: written as ``layout.json``. ``None`` when the session has none.
     layout: dict[str, Any] | None = None
+    #: The licence notice of an example case whose file the bundle holds
+    #: (:func:`licence_notice`), written as ``NOTICE.md``. ``None`` when there
+    #: is none to carry.
+    notice: str | None = None
 
 
 # ---- public API ------------------------------------------------------------
@@ -136,6 +143,8 @@ def build_manifest(inputs: BundleInputs, *, exported_at: str | None = None) -> d
         files.append("results.csv")
     if inputs.layout is not None:
         files.append(LAYOUT_ENTRY)
+    if inputs.notice is not None:
+        files.append(NOTICE_ENTRY)
     files.append("manifest.json")
     return {
         "andes_version": inputs.andes_version,
@@ -199,6 +208,10 @@ def assemble_bundle(inputs: BundleInputs, *, exported_at: str | None = None) -> 
             # The bytes the layout has beside a case, which are the ones its
             # cap is measured on.
             zf.writestr(info, layout_json(parse_layout(inputs.layout)))
+        if inputs.notice is not None:
+            info = zipfile.ZipInfo(filename=NOTICE_ENTRY, date_time=fixed_mtime)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, inputs.notice)
         info = zipfile.ZipInfo(filename="manifest.json", date_time=fixed_mtime)
         info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(info, json.dumps(manifest, indent=2, sort_keys=True))
@@ -232,6 +245,55 @@ def read_bundle_manifest(zip_bytes: bytes) -> dict[str, Any]:
 
 
 # ---- helpers ---------------------------------------------------------------
+
+# The bundle entry that holds the licence notice of an example case.
+NOTICE_ENTRY: str = "NOTICE.md"
+
+
+def licence_notice(
+    case_files: tuple[tuple[str, bytes], ...], original_name: str | None = None
+) -> str | None:
+    """The licence notice the data of a bundle's case asks to travel with it, or ``None``.
+
+    A source can ask that its notice appear, whole, in every copy of its data: the NREL
+    agreement of RTS-GMLC does, and its RAW file carries no header that says so. A bundle is
+    a copy made to be passed on, so it holds the notice of each example case whose file it
+    carries. A file is that case's by its checksum, or by its name (an edited copy keeps the
+    name, and a canonical export of an edited case is named after the file it was loaded
+    from, ``original_name``). A case with no such notice gives ``None``.
+    """
+    from tensa.core.example_catalog import CatalogError, load_catalog, quoted_notice
+
+    try:
+        catalog = load_catalog()
+    except CatalogError:
+        return None
+    names = {name.casefold() for name, _ in case_files}
+    if original_name is not None:
+        names.add(original_name.casefold())
+    checksums = {hashlib.sha256(data).hexdigest() for _, data in case_files}
+    blocks: list[str] = []
+    for example in catalog.examples:
+        notice = example.licence.notice
+        if not notice:
+            continue
+        if not any(f.name.casefold() in names or f.sha256 in checksums for f in example.files()):
+            continue
+        licence = example.licence
+        terms = licence.name + (f" ({licence.url})" if licence.url else "")
+        lines = [
+            f"## {example.title} (`{example.id}`)",
+            "",
+            f"The data of this case comes from the example case above, under {terms}."
+            + (f" Source: {example.provenance.source_url}." if example.provenance.source_url else ""),
+            "The licence asks that this notice appear, in full, in every copy of the data:",
+            "",
+            *quoted_notice(notice),
+        ]
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return None
+    return "# Licence notice\n\n" + "\n\n".join(blocks) + "\n"
 
 
 def case_files_from_workspace(
@@ -1072,11 +1134,13 @@ __all__ = [
     "CaseMetadataDiff",
     "LAYOUT_ENTRY",
     "MAX_BUNDLE_BYTES",
+    "NOTICE_ENTRY",
     "assemble_bundle",
     "build_manifest",
     "bundle_plan_to_dict",
     "case_files_from_workspace",
     "extract_bundle",
+    "licence_notice",
     "list_bundle_entries",
     "read_bundle_disturbances",
     "read_bundle_manifest",

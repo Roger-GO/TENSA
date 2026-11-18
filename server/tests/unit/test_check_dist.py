@@ -205,12 +205,15 @@ def test_another_distribution_is_refused(tmp_path: Path) -> None:
     assert "not the tensa distribution" in problem
 
 
-def _catalog_bundling(*paths: str, extra: tuple[str, ...] = ()) -> str:
+def _catalog_bundling(
+    *paths: str, extra: tuple[str, ...] = (), notice: str | None = None
+) -> str:
     """A catalog with one bundled entry (its file and any extra files) and one of the user's ANDES."""
     entries = [
         {
             "provenance": {"kind": "bundled", "path": path},
             "extra_files": [{"path": e} for e in extra],
+            "licence": {"name": "As stated", **({"notice": notice} if notice else {})},
         }
         for path in paths
     ]
@@ -294,3 +297,50 @@ def test_a_catalog_that_cannot_be_read_is_refused(tmp_path: Path) -> None:
     assert len(problems) == 2
     assert all("unreadable" in p for p in problems)
 
+
+def test_the_file_that_holds_a_licence_notice_must_be_beside_the_data_in_both_archives(
+    tmp_path: Path,
+) -> None:
+    """The NREL agreement lets RTS-GMLC.RAW be passed on only with its notice, which is the
+    file beside it: an archive that holds the data and not the notice is refused."""
+    catalog = _catalog_bundling("rts/RTS-GMLC.RAW", notice="The whole notice.")
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(
+        out,
+        extra={
+            "tensa/examples/catalog.json": catalog,
+            "tensa/examples/cases/rts/RTS-GMLC.RAW": "raw",
+        },
+    )
+    _sdist(
+        out,
+        extra={
+            "src/tensa/examples/catalog.json": catalog,
+            "src/tensa/examples/cases/rts/RTS-GMLC.RAW": "raw",
+        },
+    )
+    problems = _script().check(out)
+    assert len(problems) == 2
+    assert any("tensa/examples/cases/rts/RTS-GMLC-NOTICE.md" in p and ".whl" in p for p in problems)
+    assert any(
+        "src/tensa/examples/cases/rts/RTS-GMLC-NOTICE.md" in p and ".tar.gz" in p for p in problems
+    )
+    # With the notice there, nothing is wrong; and an entry with no notice needs no file.
+    _wheel(
+        out,
+        extra={
+            "tensa/examples/catalog.json": catalog,
+            "tensa/examples/cases/rts/RTS-GMLC.RAW": "raw",
+            "tensa/examples/cases/rts/RTS-GMLC-NOTICE.md": "notice",
+        },
+    )
+    _sdist(
+        out,
+        extra={
+            "src/tensa/examples/catalog.json": catalog,
+            "src/tensa/examples/cases/rts/RTS-GMLC.RAW": "raw",
+            "src/tensa/examples/cases/rts/RTS-GMLC-NOTICE.md": "notice",
+        },
+    )
+    assert _script().check(out) == []

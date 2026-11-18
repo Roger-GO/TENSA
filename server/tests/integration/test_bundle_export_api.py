@@ -23,6 +23,7 @@ import pytest
 
 import tensa
 from tensa.api.app import make_app
+from tensa.core.example_catalog import bundled_cases_dir, load_catalog
 from tensa.core.session import SessionManager
 
 
@@ -102,8 +103,29 @@ async def test_export_bundle_minimal_returns_zip_with_case_and_manifest(
     assert "disturbances.json" not in names
     assert "sim_params.json" not in names
     assert "results.csv" not in names
+    assert "NOTICE.md" not in names
     # Stamped by the worker subprocess from the package metadata.
     assert manifest["tensa_version"] == tensa.__version__
+
+
+@pytest.mark.integration
+async def test_export_bundle_of_the_rts_gmlc_case_carries_the_nrel_notice(
+    client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    """The NREL agreement lets the data be passed on only with its whole notice, so the bundle
+    a user shares holds it beside the case, and the manifest lists it."""
+    workspace = tmp_path / "ws"
+    shutil.copy2(bundled_cases_dir() / "RTS-GMLC.RAW", workspace / "RTS-GMLC.RAW")
+    sid = await _create_session_and_load(client, "RTS-GMLC.RAW")
+    resp = await client.post(f"/api/sessions/{sid}/bundle/export", json={})
+    assert resp.status_code == 200, resp.text
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        notice = zf.read("NOTICE.md").decode("utf-8")
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    entry = load_catalog().get("rts_gmlc")
+    assert entry is not None and entry.licence.notice
+    assert entry.licence.notice.strip().split("\n")[0] in notice
+    assert "NOTICE.md" in manifest["files"]
 
 
 @pytest.mark.integration

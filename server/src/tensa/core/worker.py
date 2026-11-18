@@ -882,6 +882,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         assemble_bundle,
         case_files_from_workspace,
         check_exportable_case_files,
+        licence_notice,
     )
     from tensa.core.layout import (
         LayoutError,
@@ -996,6 +997,7 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
         andes_version=str(getattr(andes, "__version__", "unknown")),
         tensa_version=str(tensa_version),
         layout=layout,
+        notice=licence_notice(case_files, None if case_path is None else case_path.name),
     )
     return assemble_bundle(inputs)
 

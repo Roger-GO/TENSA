@@ -30,10 +30,12 @@ from tensa.core.bundle import (
     case_files_from_workspace,
     check_exportable_case_files,
     extract_bundle,
+    licence_notice,
     list_bundle_entries,
     read_bundle_manifest,
     validate_bundle,
 )
+from tensa.core.example_catalog import bundled_cases_dir, load_catalog
 
 
 def _minimal_inputs(**overrides: object) -> BundleInputs:
@@ -151,6 +153,53 @@ def test_manifest_files_list_reflects_optional_components() -> None:
     ]
     assert manifest["disturbance_count"] == 1
     assert manifest["run_id"] == "run-abc"
+
+
+@pytest.mark.unit
+def test_a_notice_is_a_file_of_the_bundle_listed_in_its_manifest() -> None:
+    inputs = _minimal_inputs(notice="# Licence notice\n")
+    out = assemble_bundle(inputs, exported_at="2026-05-09T12:00:00+00:00")
+    assert list_bundle_entries(out) == ["case/ieee14.raw", "NOTICE.md", "manifest.json"]
+    assert read_bundle_manifest(out)["files"] == ["case/ieee14.raw", "NOTICE.md", "manifest.json"]
+    assert "NOTICE.md" not in list_bundle_entries(assemble_bundle(_minimal_inputs()))
+
+
+def _rts_gmlc_notice() -> str:
+    entry = load_catalog().get("rts_gmlc")
+    assert entry is not None and entry.licence.notice
+    return entry.licence.notice
+
+
+@pytest.mark.unit
+def test_a_bundle_of_the_rts_gmlc_file_carries_the_whole_nrel_notice() -> None:
+    """The NREL agreement allows the data to be passed on only with its whole notice, and the
+    RAW file has no header that holds it, so the bundle (a copy made to be shared) does."""
+    raw = (bundled_cases_dir() / "RTS-GMLC.RAW").read_bytes()
+    notice = licence_notice((("RTS-GMLC.RAW", raw),))
+    assert notice is not None
+    quoted = "\n".join(f"> {line}".rstrip() for line in _rts_gmlc_notice().strip("\n").split("\n"))
+    assert quoted in notice
+    assert "RTS-GMLC" in notice and "rts_gmlc" in notice
+
+
+@pytest.mark.unit
+def test_the_notice_goes_with_a_renamed_copy_of_the_file_and_with_an_edited_case() -> None:
+    raw = (bundled_cases_dir() / "RTS-GMLC.RAW").read_bytes()
+    # The same bytes under another name: found by the checksum.
+    assert licence_notice((("my-rts.raw", raw),)) is not None
+    # An edited copy that keeps the name: found by the name.
+    assert licence_notice((("rts-gmlc.raw", raw + b"\n"),)) is not None
+    # A canonical export of an edited case is named after the file it was loaded from.
+    assert licence_notice((("RTS-GMLC.xlsx", b"x"),), original_name="RTS-GMLC.RAW") is not None
+
+
+@pytest.mark.unit
+def test_a_case_whose_source_asks_for_no_notice_gets_none() -> None:
+    assert licence_notice((("ieee14.raw", b"BUS 1\n"),)) is None
+    # A CC BY file carries its licence in its own header, so no entry of the catalog but
+    # the one that asks for a notice makes the bundle hold one.
+    pglib = (bundled_cases_dir() / "pglib_opf_case30_ieee.m").read_bytes()
+    assert licence_notice((("pglib_opf_case30_ieee.m", pglib),)) is None
 
 
 @pytest.mark.unit

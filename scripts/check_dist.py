@@ -13,7 +13,10 @@ checks are the ones a release must not skip:
 * the wheel and the sdist carry the built web UI (``index.html`` and its
   assets), so the package serves a page instead of a 404;
 * both carry the example catalog and its ``NOTICE.md``, and every case file the
-  catalog bundles (kind ``bundled``), so a case it offers is never missing;
+  catalog bundles (kind ``bundled``), so a case it offers is never missing, and
+  beside the file of an entry whose licence carries a notice (the NREL agreement
+  of RTS-GMLC) the file that holds the notice, ``<file>-NOTICE.md``, which the
+  licence asks to travel with every copy of the data;
 * neither carries a source map (``*.map``), which would add about 10 MB for
   nothing;
 * both carry the license text, and the sdist the build hook it needs to be built
@@ -32,7 +35,7 @@ import tarfile
 import zipfile
 from collections.abc import Iterable
 from email.parser import Parser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from packaging.version import InvalidVersion, Version
 
@@ -82,11 +85,28 @@ def _example_problems(
                 *(extra["path"] for extra in entry.get("extra_files", [])),
             ]
         ]
+        noticed = [
+            str(
+                PurePosixPath(entry["provenance"]["path"]).with_name(
+                    PurePosixPath(entry["provenance"]["path"]).stem + "-NOTICE.md"
+                )
+            )
+            for entry in entries
+            if entry["provenance"]["kind"] == "bundled" and entry.get("licence", {}).get("notice")
+        ]
     except (ValueError, KeyError, TypeError):
         return [*problems, f"{kind} has an unreadable {examples_dir}/catalog.json"]
     problems += [
         f"{kind} has no {examples_dir}/cases/{path}, which the example catalog bundles"
         for path in bundled
+        if f"{examples_dir}/cases/{path}" not in names
+    ]
+    # The notice a licence says must travel with the data is a file beside the data, so a
+    # change to what the archive leaves out cannot ship the data without it.
+    problems += [
+        f"{kind} has no {examples_dir}/cases/{path}, which holds the licence notice of a file "
+        "the example catalog bundles"
+        for path in noticed
         if f"{examples_dir}/cases/{path}" not in names
     ]
     return problems
