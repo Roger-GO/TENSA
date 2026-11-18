@@ -82,7 +82,11 @@ def _entry(example_id: str, path: str, *, default: bool = False, **more: Any) ->
             "source_url": f"https://example.org/andes/{path}",
         },
         "citations": [
-            {"text": f"Citation text of {example_id}.", "bibtex": f"@misc{{{example_id}}}"}
+            {
+                "role": "system",
+                "text": f"Citation text of {example_id}.",
+                "bibtex": f"@misc{{{example_id}}}",
+            }
         ],
         "licence": {
             "name": "GPL-3.0-or-later",
@@ -460,7 +464,7 @@ def test_the_sources_file_records_source_licence_modifications_and_citations(
     assert "- Licence: GPL-3.0-or-later (https://example.org/licence). Cite the paper." in text
     assert "- Modifications: a change." in text
     assert "- Caveat: a caveat" in text
-    assert "- Citation text of one." in text
+    assert "- System: Citation text of one." in text
 
 
 def test_each_added_case_has_its_own_section_and_adding_again_replaces_it(
@@ -719,20 +723,48 @@ def test_the_bundled_wscc9_that_ships_is_not_the_file_an_earlier_release_seeded(
 def test_citations_come_as_text_or_as_bibtex(catalog: Catalog) -> None:
     one = catalog.get("one")
     assert one is not None
-    assert format_citations(one) == "Citation text of one."
-    assert format_citations(one, bibtex=True) == "@misc{one}"
+    assert format_citations(one) == "System: Citation text of one."
+    assert format_citations(one, bibtex=True) == "% System\n@misc{one}"
     cited_twice = _catalog(
         _entry(
             "one",
             "one/one.xlsx",
             citations=[
-                {"text": "First.", "bibtex": "@misc{a}"},
-                {"text": "Second.", "bibtex": "@misc{b}"},
+                {"role": "data", "text": "First.", "bibtex": "@misc{a}"},
+                {"role": "software", "text": "Second.", "bibtex": "@misc{b}"},
+                {"role": "model", "text": "Third.", "bibtex": "@misc{c}"},
             ],
         )
     ).examples[0]
-    assert format_citations(cited_twice) == "First.\n\nSecond."
+    # Each reference says what it is, so a paste of several does not leave the reader to guess
+    # which is the system's paper, which the source of the data and which the software.
+    assert format_citations(cited_twice) == (
+        "Data source: First.\n\nSoftware: Second.\n\nDynamic model: Third."
+    )
+    assert format_citations(cited_twice, bibtex=True) == (
+        "% Data source\n@misc{a}\n\n% Software\n@misc{b}\n\n% Dynamic model\n@misc{c}"
+    )
     assert format_citations(_catalog(_entry("x", "one/one.xlsx", citations=[])).examples[0]) == ""
+
+
+def test_the_source_line_of_a_file_tensa_builds_says_so_instead_of_a_retrieval() -> None:
+    sha = _sha(_FILES["one/one.xlsx"])
+    bundled = {
+        "kind": "bundled",
+        "path": "one.xlsx",
+        "sha256": sha,
+        "source_url": "https://example.org/repo/blob/main/scripts/build_one.py",
+        "retrieved": "2026-11-17",
+    }
+    taken = _catalog(_entry("x", "one/one.xlsx", provenance=bundled)).examples[0]
+    built = _catalog(
+        _entry("x", "one/one.xlsx", provenance={**bundled, "built": True})
+    ).examples[0]
+    assert "retrieved 2026-11-17" in examples._source_line(taken)  # noqa: SLF001
+    line = examples._source_line(built)  # noqa: SLF001
+    assert "built by TENSA with the script at https://example.org/repo/blob/main" in line
+    assert "written 2026-11-17" in line and "retrieved" not in line
+    assert f"sha256 `{sha}`" in line
 
 
 # ---- locating ANDES ---------------------------------------------------------------------

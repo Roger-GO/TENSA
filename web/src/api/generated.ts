@@ -2074,6 +2074,12 @@ export interface components {
         /** Citation */
         Citation: {
             /**
+             * Role
+             * @description What the reference is: ``system`` (the publication that defines the test system), ``data`` (the dataset, archive or library the file comes from, or was checked against), ``software`` (the program the case is run with or was made for) or ``model`` (the documentation of a dynamic model the case uses).
+             * @enum {string}
+             */
+            role: "system" | "data" | "software" | "model";
+            /**
              * Text
              * @description The reference as plain text.
              */
@@ -4184,9 +4190,15 @@ export interface components {
             source_url?: string | null;
             /**
              * Retrieved
-             * @description The day the file was retrieved from ``source_url``.
+             * @description The day the file was retrieved from ``source_url`` (the day it was written, for a file that is ``built``).
              */
             retrieved?: string | null;
+            /**
+             * Built
+             * @description ``true`` for a bundled file that TENSA writes itself, with the script in this repository that ``source_url`` names, and not one taken from a source. It is said so wherever the file's origin is, instead of a retrieval.
+             * @default false
+             */
+            built: boolean;
         };
         /**
          * RecoveryDescriptor

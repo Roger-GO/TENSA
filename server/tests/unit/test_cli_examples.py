@@ -42,8 +42,8 @@ def _entry(example_id: str, path: str, **more: Any) -> dict[str, Any]:
         "default": example_id == "a",
         "provenance": {"kind": "andes", "path": path, "sha256": _sha(_FILES[path])},
         "citations": [
-            {"text": f"Text {example_id}.", "bibtex": f"@misc{{{example_id}}}"},
-            {"text": "Second.", "bibtex": "@misc{second}"},
+            {"role": "data", "text": f"Text {example_id}.", "bibtex": f"@misc{{{example_id}}}"},
+            {"role": "software", "text": "Second.", "bibtex": "@misc{second}"},
         ],
         "licence": {"name": "GPL-3.0-or-later"},
     }
@@ -213,9 +213,9 @@ def test_an_andes_file_that_is_not_the_recorded_one_is_a_warning_on_stderr(
 def test_cite_prints_the_citations_and_bibtex_with_the_flag(catalog: Catalog) -> None:
     text = runner.invoke(cli.app, ["examples", "cite", "a"])
     assert text.exit_code == 0, text.output
-    assert text.stdout.strip() == "Text a.\n\nSecond."
+    assert text.stdout.strip() == "Data source: Text a.\n\nSoftware: Second."
     bibtex = runner.invoke(cli.app, ["examples", "cite", "a", "--bibtex"])
-    assert bibtex.stdout.strip() == "@misc{a}\n\n@misc{second}"
+    assert bibtex.stdout.strip() == "% Data source\n@misc{a}\n\n% Software\n@misc{second}"
 
 
 def test_cite_says_so_when_a_case_has_no_citations_and_refuses_an_unknown_id(
@@ -260,4 +260,6 @@ def test_every_shipped_case_can_be_cited_in_both_forms(example_id: str) -> None:
     assert text.stdout.strip()
     bibtex = runner.invoke(cli.app, ["examples", "cite", example_id, "--bibtex"])
     assert bibtex.exit_code == 0, bibtex.output
-    assert bibtex.stdout.strip().startswith("@")
+    # A comment line says what the first entry is; the entry follows.
+    assert bibtex.stdout.strip().startswith("% ")
+    assert "\n@" in bibtex.stdout

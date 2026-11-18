@@ -40,6 +40,8 @@ from tensa.core.example_catalog import (
     Catalog,
     Example,
     bundled_cases_dir,
+    citation_bibtex,
+    citation_text,
     load_catalog,
     quoted_notice,
 )
@@ -392,9 +394,10 @@ def add_example(
 
 
 def format_citations(example: Example, *, bibtex: bool = False) -> str:
-    """The citations of an entry as plain text, or as BibTeX, one block after the other."""
-    parts = [c.bibtex if bibtex else c.text for c in example.citations]
-    return "\n\n".join(part.strip() for part in parts)
+    """The citations of an entry as plain text, or as BibTeX, one block after the other, each
+    marked with what it is: the system's publication, the data source, the software."""
+    parts = [citation_bibtex(c) if bibtex else citation_text(c) for c in example.citations]
+    return "\n\n".join(parts)
 
 
 # ---- the sources file -------------------------------------------------------
@@ -407,6 +410,14 @@ def _source_line(example: Example) -> str:
             f"copied from the ANDES installed on this machine (`andes/cases/{prov.path}`), "
             f"which TENSA recorded against {prov.release or 'ANDES'}"
         )
+    elif prov.built:
+        # Written by a script of TENSA's repository, which is not a place a file is retrieved from.
+        text = f"bundled with TENSA as `{prov.path}`, built by TENSA"
+        if prov.source_url:
+            text += f" with the script at {prov.source_url}"
+        if prov.retrieved:
+            text += f", written {prov.retrieved.isoformat()}"
+        return f"{text}. sha256 `{prov.sha256}`."
     else:
         text = f"bundled with TENSA as `{prov.path}`"
     if prov.source_url:
@@ -444,7 +455,7 @@ def _sources_section(example: Example, names: list[str], warnings: list[str]) ->
         ]
     if example.citations:
         lines += ["", "Cite:", ""]
-        lines += [f"- {citation.text}" for citation in example.citations]
+        lines += [f"- {citation_text(citation)}" for citation in example.citations]
     lines.append(f"<!-- /tensa-example:{example.id} -->")
     return "\n".join(lines) + "\n"
 

@@ -111,9 +111,14 @@ _BUNDLED: dict[str, Any] = {
     },
     "extra_files": [{"path": "pjm/pjm.dyr", "sha256": _SHA, "role": "dynamics"}],
     "citations": [
-        {"text": "Cited by DOI.", "bibtex": "@misc{doi}", "doi": "10.1000/xyz"},
-        {"text": "Cited by link.", "bibtex": "@misc{link}", "url": "https://example.org/paper"},
-        {"text": "Cited by neither.", "bibtex": "@misc{none}"},
+        {"role": "system", "text": "Cited by DOI.", "bibtex": "@misc{doi}", "doi": "10.1000/xyz"},
+        {
+            "role": "data",
+            "text": "Cited by link.",
+            "bibtex": "@misc{link}",
+            "url": "https://example.org/paper",
+        },
+        {"role": "software", "text": "Cited by neither.", "bibtex": "@misc{none}"},
     ],
     "licence": {
         "name": "CC BY 4.0",
@@ -168,10 +173,19 @@ def test_a_bundled_entry_shows_its_files_source_licence_changes_and_checks(
     assert "**Licence.** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Credit the authors." in page
     assert "**Changes to the data.** Changed a unit; Dropped a table" in page
     assert "- Not for OPF." in page
-    assert "- Cited by DOI. [DOI](https://doi.org/10.1000/xyz)" in page
-    assert "- Cited by link. [Link](https://example.org/paper)" in page
-    assert "- Cited by neither.\n" in page
+    assert "- **System:** Cited by DOI. [DOI](https://doi.org/10.1000/xyz)" in page
+    assert "- **Data source:** Cited by link. [Link](https://example.org/paper)" in page
+    assert "- **Software:** Cited by neither.\n" in page
     assert page.count("```bibtex") == 3
+    assert "```bibtex\n% System\n@misc{doi}\n```" in page
+
+
+def test_a_file_tensa_builds_is_said_to_be_built_and_not_retrieved(script: ModuleType) -> None:
+    built = {**_BUNDLED, "provenance": {**_BUNDLED["provenance"], "built": True}}
+    page = script.render_page(_catalog(built))
+    assert "TENSA builds this file itself with the script at <https://example.org/pjm.m>" in page
+    assert "written 2026-11-17; it is not retrieved from anywhere" in page
+    assert "retrieved 2026-11-17" not in page
 
 
 def test_a_pipe_in_a_table_cell_cannot_break_the_table(script: ModuleType) -> None:

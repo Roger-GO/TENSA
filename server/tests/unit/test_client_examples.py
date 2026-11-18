@@ -325,7 +325,7 @@ def test_the_mcp_list_examples_tool_shortens_the_catalog_and_gives_one_entry_in_
         "available": True,
         "provenance": {"kind": "andes"},
         "licence": {"name": "GPL-3.0-or-later"},
-        "citations": [{"text": "A long citation", "bibtex": "@misc{a}"}],
+        "citations": [{"role": "system", "text": "A long citation", "bibtex": "@misc{a}"}],
     }
     asked: list[tuple[str, str]] = []
 

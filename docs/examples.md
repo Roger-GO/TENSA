@@ -14,8 +14,9 @@ The cases marked as first run are copied into an empty workspace the first time 
 starts. Any case can be added later. In the app, **Example cases** lists them: it is the button
 in the Workspace part of the Project tab, an item of the Workspace menu and a command in the
 command palette. The cases are grouped by what they support. **Add to workspace** copies a
-case's file in and **Open** loads it. **Cite** shows its references and copies them as text or
-as BibTeX, and the links to its source and licence open in a new tab. A case that is only links
+case's file in and **Open** loads it. **Cite** shows its references, each marked as the publication of
+the system, the source of the data, the software or a dynamic model, and copies them as text or
+as BibTeX with those marks, and the links to its source and licence open in a new tab. A case that is only links
 to data TENSA does not hold has an **Open source page** link instead. From the command line:
 
 ```bash
@@ -100,13 +101,14 @@ The IEEE 14-bus system with a round-rotor machine, an exciter and a governor on 
 
 **Citations**
 
-- IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
-- ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
+- **Data source:** ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee14,
   title        = {{IEEE} 14 Bus Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -116,6 +118,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{andes_ieee14_readme,
   title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},
   howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},
@@ -125,6 +128,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -179,14 +183,15 @@ Four generators in two areas joined by a weak tie, the standard case for inter-a
 
 **Citations**
 
-- P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.
-- M. Klein, G. J. Rogers and P. Kundur, "A fundamental study of inter-area oscillations in power systems," IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229. [DOI](https://doi.org/10.1109/59.119229)
-- CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data. [Link](https://colib.net/testCases/kundur_two_area_system/index.html)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.
+- **System:** M. Klein, G. J. Rogers and P. Kundur, "A fundamental study of inter-area oscillations in power systems," IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229. [DOI](https://doi.org/10.1109/59.119229)
+- **Data source:** CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data. [Link](https://colib.net/testCases/kundur_two_area_system/index.html)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @book{kundur1994,
   author    = {Kundur, Prabha},
   title     = {Power System Stability and Control},
@@ -198,6 +203,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{klein1991fundamental,
   author  = {Klein, M. and Rogers, G. J. and Kundur, P.},
   title   = {A fundamental study of inter-area oscillations in power systems},
@@ -211,6 +217,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{colib_kundur_two_area,
   title        = {Kundur two-area system},
   howpublished = {CRESYM Colib, test cases},
@@ -220,6 +227,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -271,19 +279,20 @@ The 3-machine, 9-bus system of Anderson and Fouad with its three machines on the
 - **First run:** yes
 - **File:** `wscc9.xlsx`
 
-**Source.** Bundled with TENSA as `wscc9.xlsx` from <https://github.com/Roger-GO/TENSA/blob/778a06d7396f1ccde31b48955fcb4072e731716d/scripts/build_wscc9.py>, retrieved 2026-11-17. SHA-256 `ce980cc07d6dfc133fe66473610fa6e3a3962c4ccd09734d2d6d951df525c758`.
+**Source.** Bundled with TENSA as `wscc9.xlsx`. TENSA builds this file itself with the script at <https://github.com/Roger-GO/TENSA/blob/main/scripts/build_wscc9.py>, written 2026-11-17; it is not retrieved from anywhere. SHA-256 `ce980cc07d6dfc133fe66473610fa6e3a3962c4ccd09734d2d6d951df525c758`.
 
 **Licence.** [GPL-3.0-or-later](https://github.com/Roger-GO/TENSA/blob/main/LICENSE). The file is written by TENSA's scripts/build_wscc9.py and is distributed with TENSA under its licence. The numbers in it are those of the book in the first citation, which is the work to cite for the system.
 
 **Citations**
 
-- P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. Piscataway, NJ: IEEE Press; Hoboken, NJ: Wiley-Interscience, 2003, ISBN 0-471-23862-7, doi:10.1109/9780470545577. The system is the one of Chapter 2 and its Example 2.6. [DOI](https://doi.org/10.1109/9780470545577)
-- B. Wang, Y. Liu and K. Sun, "Power System Differential-Algebraic Equations," arXiv:1512.05185, 2015. It prints the classical-model data of this system (H, x'd, the mechanical powers, the internal voltages and the reduced admittance matrix of Example 2.6) that the build of this case is checked against. [Link](https://arxiv.org/abs/1512.05185)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** P. M. Anderson and A. A. Fouad, Power System Control and Stability, 2nd ed. Piscataway, NJ: IEEE Press; Hoboken, NJ: Wiley-Interscience, 2003, ISBN 0-471-23862-7, doi:10.1109/9780470545577. The system is the one of Chapter 2 and its Example 2.6. [DOI](https://doi.org/10.1109/9780470545577)
+- **Data source:** B. Wang, Y. Liu and K. Sun, "Power System Differential-Algebraic Equations," arXiv:1512.05185, 2015. It prints the classical-model data of this system (H, x'd, the mechanical powers, the internal voltages and the reduced admittance matrix of Example 2.6) that the build of this case is checked against. [Link](https://arxiv.org/abs/1512.05185)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @book{anderson2003power,
   author    = {Anderson, Paul M. and Fouad, A. A.},
   title     = {Power System Control and Stability},
@@ -297,6 +306,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{wang2015dae,
   author        = {Wang, Bin and Liu, Yang and Sun, Kai},
   title         = {Power System Differential-Algebraic Equations},
@@ -308,6 +318,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -369,14 +380,15 @@ The 39-bus, 10-machine New England system with a round-rotor machine, an exciter
 
 **Citations**
 
-- T. Athay, R. Podmore and S. Virmani, "A practical method for the direct analysis of transient stability," IEEE Transactions on Power Apparatus and Systems, vol. PAS-98, no. 2, pp. 573-584, March 1979, doi:10.1109/TPAS.1979.319407. The system's data are traced to this paper, and from it to G. W. Bills et al., On-Line Stability Analysis Study, EEI RP 90-1, 1970, by the header of MATPOWER's case39.m and by pandapower's documentation (neither work was opened for this entry). [DOI](https://doi.org/10.1109/TPAS.1979.319407)
-- M. A. Pai, Energy Function Analysis for Power System Stability. Boston, MA: Kluwer Academic Publishers, 1989, doi:10.1007/978-1-4613-1635-0. The book MATPOWER's case39.m names as the source of its 39-bus data (the book itself was not opened). [DOI](https://doi.org/10.1007/978-1-4613-1635-0)
-- MATPOWER, data/case39.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case39.m (accessed 2026-11-17). Its header describes the 39-bus New England system as generally representative of the New England 345 kV system and gives the sources above. Used here only to compare the file with the system as MATPOWER holds it. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case39.m)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** T. Athay, R. Podmore and S. Virmani, "A practical method for the direct analysis of transient stability," IEEE Transactions on Power Apparatus and Systems, vol. PAS-98, no. 2, pp. 573-584, March 1979, doi:10.1109/TPAS.1979.319407. The system's data are traced to this paper, and from it to G. W. Bills et al., On-Line Stability Analysis Study, EEI RP 90-1, 1970, by the header of MATPOWER's case39.m and by pandapower's documentation (neither work was opened for this entry). [DOI](https://doi.org/10.1109/TPAS.1979.319407)
+- **System:** M. A. Pai, Energy Function Analysis for Power System Stability. Boston, MA: Kluwer Academic Publishers, 1989, doi:10.1007/978-1-4613-1635-0. The book MATPOWER's case39.m names as the source of its 39-bus data (the book itself was not opened). [DOI](https://doi.org/10.1007/978-1-4613-1635-0)
+- **Data source:** MATPOWER, data/case39.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case39.m (accessed 2026-11-17). Its header describes the 39-bus New England system as generally representative of the New England 345 kV system and gives the sources above. Used here only to compare the file with the system as MATPOWER holds it. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case39.m)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{athay1979practical,
   author  = {Athay, T. and Podmore, R. and Virmani, S.},
   title   = {A practical method for the direct analysis of transient stability},
@@ -391,6 +403,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @book{pai1989energy,
   author    = {Pai, M. A.},
   title     = {Energy Function Analysis for Power System Stability},
@@ -402,6 +415,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case39,
   title        = {{MATPOWER} case39: the 39-bus {New England} system},
   howpublished = {MATPOWER release 8.0, data/case39.m},
@@ -411,6 +425,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -468,14 +483,15 @@ A 140-bus, 48-machine model of the northeast of the Eastern Interconnection, wit
 
 **Citations**
 
-- J. H. Chow and K. W. Cheung, "A toolbox for power system dynamics and control engineering education and research," IEEE Transactions on Power Systems, vol. 7, no. 4, pp. 1559-1564, 1992, doi:10.1109/59.207380. The paper on the Power System Toolbox, which distributes the 48-machine, 140-bus NPCC system: it is the work Qi, Sun and Kang cite for it (the next entry). The paper itself was not opened, so which of its pages describes the system is not stated here. [DOI](https://doi.org/10.1109/59.207380)
-- J. Qi, K. Sun and W. Kang, "Adaptive optimal PMU placement based on empirical observability Gramian," arXiv:1411.7016 (section 5, case study). It tests on the NPCC 48-machine, 140-bus system, cites Chow and Cheung (1992) for it, calls it a model of the northeast region of the Eastern Interconnection and says that 27 of its 48 generators have a fourth-order transient model and the others the classical second-order one, which is what this file holds. [Link](https://arxiv.org/abs/1411.7016)
-- H. Cui, ANDES documentation, Verification: CURENT NPCC verification notebook, ANDES release 2.0.0 (docs/source/verification/andes-npcc-verification.ipynb), https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-npcc-verification.ipynb (accessed 2026-11-17). It describes the system, its models and the line trip that ANDES was compared with DSATools TSAT on. [Link](https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-npcc-verification.ipynb)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** J. H. Chow and K. W. Cheung, "A toolbox for power system dynamics and control engineering education and research," IEEE Transactions on Power Systems, vol. 7, no. 4, pp. 1559-1564, 1992, doi:10.1109/59.207380. The paper on the Power System Toolbox, which distributes the 48-machine, 140-bus NPCC system: it is the work Qi, Sun and Kang cite for it (the next entry). The paper itself was not opened, so which of its pages describes the system is not stated here. [DOI](https://doi.org/10.1109/59.207380)
+- **System:** J. Qi, K. Sun and W. Kang, "Adaptive optimal PMU placement based on empirical observability Gramian," arXiv:1411.7016 (section 5, case study). It tests on the NPCC 48-machine, 140-bus system, cites Chow and Cheung (1992) for it, calls it a model of the northeast region of the Eastern Interconnection and says that 27 of its 48 generators have a fourth-order transient model and the others the classical second-order one, which is what this file holds. [Link](https://arxiv.org/abs/1411.7016)
+- **Software:** H. Cui, ANDES documentation, Verification: CURENT NPCC verification notebook, ANDES release 2.0.0 (docs/source/verification/andes-npcc-verification.ipynb), https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-npcc-verification.ipynb (accessed 2026-11-17). It describes the system, its models and the line trip that ANDES was compared with DSATools TSAT on. [Link](https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-npcc-verification.ipynb)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{chow1992toolbox,
   author  = {Chow, J. H. and Cheung, K. W.},
   title   = {A toolbox for power system dynamics and control engineering education and research},
@@ -489,6 +505,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @misc{qi2014adaptive,
   author        = {Qi, Junjian and Sun, Kai and Kang, Wei},
   title         = {Adaptive Optimal {PMU} Placement Based on Empirical Observability {Gramian}},
@@ -500,6 +517,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @misc{andes_npcc_verification,
   author       = {Cui, Hantao},
   title        = {{ANDES} documentation, Verification: NPCC verification notebook},
@@ -510,6 +528,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -571,14 +590,15 @@ A 179-bus, 29-machine model of the Western Interconnection with a governor, an e
 
 **Citations**
 
-- S. Maslennikov, B. Wang, Q. Zhang, F. Ma, X. Luo, K. Sun and E. Litvinov, "A test cases library for methods locating the sources of sustained oscillations," 2016 IEEE Power and Energy Society General Meeting (PESGM), Boston, MA, July 2016, doi:10.1109/PESGM.2016.7741772. The library is built on a modified WECC 179-bus, 29-machine system, and asks that publications that use its material cite this paper. This file is ANDES's, not the library's: it is cited because it describes the system, and whether the two files hold the same data was not checked. [DOI](https://doi.org/10.1109/PESGM.2016.7741772)
-- Test Cases Library of Power System Sustained Oscillations, Department of Electrical Engineering and Computer Science, University of Tennessee, Knoxville, https://web.eecs.utk.edu/~kaisun/Oscillation/ (accessed 2026-11-17), and its model page, https://web.eecs.utk.edu/~kaisun/Oscillation/model.html, which says the system was first reported in an EPRI report (TR-104586, Projects 2675-04-05, Final Report, 1994; not opened) and that its inertia and damping data were created with reference to the WECC system and may not match the real one. [Link](https://web.eecs.utk.edu/~kaisun/Oscillation/)
-- H. Cui, ANDES documentation, Verification: CURENT WECC verification notebook, ANDES release 2.0.0 (docs/source/verification/andes-wecc-verification.ipynb), https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-wecc-verification.ipynb (accessed 2026-11-17). It describes the system, its models and the line trip that ANDES was compared with DSATools TSAT on. [Link](https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-wecc-verification.ipynb)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** S. Maslennikov, B. Wang, Q. Zhang, F. Ma, X. Luo, K. Sun and E. Litvinov, "A test cases library for methods locating the sources of sustained oscillations," 2016 IEEE Power and Energy Society General Meeting (PESGM), Boston, MA, July 2016, doi:10.1109/PESGM.2016.7741772. The library is built on a modified WECC 179-bus, 29-machine system, and asks that publications that use its material cite this paper. This file is ANDES's, not the library's: it is cited because it describes the system, and whether the two files hold the same data was not checked. [DOI](https://doi.org/10.1109/PESGM.2016.7741772)
+- **Data source:** Test Cases Library of Power System Sustained Oscillations, Department of Electrical Engineering and Computer Science, University of Tennessee, Knoxville, https://web.eecs.utk.edu/~kaisun/Oscillation/ (accessed 2026-11-17), and its model page, https://web.eecs.utk.edu/~kaisun/Oscillation/model.html, which says the system was first reported in an EPRI report (TR-104586, Projects 2675-04-05, Final Report, 1994; not opened) and that its inertia and damping data were created with reference to the WECC system and may not match the real one. [Link](https://web.eecs.utk.edu/~kaisun/Oscillation/)
+- **Software:** H. Cui, ANDES documentation, Verification: CURENT WECC verification notebook, ANDES release 2.0.0 (docs/source/verification/andes-wecc-verification.ipynb), https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-wecc-verification.ipynb (accessed 2026-11-17). It describes the system, its models and the line trip that ANDES was compared with DSATools TSAT on. [Link](https://github.com/CURENT/andes/blob/v2.0.0/docs/source/verification/andes-wecc-verification.ipynb)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @inproceedings{maslennikov2016library,
   author    = {Maslennikov, S. and Wang, B. and Zhang, Q. and Ma, F. and Luo, X. and Sun, K. and Litvinov, E.},
   title     = {A test cases library for methods locating the sources of sustained oscillations},
@@ -591,6 +611,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{utk_oscillation_library,
   title        = {Test Cases Library of Power System Sustained Oscillations},
   howpublished = {University of Tennessee, Knoxville, Department of Electrical Engineering and Computer Science},
@@ -600,6 +621,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @misc{andes_wecc_verification,
   author       = {Cui, Hantao},
   title        = {{ANDES} documentation, Verification: WECC verification notebook},
@@ -610,6 +632,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -671,15 +694,16 @@ The modified Kundur two-area system of the Kundur case with a power system stabi
 
 **Citations**
 
-- P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.
-- M. Klein, G. J. Rogers and P. Kundur, "A fundamental study of inter-area oscillations in power systems," IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229. [DOI](https://doi.org/10.1109/59.119229)
-- CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data. [Link](https://colib.net/testCases/kundur_two_area_system/index.html)
-- ANDES, andes/models/pss/ieeest.py, release 2.0.0: the IEEEST power system stabiliser model that the case's IEEEST_1 is an instance of, with its input signal selection, two second-order filters, two lead-lag blocks, gain, washout and output limiter (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.
+- **System:** M. Klein, G. J. Rogers and P. Kundur, "A fundamental study of inter-area oscillations in power systems," IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229. [DOI](https://doi.org/10.1109/59.119229)
+- **Data source:** CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data. [Link](https://colib.net/testCases/kundur_two_area_system/index.html)
+- **Dynamic model:** ANDES, andes/models/pss/ieeest.py, release 2.0.0: the IEEEST power system stabiliser model that the case's IEEEST_1 is an instance of, with its input signal selection, two second-order filters, two lead-lag blocks, gain, washout and output limiter (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @book{kundur1994,
   author    = {Kundur, Prabha},
   title     = {Power System Stability and Control},
@@ -691,6 +715,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{klein1991fundamental,
   author  = {Klein, M. and Rogers, G. J. and Kundur, P.},
   title   = {A fundamental study of inter-area oscillations in power systems},
@@ -704,6 +729,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{colib_kundur_two_area,
   title        = {Kundur two-area system},
   howpublished = {CRESYM Colib, test cases},
@@ -713,6 +739,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_ieeest,
   title        = {{ANDES} model {IEEEST}: power system stabiliser},
   howpublished = {ANDES release 2.0.0, andes/models/pss/ieeest.py},
@@ -722,6 +749,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -783,14 +811,15 @@ The IEEE 14-bus case with machines and controls (the data of the IEEE 14-bus ent
 
 **Citations**
 
-- IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
-- ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
-- ANDES, andes/models/timer.py, release 2.0.0: the Fault model, a three-phase-to-ground fault applied at a bus at one time and cleared at another through a small reactance and resistance to ground, which the case's Fault_1 is an instance of (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
+- **Data source:** ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
+- **Dynamic model:** ANDES, andes/models/timer.py, release 2.0.0: the Fault model, a three-phase-to-ground fault applied at a bus at one time and cleared at another through a small reactance and resistance to ground, which the case's Fault_1 is an instance of (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee14,
   title        = {{IEEE} 14 Bus Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -800,6 +829,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{andes_ieee14_readme,
   title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},
   howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},
@@ -809,6 +839,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_fault,
   title        = {{ANDES} model {Fault}: three-phase-to-ground fault},
   howpublished = {ANDES release 2.0.0, andes/models/timer.py},
@@ -818,6 +849,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -874,16 +906,17 @@ The PJM 5-bus test system of Li and Bo with four classical-model machines, a gov
 
 **Citations**
 
-- F. Li and R. Bo, "Small test systems for power system economic studies," Proceedings of the 2010 IEEE Power & Energy Society General Meeting, July 2010, pp. 1-4, doi:10.1109/PES.2010.5589973. The paper MATPOWER's case5 file names as the source of the network. Its title, authors, venue and pages were read from Crossref; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/PES.2010.5589973)
-- MATPOWER, data/case5.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m (accessed 2026-11-17). Its header describes the data as a modified 5-bus, 5-generator case based on the PJM 5-bus system, created by Rui Bo in 2006 and modified in 2010 and 2014, and distributed with permission. ANDES's copy of the file (andes/cases/matpower/case5.m) is byte for byte this one. Used here to compare the network of the case with the system as MATPOWER holds it. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case5 file the network is taken from. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- F. Milano, Power System Modelling and Scripting. Berlin, Heidelberg: Springer, 2010, doi:10.1007/978-3-642-13669-6. The book that ANDES's source names for its TG2 governor model, the one this case's governors are (the book was not opened). [DOI](https://doi.org/10.1007/978-3-642-13669-6)
-- ANDES, andes/models/governor/tg2.py and andes/core/discrete.py, release 2.0.0: the TG2 governor, whose speed input goes through a dead band block (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py), and the DeadBandRT block, whose flags stand at "inside the band" while the block is not enabled (https://github.com/CURENT/andes/blob/v2.0.0/andes/core/discrete.py), accessed 2026-11-17. Together they are why the governors of this case do not act (see the caveats). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** F. Li and R. Bo, "Small test systems for power system economic studies," Proceedings of the 2010 IEEE Power & Energy Society General Meeting, July 2010, pp. 1-4, doi:10.1109/PES.2010.5589973. The paper MATPOWER's case5 file names as the source of the network. Its title, authors, venue and pages were read from Crossref; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/PES.2010.5589973)
+- **Data source:** MATPOWER, data/case5.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m (accessed 2026-11-17). Its header describes the data as a modified 5-bus, 5-generator case based on the PJM 5-bus system, created by Rui Bo in 2006 and modified in 2010 and 2014, and distributed with permission. ANDES's copy of the file (andes/cases/matpower/case5.m) is byte for byte this one. Used here to compare the network of the case with the system as MATPOWER holds it. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case5 file the network is taken from. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Dynamic model:** F. Milano, Power System Modelling and Scripting. Berlin, Heidelberg: Springer, 2010, doi:10.1007/978-3-642-13669-6. The book that ANDES's source names for its TG2 governor model, the one this case's governors are (the book was not opened). [DOI](https://doi.org/10.1007/978-3-642-13669-6)
+- **Dynamic model:** ANDES, andes/models/governor/tg2.py and andes/core/discrete.py, release 2.0.0: the TG2 governor, whose speed input goes through a dead band block (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py), and the DeadBandRT block, whose flags stand at "inside the band" while the block is not enabled (https://github.com/CURENT/andes/blob/v2.0.0/andes/core/discrete.py), accessed 2026-11-17. Together they are why the governors of this case do not act (see the caveats). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @inproceedings{li2010small,
   author    = {Li, Fangxing and Bo, Rui},
   title     = {Small test systems for power system economic studies},
@@ -896,6 +929,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case5,
   title        = {{MATPOWER} case5: a modified 5-bus system based on the {PJM} 5-bus system},
   howpublished = {MATPOWER release 8.0, data/case5.m},
@@ -905,6 +939,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray Daniel and Murillo-S{\'a}nchez, Carlos Edmundo and Thomas, Robert John},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -919,6 +954,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @book{milano2010power,
   author    = {Milano, Federico},
   title     = {Power System Modelling and Scripting},
@@ -930,6 +966,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_tg2,
   title        = {{ANDES} model {TG2}: turbine governor type 2, and the {DeadBandRT} block},
   howpublished = {ANDES release 2.0.0, andes/models/governor/tg2.py and andes/core/discrete.py},
@@ -939,6 +976,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -999,17 +1037,18 @@ The IEEE 14-bus case with the machine at bus 8 replaced by a converter-interface
 
 **Citations**
 
-- IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
-- ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
-- ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html)
-- WECC Renewable Energy Modeling Task Force, Generic Solar Photovoltaic System Dynamic Simulation Model Specification, Western Electricity Coordinating Council Modeling and Validation Work Group, September 2012 (also Sandia National Laboratories report SAND2013-8876 by A. Ellis, M. Behnke and R. Elliott, October 2013), https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf (accessed 2026-11-17). It specifies the converter (REGC_A), the electrical control (REEC_B) and the plant controller (REPC_A) of a central-station PV plant, and says that the available solar power is taken as constant through a run. [Link](https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf)
-- P. Pourbeik, Proposed Changes to the WECC WT4 Generic Model for Type 4 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 16 December 2011 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the converter (regc_a), electrical control (reec_a) and plant controller (repc_a) models that ANDES's REGCA1, REECA1 and REPCA1 implement. [Link](https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf)
-- P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, "Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies," IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/TEC.2016.2639050)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
+- **Data source:** ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
+- **Dynamic model:** ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html)
+- **Dynamic model:** WECC Renewable Energy Modeling Task Force, Generic Solar Photovoltaic System Dynamic Simulation Model Specification, Western Electricity Coordinating Council Modeling and Validation Work Group, September 2012 (also Sandia National Laboratories report SAND2013-8876 by A. Ellis, M. Behnke and R. Elliott, October 2013), https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf (accessed 2026-11-17). It specifies the converter (REGC_A), the electrical control (REEC_B) and the plant controller (REPC_A) of a central-station PV plant, and says that the available solar power is taken as constant through a run. [Link](https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf)
+- **Dynamic model:** P. Pourbeik, Proposed Changes to the WECC WT4 Generic Model for Type 4 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 16 December 2011 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the converter (regc_a), electrical control (reec_a) and plant controller (repc_a) models that ANDES's REGCA1, REECA1 and REPCA1 implement. [Link](https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf)
+- **Dynamic model:** P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, "Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies," IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/TEC.2016.2639050)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee14,
   title        = {{IEEE} 14 Bus Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -1019,6 +1058,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{andes_ieee14_readme,
   title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},
   howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},
@@ -1028,6 +1068,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_renewable_models,
   title        = {{ANDES} model reference: renewable generator, electrical control and plant control groups},
   howpublished = {ANDES release 2.0.0, docs.andes.app},
@@ -1037,6 +1078,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @techreport{wecc2012solarpv,
   author      = {{WECC Renewable Energy Modeling Task Force}},
   title       = {Generic Solar Photovoltaic System Dynamic Simulation Model Specification},
@@ -1049,6 +1091,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @techreport{pourbeik2013wt4,
   author      = {Pourbeik, Pouyan},
   title       = {Proposed Changes to the {WECC} {WT4} Generic Model for Type 4 Wind Turbine Generators},
@@ -1061,6 +1104,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @article{pourbeik2017generic,
   author  = {Pourbeik, Pouyan and Sanchez-Gasca, Juan J. and Senthil, Jayapalan and Weber, James D. and Zadkhast, Pouya and Kazachkov, Yuriy and Tacke, Spencer and Wen, Jun and Ellis, Abraham},
   title   = {Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies},
@@ -1075,6 +1119,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1132,17 +1177,18 @@ The IEEE 14-bus case with the machine at bus 8 replaced by a type-3 wind turbine
 
 **Citations**
 
-- IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
-- ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
-- ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html)
-- ANDES documentation, model reference, release 2.0.0: the groups RenGovernor (WTDTA1, the wind turbine drive train, a two-mass model when Htfrac is not 0), RenAerodynamics (WTARA1), RenPitch (WTPTA1) and RenTorque (WTTQA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html, https://docs.andes.app/en/v2.0.0/reference/models/RenAerodynamics.html, https://docs.andes.app/en/v2.0.0/reference/models/RenPitch.html and https://docs.andes.app/en/v2.0.0/reference/models/RenTorque.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html)
-- P. Pourbeik, Proposed Changes to the WECC WT3 Generic Model for Type 3 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 26 March 2012 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the seven models of the second-generation type 3 wind turbine: converter (regc_a), electrical control (reec_a), drive train (wtgt_a), aerodynamics (wtgar_a), pitch control (wtgpt_a), torque control (wtgtrq_a) and plant controller (repc_a), which are the seven models of this case. [Link](https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf)
-- P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, "Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies," IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/TEC.2016.2639050)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
+- **Data source:** ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
+- **Dynamic model:** ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html)
+- **Dynamic model:** ANDES documentation, model reference, release 2.0.0: the groups RenGovernor (WTDTA1, the wind turbine drive train, a two-mass model when Htfrac is not 0), RenAerodynamics (WTARA1), RenPitch (WTPTA1) and RenTorque (WTTQA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html, https://docs.andes.app/en/v2.0.0/reference/models/RenAerodynamics.html, https://docs.andes.app/en/v2.0.0/reference/models/RenPitch.html and https://docs.andes.app/en/v2.0.0/reference/models/RenTorque.html, accessed 2026-11-17). [Link](https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html)
+- **Dynamic model:** P. Pourbeik, Proposed Changes to the WECC WT3 Generic Model for Type 3 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 26 March 2012 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the seven models of the second-generation type 3 wind turbine: converter (regc_a), electrical control (reec_a), drive train (wtgt_a), aerodynamics (wtgar_a), pitch control (wtgpt_a), torque control (wtgtrq_a) and plant controller (repc_a), which are the seven models of this case. [Link](https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf)
+- **Dynamic model:** P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, "Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies," IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/TEC.2016.2639050)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee14,
   title        = {{IEEE} 14 Bus Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -1152,6 +1198,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{andes_ieee14_readme,
   title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},
   howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},
@@ -1161,6 +1208,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_renewable_models,
   title        = {{ANDES} model reference: renewable generator, electrical control and plant control groups},
   howpublished = {ANDES release 2.0.0, docs.andes.app},
@@ -1170,6 +1218,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @misc{andes_wind_turbine_models,
   title        = {{ANDES} model reference: wind turbine drive train, aerodynamics, pitch and torque control},
   howpublished = {ANDES release 2.0.0, docs.andes.app},
@@ -1179,6 +1228,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @techreport{pourbeik2013wt3,
   author      = {Pourbeik, Pouyan},
   title       = {Proposed Changes to the {WECC} {WT3} Generic Model for Type 3 Wind Turbine Generators},
@@ -1191,6 +1241,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Dynamic model
 @article{pourbeik2017generic,
   author  = {Pourbeik, Pouyan and Sanchez-Gasca, Juan J. and Senthil, Jayapalan and Weber, James D. and Zadkhast, Pouya and Kazachkov, Yuriy and Tacke, Spencer and Wen, Jun and Ellis, Abraham},
   title   = {Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies},
@@ -1205,6 +1256,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1264,15 +1316,16 @@ The 24-bus IEEE Reliability Test System of 1979 as the PGLib-OPF library (v23.07
 
 **Citations**
 
-- IEEE Reliability Test System Task Force of the Applications of Probability Methods Subcommittee, "IEEE reliability test system," IEEE Transactions on Power Apparatus and Systems, vol. PAS-98, no. 6, pp. 2047-2054, Nov./Dec. 1979, doi:10.1109/TPAS.1979.319398. The system the file describes, which its header names as the source of its power flow data. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the paper's text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPAS.1979.319398)
-- IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case24_ieee_rts.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case24_ieee_rts.m (accessed 2026-11-18). Its header names the RTS of 1979 as the source of the power flow data, Georgia Tech's Power Systems Control and Automation Laboratory as the source of the cost data and Bruce Wollenberg as the provider of the MATPOWER case file data, and states The Institute of Electrical and Electronics Engineers' copyright of 1979 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is 00b024c2e583b82452392514d2c22881c708ba7c, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case24_ieee_rts.m)
-- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** IEEE Reliability Test System Task Force of the Applications of Probability Methods Subcommittee, "IEEE reliability test system," IEEE Transactions on Power Apparatus and Systems, vol. PAS-98, no. 6, pp. 2047-2054, Nov./Dec. 1979, doi:10.1109/TPAS.1979.319398. The system the file describes, which its header names as the source of its power flow data. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the paper's text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPAS.1979.319398)
+- **Data source:** IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case24_ieee_rts.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case24_ieee_rts.m (accessed 2026-11-18). Its header names the RTS of 1979 as the source of the power flow data, Georgia Tech's Power Systems Control and Automation Laboratory as the source of the cost data and Bruce Wollenberg as the provider of the MATPOWER case file data, and states The Institute of Electrical and Electronics Engineers' copyright of 1979 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is 00b024c2e583b82452392514d2c22881c708ba7c, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case24_ieee_rts.m)
+- **Data source:** S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{ieee1979rts,
   author  = {{IEEE Reliability Test System Task Force of the Applications of Probability Methods Subcommittee}},
   title   = {{IEEE} Reliability Test System},
@@ -1287,6 +1340,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{pglib_opf_case24_ieee_rts,
   title        = {{PGLib-OPF} v23.07, pglib\_opf\_case24\_ieee\_rts.m},
   howpublished = {IEEE PES Power Grid Library},
@@ -1296,6 +1350,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{babaeinejadsarookolaee2019pglib,
   author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
   title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
@@ -1307,6 +1362,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1321,6 +1377,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1371,15 +1428,16 @@ The IEEE 30-bus test case of the University of Washington archive as the PGLib-O
 
 **Citations**
 
-- 30 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1961, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, that the 11 kV and 1.0 kV base voltages are Christie's guess (the model has these buses at 132 or 33 kV), and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm)
-- IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case30_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m (accessed 2026-11-18). Its header names the archive's ieee30cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d429394621c797fa3893d4e4b6d8efa220a4015a, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m)
-- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** 30 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1961, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, that the 11 kV and 1.0 kV base voltages are Christie's guess (the model has these buses at 132 or 33 kV), and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf30/pg_tca30bus.htm)
+- **Data source:** IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case30_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m (accessed 2026-11-18). Its header names the archive's ieee30cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d429394621c797fa3893d4e4b6d8efa220a4015a, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case30_ieee.m)
+- **Data source:** S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee30,
   title        = {30 Bus Power Flow Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -1389,6 +1447,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{pglib_opf_case30_ieee,
   title        = {{PGLib-OPF} v23.07, pglib\_opf\_case30\_ieee.m},
   howpublished = {IEEE PES Power Grid Library},
@@ -1398,6 +1457,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{babaeinejadsarookolaee2019pglib,
   author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
   title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
@@ -1409,6 +1469,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1423,6 +1484,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1473,15 +1535,16 @@ The IEEE 57-bus test case of the University of Washington archive as the PGLib-O
 
 **Citations**
 
-- 57 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as it was in the early 1960s, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm)
-- IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case57_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m (accessed 2026-11-18). Its header names the archive's ieee57cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d8b0c9e8b45265e57f52b7ab96880ad3a874cde5, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m)
-- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** 57 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm (accessed 2026-11-18). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as it was in the early 1960s, that the data was provided by Iraj Dabbagchi of AEP and entered in IEEE Common Data Format by Rich Christie at the University of Washington in August 1993, that the line impedances were hard to read on the printed data and may be incorrect, that the data has not been run through a power flow to check the answers, and that the case has no line limits. [Link](https://labs.ece.uw.edu/pstca/pf57/pg_tca57bus.htm)
+- **Data source:** IEEE PES Power Grid Library, pglib-opf v23.07 (tag v23.07, commit dc6be4b2f85c), pglib_opf_case57_ieee.m, https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m (accessed 2026-11-18). Its header names the archive's ieee57cdf.txt as its source, converted by cdf2matp rev. 1.11 on 20 September 2004, and states Richard D. Christie's copyright of 1999 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the tag is d8b0c9e8b45265e57f52b7ab96880ad3a874cde5, the one of the file TENSA bundles. [Link](https://github.com/power-grid-lib/pglib-opf/blob/dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3/pglib_opf_case57_ieee.m)
+- **Data source:** S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee57,
   title        = {57 Bus Power Flow Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -1491,6 +1554,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{pglib_opf_case57_ieee,
   title        = {{PGLib-OPF} v23.07, pglib\_opf\_case57\_ieee.m},
   howpublished = {IEEE PES Power Grid Library},
@@ -1500,6 +1564,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{babaeinejadsarookolaee2019pglib,
   author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
   title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
@@ -1511,6 +1576,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1525,6 +1591,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1586,15 +1653,16 @@ The licence asks that this notice appear, in full, in every copy of the data:
 
 **Citations**
 
-- C. Barrows, A. Bloom, A. Ehlen, J. Ikaheimo, J. Jorgenson, D. Krishnamurthy, J. Lau, B. McBennett, M. O'Connell, E. Preston, A. Staid, G. Stephen and J. P. Watson, "The IEEE Reliability Test System: A Proposed 2019 Update," IEEE Transactions on Power Systems, vol. 35, no. 1, pp. 119-127, January 2020, doi:10.1109/TPWRS.2019.2925557. The paper that describes the RTS-GMLC; its accepted manuscript (https://www.osti.gov/biblio/1545004) was read. [DOI](https://doi.org/10.1109/TPWRS.2019.2925557)
-- RTS-GMLC, Reliability Test System - Grid Modernization Lab Consortium, GridMod/RTS-GMLC v0.2.3 (commit 3ece0d3725c8), RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW, https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW (accessed 2026-11-18). The repository's PSSE folder says the file was made from the repository's source data through its MATPOWER case and a PowerWorld Simulator 19 case, and was saved from PowerWorld; the file's first line is dated 7 November 2017. The repository's README states the data use agreement that is the licence, and describes the system as an updated version of the RTS-96. The git blob of the file at the tag is 41372a04c008b48027fbec4c239014bf3791b776, the one of the file TENSA bundles. [Link](https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW)
-- C. Grigg, P. Wong, P. Albrecht, R. Allan, M. Bhavaraju, R. Billinton, Q. Chen, C. Fong, S. Haddad, S. Kuruganty, W. Li, R. Mukerji, D. Patton, N. Rau, D. Reppen, A. Schneider, M. Shahidehpour and C. Singh, "The IEEE Reliability Test System-1996. A report prepared by the Reliability Test System Task Force of the Application of Probability Methods Subcommittee," IEEE Transactions on Power Systems, vol. 14, no. 3, pp. 1010-1020, August 1999, doi:10.1109/59.780914. The system the RTS-GMLC updates (three joined copies of the RTS of 1979, which the RTS-GMLC paper describes). The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/59.780914)
-- PSS/E load flow report RTSOP_PSSE_Hooman.txt, RTS-GMLC repository (commit 3ece0d3725c8), https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTSOP_PSSE_Hooman.txt (accessed 2026-11-18), provided by Hooman Ghaffarzadeh on 8 November 2017. The solution PSS/E 33 printed for a copy of the RAW file, which the case's checks compare a power flow with (see the verification). [Link](https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTSOP_PSSE_Hooman.txt)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** C. Barrows, A. Bloom, A. Ehlen, J. Ikaheimo, J. Jorgenson, D. Krishnamurthy, J. Lau, B. McBennett, M. O'Connell, E. Preston, A. Staid, G. Stephen and J. P. Watson, "The IEEE Reliability Test System: A Proposed 2019 Update," IEEE Transactions on Power Systems, vol. 35, no. 1, pp. 119-127, January 2020, doi:10.1109/TPWRS.2019.2925557. The paper that describes the RTS-GMLC; its accepted manuscript (https://www.osti.gov/biblio/1545004) was read. [DOI](https://doi.org/10.1109/TPWRS.2019.2925557)
+- **Data source:** RTS-GMLC, Reliability Test System - Grid Modernization Lab Consortium, GridMod/RTS-GMLC v0.2.3 (commit 3ece0d3725c8), RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW, https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW (accessed 2026-11-18). The repository's PSSE folder says the file was made from the repository's source data through its MATPOWER case and a PowerWorld Simulator 19 case, and was saved from PowerWorld; the file's first line is dated 7 November 2017. The repository's README states the data use agreement that is the licence, and describes the system as an updated version of the RTS-96. The git blob of the file at the tag is 41372a04c008b48027fbec4c239014bf3791b776, the one of the file TENSA bundles. [Link](https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW)
+- **System:** C. Grigg, P. Wong, P. Albrecht, R. Allan, M. Bhavaraju, R. Billinton, Q. Chen, C. Fong, S. Haddad, S. Kuruganty, W. Li, R. Mukerji, D. Patton, N. Rau, D. Reppen, A. Schneider, M. Shahidehpour and C. Singh, "The IEEE Reliability Test System-1996. A report prepared by the Reliability Test System Task Force of the Application of Probability Methods Subcommittee," IEEE Transactions on Power Systems, vol. 14, no. 3, pp. 1010-1020, August 1999, doi:10.1109/59.780914. The system the RTS-GMLC updates (three joined copies of the RTS of 1979, which the RTS-GMLC paper describes). The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/59.780914)
+- **Data source:** PSS/E load flow report RTSOP_PSSE_Hooman.txt, RTS-GMLC repository (commit 3ece0d3725c8), https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTSOP_PSSE_Hooman.txt (accessed 2026-11-18), provided by Hooman Ghaffarzadeh on 8 November 2017. The solution PSS/E 33 printed for a copy of the RAW file, which the case's checks compare a power flow with (see the verification). [Link](https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/RTS_Data/FormattedData/PSSE/RTSOP_PSSE_Hooman.txt)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{barrows2020rts,
   author  = {Barrows, Clayton and Bloom, Aaron and Ehlen, Ali and Ikaheimo, Jussi and Jorgenson, Jennie and Krishnamurthy, Dheepak and Lau, Jessica and McBennett, Brendan and O'Connell, Matthew and Preston, Eugene and Staid, Andrea and Stephen, Gord and Watson, Jean-Paul},
   title   = {The {IEEE} Reliability Test System: A Proposed 2019 Update},
@@ -1609,6 +1677,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{rts_gmlc_raw,
   title        = {{RTS-GMLC} v0.2.3, RTS-GMLC.RAW (PSS/E version 33)},
   author       = {{National Renewable Energy Laboratory and partners}},
@@ -1619,6 +1688,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{grigg1999rts96,
   author  = {Grigg, C. and Wong, P. and Albrecht, P. and Allan, R. and Bhavaraju, M. and Billinton, R. and Chen, Q. and Fong, C. and Haddad, S. and Kuruganty, S. and Li, W. and Mukerji, R. and Patton, D. and Rau, N. and Reppen, D. and Schneider, A. and Shahidehpour, M. and Singh, C.},
   title   = {The {IEEE} Reliability Test System-1996. A report prepared by the Reliability Test System Task Force of the Application of Probability Methods Subcommittee},
@@ -1633,6 +1703,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{rts_gmlc_psse_report,
   title        = {{PSS/E} load flow report {RTSOP\_PSSE\_Hooman.txt} of the {RTS-GMLC} case},
   author       = {Ghaffarzadeh, Hooman},
@@ -1644,6 +1715,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1702,15 +1774,16 @@ A part of the European high-voltage transmission system as the PEGASE project of
 
 **Citations**
 
-- C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, "AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE," arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read. [Link](https://arxiv.org/abs/1603.01533)
-- S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, "Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions," IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPWRS.2013.2251015)
-- MATPOWER, data/case89pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m (accessed 2026-11-18). Its header describes the data as a part of the European high voltage transmission network of 89 buses, 12 generators and 210 branches at 380, 220 and 150 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is 71f1cf78dc523e4a3ffe532261d0525297cbab8b, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, "AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE," arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read. [Link](https://arxiv.org/abs/1603.01533)
+- **System:** S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, "Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions," IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPWRS.2013.2251015)
+- **Data source:** MATPOWER, data/case89pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m (accessed 2026-11-18). Its header describes the data as a part of the European high voltage transmission network of 89 buses, 12 generators and 210 branches at 380, 220 and 150 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is 71f1cf78dc523e4a3ffe532261d0525297cbab8b, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{josz2016acpf,
   author        = {Josz, C{\'e}dric and Fliscounakis, St{\'e}phane and Maeght, Jean and Panciatici, Patrick},
   title         = {{AC} Power Flow Data in {MATPOWER} and {QCQP} Format: i{T}esla, {RTE} Snapshots, and {PEGASE}},
@@ -1721,6 +1794,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{fliscounakis2013contingency,
   author  = {Fliscounakis, St{\'e}phane and Panciatici, Patrick and Capitanescu, Florin and Wehenkel, Louis},
   title   = {Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions},
@@ -1735,6 +1809,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case89pegase,
   title        = {{MATPOWER} data/case89pegase.m},
   howpublished = {MATPOWER release 8.1},
@@ -1744,6 +1819,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1758,6 +1834,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1811,14 +1888,15 @@ The IEEE 118-bus test case of the University of Washington archive as MATPOWER h
 
 **Citations**
 
-- 118 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm (accessed 2026-11-17). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1962, typed in from a copy of the AEP document by Rich Christie at the University of Washington in 1993 (in PECO PSAP format, then in IEEE Common Data Format, ieee118cdf.txt). [Link](https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm)
-- MATPOWER, data/case118.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m (accessed 2026-11-17). Its header says it was converted from the archive's IEEE CDF file (ieee118cdf.txt) on 15 October 2014 by cdf2matp, that the base kV data come from the archive's PSAP file and were added by hand on 10 March 2006, and that branches 86-87 and 68-116 were changed from transmission lines to transformers with a tap ratio of 1 on 15 February 2019. ANDES's copy of the file (andes/cases/matpower/case118.m) is byte for byte this one. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case118 file. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** 118 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm (accessed 2026-11-17). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1962, typed in from a copy of the AEP document by Rich Christie at the University of Washington in 1993 (in PECO PSAP format, then in IEEE Common Data Format, ieee118cdf.txt). [Link](https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm)
+- **Data source:** MATPOWER, data/case118.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m (accessed 2026-11-17). Its header says it was converted from the archive's IEEE CDF file (ieee118cdf.txt) on 15 October 2014 by cdf2matp, that the base kV data come from the archive's PSAP file and were added by hand on 10 March 2006, and that branches 86-87 and 68-116 were changed from transmission lines to transformers with a tap ratio of 1 on 15 February 2019. ANDES's copy of the file (andes/cases/matpower/case118.m) is byte for byte this one. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case118 file. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee118,
   title        = {118 Bus Power Flow Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -1828,6 +1906,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case118,
   title        = {{MATPOWER} data/case118.m},
   howpublished = {MATPOWER release 8.0},
@@ -1837,6 +1916,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1851,6 +1931,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -1904,15 +1985,16 @@ A synthetic 200-bus power system built to look like a transmission system of cen
 
 **Citations**
 
-- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
-- ACTIVSg200: 200-bus synthetic grid, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location, and that it is free for commercial or non-commercial use (it names no licence); it offers the case in the PowerWorld, MATPOWER, PSS/E RAW and PSLF formats with the files for its transient stability models, and asks users to cite the appropriate papers. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/)
-- MATPOWER, data/case_ACTIVSg200.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg200.m (accessed 2026-11-18). Its header says it was created from ACTIV_SG_200.pwb, saved by PowerWorld Simulator version 20 Beta, and then by MATPOWER 6, dated 16 May 2017, and states the authors' copyright of 2017 under the Creative Commons Attribution 4.0 International licence. The file of release 8.0 is the same. The git blob of the file at the tag is 7f707e91b414de417f25492f47ed81cee8e6c981, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg200.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- **Data source:** ACTIVSg200: 200-bus synthetic grid, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location, and that it is free for commercial or non-commercial use (it names no licence); it offers the case in the PowerWorld, MATPOWER, PSS/E RAW and PSLF formats with the files for its transient stability models, and asks users to cite the appropriate papers. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/)
+- **Data source:** MATPOWER, data/case_ACTIVSg200.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg200.m (accessed 2026-11-18). Its header says it was created from ACTIV_SG_200.pwb, saved by PowerWorld Simulator version 20 Beta, and then by MATPOWER 6, dated 16 May 2017, and states the authors' copyright of 2017 under the Creative Commons Attribution 4.0 International licence. The file of release 8.0 is the same. The git blob of the file at the tag is 7f707e91b414de417f25492f47ed81cee8e6c981, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg200.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{birchfield2017grid,
   author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
   title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
@@ -1927,6 +2009,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{tamu_activsg200,
   title        = {{ACTIVSg200}: 200-bus synthetic grid},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -1936,6 +2019,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case_activsg200,
   title        = {{MATPOWER} data/case\_ACTIVSg200.m},
   howpublished = {MATPOWER release 8.1},
@@ -1945,6 +2029,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -1959,6 +2044,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -2014,14 +2100,15 @@ The IEEE 300-bus test case of the University of Washington archive as MATPOWER h
 
 **Citations**
 
-- 300 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm (accessed 2026-11-18). The page says the case was developed by the IEEE Test Systems Task Force under the direction of Mike Adibi in 1993, that the IEEE Common Data Format version was obtained from Fernando Alvarado at the University of Wisconsin, and that the PTI format version was provided by Joan Staron of PTI. The title line of the data file reads "13/05/91 CYME INTERNATIONAL 100.0 1991 S IEEE 300-BUS TEST SYSTEM". No publication that describes the data was found. [Link](https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm)
-- MATPOWER, data/case300.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m (accessed 2026-11-18). Its header says it was converted from the archive's IEEE CDF file (ieee300cdf.txt) on 18 November 2014 by cdf2matp, and the warnings at its end list what the conversion did (the negative generator outputs treated as load, the limit it gave the slack generator). ANDES's copy of the file (andes/cases/matpower/case300.m) is byte for byte this one. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case300 file. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** 300 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm (accessed 2026-11-18). The page says the case was developed by the IEEE Test Systems Task Force under the direction of Mike Adibi in 1993, that the IEEE Common Data Format version was obtained from Fernando Alvarado at the University of Wisconsin, and that the PTI format version was provided by Joan Staron of PTI. The title line of the data file reads "13/05/91 CYME INTERNATIONAL 100.0 1991 S IEEE 300-BUS TEST SYSTEM". No publication that describes the data was found. [Link](https://labs.ece.uw.edu/pstca/pf300/pg_tca300bus.htm)
+- **Data source:** MATPOWER, data/case300.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m (accessed 2026-11-18). Its header says it was converted from the archive's IEEE CDF file (ieee300cdf.txt) on 18 November 2014 by cdf2matp, and the warnings at its end list what the conversion did (the negative generator outputs treated as load, the limit it gave the slack generator). ANDES's copy of the file (andes/cases/matpower/case300.m) is byte for byte this one. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case300.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case300 file. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_ieee300,
   title        = {300 Bus Power Flow Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -2031,6 +2118,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case300,
   title        = {{MATPOWER} data/case300.m},
   howpublished = {MATPOWER release 8.0},
@@ -2040,6 +2128,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -2054,6 +2143,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -2106,15 +2196,16 @@ A medium part of the European high-voltage transmission system as the PEGASE pro
 
 **Citations**
 
-- C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, "AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE," arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read. [Link](https://arxiv.org/abs/1603.01533)
-- S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, "Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions," IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPWRS.2013.2251015)
-- MATPOWER, data/case1354pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m (accessed 2026-11-18). Its header describes the data as a medium part of the European high voltage transmission network of 1,354 buses, 260 generators and 1,991 branches at 380 and 220 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is d6ede376f35af472b45b93ae771209c483427c26, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **Data source:** C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, "AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE," arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read. [Link](https://arxiv.org/abs/1603.01533)
+- **System:** S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, "Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions," IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read. [DOI](https://doi.org/10.1109/TPWRS.2013.2251015)
+- **Data source:** MATPOWER, data/case1354pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m (accessed 2026-11-18). Its header describes the data as a medium part of the European high voltage transmission network of 1,354 buses, 260 generators and 1,991 branches at 380 and 220 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is d6ede376f35af472b45b93ae771209c483427c26, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{josz2016acpf,
   author        = {Josz, C{\'e}dric and Fliscounakis, St{\'e}phane and Maeght, Jean and Panciatici, Patrick},
   title         = {{AC} Power Flow Data in {MATPOWER} and {QCQP} Format: i{T}esla, {RTE} Snapshots, and {PEGASE}},
@@ -2125,6 +2216,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{fliscounakis2013contingency,
   author  = {Fliscounakis, St{\'e}phane and Panciatici, Patrick and Capitanescu, Florin and Wehenkel, Louis},
   title   = {Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions},
@@ -2139,6 +2231,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case1354pegase,
   title        = {{MATPOWER} data/case1354pegase.m},
   howpublished = {MATPOWER release 8.1},
@@ -2148,6 +2241,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -2162,6 +2256,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -2213,15 +2308,16 @@ A synthetic 2,000-bus power system built to look like a transmission system on t
 
 **Citations**
 
-- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
-- ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/)
-- MATPOWER, data/case_ACTIVSg2000.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m (accessed 2026-11-18). Its header says it was created from ACTIVSg2000_AUG-09-2018.pwb, saved by PowerWorld Simulator version 21 (build date August 30, 2018), then by MATPOWER 6, dated August 9, 2018, and states the authors' copyright of 2017 to 2018 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the commit is 26c5add5b09e3d24d16cef254932ac385a37ebcc, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+- **System:** A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- **Data source:** ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/)
+- **Data source:** MATPOWER, data/case_ACTIVSg2000.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m (accessed 2026-11-18). Its header says it was created from ACTIVSg2000_AUG-09-2018.pwb, saved by PowerWorld Simulator version 21 (build date August 30, 2018), then by MATPOWER 6, dated August 9, 2018, and states the authors' copyright of 2017 to 2018 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the commit is 26c5add5b09e3d24d16cef254932ac385a37ebcc, the one of the file TENSA bundles. [Link](https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
 
 BibTeX:
 
 ```bibtex
+% System
 @article{birchfield2017grid,
   author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
   title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
@@ -2236,6 +2332,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{tamu_activsg2000,
   title        = {{ACTIVSg2000}: 2000-bus synthetic grid on footprint of Texas},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -2245,6 +2342,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{matpower_case_activsg2000,
   title        = {{MATPOWER} data/case\_ACTIVSg2000.m},
   howpublished = {MATPOWER release 8.1},
@@ -2254,6 +2352,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -2268,6 +2367,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{cui2021andes,
   author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
   title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
@@ -2322,15 +2422,16 @@ The 200-bus synthetic Illinois grid of the Electric Grid Test Case Repository of
 
 **Citations**
 
-- ACTIVSg200: 200-bus synthetic grid, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location, and that it is free for commercial or non-commercial use (it names no licence); it offers the case in the PowerWorld, MATPOWER, PSS/E RAW and PSLF formats with the files for its transient stability models, and asks users to cite the appropriate papers. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/)
-- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
-- T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
-- T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
-- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+- **Data source:** ACTIVSg200: 200-bus synthetic grid, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location, and that it is free for commercial or non-commercial use (it names no licence); it offers the case in the PowerWorld, MATPOWER, PSS/E RAW and PSLF formats with the files for its transient stability models, and asks users to cite the appropriate papers. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/)
+- **System:** A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- **System:** T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
+- **System:** T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
+- **Data source:** References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{tamu_activsg200,
   title        = {{ACTIVSg200}: 200-bus synthetic grid},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -2340,6 +2441,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{birchfield2017grid,
   author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
   title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
@@ -2354,6 +2456,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{xu2018modeling,
   author  = {Xu, Ti and Birchfield, Adam B. and Overbye, Thomas J.},
   title   = {Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids},
@@ -2368,6 +2471,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @inproceedings{xu2017creation,
   author    = {Xu, Ti and Birchfield, Adam B. and Shetye, Komal S. and Overbye, Thomas J.},
   title     = {Creation of Synthetic Electric Grid Models for Transient Stability Studies},
@@ -2379,6 +2483,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{tamu_references,
   title        = {References},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -2418,16 +2523,17 @@ The 2000-bus synthetic grid on the footprint of Texas of the Texas A&M repositor
 
 **Citations**
 
-- ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/)
-- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
-- T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
-- T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
-- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
-- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+- **Data source:** ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/)
+- **System:** A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- **System:** T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
+- **System:** T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
+- **Data source:** References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+- **Data source:** PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{tamu_activsg2000,
   title        = {{ACTIVSg2000}: 2000-bus synthetic grid on footprint of Texas},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -2437,6 +2543,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{birchfield2017grid,
   author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
   title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
@@ -2451,6 +2558,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{xu2018modeling,
   author  = {Xu, Ti and Birchfield, Adam B. and Overbye, Thomas J.},
   title   = {Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids},
@@ -2465,6 +2573,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @inproceedings{xu2017creation,
   author    = {Xu, Ti and Birchfield, Adam B. and Shetye, Komal S. and Overbye, Thomas J.},
   title     = {Creation of Synthetic Electric Grid Models for Transient Stability Studies},
@@ -2476,6 +2585,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{tamu_references,
   title        = {References},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -2485,6 +2595,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{sienna_powersystemstestdata,
   title        = {{PowerSystemsTestData}},
   author       = {{Sienna platform}},
@@ -2538,14 +2649,15 @@ The reduced Western Interconnection model of the National Laboratory of the Rock
 
 **Citations**
 
-- H. Yuan, R. S. Biswas, J. Tan and Y. Zhang, "Developing a Reduced 240-Bus WECC Dynamic Model for Frequency Response Study of High Renewable Integration," 2020 IEEE/PES Transmission and Distribution Conference and Exposition (T&D), October 2020, pp. 1-5, doi:10.1109/TD39804.2020.9299666. The paper the files' headers and the NLR readme name as the reference of the system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TD39804.2020.9299666)
-- J. Price and J. Goodin, "Reduced network modeling of WECC as a market design prototype," 2011 IEEE Power and Energy Society General Meeting, July 2011, pp. 1-6, doi:10.1109/PES.2011.6039476. The 240-bus model the NLR page says the repository's system starts from. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/PES.2011.6039476)
-- Test Case Repository for High Energy Study, 240-Bus Western Electricity Coordinating Council Test System, National Laboratory of the Rockies (NLR, formerly the National Renewable Energy Laboratory), https://www.nlr.gov/grid/test-case-repository.html (accessed 2026-11-18). The page describes the reduced WECC model, its 2018 base case and its dynamic models, offers the download used here (wecc-osl.zip, the cases of the 2021 IEEE-NASPI Oscillation Source Location contest) and asks users to cite the original author. [Link](https://www.nlr.gov/grid/test-case-repository.html)
-- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+- **System:** H. Yuan, R. S. Biswas, J. Tan and Y. Zhang, "Developing a Reduced 240-Bus WECC Dynamic Model for Frequency Response Study of High Renewable Integration," 2020 IEEE/PES Transmission and Distribution Conference and Exposition (T&D), October 2020, pp. 1-5, doi:10.1109/TD39804.2020.9299666. The paper the files' headers and the NLR readme name as the reference of the system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TD39804.2020.9299666)
+- **System:** J. Price and J. Goodin, "Reduced network modeling of WECC as a market design prototype," 2011 IEEE Power and Energy Society General Meeting, July 2011, pp. 1-6, doi:10.1109/PES.2011.6039476. The 240-bus model the NLR page says the repository's system starts from. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/PES.2011.6039476)
+- **Data source:** Test Case Repository for High Energy Study, 240-Bus Western Electricity Coordinating Council Test System, National Laboratory of the Rockies (NLR, formerly the National Renewable Energy Laboratory), https://www.nlr.gov/grid/test-case-repository.html (accessed 2026-11-18). The page describes the reduced WECC model, its 2018 base case and its dynamic models, offers the download used here (wecc-osl.zip, the cases of the 2021 IEEE-NASPI Oscillation Source Location contest) and asks users to cite the original author. [Link](https://www.nlr.gov/grid/test-case-repository.html)
+- **Data source:** PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
 
 BibTeX:
 
 ```bibtex
+% System
 @inproceedings{yuan2020developing,
   author    = {Yuan, Haoyu and Biswas, Rajarshi Sen and Tan, Jin and Zhang, Yingchen},
   title     = {Developing a Reduced 240-Bus {WECC} Dynamic Model for Frequency Response Study of High Renewable Integration},
@@ -2558,6 +2670,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @inproceedings{price2011reduced,
   author    = {Price, James and Goodin, John},
   title     = {Reduced network modeling of {WECC} as a market design prototype},
@@ -2570,6 +2683,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{nlr_test_case_repository,
   title        = {Test Case Repository for High Energy Study: 240-Bus Western Electricity Coordinating Council Test System},
   author       = {{National Laboratory of the Rockies}},
@@ -2580,6 +2694,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{sienna_powersystemstestdata,
   title        = {{PowerSystemsTestData}},
   author       = {{Sienna platform}},
@@ -2630,15 +2745,16 @@ The benchmark systems of the IEEE PES Task Force on Benchmark Systems for Stabil
 
 **Citations**
 
-- Benchmark Systems for Small-Signal Stability Analysis and Control, IEEE PES Task Force on Benchmark Systems for Stability Controls, https://cmte.ieee.org/pes-psdp/benchmark-systems-2/ (accessed 2026-11-18). The page lists the benchmark systems with, for each, the reports and the files of the programs they were prepared for. It says the reports and implementations are not peer-reviewed documents, that the authors give no support, and that any citation of the reports should mention them as working papers. [Link](https://cmte.ieee.org/pes-psdp/benchmark-systems-2/)
-- IEEE PES Task Force on Benchmark Systems for Stability Controls, "Benchmark Systems for Small-Signal Stability Analysis and Control," Technical Report PES-TR18, IEEE Power & Energy Society, 1 August 2015, 390 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18 (accessed 2026-11-18). The report that documents the benchmark systems consistently, which the benchmark page points to. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18)
-- C. Canizares, T. Fernandes, E. Geraldi, L. Gerin-Lajoie, M. Gibbard, I. Hiskens, J. Kersulis, R. Kuiava, L. Lima, F. DeMarco, N. Martins, B. C. Pal, A. Piardi, R. Ramos, J. dos Santos, D. Silva, A. K. Singh, B. Tamimi and D. Vowles, "Benchmark Models for the Analysis and Control of Small-Signal Oscillatory Dynamics in Power Systems," IEEE Transactions on Power Systems, vol. 32, no. 1, pp. 715-722, January 2017, doi:10.1109/TPWRS.2016.2561263. The paper of the Task Force on its benchmark systems, with the authors as Crossref lists them. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2561263)
-- Simplified 14-generator model of the South East Australian power system, version 04, The University of Adelaide, http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/ (accessed 2026-11-18). The developers' server, which the benchmark page names for this system; its listing shows the model data (85 KB), the small-signal and state-space results, a 1.5 GB archive of transient stability results and the report of the model. Only the listing was opened. [Link](http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/)
-- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+- **Data source:** Benchmark Systems for Small-Signal Stability Analysis and Control, IEEE PES Task Force on Benchmark Systems for Stability Controls, https://cmte.ieee.org/pes-psdp/benchmark-systems-2/ (accessed 2026-11-18). The page lists the benchmark systems with, for each, the reports and the files of the programs they were prepared for. It says the reports and implementations are not peer-reviewed documents, that the authors give no support, and that any citation of the reports should mention them as working papers. [Link](https://cmte.ieee.org/pes-psdp/benchmark-systems-2/)
+- **System:** IEEE PES Task Force on Benchmark Systems for Stability Controls, "Benchmark Systems for Small-Signal Stability Analysis and Control," Technical Report PES-TR18, IEEE Power & Energy Society, 1 August 2015, 390 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18 (accessed 2026-11-18). The report that documents the benchmark systems consistently, which the benchmark page points to. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18)
+- **System:** C. Canizares, T. Fernandes, E. Geraldi, L. Gerin-Lajoie, M. Gibbard, I. Hiskens, J. Kersulis, R. Kuiava, L. Lima, F. DeMarco, N. Martins, B. C. Pal, A. Piardi, R. Ramos, J. dos Santos, D. Silva, A. K. Singh, B. Tamimi and D. Vowles, "Benchmark Models for the Analysis and Control of Small-Signal Oscillatory Dynamics in Power Systems," IEEE Transactions on Power Systems, vol. 32, no. 1, pp. 715-722, January 2017, doi:10.1109/TPWRS.2016.2561263. The paper of the Task Force on its benchmark systems, with the authors as Crossref lists them. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2561263)
+- **Data source:** Simplified 14-generator model of the South East Australian power system, version 04, The University of Adelaide, http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/ (accessed 2026-11-18). The developers' server, which the benchmark page names for this system; its listing shows the model data (85 KB), the small-signal and state-space results, a 1.5 GB archive of transient stability results and the report of the model. Only the listing was opened. [Link](http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/)
+- **Data source:** PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{pes_benchmark_page,
   title        = {Benchmark Systems for Small-Signal Stability Analysis and Control},
   author       = {{IEEE PES Task Force on Benchmark Systems for Stability Controls}},
@@ -2649,6 +2765,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @techreport{pestr18,
   author      = {{IEEE PES Task Force on Benchmark Systems for Stability Controls}},
   title       = {Benchmark Systems for Small-Signal Stability Analysis and Control},
@@ -2662,6 +2779,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{canizares2017benchmark,
   author  = {Canizares, C. and Fernandes, T. and Geraldi, E. and Gerin-Lajoie, L. and Gibbard, M. and Hiskens, I. and Kersulis, J. and Kuiava, R. and Lima, L. and DeMarco, F. and Martins, N. and Pal, B. C. and Piardi, A. and Ramos, R. and dos Santos, J. and Silva, D. and Singh, A. K. and Tamimi, B. and Vowles, D.},
   title   = {Benchmark Models for the Analysis and Control of Small-Signal Oscillatory Dynamics in Power Systems},
@@ -2676,6 +2794,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{au14_adelaide,
   title        = {Simplified 14-generator model of the {South East Australian} power system, version 04},
   howpublished = {The University of Adelaide, Power Systems Control group},
@@ -2685,6 +2804,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{sienna_powersystemstestdata,
   title        = {{PowerSystemsTestData}},
   author       = {{Sienna platform}},
@@ -2739,13 +2859,14 @@ The Nordic test system of the IEEE PES Task Force on Test Systems for Voltage St
 
 **Citations**
 
-- IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, "Test Systems for Voltage Stability Analysis and Security Assessment," Technical Report PES-TR19, IEEE Power & Energy Society, 25 August 2015, 161 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19 (accessed 2026-11-18). The report that defines the Nordic and RVS test systems, which the repository's README asks to cite. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19)
-- Test Systems for Voltage Stability Analysis and Security Assessment, IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, https://cmte.ieee.org/pes-psdp/489-2/ (accessed 2026-11-18). The page describes the Nordic test system (a variant of the Nordic32 system, 50 Hz, 74 buses, 102 branches, 20 generators with step-up transformers and overexcitation limiters, 22 loads controlled by load tap changers) and gives its input data for RAMSES, PSS/E, ANATEM and DigSilent PowerFactory, and sample outputs. [Link](https://cmte.ieee.org/pes-psdp/489-2/)
-- IEEE Nordic Test System in RAMSES format, SPS-L, https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system (accessed 2026-11-18). A repository of the data for the STEPSS platform (RAMSES and HELIOS), under the Apache License 2.0, whose README asks that users of the system cite Technical Report PES-TR19. [Link](https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system)
+- **System:** IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, "Test Systems for Voltage Stability Analysis and Security Assessment," Technical Report PES-TR19, IEEE Power & Energy Society, 25 August 2015, 161 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19 (accessed 2026-11-18). The report that defines the Nordic and RVS test systems, which the repository's README asks to cite. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19)
+- **Data source:** Test Systems for Voltage Stability Analysis and Security Assessment, IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, https://cmte.ieee.org/pes-psdp/489-2/ (accessed 2026-11-18). The page describes the Nordic test system (a variant of the Nordic32 system, 50 Hz, 74 buses, 102 branches, 20 generators with step-up transformers and overexcitation limiters, 22 loads controlled by load tap changers) and gives its input data for RAMSES, PSS/E, ANATEM and DigSilent PowerFactory, and sample outputs. [Link](https://cmte.ieee.org/pes-psdp/489-2/)
+- **Data source:** IEEE Nordic Test System in RAMSES format, SPS-L, https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system (accessed 2026-11-18). A repository of the data for the STEPSS platform (RAMSES and HELIOS), under the Apache License 2.0, whose README asks that users of the system cite Technical Report PES-TR19. [Link](https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system)
 
 BibTeX:
 
 ```bibtex
+% System
 @techreport{pestr19,
   author      = {{IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment}},
   title       = {Test Systems for Voltage Stability Analysis and Security Assessment},
@@ -2759,6 +2880,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{pes_nordic_page,
   title        = {Test Systems for Voltage Stability Analysis and Security Assessment},
   author       = {{IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment}},
@@ -2769,6 +2891,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{spsl_nordic,
   title        = {{IEEE} Nordic Test System in {RAMSES} format},
   author       = {{SPS-L}},
@@ -2811,13 +2934,14 @@ Two dynamic stability test cases of the University of Washington Power Systems T
 
 **Citations**
 
-- 50 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm (accessed 2026-11-18). The page says the case, with a 145-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University, was previously distributed by Iowa State on diskette and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the dynamic and exciter data seem to be in the EPRI format of the manual EPRI EL-2001-CCM. [Link](https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm)
-- 17 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm (accessed 2026-11-18). The page says the case, with a 162-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the classical dynamic data seems to be in the EPRI format. [Link](https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm)
-- V. Vittal, D. Martin, R. Chu, J. Fish, J. C. Giri, C. K. Tang, F. Eugenio Villaseca and R. G. Farmer, "Transient stability test systems for direct stability methods," IEEE Transactions on Power Systems, vol. 7, no. 1, pp. 37-43, February 1992, doi:10.1109/59.141684. Probably the IEEE committee report that the archive's pages say the two cases were the subject of: the pages do not name it, and the identification rests on a search result that describes the report's test systems as a 17-generator, 162-bus system and a 50-generator, 145-bus system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the repository record of Cleveland State University (https://engagedscholarship.csuohio.edu/enece_facpub/82) was opened and its abstract read, which says the report presents a standard set of test system data with benchmark results. Its text could not be opened, so the identification was not confirmed from it. [DOI](https://doi.org/10.1109/59.141684)
+- **Data source:** 50 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm (accessed 2026-11-18). The page says the case, with a 145-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University, was previously distributed by Iowa State on diskette and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the dynamic and exciter data seem to be in the EPRI format of the manual EPRI EL-2001-CCM. [Link](https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm)
+- **Data source:** 17 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm (accessed 2026-11-18). The page says the case, with a 162-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the classical dynamic data seems to be in the EPRI format. [Link](https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm)
+- **System:** V. Vittal, D. Martin, R. Chu, J. Fish, J. C. Giri, C. K. Tang, F. Eugenio Villaseca and R. G. Farmer, "Transient stability test systems for direct stability methods," IEEE Transactions on Power Systems, vol. 7, no. 1, pp. 37-43, February 1992, doi:10.1109/59.141684. Probably the IEEE committee report that the archive's pages say the two cases were the subject of: the pages do not name it, and the identification rests on a search result that describes the report's test systems as a 17-generator, 162-bus system and a 50-generator, 145-bus system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the repository record of Cleveland State University (https://engagedscholarship.csuohio.edu/enece_facpub/82) was opened and its abstract read, which says the report presents a standard set of test system data with benchmark results. Its text could not be opened, so the identification was not confirmed from it. [DOI](https://doi.org/10.1109/59.141684)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca_dyn50,
   title        = {50 Generator Dynamic Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -2827,6 +2951,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{uw_pstca_dyn17,
   title        = {17 Generator Dynamic Test Case},
   howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
@@ -2836,6 +2961,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{vittal1992transient,
   author  = {Vittal, V. and Martin, D. and Chu, R. and Fish, J. and Giri, J. C. and Tang, C. K. and Villaseca, F. Eugenio and Farmer, R. G.},
   title   = {Transient stability test systems for direct stability methods},
@@ -2880,12 +3006,13 @@ The case files that come with MATPOWER, the power flow and optimal power flow pa
 
 **Citations**
 
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
-- R. D. Zimmerman and C. E. Murillo-Sanchez, MATPOWER (Version 8.1), 2025 [Software], https://matpower.org, doi:10.5281/zenodo.15871662. The citation the MATPOWER README gives for version 8.1 of the software; the general, version-independent DOI is 10.5281/zenodo.3236535. Both DOIs resolve to Zenodo. [DOI](https://doi.org/10.5281/zenodo.15871662)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Software:** R. D. Zimmerman and C. E. Murillo-Sanchez, MATPOWER (Version 8.1), 2025 [Software], https://matpower.org, doi:10.5281/zenodo.15871662. The citation the MATPOWER README gives for version 8.1 of the software; the general, version-independent DOI is 10.5281/zenodo.3236535. Both DOIs resolve to Zenodo. [DOI](https://doi.org/10.5281/zenodo.15871662)
 
 BibTeX:
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -2900,6 +3027,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @misc{zimmerman2025matpower,
   author       = {Zimmerman, R. D. and Murillo-S{\'a}nchez, C. E.},
   title        = {{MATPOWER} (Version 8.1)},
@@ -2941,13 +3069,14 @@ The Power Grid Lib of the IEEE PES Task Force on Benchmarks for Validation of Em
 
 **Citations**
 
-- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
-- IEEE PES Power Grid Library, pglib-opf, https://github.com/power-grid-lib/pglib-opf (accessed 2026-11-18). The repository of the benchmark library, curated by the IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms; its README asks that the version number be named when it is referenced. [Link](https://github.com/power-grid-lib/pglib-opf)
-- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- **Data source:** S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- **Data source:** IEEE PES Power Grid Library, pglib-opf, https://github.com/power-grid-lib/pglib-opf (accessed 2026-11-18). The repository of the benchmark library, curated by the IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms; its README asks that the version number be named when it is referenced. [Link](https://github.com/power-grid-lib/pglib-opf)
+- **Software:** R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{babaeinejadsarookolaee2019pglib,
   author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
   title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
@@ -2959,6 +3088,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Data source
 @misc{pglib_opf,
   title        = {{PGLib-OPF}: {IEEE PES} Power Grid Library, Optimal Power Flow},
   author       = {{IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms}},
@@ -2969,6 +3099,7 @@ BibTeX:
 ```
 
 ```bibtex
+% Software
 @article{zimmerman2011matpower,
   author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
   title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
@@ -3013,11 +3144,12 @@ The archive that made the IEEE 14, 30, 57, 118 and 300-bus power flow cases, the
 
 **Citations**
 
-- Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, maintained by R. D. Christie, https://labs.ece.uw.edu/pstca/ (accessed 2026-11-18). The archive's front page lists the power flow cases of 14, 30, 57, 118 and 300 buses, the dynamic cases, the Reliability Test System (1979 and 1996) and other material; its introduction (last updated August 1999) holds the disclaimer and content policy. [Link](https://labs.ece.uw.edu/pstca/)
+- **Data source:** Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, maintained by R. D. Christie, https://labs.ece.uw.edu/pstca/ (accessed 2026-11-18). The archive's front page lists the power flow cases of 14, 30, 57, 118 and 300 buses, the dynamic cases, the Reliability Test System (1979 and 1996) and other material; its introduction (last updated August 1999) holds the disclaimer and content policy. [Link](https://labs.ece.uw.edu/pstca/)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{uw_pstca,
   title        = {Power Systems Test Case Archive},
   author       = {Christie, Richard D.},
@@ -3057,12 +3189,13 @@ The repository of synthetic grids of Texas A&M University: ACTIVSg200, 500, 2000
 
 **Citations**
 
-- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
-- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- **Data source:** References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+- **System:** A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{tamu_references,
   title        = {References},
   howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
@@ -3072,6 +3205,7 @@ BibTeX:
 ```
 
 ```bibtex
+% System
 @article{birchfield2017grid,
   author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
   title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
@@ -3115,11 +3249,12 @@ The Power Systems Test Case Archive of the School of Mathematics of the Universi
 
 **Citations**
 
-- Power Systems Test Case Archive, GB Network, School of Mathematics, University of Edinburgh, maintained by W. Bukhsh, https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/ (accessed 2026-11-18; the archive's older address, www.maths.ed.ac.uk/optenergy/NetworkData/, redirects there). The page says the data is a detailed model of the transmission network of Great Britain with 2224 nodes, 3207 branches and 394 generators, obtained from public data on the website of National Grid, and offers it as GBnetwork.m. The archive asks that users cite W. A. Bukhsh and K. McKinnon, "Network data of real transmission networks," April 2013; that report was not found and is not cited here. [Link](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/)
+- **Data source:** Power Systems Test Case Archive, GB Network, School of Mathematics, University of Edinburgh, maintained by W. Bukhsh, https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/ (accessed 2026-11-18; the archive's older address, www.maths.ed.ac.uk/optenergy/NetworkData/, redirects there). The page says the data is a detailed model of the transmission network of Great Britain with 2224 nodes, 3207 branches and 394 generators, obtained from public data on the website of National Grid, and offers it as GBnetwork.m. The archive asks that users cite W. A. Bukhsh and K. McKinnon, "Network data of real transmission networks," April 2013; that report was not found and is not cited here. [Link](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/)
 
 BibTeX:
 
 ```bibtex
+% Data source
 @misc{edinburgh_gb,
   title        = {Power Systems Test Case Archive: {GB} Network},
   author       = {Bukhsh, Waqquas A.},

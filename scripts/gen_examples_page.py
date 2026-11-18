@@ -55,8 +55,9 @@ The cases marked as first run are copied into an empty workspace the first time 
 starts. Any case can be added later. In the app, **Example cases** lists them: it is the button
 in the Workspace part of the Project tab, an item of the Workspace menu and a command in the
 command palette. The cases are grouped by what they support. **Add to workspace** copies a
-case's file in and **Open** loads it. **Cite** shows its references and copies them as text or
-as BibTeX, and the links to its source and licence open in a new tab. A case that is only links
+case's file in and **Open** loads it. **Cite** shows its references, each marked as the publication of
+the system, the source of the data, the software or a dynamic model, and copies them as text or
+as BibTeX with those marks, and the links to its source and licence open in a new tab. A case that is only links
 to data TENSA does not hold has an **Open source page** link instead. From the command line:
 
 ```bash
@@ -117,6 +118,14 @@ def _source_paragraph(example: Example) -> str:
         return "TENSA holds no file of this case; the links below say where to get it."
     came = f" from <{prov.source_url}>" if prov.source_url else ""
     when = f", retrieved {prov.retrieved.isoformat()}" if prov.retrieved else ""
+    if prov.built:
+        # TENSA writes this file itself; the URL is the script, not a place it was fetched from.
+        script = f" with the script at <{prov.source_url}>" if prov.source_url else ""
+        day = f", written {prov.retrieved.isoformat()}" if prov.retrieved else ""
+        return (
+            f"Bundled with TENSA as `{prov.path}`. TENSA builds this file itself{script}{day}; "
+            f"it is not retrieved from anywhere. SHA-256 `{prov.sha256}`."
+        )
     if prov.kind == "bundled":
         return f"Bundled with TENSA as `{prov.path}`{came}{when}. SHA-256 `{prov.sha256}`."
     text = (
@@ -138,6 +147,8 @@ def _licence_paragraph(example: Example) -> str:
 
 
 def _render_example(example: Example) -> list[str]:
+    from tensa.core.example_catalog import CITATION_ROLE_LABELS, citation_bibtex, quoted_notice
+
     out = [f"### {example.title} {{ #{example.id} }}", "", example.summary, ""]
     kind = "Dynamic" if example.category == "dynamic" else "Steady state"
     out += [f"- **Id:** `{example.id}`", f"- **Kind:** {kind}", f"- **Size:** {_size(example)}"]
@@ -149,8 +160,6 @@ def _render_example(example: Example) -> list[str]:
     out += ["", f"**Source.** {_source_paragraph(example)}", ""]
     out += [f"**Licence.** {_licence_paragraph(example)}", ""]
     if example.licence.notice:
-        from tensa.core.example_catalog import quoted_notice
-
         out += [
             "The licence asks that this notice appear, in full, in every copy of the data:",
             "",
@@ -161,7 +170,7 @@ def _render_example(example: Example) -> list[str]:
     if example.citations:
         out += ["**Citations**", ""]
         for citation in example.citations:
-            line = f"- {citation.text}"
+            line = f"- **{CITATION_ROLE_LABELS[citation.role]}:** {citation.text}"
             if citation.doi:
                 line += f" [DOI](https://doi.org/{citation.doi})"
             elif citation.url:
@@ -169,7 +178,7 @@ def _render_example(example: Example) -> list[str]:
             out.append(line)
         out += ["", "BibTeX:", ""]
         for citation in example.citations:
-            out += ["```bibtex", citation.bibtex.strip(), "```", ""]
+            out += ["```bibtex", citation_bibtex(citation), "```", ""]
     if example.links:
         out += ["**Links**", ""]
         for link in example.links:

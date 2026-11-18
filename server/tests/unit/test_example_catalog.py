@@ -193,8 +193,21 @@ def test_an_entry_may_not_write_one_name_twice() -> None:
         ({"provenance": {"kind": "andes", "path": "a.xlsx", "sha256": "ABC"}}, "sha256"),
         ({"unknown_field": 1}, "unknown_field"),
         ({"size": {"buses": 0, "generators": 1}}, "buses"),
-        ({"citations": [{"text": "T", "bibtex": "@misc{}", "doi": "not-a-doi"}]}, "doi"),
-        ({"citations": [{"text": "T", "bibtex": "@misc{}", "url": "javascript:alert(1)"}]}, "url"),
+        ({"citations": [{"role": "data", "text": "T", "bibtex": "@misc{}", "doi": "x"}]}, "doi"),
+        (
+            {
+                "citations": [
+                    {"role": "data", "text": "T", "bibtex": "@misc{}", "url": "javascript:alert(1)"}
+                ]
+            },
+            "url",
+        ),
+        ({"citations": [{"text": "T", "bibtex": "@misc{}"}]}, "role"),
+        ({"citations": [{"role": "author", "text": "T", "bibtex": "@misc{}"}]}, "role"),
+        (
+            {"provenance": {"kind": "andes", "path": "a.xlsx", "sha256": _SHA, "built": True}},
+            "only a bundled entry can be built",
+        ),
         ({"licence": {"name": "X", "url": "ftp://example.org/licence"}}, "url"),
     ],
 )
@@ -216,6 +229,21 @@ def test_a_bundled_entry_needs_the_url_and_the_day_it_was_retrieved() -> None:
     assert example.provenance.retrieved is not None
     without_date = {k: v for k, v in bundled.items() if k != "retrieved"}
     assert "retrieved" in _problem(_entry(provenance=without_date))
+
+
+def test_a_file_tensa_builds_says_so_and_a_file_it_retrieves_does_not() -> None:
+    bundled = {
+        "kind": "bundled",
+        "path": "a.m",
+        "sha256": _SHA,
+        "source_url": "https://example.org/a.m",
+        "retrieved": "2026-11-17",
+    }
+    (taken,) = parse_catalog(json.dumps(_catalog(_entry(provenance=bundled)))).examples
+    (built,) = parse_catalog(
+        json.dumps(_catalog(_entry(provenance={**bundled, "built": True})))
+    ).examples
+    assert taken.provenance.built is False and built.provenance.built is True
 
 
 @pytest.mark.parametrize(
@@ -996,6 +1024,25 @@ def test_every_file_entry_of_the_catalog_names_what_it_must() -> None:
         assert example.citations, example.id
         for citation in example.citations:
             assert citation.text.strip() and citation.bibtex.startswith("@"), example.id
+        # A reference that says where the case itself is from: its publication or its dataset.
+        assert {c.role for c in example.citations} & {"system", "data"}, example.id
+        # And a record of how its results were checked, with at least one check written down.
+        verification = example.verification
+        assert verification is not None and verification.summary.strip(), example.id
+        assert verification.checks, example.id
+
+
+def test_the_wscc9_file_is_built_by_tensa_from_a_script_at_a_url_that_survives_a_merge() -> None:
+    """The file is written by ``scripts/build_wscc9.py``, which is no place a file is fetched
+    from, and its address is not a commit of a branch that a squash merge would orphan."""
+    wscc9 = load_catalog().get("wscc9")
+    assert wscc9 is not None
+    assert wscc9.provenance.built is True
+    assert wscc9.provenance.source_url == (
+        "https://github.com/Roger-GO/TENSA/blob/main/scripts/build_wscc9.py"
+    )
+    # No other file of the catalog is built: the others are copied from where they are said to be.
+    assert [e.id for e in load_catalog().examples if e.provenance.built] == ["wscc9"]
 
 
 def test_a_loaded_catalog_is_not_changed_by_a_caller() -> None:

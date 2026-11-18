@@ -54,6 +54,17 @@ Analysis = Literal["pf", "tds", "eig"]
 CheckKind = Literal[
     "independent-solver", "published", "stored-solution", "ring-down", "regression-baseline"
 ]
+CitationRole = Literal["system", "data", "software", "model"]
+
+# What each role of a citation is called wherever a reference is shown, copied or written to a
+# file (the Cite panel, ``tensa examples cite``, ``EXAMPLE-SOURCES.md``, the documentation
+# page). The web client keeps the same words in ``web/src/lib/exampleCases.ts``.
+CITATION_ROLE_LABELS: dict[str, str] = {
+    "system": "System",
+    "data": "Data source",
+    "software": "Software",
+    "model": "Dynamic model",
+}
 
 _Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 _Url = Annotated[str, StringConstraints(pattern=r"^https?://\S+$", max_length=500)]
@@ -145,7 +156,19 @@ class Provenance(_Model):
         ),
     )
     retrieved: date | None = Field(
-        None, description="The day the file was retrieved from ``source_url``."
+        None,
+        description=(
+            "The day the file was retrieved from ``source_url`` (the day it was written, for "
+            "a file that is ``built``)."
+        ),
+    )
+    built: bool = Field(
+        False,
+        description=(
+            "``true`` for a bundled file that TENSA writes itself, with the script in this "
+            "repository that ``source_url`` names, and not one taken from a source. It is "
+            "said so wherever the file's origin is, instead of a retrieval."
+        ),
     )
 
 
@@ -164,6 +187,15 @@ class ExtraFile(_Model):
 
 
 class Citation(_Model):
+    role: CitationRole = Field(
+        ...,
+        description=(
+            "What the reference is: ``system`` (the publication that defines the test system), "
+            "``data`` (the dataset, archive or library the file comes from, or was checked "
+            "against), ``software`` (the program the case is run with or was made for) or "
+            "``model`` (the documentation of a dynamic model the case uses)."
+        ),
+    )
     text: str = Field(..., description="The reference as plain text.", max_length=1200)
     bibtex: str = Field(..., description="The same reference as a BibTeX entry.", max_length=2000)
     doi: _Doi | None = Field(None, description="The DOI, where the work has one.")
@@ -276,6 +308,8 @@ class Example(_Model):
     def _holds_together(self) -> Self:
         prov = self.provenance
         problems: list[str] = []
+        if prov.built and prov.kind != "bundled":
+            problems.append("only a bundled entry can be built by TENSA")
         if prov.kind == "external":
             if prov.path or prov.sha256 or self.extra_files:
                 problems.append("an external entry has no file")
@@ -352,6 +386,16 @@ class Catalog(_Model):
     def defaults(self) -> list[Example]:
         """The entries put in an empty workspace, in catalog order."""
         return [e for e in self.examples if e.default]
+
+
+def citation_text(citation: Citation) -> str:
+    """The reference as plain text, led by what it is (``System: ...``)."""
+    return f"{CITATION_ROLE_LABELS[citation.role]}: {citation.text.strip()}"
+
+
+def citation_bibtex(citation: Citation) -> str:
+    """The BibTeX entry under a ``%`` comment that says what it is (BibTeX ignores it)."""
+    return f"% {CITATION_ROLE_LABELS[citation.role]}\n{citation.bibtex.strip()}"
 
 
 def quoted_notice(text: str) -> list[str]:
