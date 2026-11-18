@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from tensa.core import examples
-from tensa.core.example_catalog import Catalog, load_catalog, parse_catalog
+from tensa.core.example_catalog import Catalog, load_catalog, parse_catalog, quoted_notice
 from tensa.core.examples import (
     SOURCES_FILE,
     SUPPORTED_CASE_EXTENSIONS,
@@ -815,3 +815,68 @@ def test_a_bundled_pglib_case_is_added_byte_for_byte_with_its_credit_beside_it(
     assert written.name in [p.name for p in list_workspace_files(workspace, SUPPORTED_CASE_EXTENSIONS)]
     (status,) = [s for s in example_statuses(workspace, load_catalog()) if s.example.id == example_id]
     assert status.in_workspace and not status.differs
+
+
+def test_the_rts_24_case_is_added_byte_for_byte_with_the_ieees_credit_beside_it(
+    workspace: Path,
+) -> None:
+    """Another creator than the 30 and 57-bus files: the sources file names the IEEE, the system's
+    paper and the library, with the licence link and that nothing was changed."""
+    result = add_example("rts24", workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    source = examples.bundled_cases_dir() / "pglib_opf_case24_ieee_rts.m"
+    assert written.name == "pglib_opf_case24_ieee_rts.m"
+    assert (workspace / written.name).read_bytes() == source.read_bytes()
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "bundled with TENSA as `pglib_opf_case24_ieee_rts.m`" in text
+    assert "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)" in text
+    assert "The Institute of Electrical and Electronics Engineers (IEEE)" in text
+    assert "doi:10.1109/TPAS.1979.319398" in text and "arXiv:1908.02788" in text
+    assert "- Modifications: TENSA changed nothing" in text
+    # No notice goes with these data, so the sources file has no such block.
+    assert "in every copy of the data" not in text
+
+
+def test_the_activsg_200_case_is_added_byte_for_byte_with_its_authors_credited(
+    workspace: Path,
+) -> None:
+    result = add_example("activsg200", workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    source = examples.bundled_cases_dir() / "case_ACTIVSg200.m"
+    assert (workspace / written.name).read_bytes() == source.read_bytes()
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye" in text
+    assert "/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/" in text
+    assert "doi:10.1109/TPWRS.2016.2616385" in text and "in every copy of the data" not in text
+
+
+def test_the_rts_gmlc_case_is_added_with_the_whole_nrel_notice_beside_it(workspace: Path) -> None:
+    """The agreement lets the data be copied provided its entire notice appears in all copies, so
+    the sources file the case is added with holds the notice, every word, as a quotation, and
+    adding the case again leaves one copy of it."""
+    example = load_catalog().get("rts_gmlc")
+    assert example is not None and example.licence.notice is not None
+    result = add_example("rts_gmlc", workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    assert written.name == "RTS-GMLC.RAW"
+    source = examples.bundled_cases_dir() / "RTS-GMLC.RAW"
+    assert (workspace / written.name).read_bytes() == source.read_bytes()
+    # It is a case the workspace lists, whatever the case of its extension.
+    assert "RTS-GMLC.RAW" in [p.name for p in list_workspace_files(workspace, SUPPORTED_CASE_EXTENSIONS)]
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    quoted = "\n".join(quoted_notice(example.licence.notice))
+    assert quoted in text
+    assert "The licence asks that this notice appear, in full, in every copy of the data:" in text
+    assert "NREL Data Use Disclaimer Agreement" in text and "DOE/NREL/ALLIANCE" in text
+    # The block sits inside the case's own section, before its citations.
+    start = text.index("<!-- tensa-example:rts_gmlc -->")
+    assert start < text.index(quoted) < text.index("Cite:") < text.index("<!-- /tensa-example:rts_gmlc -->")
+    again = add_example("rts_gmlc", workspace, overwrite=True)
+    assert again.files[0].replaced
+    assert (workspace / SOURCES_FILE).read_text(encoding="utf-8").count(quoted) == 1
+    # The notice is the sources file's, not a case's: the other cases' sections have none.
+    add_example("rts24", workspace)
+    assert (workspace / SOURCES_FILE).read_text(encoding="utf-8").count(quoted) == 1

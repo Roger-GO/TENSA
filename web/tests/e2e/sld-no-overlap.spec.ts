@@ -54,10 +54,12 @@
  *   opens, after a tidy, with the values of a power flow and laid out again, nothing is drawn over
  *   anything else, and the generators' reactive limits that the power flow leaves are counted
  *
- *   in IEEE 30 and 57 (bundled with TENSA from the PGLib-OPF library) and IEEE 300 (a steady-state gallery
- *   case of 300 buses and 410 connectors), each added to the workspace first -> as it opens, after a tidy, with
- *   the values of a power flow and laid out again, nothing is drawn over anything else, the device connectors
- *   that do not drop square are those listed, and the Violations tab counts what the catalog's entry names
+ *   in IEEE RTS-24, IEEE 30 and 57 (bundled with TENSA from the PGLib-OPF library), RTS-GMLC (bundled from its
+ *   repository, a PSS/E file with up to six generators at one bus), ACTIVSg200 (bundled from MATPOWER) and IEEE 300
+ *   (a steady-state gallery case of 300 buses and 710 connectors), each added to the workspace first -> as it
+ *   opens, after a tidy, with the values of a power flow and laid out again, nothing is drawn over anything else,
+ *   the device connectors that do not drop square are those listed, and the Violations tab counts what the
+ *   catalog's entry names
  *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
@@ -599,8 +601,11 @@ test('case118.m: a steady-state gallery case of 118 buses is drawn with nothing 
  * past their rating where the file gives a rating).
  */
 const STEADY_GALLERY: [string, string, string[], string][] = [
+  ['rts24', 'pglib_opf_case24_ieee_rts.m', ['stub-generator-13', 'stub-generator-33'], '5'],
   ['ieee30', 'pglib_opf_case30_ieee.m', ['stub-load-PQ_1'], '5'],
   ['ieee57', 'pglib_opf_case57_ieee.m', [], '5'],
+  ['rts_gmlc', 'RTS-GMLC.RAW', ['stub-generator-52', 'stub-generator-84'], '22'],
+  ['activsg200', 'case_ACTIVSg200.m', [], '4'],
   ['ieee300', 'case300.m', ['stub-load-PQ_137', 'stub-shunt-Shunt_9'], '21'],
 ];
 

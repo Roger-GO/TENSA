@@ -176,6 +176,15 @@ class Licence(_Model):
     attribution: str | None = Field(
         None, description="The credit the licence asks a user of the data to give.", max_length=1200
     )
+    notice: str | None = Field(
+        None,
+        description=(
+            "A notice the licence says must appear, whole, in every copy of the data. TENSA "
+            "repeats it in its own ``NOTICE.md``, in a file beside the bundled data and in the "
+            "``EXAMPLE-SOURCES.md`` it writes next to the case in a workspace."
+        ),
+        max_length=4000,
+    )
 
 
 class VerificationCheck(_Model):
@@ -343,6 +352,11 @@ class Catalog(_Model):
     def defaults(self) -> list[Example]:
         """The entries put in an empty workspace, in catalog order."""
         return [e for e in self.examples if e.default]
+
+
+def quoted_notice(text: str) -> list[str]:
+    """The lines of a licence notice as a Markdown block quote (an empty line is ``>``)."""
+    return [f"> {line}" if line else ">" for line in text.strip("\n").split("\n")]
 
 
 def examples_dir() -> Path:

@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from tensa.core import example_catalog
 from tensa.core.example_catalog import load_catalog
 from tensa.core.example_references import (
     ExampleReference,
@@ -25,6 +26,7 @@ from tensa.core.example_references import (
     parse_reference,
     references_dir,
 )
+from tests._repo import SCRIPTS_DIR, load_module
 
 pytestmark = pytest.mark.unit
 
@@ -104,13 +106,27 @@ def test_the_baselines_are_labelled_so_and_the_independent_values_are_not() -> N
             if check.kind == "regression-baseline":
                 assert "own earlier output" in check.reference, (stem, check.name)
             if check.generated_by is not None:
-                # The two kinds a script can write: what a solver computed, or what the case
-                # file itself stores (the script reads it, it does not compute it).
-                assert check.kind in ("independent-solver", "stored-solution"), (stem, check.name)
-                assert (check.kind == "stored-solution") == check.generated_by.endswith("stored"), (
+                # The kinds a script can write: what a solver computed, what the case file
+                # itself stores, or what a report of another program printed (the script reads
+                # those, it does not compute them).
+                assert check.kind in ("independent-solver", "stored-solution", "published"), (
                     stem,
                     check.name,
                 )
+                command = check.generated_by.removesuffix(" --enforce-q-limits")
+                assert (check.kind == "stored-solution") == command.endswith(" stored"), (
+                    stem,
+                    check.name,
+                )
+                assert (check.kind == "published") == command.endswith(" report"), (
+                    stem,
+                    check.name,
+                )
+                # A check of a power flow with the reactive limits enforced says so, and is
+                # written under a name of its own, so that it stands beside the other and not over it.
+                assert (check.pflow is not None) == check.generated_by.endswith(
+                    " --enforce-q-limits"
+                ), (stem, check.name)
 
 
 def test_a_reference_that_is_not_there_is_none_and_one_of_another_case_is_refused(
@@ -608,3 +624,182 @@ def test_the_ieee_300_stored_state_is_not_a_solution_and_its_tolerance_is_what_i
     assert "0.0085 pu (bus 193)" in text and "9.76 degrees (bus 2040)" in text
     assert "18 of the 300 voltages" in text and "median angle gap 0.026 degrees" in text
     assert "no output for the slack (0 MW)" in text
+
+
+def test_a_check_may_say_how_its_power_flow_is_run_and_only_a_power_flow_check_may() -> None:
+    document = _document()
+    document["checks"][0]["pflow"] = {"enforce_q_limits": True}
+    check = parse_reference(json.dumps(document)).checks[0]
+    assert check.pflow is not None and check.pflow.enforce_q_limits is True
+    # No settings is the power flow at TENSA's defaults, and a setting that is not one is refused.
+    assert parse_reference(json.dumps(_document())).checks[0].pflow is None
+    document["checks"][0]["pflow"] = {"enforce_q_limits": True, "tolerance": 1e-3}
+    with pytest.raises(ReferenceFileError, match="tolerance"):
+        parse_reference(json.dumps(document))
+    document["checks"][0]["pflow"] = {}
+    with pytest.raises(ReferenceFileError, match="enforce_q_limits"):
+        parse_reference(json.dumps(document))
+    # A time-domain check has no power flow of its own to set.
+    tds = _document(disturbance={"description": "a trip"})
+    tds["checks"][0].update(
+        {"quantity": "tds.min_voltage_pu", "expected": 0.8, "pflow": {"enforce_q_limits": True}}
+    )
+    with pytest.raises(ReferenceFileError, match="pflow belongs to a power flow quantity only"):
+        parse_reference(json.dumps(tds))
+
+
+def _caveats(example_id: str) -> list[str]:
+    entry = load_catalog().get(example_id)
+    assert entry is not None
+    return entry.caveats
+
+
+def _by_kind(example_id: str) -> dict[tuple[str, str, bool], Any]:
+    """The checks of a reference by kind, quantity and whether they ask the reactive limits."""
+    reference = load_reference(example_id)
+    assert reference is not None
+    return {(c.kind, c.quantity, c.pflow is not None): c for c in reference.checks}
+
+
+def test_the_rts_24_case_is_a_power_flow_case_checked_against_a_solver_that_reads_the_file() -> None:
+    reference = load_reference("rts24")
+    assert reference is not None
+    assert reference.disturbance is None and reference.remove_events == []
+    # The file starts flat and no published solution was found, so the solver is all there is.
+    assert {(c.kind, c.analysis) for c in reference.checks} == {("independent-solver", "pf")}
+    assert [c.quantity for c in reference.checks] == [
+        "pf.bus_voltage_pu",
+        "pf.bus_angle_deg",
+        "pf.loss_mw",
+        "pf.slack_p_mw",
+    ]
+    for check in reference.checks:
+        assert "pglib_opf_case24_ieee_rts.m, read by matpowercaseframes" in check.reference
+        if isinstance(check.expected, dict):
+            assert len(check.expected) == 24
+    by = _by_kind("rts24")
+    # The numbers the entry quotes: 44.5 MW of losses, and the slack at 1073.0 MW (482 MW over the 591 MW its three units allow).
+    assert by[("independent-solver", "pf.loss_mw", False)].expected == pytest.approx(44.527, abs=5e-4)
+    slack = by[("independent-solver", "pf.slack_p_mw", False)].expected
+    assert slack == pytest.approx(1073.03, abs=5e-3) and slack - 591.0 == pytest.approx(482.0, abs=0.05)
+    entry = load_catalog().get("rts24")
+    assert entry is not None and entry.verification is not None
+    assert [c.name for c in entry.verification.checks] == [c.name for c in reference.checks]
+    text = " ".join(entry.caveats)
+    assert "1073.0 MW, 482 MW over" in text and "44.5 MW of losses" in text
+
+
+def test_the_rts_gmlc_power_flow_is_held_to_the_solution_pss_e_printed_and_to_a_solver() -> None:
+    """The solver reads the RAW file with a reader of the script's own. The published solution is
+    PSS/E's, printed to four decimals of a voltage and two of an angle, for a copy of the file;
+    held to it with the reactive limits enforced (the way it was solved) it is held to its rounding,
+    and at the defaults to twice that."""
+    reference = load_reference("rts_gmlc")
+    assert reference is not None
+    assert reference.disturbance is None and reference.remove_events == []
+    assert {c.analysis for c in reference.checks} == {"pf"}
+    assert {c.kind for c in reference.checks} == {"independent-solver", "published"}
+    by = _by_kind("rts_gmlc")
+    for check in (c for c in reference.checks if c.kind == "independent-solver"):
+        assert "read by the PSS/E reader of scripts/crosscheck_pf.py" in check.reference
+        assert check.pflow is None and check.tolerance.abs in (1e-4, 0.01)
+    default_v = by[("published", "pf.bus_voltage_pu", False)]
+    limited_v = by[("published", "pf.bus_voltage_pu", True)]
+    default_a = by[("published", "pf.bus_angle_deg", False)]
+    limited_a = by[("published", "pf.bus_angle_deg", True)]
+    solver_v = by[("independent-solver", "pf.bus_voltage_pu", False)]
+    solver_a = by[("independent-solver", "pf.bus_angle_deg", False)]
+    for check in (default_v, limited_v, default_a, limited_a, solver_v, solver_a):
+        assert isinstance(check.expected, dict) and len(check.expected) == 73
+    # Both are the one report's numbers.
+    assert limited_v.expected == default_v.expected and limited_a.expected == default_a.expected
+    assert (default_v.tolerance.abs, limited_v.tolerance.abs) == (2e-4, 1e-4)
+    assert (default_a.tolerance.abs, limited_a.tolerance.abs) == (0.02, 0.01)
+    assert limited_v.pflow is not None and limited_v.pflow.enforce_q_limits
+    for kind_checks in (
+        (default_v, limited_v, default_a, limited_a),
+        (
+            by[("published", "pf.slack_p_mw", False)],
+            by[("published", "pf.slack_p_mw", True)],
+        ),
+    ):
+        for check in kind_checks:
+            assert "RTSOP_PSSE_Hooman.txt" in check.reference and "TENSA did not compute it" in check.reference
+    assert by[("published", "pf.slack_p_mw", False)].expected == 220.0
+    # The solver's solution, which holds no reactive limits, is the gap the entry quotes from the
+    # report: 1.0e-4 pu at bus 315 and 0.0054 degrees at bus 312, inside the tolerances of the
+    # defaults and not inside those that go with the limits.
+    assert isinstance(solver_v.expected, dict) and isinstance(default_v.expected, dict)
+    assert isinstance(solver_a.expected, dict) and isinstance(default_a.expected, dict)
+    gap_v = {k: abs(solver_v.expected[k] - default_v.expected[k]) for k in default_v.expected}
+    gap_a = {k: abs(solver_a.expected[k] - default_a.expected[k]) for k in default_a.expected}
+    assert max(gap_v, key=lambda k: gap_v[k]) == "315" and max(gap_v.values()) == pytest.approx(1.0e-4, abs=1e-6)
+    assert max(gap_a, key=lambda k: gap_a[k]) == "312" and max(gap_a.values()) == pytest.approx(0.0054, abs=5e-5)
+    assert max(gap_v.values()) <= default_v.tolerance.bound(1.0) < 2 * max(gap_v.values()) + 1e-12
+    entry = load_catalog().get("rts_gmlc")
+    assert entry is not None and entry.verification is not None
+    assert [c.name for c in entry.verification.checks] == [c.name for c in reference.checks]
+    assert "to 1.0e-4 pu and the angles to 0.0054 degrees" in entry.verification.summary
+
+
+def test_the_rts_gmlc_stored_state_is_not_a_solution_and_no_check_rests_on_it() -> None:
+    """The bus voltages and angles the RAW file stores are 0.081 pu and 18.1 degrees from a solution,
+    both at bus 307, while the slack's 220 MW is the solution's. The entry says so, and the reference
+    has no stored-solution check for it."""
+    reference = load_reference("rts_gmlc")
+    assert reference is not None and "stored-solution" not in {c.kind for c in reference.checks}
+    script = load_module("crosscheck_pf_for_references", SCRIPTS_DIR / "crosscheck_pf.py")
+    raw = script._ppc_from_raw_file(  # noqa: SLF001
+        example_catalog.bundled_cases_dir() / "RTS-GMLC.RAW"
+    )
+    stored = {str(int(row[0])): (row[7], row[8]) for row in raw["bus"]}
+    by = _by_kind("rts_gmlc")
+    solved_v, solved_a = by[("independent-solver", "pf.bus_voltage_pu", False)], by[("independent-solver", "pf.bus_angle_deg", False)]
+    assert isinstance(solved_v.expected, dict) and isinstance(solved_a.expected, dict)
+    dv = {k: abs(stored[k][0] - solved_v.expected[k]) for k in stored}
+    da = {k: abs(stored[k][1] - solved_a.expected[k]) for k in stored}
+    assert (max(dv, key=lambda k: dv[k]), max(da, key=lambda k: da[k])) == ("307", "307")
+    assert max(dv.values()) == pytest.approx(0.0812, abs=5e-5)
+    assert max(da.values()) == pytest.approx(18.11, abs=5e-3)
+    slack = by[("independent-solver", "pf.slack_p_mw", False)].expected
+    assert slack == pytest.approx(220.0, abs=0.01)
+    text = " ".join(_caveats("rts_gmlc"))
+    assert "0.081 pu and 18.1 degrees (both at bus 307)" in text and "220 MW" in text
+
+
+def test_the_activsg_200_stored_state_is_a_solution_with_the_reactive_limits_enforced() -> None:
+    """PowerWorld stored a state solved with the generators' reactive limits held. TENSA's power flow
+    without them (its default) is up to 0.0038 pu, 0.031 degrees and 0.027 MW from it, at the bus of a
+    generator that is outside a limit; with them it is the 1e-5 pu the entry quotes. The checks of
+    the first are held to what those gaps need, and the others to a tolerance a tenth of that."""
+    reference = load_reference("activsg200")
+    assert reference is not None
+    assert {c.kind for c in reference.checks} == {"independent-solver", "stored-solution"}
+    by = _by_kind("activsg200")
+    default_v, limited_v = by[("stored-solution", "pf.bus_voltage_pu", False)], by[("stored-solution", "pf.bus_voltage_pu", True)]
+    default_a, limited_a = by[("stored-solution", "pf.bus_angle_deg", False)], by[("stored-solution", "pf.bus_angle_deg", True)]
+    default_p, limited_p = by[("stored-solution", "pf.slack_p_mw", False)], by[("stored-solution", "pf.slack_p_mw", True)]
+    assert (default_v.tolerance.abs, limited_v.tolerance.abs) == (0.005, 1e-4)
+    assert (default_a.tolerance.abs, limited_a.tolerance.abs) == (0.05, 0.005)
+    assert (default_p.tolerance.abs, limited_p.tolerance.abs) == (0.05, 0.05)
+    # One stored state, held to two tolerances.
+    assert limited_v.expected == default_v.expected and limited_a.expected == default_a.expected
+    assert limited_p.expected == default_p.expected == pytest.approx(384.37)
+    solved_v = by[("independent-solver", "pf.bus_voltage_pu", False)].expected
+    solved_a = by[("independent-solver", "pf.bus_angle_deg", False)].expected
+    solved_p = by[("independent-solver", "pf.slack_p_mw", False)].expected
+    assert isinstance(solved_v, dict) and isinstance(solved_a, dict)
+    assert isinstance(default_v.expected, dict) and isinstance(default_a.expected, dict)
+    assert len(default_v.expected) == 200
+    dv = {k: abs(default_v.expected[k] - solved_v[k]) for k in solved_v}
+    da = {k: abs(default_a.expected[k] - solved_a[k]) for k in solved_a}
+    worst = max(dv, key=lambda k: dv[k])
+    assert worst == max(da, key=lambda k: da[k]) == "114"
+    assert dv[worst] == pytest.approx(0.0038, abs=5e-5) and da[worst] == pytest.approx(0.031, abs=5e-4)
+    assert abs(solved_p - 384.37) == pytest.approx(0.027, abs=5e-4)
+    # The default tolerances are the gaps rounded up (not the ones of the limited run).
+    assert dv[worst] < default_v.tolerance.bound(1.0) < 2 * dv[worst]
+    assert da[worst] < default_a.tolerance.bound(1.0) < 2 * da[worst]
+    text = " ".join(_caveats("activsg200"))
+    assert "(bus 114, stored 1.0362 against the 1.04 set-point) and 0.031 degrees" in text
+    assert "0.027 MW" in text and "buses 67, 94, 114 and 167" in text

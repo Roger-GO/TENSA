@@ -41,6 +41,7 @@ from tensa.core.example_catalog import (
     Example,
     bundled_cases_dir,
     load_catalog,
+    quoted_notice,
 )
 from tensa.security.paths import (
     WorkspacePathError,
@@ -434,6 +435,13 @@ def _sources_section(example: Example, names: list[str], warnings: list[str]) ->
     ]
     lines += [f"- Caveat: {caveat}" for caveat in example.caveats]
     lines += [f"- Warning: {warning}" for warning in warnings]
+    if licence.notice:
+        lines += [
+            "",
+            "The licence asks that this notice appear, in full, in every copy of the data:",
+            "",
+            *quoted_notice(licence.notice),
+        ]
     if example.citations:
         lines += ["", "Cite:", ""]
         lines += [f"- {citation.text}" for citation in example.citations]

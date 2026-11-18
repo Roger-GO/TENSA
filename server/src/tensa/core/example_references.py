@@ -85,6 +85,20 @@ class Tolerance(_Model):
         return " + ".join(parts)
 
 
+class PFlowSettings(_Model):
+    """How the power flow a check reads is run, as ``POST /sessions/{id}/pflow`` takes it."""
+
+    enforce_q_limits: bool = Field(
+        ...,
+        description=(
+            "Hold a generator at its reactive limit when its reactive power would go past one. "
+            "It is off by default, in TENSA and in the independent solver of the other checks; "
+            "a stored or published solution made with the limits on is compared with a power "
+            "flow run with them on."
+        ),
+    )
+
+
 class ReferenceCheck(_Model):
     name: str = Field(..., description="What is checked, as the report names it.", max_length=200)
     quantity: Quantity = Field(..., description="What the harness measures from the run.")
@@ -101,6 +115,13 @@ class ReferenceCheck(_Model):
             "oscillatory eigenvalue is the mode that is meant."
         ),
     )
+    pflow: PFlowSettings | None = Field(
+        None,
+        description=(
+            "Power flow quantities only: the settings of the power flow whose result is "
+            "compared. ``null`` is the power flow at TENSA's defaults."
+        ),
+    )
     generated_by: str | None = Field(
         None, description="The script that wrote this check, which may write it again."
     )
@@ -108,6 +129,8 @@ class ReferenceCheck(_Model):
     @model_validator(mode="after")
     def _holds_together(self) -> Self:
         problems: list[str] = []
+        if self.pflow is not None and not self.quantity.startswith("pf."):
+            problems.append("pflow belongs to a power flow quantity only")
         if self.quantity in MAP_QUANTITIES:
             if not isinstance(self.expected, dict) or not self.expected:
                 problems.append(f"{self.quantity} needs a map of the buses' values")

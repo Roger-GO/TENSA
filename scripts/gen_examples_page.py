@@ -148,6 +148,15 @@ def _render_example(example: Example) -> list[str]:
         out.append(f"- **File:** {names}")
     out += ["", f"**Source.** {_source_paragraph(example)}", ""]
     out += [f"**Licence.** {_licence_paragraph(example)}", ""]
+    if example.licence.notice:
+        from tensa.core.example_catalog import quoted_notice
+
+        out += [
+            "The licence asks that this notice appear, in full, in every copy of the data:",
+            "",
+            *quoted_notice(example.licence.notice),
+            "",
+        ]
 
     if example.citations:
         out += ["**Citations**", ""]

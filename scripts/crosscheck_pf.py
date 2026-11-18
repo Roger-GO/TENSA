@@ -5,7 +5,9 @@ Usage:
     python scripts/crosscheck_pf.py dump  ID_OR_FILE -o NETWORK.json
     python scripts/crosscheck_pf.py solve NETWORK.json|CASE.m [--example ID] [--write]
     python scripts/crosscheck_pf.py run   ID [--write]
-    python scripts/crosscheck_pf.py stored ID [--write]
+    python scripts/crosscheck_pf.py stored ID [--write] [--enforce-q-limits]
+    python scripts/crosscheck_pf.py report REPORT.txt --raw CASE.RAW --solved-raw SOLVED.RAW \\
+        --example ID --origin TEXT [--write] [--enforce-q-limits]
 
 TENSA solves a power flow with ANDES. To check it against a solver that shares none of its
 code, this script solves the same data with pandapower and writes the bus voltages and angles
@@ -26,8 +28,9 @@ work is in two steps that meet at a file:
            that the dump does not know (a switched shunt, a jumper) stops it with an error
            rather than give a reference for a different network.
 ``solve``  (the verification environment, needs pandapower) builds a pandapower network from
-           that file, or straight from a MATPOWER ``.m`` file (read by matpowercaseframes,
-           with no ANDES involved at all), solves it (Newton-Raphson, tolerance 1e-8 MVA,
+           that file, or straight from a MATPOWER ``.m`` file (read by matpowercaseframes) or a
+           PSS/E ``.raw`` file (read by the reader in this script), with no ANDES involved at
+           all, solves it (Newton-Raphson, tolerance 1e-8 MVA,
            reactive limits not enforced, as TENSA's default), and prints the result, or with
            ``--write`` puts it into the reference file.
 ``run``    does both, each with the Python that has what it needs: the one running the script
@@ -46,6 +49,12 @@ work is in two steps that meet at a file:
            solution, and the IEEE 300-bus file the archive's state of data that has a phase
            shifter the file has lost).
 
+``report`` (needs neither ANDES nor pandapower) reads a load flow report that PSS/E printed, as
+           a published solution of a RAW file: the bus voltages and angles, and the power of the
+           slack, as ``published`` checks. The report was made from a copy of the case's file, so
+           the command first compares the two RAW files (every bus, every generator in service,
+           every branch and transformer) and stops if the networks differ.
+
 What the network holds, and where it differs from what ANDES solves, is listed in
 ``MODELLING`` below. The bus numbers are the ANDES ``idx`` of the buses, which is what
 TENSA's power flow answers by.
@@ -59,6 +68,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -74,6 +84,10 @@ REFERENCES = SERVER_SRC / "tensa" / "examples" / "references"
 # power flow of ``solve`` and the state of ``stored`` are written at different times.
 GENERATED_BY = "scripts/crosscheck_pf.py"
 STORED_BY = "scripts/crosscheck_pf.py stored"
+REPORT_BY = "scripts/crosscheck_pf.py report"
+# What marks a check whose power flow is run with the reactive limits enforced (the check names
+# it in ``pflow``), so that it is written beside the one at the defaults and not over it.
+LIMITS_FLAG = " --enforce-q-limits"
 
 # The columns of the arrays in a network file, as MATPOWER numbers them (case format v2).
 MATPOWER_BUS = (
@@ -493,6 +507,24 @@ STORED_BASES: dict[str, StoredBasis] = {
     # data as the file has it differs by up to 0.0085 pu and 9.76 degrees (bus 2040, with the
     # median at 0.026 degrees). The file stores no output for the slack (0 MW), so there is no
     # check of it.
+    # The final voltages and angles of PowerWorld's solution of the original ACTIV_SG_200 case, as
+    # case_ACTIVSg200.m carries them (seven decimals of a voltage, six of an angle). PowerWorld holds
+    # the generators to their reactive limits, which a power flow of TENSA's default does not: four
+    # generators (buses 67, 94, 114 and 167) are outside theirs without it, and pandapower with the
+    # limits enforced lands on the stored state to 1.4e-5 pu and 0.0009 degrees. Without the limits
+    # the gap is 0.0038 pu (bus 114) and 0.031 degrees, and the slack's power differs by 0.027 MW.
+    "activsg200": StoredBasis(
+        origin=(
+            "the final voltages and angles of PowerWorld Simulator's solution of the original "
+            "ACTIV_SG_200 case, which this file was created from; a state solved with the "
+            "generators held to their reactive limits, so it differs from a power flow without "
+            "them by up to 0.0038 pu and 0.031 degrees, at the buses of the four generators "
+            "that are outside their limits without it"
+        ),
+        voltage=0.005,
+        angle=0.05,
+        slack_p=0.05,
+    ),
     "ieee300": StoredBasis(
         origin=(
             "the final voltages and angles of the University of Washington archive's "
@@ -508,25 +540,57 @@ STORED_BASES: dict[str, StoredBasis] = {
 }
 
 
+# The same, for a state that was solved with the generators held to their reactive limits, which a
+# power flow run with ``enforce_q_limits`` is compared with (TENSA's default does not enforce them).
+STORED_BASES_ENFORCED: dict[str, StoredBasis] = {
+    # With the limits enforced, TENSA lands on PowerWorld's state to 1.4e-5 pu and 0.0009 degrees;
+    # the slack's power is 384.399 MW against the 384.37 the file stores, 0.029 MW.
+    "activsg200": StoredBasis(
+        origin=(
+            "the final voltages and angles of PowerWorld Simulator's solution of the original "
+            "ACTIV_SG_200 case, which this file was created from; a state solved with the "
+            "generators held to their reactive limits, which is how the power flow compared "
+            "with it is run"
+        ),
+        voltage=1e-4,
+        angle=0.005,
+        slack_p=0.05,
+    ),
+}
+
+
 def _stored_checks(
-    state: dict[str, Any], file_name: str, basis: StoredBasis = RAW_BASIS
+    state: dict[str, Any],
+    file_name: str,
+    basis: StoredBasis = RAW_BASIS,
+    enforce_q_limits: bool = False,
 ) -> list[dict[str, Any]]:
-    """The ``stored-solution`` checks of a reference file that a case file's state gives."""
+    """The ``stored-solution`` checks of a reference file that a case file's state gives.
+
+    With ``enforce_q_limits`` they are checks of a power flow run with the reactive limits
+    enforced (the check says so in ``pflow``), written under a ``generated_by`` of their own.
+    """
     why = (
         f"the solved state stored in {file_name} ({basis.origin}; TENSA did not compute it); "
         "written by scripts/crosscheck_pf.py stored"
     )
-    common = {"kind": "stored-solution", "reference": why, "generated_by": STORED_BY}
+    common: dict[str, Any] = {"kind": "stored-solution", "reference": why, "generated_by": STORED_BY}
+    suffix = ""
+    if enforce_q_limits:
+        suffix = ", reactive limits enforced"
+        common["reference"] += LIMITS_FLAG + "; the power flow compared with it is run with the reactive limits enforced"
+        common["generated_by"] += LIMITS_FLAG
+        common["pflow"] = {"enforce_q_limits": True}
     checks = [
         {
-            "name": "Bus voltage magnitudes against the solution stored in the case file",
+            "name": "Bus voltage magnitudes against the solution stored in the case file" + suffix,
             "quantity": "pf.bus_voltage_pu",
             "expected": {k: round(v, 9) for k, v in state["bus_voltage"].items()},
             "tolerance": {"abs": basis.voltage},
             **common,
         },
         {
-            "name": "Bus voltage angles against the solution stored in the case file",
+            "name": "Bus voltage angles against the solution stored in the case file" + suffix,
             "quantity": "pf.bus_angle_deg",
             "expected": {k: round(v, 7) for k, v in state["bus_angle"].items()},
             "tolerance": {"abs": basis.angle},
@@ -536,7 +600,7 @@ def _stored_checks(
     if basis.slack_p is not None:
         checks.append(
             {
-                "name": "Slack active power against the solution stored in the case file",
+                "name": "Slack active power against the solution stored in the case file" + suffix,
                 "quantity": "pf.slack_p_mw",
                 "expected": round(state["slack_p_mw"], 6),
                 "tolerance": {"abs": basis.slack_p},
@@ -551,15 +615,180 @@ def cmd_stored(args: argparse.Namespace) -> int:
 
     path, example_id = _find_case(args.id)
     system = andes.load(str(path), setup=False, no_output=True, default_config=True)
-    basis = STORED_BASES.get(example_id or "", RAW_BASIS)
-    checks = _stored_checks(stored_solution(system), path.name, basis)
+    enforce = bool(getattr(args, "enforce_q_limits", False))
+    if enforce:
+        basis = STORED_BASES_ENFORCED.get(example_id or "")
+        if basis is None:
+            raise CrosscheckError(
+                f"{args.id!r} has no stored state solved with the reactive limits enforced"
+            )
+    else:
+        basis = STORED_BASES.get(example_id or "", RAW_BASIS)
+    checks = _stored_checks(stored_solution(system), path.name, basis, enforce)
     if not args.write:
         print(json.dumps(checks, indent=1))
         return 0
     if example_id is None:
         raise CrosscheckError("--write needs an example id, not a file")
     target = Path(args.reference) if args.reference else REFERENCES / f"{example_id}.json"
-    write_reference(example_id, checks, target, generated_by=STORED_BY)
+    write_reference(
+        example_id, checks, target, generated_by=STORED_BY + (LIMITS_FLAG if enforce else "")
+    )
+    print(f"wrote {len(checks)} checks to {target}")
+    return 0
+
+
+# ----------------------------------------------------------------------------------------
+# report: a published PSS/E solution (needs neither ANDES nor pandapower)
+# ----------------------------------------------------------------------------------------
+
+# How close a power flow has to be to what a PSS/E report prints. The report gives a voltage to
+# four decimals (a rounding of 5e-5 pu) and an angle to two (0.005 degrees), and the slack's
+# power to 0.1 MW. The report was solved with the generators held to their reactive limits (the
+# ones at a limit are marked in it). A power flow of TENSA that holds them differs from it by
+# 5.8e-5 pu and 0.0053 degrees on the RTS-GMLC case, which is the rounding, so those are held to
+# 1e-4 pu and 0.01 degrees. One that does not (TENSA's default) differs by 1.0e-4 pu and 0.0054
+# degrees, since twenty-two generators are 0.5 MVAr or less past a limit, and is held to twice
+# the first and four times the rounding of the second.
+REPORT_VOLTAGE_TOLERANCE = 2e-4
+REPORT_ANGLE_TOLERANCE = 0.02
+REPORT_SLACK_TOLERANCE = 0.1
+REPORT_VOLTAGE_TOLERANCE_ENFORCED = 1e-4
+REPORT_ANGLE_TOLERANCE_ENFORCED = 0.01
+
+_REPORT_BUS = re.compile(r"^\s*BUS\s+(\d+)\s.*?\s%\s*([0-9.]+)PU\s+(-?[0-9.]+)")
+_REPORT_GENERATION = re.compile(r"^\s*FROM GENERATION\s+(-?[0-9.]+)")
+
+
+def parse_psse_report(text: str) -> tuple[dict[int, tuple[float, float]], dict[int, float]]:
+    """The bus voltages and angles, and the generation of each bus, of a PSS/E load flow report.
+
+    A bus block starts with ``BUS <number> <name> <kV> CKT ... % <voltage>PU <angle>``; a bus
+    that has generation has a line ``FROM GENERATION <MW> <MVAr>`` under it. The first gives
+    ``{bus: (voltage in pu, angle in degrees)}`` and the second ``{bus: MW}``.
+    """
+    state: dict[int, tuple[float, float]] = {}
+    generation: dict[int, float] = {}
+    current: int | None = None
+    for line in text.splitlines():
+        header = _REPORT_BUS.match(line)
+        if header:
+            current = int(header.group(1))
+            state[current] = (float(header.group(2)), float(header.group(3)))
+            continue
+        found = _REPORT_GENERATION.match(line)
+        if found and current is not None:
+            generation[current] = float(found.group(1))
+    if not state:
+        raise CrosscheckError("the report holds no bus block (BUS <number> ... PU <angle>)")
+    return state, generation
+
+
+def _branch_key(row: list[float]) -> tuple[float, ...]:
+    """A branch as a tuple that two listings of it share. A branch with no tap and no shift is
+    the same whichever end is called its from end, so its ends go in order."""
+    ends = (row[0], row[1])
+    if row[8] in (0.0, 1.0) and row[9] == 0.0:
+        ends = tuple(sorted(ends))  # type: ignore[assignment]
+    return (*ends, *(round(v, 9) for v in row[2:11]))
+
+
+def network_differences(a: dict[str, Any], b: dict[str, Any]) -> list[str]:
+    """What differs between two RAW files that a power flow notices, as sentences (none: the
+    same network and dispatch).
+
+    Not compared: the voltage and angle a bus is stored at, the settings of a generator that is
+    out of service, the order the branches are listed in and the end a branch with no tap is
+    listed from.
+    """
+    problems: list[str] = []
+    if float(a["baseMVA"]) != float(b["baseMVA"]):
+        problems.append(f"the system base differs: {a['baseMVA']} and {b['baseMVA']} MVA")
+    buses_a = {int(r[0]): r for r in a["bus"]}
+    buses_b = {int(r[0]): r for r in b["bus"]}
+    if buses_a.keys() != buses_b.keys():
+        problems.append("the two files do not hold the same buses")
+    for number in sorted(buses_a.keys() & buses_b.keys()):
+        ra, rb = buses_a[number], buses_b[number]
+        # Type, active and reactive load, shunt conductance and susceptance, base voltage.
+        if any(abs(ra[i] - rb[i]) > 1e-9 for i in (1, 2, 3, 4, 5, 9)):
+            problems.append(f"bus {number} differs in its type, load, shunt or base voltage")
+    in_service = [sorted(tuple(g[:7]) for g in net["gen"] if g[7] > 0) for net in (a, b)]
+    if in_service[0] != in_service[1]:
+        problems.append("the generators in service differ")
+    keys = [sorted(_branch_key(r) for r in net["branch"]) for net in (a, b)]
+    if keys[0] != keys[1]:
+        problems.append("the branches and transformers differ")
+    return problems
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    raw_path, solved_path, report_path = Path(args.raw), Path(args.solved_raw), Path(args.report)
+    mine, solved = _ppc_from_raw_file(raw_path), _ppc_from_raw_file(solved_path)
+    problems = network_differences(mine, solved)
+    if problems:
+        raise CrosscheckError(
+            f"{solved_path.name} is not the network of {raw_path.name}: " + "; ".join(problems)
+        )
+    state, generation = parse_psse_report(report_path.read_text(encoding="utf-8", errors="replace"))
+    numbers = [int(row[0]) for row in mine["bus"]]
+    missing = [n for n in numbers if n not in state]
+    if missing:
+        raise CrosscheckError(f"the report has no block for bus {missing[0]} of {raw_path.name}")
+    slack = next((int(r[0]) for r in mine["bus"] if int(r[1]) == 3), None)
+    if slack is None or slack not in generation:
+        raise CrosscheckError("the report gives no generation for the slack bus of the case")
+    enforce = bool(getattr(args, "enforce_q_limits", False))
+    why = (
+        f"{args.origin}. PSS/E printed it after solving {solved_path.name}, which holds the same "
+        f"network and dispatch as {raw_path.name} (compared by scripts/crosscheck_pf.py report: "
+        "every bus, every generator in service, every branch and transformer, apart from what a "
+        "power flow does not use: the stored state, the settings of generators out of service and "
+        "the end a branch with no tap is listed from); TENSA did not compute it. It prints a "
+        "voltage to four decimals, an angle to two and the power of a generator to 0.1 MW"
+    )
+    common: dict[str, Any] = {"kind": "published", "reference": why, "generated_by": REPORT_BY}
+    suffix = ""
+    voltage, angle = REPORT_VOLTAGE_TOLERANCE, REPORT_ANGLE_TOLERANCE
+    if enforce:
+        suffix = ", reactive limits enforced"
+        voltage, angle = REPORT_VOLTAGE_TOLERANCE_ENFORCED, REPORT_ANGLE_TOLERANCE_ENFORCED
+        common["reference"] += (
+            "; the report was solved with the generators held to their reactive limits, and the "
+            "power flow compared with it is run that way"
+        )
+        common["generated_by"] += LIMITS_FLAG
+        common["pflow"] = {"enforce_q_limits": True}
+    checks = [
+        {
+            "name": "Bus voltage magnitudes against the PSS/E solution" + suffix,
+            "quantity": "pf.bus_voltage_pu",
+            "expected": {str(n): state[n][0] for n in numbers},
+            "tolerance": {"abs": voltage},
+            **common,
+        },
+        {
+            "name": "Bus voltage angles against the PSS/E solution" + suffix,
+            "quantity": "pf.bus_angle_deg",
+            "expected": {str(n): state[n][1] for n in numbers},
+            "tolerance": {"abs": angle},
+            **common,
+        },
+        {
+            "name": "Slack active power against the PSS/E solution" + suffix,
+            "quantity": "pf.slack_p_mw",
+            "expected": generation[slack],
+            "tolerance": {"abs": REPORT_SLACK_TOLERANCE},
+            **common,
+        },
+    ]
+    if not args.write:
+        print(json.dumps(checks, indent=1))
+        return 0
+    target = Path(args.reference) if args.reference else REFERENCES / f"{args.example}.json"
+    write_reference(
+        args.example, checks, target, generated_by=REPORT_BY + (LIMITS_FLAG if enforce else "")
+    )
     print(f"wrote {len(checks)} checks to {target}")
     return 0
 
@@ -590,6 +819,299 @@ def _ppc_from_matpower_file(path: Path) -> dict[str, Any]:
         "bus": frames.bus.to_numpy(dtype=float),
         "gen": frames.gen.to_numpy(dtype=float),
         "branch": frames.branch.to_numpy(dtype=float),
+    }
+
+
+def _raw_fields(line: str) -> list[str]:
+    """The comma-separated fields of one line of a PSS/E RAW file.
+
+    A field in single quotes keeps its commas, a ``/`` outside quotes starts a comment, and
+    every field is stripped (a quoted ID such as ``'1 '`` is ``1``).
+    """
+    fields: list[str] = []
+    current: list[str] = []
+    quoted = False
+    for char in line:
+        if quoted:
+            if char == "'":
+                quoted = False
+            else:
+                current.append(char)
+        elif char == "'":
+            quoted = True
+        elif char == "/":
+            break
+        elif char == ",":
+            fields.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    fields.append("".join(current).strip())
+    return fields
+
+
+def _raw_number(fields: list[str], i: int, default: float = 0.0) -> float:
+    """Field ``i`` of a RAW record as a number; a field the record leaves out is ``default``."""
+    if i >= len(fields) or not fields[i]:
+        return default
+    return float(fields[i])
+
+
+# The sections of a version 33 RAW file in the order the file gives them, and what this reader
+# does with a record of each: ``read`` (it is part of the network), ``skip`` (it changes no power
+# flow) or ``refuse`` (a power flow of the file needs a model that this reader does not have, so
+# a file that holds one is not given a reference for a different network).
+_RAW_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("bus", "read"),
+    ("load", "read"),
+    ("fixed shunt", "read"),
+    ("generator", "read"),
+    ("branch", "read"),
+    ("transformer", "read"),
+    ("area", "skip"),
+    ("two-terminal dc", "refuse"),
+    ("voltage source converter", "refuse"),
+    ("impedance correction", "refuse"),
+    ("multi-terminal dc", "refuse"),
+    ("multi-section line", "refuse"),
+    ("zone", "skip"),
+    ("inter-area transfer", "skip"),
+    ("owner", "skip"),
+    ("facts control device", "refuse"),
+    ("switched shunt", "read"),
+    ("gne device", "refuse"),
+    # PSS/E writes this one; PowerWorld's files end after the GNE devices.
+    ("induction machine", "refuse"),
+)
+
+
+def _raw_sections(text: str) -> tuple[list[str], dict[str, list[list[str]]]]:
+    """The header fields of a RAW file and the records of each section, one list of fields per
+    line (``_ppc_from_raw_file`` joins the lines of a transformer's record)."""
+    lines = text.splitlines()
+    if len(lines) < 3:
+        raise CrosscheckError("the RAW file is too short to have a header")
+    header = _raw_fields(lines[0])
+    revision = int(_raw_number(header, 2))
+    if revision != 33:
+        raise CrosscheckError(f"the RAW file is revision {revision}; this reader is written for 33")
+    sections: dict[str, list[list[str]]] = {}
+    names = iter(_RAW_SECTIONS)
+    current: list[list[str]] = []
+    for line in lines[3:]:
+        stripped = line.strip()
+        if stripped.upper() == "Q":
+            break
+        if re.fullmatch(r"0\s*(/.*)?", stripped):
+            name = next(names, None)
+            if name is None:
+                raise CrosscheckError("the RAW file has more sections than version 33 defines")
+            sections[name[0]] = current
+            current = []
+        elif stripped:
+            current.append(_raw_fields(stripped))
+    if len(sections) < len(_RAW_SECTIONS) - 1:
+        raise CrosscheckError(
+            f"the RAW file has {len(sections)} sections where version 33 has {len(_RAW_SECTIONS)}"
+        )
+    for name, action in _RAW_SECTIONS:
+        if action == "refuse" and sections.get(name):
+            raise CrosscheckError(
+                f"the RAW file has {name} data, which this reader does not model, so a power "
+                "flow of it would be a power flow of another network"
+            )
+    return header, sections
+
+
+def _ppc_from_raw_file(path: Path) -> dict[str, Any]:
+    """A PSS/E RAW file (revision 33) as the same arrays, read here with no ANDES.
+
+    This is a reader of its own, written from the PSS/E data format and not from ANDES's reader,
+    so a power flow of the result checks ANDES's reading of the file as well as its solution. It
+    reads what a power flow of a file like the RTS-GMLC one needs: buses, constant-power loads,
+    fixed shunts, generators, branches, two-winding transformers and fixed switched shunts. What
+    would change the network and is not modelled here (a DC line, a three-winding transformer, a
+    load with a constant-current or constant-admittance part, a generator that regulates another
+    bus, a phase shifter, a magnetising admittance given as losses) stops it with an error.
+
+    The rules of PSS/E that matter: a bus of type 2 with no generator in service is a load bus, a
+    generator on a type 3 bus is the swing, a transformer's tap ratio is ``WINDV1 / WINDV2`` when
+    the windings are given in per unit of the bus voltage (``CW`` 1), and its impedance is in per
+    unit of the system base (``CZ`` 1) or of the winding base (``CZ`` 2).
+    """
+    header, sections = _raw_sections(path.read_text(encoding="ascii", errors="replace"))
+    base = _raw_number(header, 1)
+    if base <= 0:
+        raise CrosscheckError("the RAW file has no system base")
+
+    buses: dict[int, list[float]] = {}
+    for f in sections["bus"]:
+        number = int(_raw_number(f, 0))
+        if number in buses:
+            raise CrosscheckError(f"bus {number} is listed twice")
+        # BUS_I, TYPE, PD, QD, GS, BS, AREA, VM, VA, BASE_KV, ZONE, VMAX, VMIN
+        buses[number] = [
+            float(number),
+            _raw_number(f, 3, 1.0),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            _raw_number(f, 4, 1.0),
+            _raw_number(f, 7, 1.0),
+            _raw_number(f, 8),
+            _raw_number(f, 2),
+            _raw_number(f, 5, 1.0),
+            _raw_number(f, 9, 1.1),
+            _raw_number(f, 10, 0.9),
+        ]
+
+    def bus(number: float, what: str) -> list[float]:
+        try:
+            return buses[abs(int(number))]
+        except KeyError:
+            raise CrosscheckError(f"{what} is on bus {int(number)}, which the file lacks") from None
+
+    for f in sections["load"]:
+        if any(_raw_number(f, i) for i in (7, 8, 9, 10)):
+            raise CrosscheckError(
+                f"the load on bus {f[0]} has a constant-current or constant-admittance part"
+            )
+        if _raw_number(f, 2, 1.0) > 0:
+            row = bus(_raw_number(f, 0), f"a load ({f[1]})")
+            row[2] += _raw_number(f, 5)
+            row[3] += _raw_number(f, 6)
+    for f in sections["fixed shunt"]:
+        if _raw_number(f, 2, 1.0) > 0:
+            row = bus(_raw_number(f, 0), f"a fixed shunt ({f[1]})")
+            row[4] += _raw_number(f, 3)
+            row[5] += _raw_number(f, 4)
+    for f in sections["switched shunt"]:
+        # MODSW 0 is a shunt that stays at BINIT, the only kind this reader models.
+        if int(_raw_number(f, 1)) != 0:
+            raise CrosscheckError(f"the switched shunt on bus {f[0]} is adjustable")
+        if _raw_number(f, 3, 1.0) > 0:
+            bus(_raw_number(f, 0), "a switched shunt")[5] += _raw_number(f, 9)
+
+    gens: list[list[float]] = []
+    for f in sections["generator"]:
+        number = int(_raw_number(f, 0))
+        bus(number, f"a generator ({f[1]})")
+        regulated = int(_raw_number(f, 7))
+        if regulated not in (0, number):
+            raise CrosscheckError(f"the generator {f[1]} on bus {number} regulates bus {regulated}")
+        # GEN_BUS, PG, QG, QMAX, QMIN, VG, MBASE, GEN_STATUS, PMAX, PMIN
+        gens.append(
+            [
+                float(number),
+                _raw_number(f, 2),
+                _raw_number(f, 3),
+                _raw_number(f, 4),
+                _raw_number(f, 5),
+                _raw_number(f, 6, 1.0),
+                _raw_number(f, 8, base),
+                1.0 if _raw_number(f, 14, 1.0) > 0 else 0.0,
+                _raw_number(f, 16),
+                _raw_number(f, 17),
+            ]
+        )
+    # A PV bus whose generators are all out of service is a load bus.
+    online = {int(g[0]) for g in gens if g[7] > 0}
+    for number, row in buses.items():
+        if row[1] == 2 and number not in online:
+            row[1] = 1.0
+
+    branches: list[list[float]] = []
+    for f in sections["branch"]:
+        i, j = int(abs(_raw_number(f, 0))), int(abs(_raw_number(f, 1)))
+        in_service = _raw_number(f, 13, 1.0) > 0
+        # The conductance and susceptance a line has at each end, in per unit of the system base;
+        # they go with the line, so a line that is out of service has none.
+        for end, g, b in ((i, 9, 10), (j, 11, 12)):
+            row = bus(end, "a branch")
+            if in_service:
+                row[4] += _raw_number(f, g) * base
+                row[5] += _raw_number(f, b) * base
+        # F_BUS, T_BUS, BR_R, BR_X, BR_B, RATE_A, RATE_B, RATE_C, TAP, SHIFT, BR_STATUS, ANGMIN, ANGMAX
+        branches.append(
+            [
+                float(i),
+                float(j),
+                _raw_number(f, 3),
+                _raw_number(f, 4),
+                _raw_number(f, 5),
+                _raw_number(f, 6),
+                _raw_number(f, 7),
+                _raw_number(f, 8),
+                0.0,
+                0.0,
+                1.0 if in_service else 0.0,
+                -360.0,
+                360.0,
+            ]
+        )
+
+    records = sections["transformer"]
+    k = 0
+    while k < len(records):
+        first = records[k]
+        if int(_raw_number(first, 2)) != 0:
+            raise CrosscheckError(
+                f"the transformer {first[0]}-{first[1]}-{first[2]} has three windings"
+            )
+        if k + 4 > len(records):
+            raise CrosscheckError("the transformer data ends in the middle of a record")
+        impedance, winding1, winding2 = records[k + 1], records[k + 2], records[k + 3]
+        k += 4
+        i, j = int(_raw_number(first, 0)), int(_raw_number(first, 1))
+        cw, cz, cm = (int(_raw_number(first, n)) for n in (4, 5, 6))
+        if cm != 1 and (_raw_number(first, 7) or _raw_number(first, 8)):
+            raise CrosscheckError(f"the transformer {i}-{j} gives its magnetising branch as losses")
+        if cz not in (1, 2) or cw not in (1, 2, 3):
+            raise CrosscheckError(f"the transformer {i}-{j} has the codes CW {cw} and CZ {cz}")
+        if _raw_number(winding1, 2):
+            raise CrosscheckError(f"the transformer {i}-{j} is a phase shifter")
+        row_i, kv_j = bus(i, "a transformer"), bus(j, "a transformer")[9]
+        kv_i = row_i[9]
+        tap1, tap2 = _raw_number(winding1, 0, 1.0), _raw_number(winding2, 0, 1.0)
+        if cw == 1:
+            ratio = tap1 / tap2
+        elif cw == 2:
+            ratio = (tap1 / kv_i) / (tap2 / kv_j)
+        else:
+            ratio = (tap1 * _raw_number(winding1, 1, kv_i) / kv_i) / (
+                tap2 * _raw_number(winding2, 1, kv_j) / kv_j
+            )
+        scale = base / _raw_number(impedance, 2, base) if cz == 2 else 1.0
+        status = int(_raw_number(first, 11, 1.0))
+        if status > 0:
+            # The magnetising admittance (per unit of the system base) is at the winding 1 bus.
+            row_i[4] += _raw_number(first, 7) * base
+            row_i[5] += _raw_number(first, 8) * base
+        branches.append(
+            [
+                float(i),
+                float(j),
+                _raw_number(impedance, 0) * scale,
+                _raw_number(impedance, 1) * scale,
+                0.0,
+                _raw_number(winding1, 3),
+                _raw_number(winding1, 4),
+                _raw_number(winding1, 5),
+                ratio,
+                0.0,
+                1.0 if status > 0 else 0.0,
+                -360.0,
+                360.0,
+            ]
+        )
+
+    return {
+        "baseMVA": base,
+        "f_hz": _raw_number(header, 5, 60.0),
+        "bus": list(buses.values()),
+        "gen": gens,
+        "branch": branches,
     }
 
 
@@ -848,9 +1370,13 @@ def format_json(value: Any, indent: int = 0) -> str:
 def cmd_solve(args: argparse.Namespace) -> int:
     source = Path(args.network)
     bus_idx = None
-    if source.suffix.lower() == ".m":
+    suffix = source.suffix.lower()
+    if suffix == ".m":
         ppc = _ppc_from_matpower_file(source)
         f_hz = 60.0
+    elif suffix == ".raw":
+        ppc = _ppc_from_raw_file(source)
+        f_hz = float(ppc["f_hz"])
     else:
         network = json.loads(source.read_text(encoding="utf-8"))
         ppc = _ppc_from_network(network)
@@ -860,11 +1386,13 @@ def cmd_solve(args: argparse.Namespace) -> int:
     if args.write:
         if not args.example:
             raise CrosscheckError("--write needs --example ID, the case the reference belongs to")
-        what = (
-            f"{source.name}, read by matpowercaseframes"
-            if source.suffix.lower() == ".m"
-            else f"the network ANDES holds for {network['source']}"
-        )
+        if suffix == ".m":
+            what = f"{source.name}, read by matpowercaseframes"
+        elif suffix == ".raw":
+            what = f"{source.name}, read by the PSS/E reader of scripts/crosscheck_pf.py"
+        else:
+            what = f"the network ANDES holds for {network['source']}"
+
         checks = _reference_checks(result, what)
         path = Path(args.reference) if args.reference else REFERENCES / f"{args.example}.json"
         write_reference(args.example, checks, path)
@@ -953,7 +1481,32 @@ def build_parser() -> argparse.ArgumentParser:
     stored.add_argument("id", help="an example id")
     stored.add_argument("--write", action="store_true", help="write the reference file")
     stored.add_argument("--reference", help="the reference file to write (default: the case's own)")
+    stored.add_argument(
+        "--enforce-q-limits",
+        action="store_true",
+        help="checks of a power flow run with the reactive limits enforced, for a state solved so",
+    )
     stored.set_defaults(func=cmd_stored)
+    report = sub.add_parser(
+        "report", help="write the solution a PSS/E report prints as a reference (a RAW case)"
+    )
+    report.add_argument("report", help="the PSS/E load flow report, as text")
+    report.add_argument("--raw", required=True, help="the case's RAW file")
+    report.add_argument(
+        "--solved-raw", required=True, help="the RAW file PSS/E made the report from"
+    )
+    report.add_argument("--example", required=True, help="the example id the reference belongs to")
+    report.add_argument(
+        "--origin", required=True, help="where the report is from, named so it can be found"
+    )
+    report.add_argument("--write", action="store_true", help="write the reference file")
+    report.add_argument("--reference", help="the reference file to write (default: the case's own)")
+    report.add_argument(
+        "--enforce-q-limits",
+        action="store_true",
+        help="checks of a power flow run with the reactive limits enforced, for a report solved so",
+    )
+    report.set_defaults(func=cmd_report)
     return parser
 
 

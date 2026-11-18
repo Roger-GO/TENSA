@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "id": "rts24",
+  "checks": [
+    {
+      "name": "Bus voltage magnitudes against pandapower",
+      "quantity": "pf.bus_voltage_pu",
+      "expected": {"1": 1.0, "2": 1.0, "3": 0.965387369, "4": 0.965663984, "5": 0.984170365, "6": 0.978053952, "7": 1.0, "8": 0.964006491, "9": 0.973658306, "10": 0.995848176, "11": 0.972421046, "12": 0.963981977, "13": 1.0, "14": 1.0, "15": 1.0, "16": 1.0, "17": 1.000873148, "18": 1.0, "19": 0.989935728, "20": 0.993118184, "21": 1.0, "22": 1.0, "23": 1.0, "24": 0.968619809},
+      "tolerance": {"abs": 0.0001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case24_ieee_rts.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Bus voltage angles against pandapower",
+      "quantity": "pf.bus_angle_deg",
+      "expected": {
+        "1": -23.1496943,
+        "2": -23.1610419,
+        "3": -22.6127648,
+        "4": -23.5571657,
+        "5": -23.8480525,
+        "6": -25.2263808,
+        "7": -23.9622228,
+        "8": -25.8344236,
+        "9": -19.4083496,
+        "10": -21.0709534,
+        "11": -11.5444005,
+        "12": -9.1303696,
+        "13": 0.0,
+        "14": -13.3913083,
+        "15": -11.24962,
+        "16": -10.4624794,
+        "17": -8.8818192,
+        "18": -8.6617859,
+        "19": -9.0510915,
+        "20": -5.7826883,
+        "21": -7.8425819,
+        "22": -3.942056,
+        "23": -3.2311091,
+        "24": -15.3466324
+      },
+      "tolerance": {"abs": 0.01},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case24_ieee_rts.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Network losses against pandapower",
+      "quantity": "pf.loss_mw",
+      "expected": 44.527075,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case24_ieee_rts.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Slack active power against pandapower",
+      "quantity": "pf.slack_p_mw",
+      "expected": 1073.027075,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case24_ieee_rts.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    }
+  ]
+}

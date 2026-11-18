@@ -60,23 +60,33 @@ says. The catalog says what was and was not compared with the publications.
 
 ## Cases bundled from the IEEE PES Power Grid Library
 
-IEEE 30-bus test case (`pglib_opf_case30_ieee.m`) and IEEE 57-bus test case
-(`pglib_opf_case57_ieee.m`).
+IEEE RTS-24 reliability test system (`pglib_opf_case24_ieee_rts.m`), IEEE 30-bus test case
+(`pglib_opf_case30_ieee.m`) and IEEE 57-bus test case (`pglib_opf_case57_ieee.m`).
 
-These two files are part of the IEEE PES Power Grid Library for optimal power flow
+These three files are part of the IEEE PES Power Grid Library for optimal power flow
 (pglib-opf), release v23.07 (tag `v23.07`, commit `dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3`),
 https://github.com/power-grid-lib/pglib-opf, and TENSA bundles them as they are there,
 retrieved on 2026-11-18. TENSA changed nothing in them: each is the library's file byte for
 byte, header comments included, and the catalog holds the SHA-256 of each, which TENSA checks
 whenever one is added to a workspace.
 
-Credit: the header of each file reads "Copyright (c) 1999 by Richard D. Christie, University
-of Washington Electrical Engineering Licensed under the Creative Commons Attribution 4.0
-International license, http://creativecommons.org/licenses/by/4.0/". The data is that of the
-Power Systems Test Case Archive of the University of Washington
-(https://labs.ece.uw.edu/pstca/), which R. D. Christie entered in 1993 from data provided by
-I. Dabbagchi of AEP, and which the library has prepared for optimal power flow. The library
-asks that its version be named when it is cited, and describes itself in S.
+Credit: the header of the 30-bus and 57-bus files reads
+"Copyright (c) 1999 by Richard D. Christie, University of Washington Electrical Engineering
+Licensed under the Creative Commons Attribution 4.0 International license,
+http://creativecommons.org/licenses/by/4.0/". The data is that of the Power Systems Test Case
+Archive of the University of Washington (https://labs.ece.uw.edu/pstca/), which R. D. Christie
+entered in 1993 from data provided by I. Dabbagchi of AEP, and which the library has prepared
+for optimal power flow. The header of the RTS-24 file reads
+"Copyright (c) 1979 The Institute of Electrical and Electronics Engineers (IEEE) Licensed under
+the Creative Commons Attribution 4.0 International license,
+http://creativecommons.org/licenses/by/4.0/", and names M. E. Brennan of the IEEE as the
+contact for questions about further reuse of the data. The system is the IEEE Reliability Test
+System of the IEEE Reliability Test System Task Force of the Applications of Probability
+Methods Subcommittee, "IEEE reliability test system," IEEE Transactions on Power Apparatus and
+Systems, vol. PAS-98, no. 6, pp. 2047-2054, 1979, doi:10.1109/TPAS.1979.319398; the file's
+header names Bruce Wollenberg as the provider of the MATPOWER case file data and the Power
+Systems Control and Automation Laboratory of Georgia Tech as the source of its cost data. The
+library asks that its version be named when it is cited, and describes itself in S.
 Babaeinejadsarookolaee et al., "The Power Grid Library for Benchmarking AC Optimal Power Flow
 Algorithms," arXiv:1908.02788, 2019.
 
@@ -85,11 +95,79 @@ https://creativecommons.org/licenses/by/4.0/. The library's LICENSE file says th
 is under this licence ("See data files for specific copyright holders and attribution
 details") and its software under the MIT licence, which does not cover the data.
 
-Changes: TENSA made none. The library's version of the archive's data is not the archive's
-operating point: it sets every generator to 1.0 pu and starts every bus flat, gives the
-generators its own dispatch and limits, adds line ratings and angle limits, and gives the
-57-bus case a base voltage of 1.0 kV at every bus and three transformers of the 30-bus case a
-ratio of 1. The catalog lists them for each case.
+Changes: TENSA made none. The library's version of the data is not the original operating
+point: it sets every generator to 1.0 pu and starts every bus flat, gives the generators its
+own dispatch (and, in the 30-bus and 57-bus files, its own limits), adds line ratings and angle
+limits, and gives the 57-bus case a base voltage of 1.0 kV at every bus and three transformers
+of the 30-bus case a ratio of 1. The catalog lists them for each case.
+
+No warranty: the data is provided as is, as section 5 of the licence says.
+
+## Case bundled from the RTS-GMLC repository
+
+Reliability Test System of the Grid Modernization Lab Consortium, PSS/E version 33 file
+(`RTS-GMLC.RAW`).
+
+This file is part of the RTS-GMLC repository, https://github.com/GridMod/RTS-GMLC, release
+v0.2.3 (commit `3ece0d3725c844056132393ee252b3083dd4eab4`), file
+`RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW`, and TENSA bundles it as it is there, retrieved on
+2026-11-18. TENSA changed nothing in it: it is the repository's file byte for byte, and the
+catalog holds its SHA-256, which TENSA checks whenever it is added to a workspace. The data
+was provided by the National Renewable Energy Laboratory (NREL), which is operated by Alliance
+for Sustainable Energy, LLC for the U.S. Department of Energy (DOE), and the paper to cite for
+it is C. Barrows et al., "The IEEE Reliability Test System: A Proposed 2019 Update," IEEE
+Transactions on Power Systems, vol. 35, no. 1, pp. 119-127, 2020,
+doi:10.1109/TPWRS.2019.2925557.
+
+Licence: NREL Data Use Disclaimer Agreement, which the repository's README prints
+(https://github.com/GridMod/RTS-GMLC/blob/3ece0d3725c844056132393ee252b3083dd4eab4/README.md).
+It lets anyone use, copy and distribute the data free of charge for any purpose, provided that
+its entire notice appears in all copies of the data, and asks that DOE/NREL/ALLIANCE be
+credited in any publication that results from its use. The names DOE/NREL/ALLIANCE may not be
+used in advertising or publicity to endorse any product or commercial entity without their
+written permission. The notice follows as the repository prints it, and it is also in
+`RTS-GMLC-NOTICE.md` beside the file, in the catalog and in the `EXAMPLE-SOURCES.md` that TENSA
+writes next to the case in a workspace. The repository's copy of the notice ends in the middle
+of a sentence, after the words "ARISES OUT OF OR IN", and so does the copy in the repository's
+PowerFactory folder; TENSA has not completed it.
+
+> DATA USE DISCLAIMER AGREEMENT
+> *(“Agreement”)*
+>
+> These data (“Data”) are provided by the National Renewable Energy Laboratory (“NREL”), which is operated by Alliance for Sustainable Energy, LLC (“ALLIANCE”) for the U.S. Department Of Energy (“DOE”).
+>
+> Access to and use of these Data shall impose the following obligations on the user, as set forth in this Agreement.  The user is granted the right, without any fee or cost, to use, copy, and distribute these Data for any purpose whatsoever, provided that this entire notice appears in all copies of the Data.  Further, the user agrees to credit DOE/NREL/ALLIANCE in any publication that results from the use of these Data.  The names DOE/NREL/ALLIANCE, however, may not be used in any advertising or publicity to endorse or promote any products or commercial entities unless specific written permission is obtained from DOE/NREL/ ALLIANCE.  The user also understands that DOE/NREL/Alliance is not obligated to provide the user with any support, consulting, training or assistance of any kind with regard to the use of these Data or to provide the user with any updates, revisions or new versions of these Data.
+>
+> **YOU AGREE TO INDEMNIFY DOE/NREL/ALLIANCE, AND ITS SUBSIDIARIES, AFFILIATES, OFFICERS, AGENTS, AND EMPLOYEES AGAINST ANY CLAIM OR DEMAND, INCLUDING REASONABLE ATTORNEYS' FEES, RELATED TO YOUR USE OF THESE DATA.  THESE DATA ARE PROVIDED BY DOE/NREL/Alliance "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL DOE/NREL/ALLIANCE BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER, INCLUDING BUT NOT LIMITED TO CLAIMS ASSOCIATED WITH THE LOSS OF DATA OR PROFITS, WHICH MAY RESULT FROM AN ACTION IN CONTRACT, NEGLIGENCE OR OTHER TORTIOUS CLAIM THAT ARISES OUT OF OR IN**
+
+Changes: TENSA made none.
+
+## Case bundled from MATPOWER
+
+ACTIVSg200 synthetic 200-bus test case (`case_ACTIVSg200.m`).
+
+This file is part of MATPOWER, release 8.1 (commit `1a828c7af590714499284e36ee9c81273388c594`,
+`data/case_ACTIVSg200.m`; the file of release 8.0 is the same), https://github.com/MATPOWER/matpower,
+and TENSA bundles it as it is there, retrieved on 2026-11-18. TENSA changed nothing in it: it
+is MATPOWER's file byte for byte, header comments included, and the catalog holds its SHA-256,
+which TENSA checks whenever it is added to a workspace.
+
+Credit: the header of the file reads "MATPOWER Copyright (c) 2017 by A.B. Birchfield, T. Xu,
+K.M. Gegner, K.S. Shetye, and T.J. Overbye Licensed under the Creative Commons Attribution 4.0
+International license, https://creativecommons.org/licenses/by/4.0/", and asks that
+publications based on the data cite A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and
+T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks,"
+IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, 2017,
+doi:10.1109/TPWRS.2016.2616385. The system is synthetic, from the ARPA-E GRID DATA project of
+Texas A&M University (https://electricgrids.engr.tamu.edu/), whose page for the case names no
+licence and says the data is free for commercial or non-commercial use; the licence stated is
+the one in the header above.
+
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+https://creativecommons.org/licenses/by/4.0/. MATPOWER's own software is under the BSD
+3-clause licence, which is not the licence of this data.
+
+Changes: TENSA made none.
 
 No warranty: the data is provided as is, as section 5 of the licence says.
 

@@ -100,9 +100,12 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
         "pjm5bus",
         "ieee14_solar",
         "ieee14_wt3",
+        "rts24",
         "ieee30",
         "ieee57",
+        "rts_gmlc",
         "ieee118",
+        "activsg200",
         "ieee300",
     } <= set(gallery)
     report_json = tmp_path / "report.json"
@@ -151,6 +154,22 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
         case = next(c for c in report["cases"] if c["id"] == steady)
         assert {c["kind"] for c in case["checks"]} == kinds, steady
         assert {c["analysis"] for c in case["checks"]} == {"pf"}, steady
+    # The RTS-24 file starts flat and has no published solution, so the solver is all it has. The
+    # RTS-GMLC one is also held to the solution PSS/E printed (at the defaults and with the reactive
+    # limits enforced, each in a power flow of its own), and the ACTIVSg200 one to the state
+    # PowerWorld stored, the same two ways.
+    for steady, kinds, runs in (
+        ("rts24", {"sanity", "independent-solver"}, 1),
+        ("rts_gmlc", {"sanity", "independent-solver", "published"}, 2),
+        ("activsg200", {"sanity", "independent-solver", "stored-solution"}, 2),
+    ):
+        case = next(c for c in report["cases"] if c["id"] == steady)
+        assert {c["kind"] for c in case["checks"]} == kinds, steady
+        assert {c["analysis"] for c in case["checks"]} == {"pf"}, steady
+        converged = [c for c in case["checks"] if c["name"].startswith("Power flow converges")]
+        assert len(converged) == runs and all(c["passed"] for c in converged), steady
+    limited = [c for c in next(c for c in report["cases"] if c["id"] == "rts_gmlc")["checks"] if "enforced" in c["name"]]
+    assert len(limited) == 4 and all("PSS/E" in c["name"] or "converges" in c["name"] for c in limited)
     # The renewable cases are checked against the solver for the power flow, and what they do in
     # the time domain is a regression baseline: nothing independent exists for it.
     for renewable in ("ieee14_solar", "ieee14_wt3"):

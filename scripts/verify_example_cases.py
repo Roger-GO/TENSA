@@ -41,6 +41,8 @@ Checks no reference file is needed for:
   frequency window is read from the ring-down runs of this case and of the case it is a variant
   of (the same disturbance, in a session of its own), and the difference must lie in the range
   the reference gives: a stabiliser that damps a mode shows as a gain, one that does not as none;
+- where a check says ``pflow`` (reactive limits enforced, say), the power flow is run again with
+  those settings, in a session of its own, and that run is what the check reads;
 - the case's disturbance run completes and its rotor angles end within
   ``disturbance.stable_below_deg`` of each other, and, where the reference says
   ``disturbance.settles_within_deg``, within that many degrees of the spread they began with.
@@ -403,16 +405,37 @@ class Measured:
     """What the runs of one case produced, for the reference checks to read."""
 
     pf: dict[str, Any] | None = None
+    # The power flows run again for the checks that give settings, by ``pflow_key``.
+    pf_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
     tds: dict[str, float] | None = None
     modes: list[tuple[float, float]] | None = None
+
+    def pf_for(self, check: ReferenceCheck) -> dict[str, Any] | None:
+        """The power flow a check reads: the one at the defaults, or the one its settings ask."""
+        key = pflow_key(check)
+        return self.pf if key is None else self.pf_runs.get(key)
+
+
+def pflow_key(check: ReferenceCheck) -> str | None:
+    """The settings a check's power flow is run with, as a key; ``None`` for the defaults."""
+    if check.pflow is None:
+        return None
+    return json.dumps(check.pflow.model_dump(), sort_keys=True)
+
+
+def pflow_words(check: ReferenceCheck) -> str:
+    """What the settings of a check's power flow are, in words."""
+    if check.pflow is not None and check.pflow.enforce_q_limits:
+        return "reactive limits enforced"
+    return "its defaults"
 
 
 def _measured_scalar(quantity: str, check: ReferenceCheck, m: Measured) -> float | None:
     if quantity == "pf.loss_mw":
-        summary = (m.pf or {}).get("summary") or {}
+        summary = (m.pf_for(check) or {}).get("summary") or {}
         return summary.get("loss_p")
     if quantity == "pf.slack_p_mw":
-        summary = (m.pf or {}).get("summary") or {}
+        summary = (m.pf_for(check) or {}).get("summary") or {}
         return summary.get("slack_p")
     if quantity.startswith("tds."):
         return (m.tds or {}).get(quantity.split(".", 1)[1])
@@ -467,7 +490,7 @@ def _unit_suffix(quantity: str) -> str:
 
 def _evaluate_map(check: ReferenceCheck, m: Measured, base: dict[str, str]) -> Check:
     assert isinstance(check.expected, dict)
-    pf = m.pf or {}
+    pf = m.pf_for(check) or {}
     if check.quantity == "pf.bus_voltage_pu":
         got = {k: float(v) for k, v in (pf.get("bus_voltages") or {}).items()}
     else:
@@ -655,8 +678,8 @@ class Session:
             body = {"disturbances": [s.model_dump(mode="json") for s in specs]}
             self.api.post(f"/sessions/{self.id}/disturbances", body)
 
-    def pflow(self) -> dict[str, Any]:
-        return dict(self.api.post(f"/sessions/{self.id}/pflow"))
+    def pflow(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+        return dict(self.api.post(f"/sessions/{self.id}/pflow", settings))
 
     def tds(self, tf: float, names: Sequence[str], h: float | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"tf": tf, "dae_vars": list(names)}
@@ -845,10 +868,48 @@ def _verify(
             result.notes.append(
                 "The power flow did not converge, so the time-domain and eigenvalue runs were skipped."
             )
+        _pflow_variants(api, reference, primary, extra, result, measured, log)
         _reference_checks(reference, result, measured)
     finally:
         if session is not None:
             session.close()
+
+
+def _pflow_variants(
+    api: Api,
+    reference: ExampleReference | None,
+    primary: str,
+    extra: list[str],
+    result: CaseResult,
+    measured: Measured,
+    log: Log,
+) -> None:
+    """Run the power flow again for each settings the checks of the reference give.
+
+    Each run has a session of its own, so that none starts from the state another left, and
+    it is a power flow that must converge like the first.
+    """
+    for check in reference.checks if reference else []:
+        key = pflow_key(check)
+        if key is None or key in measured.pf_runs:
+            continue
+        words = pflow_words(check)
+        log(f"power flow with {words}")
+        session = Session(api, primary, extra)
+        try:
+            pf = session.pflow(check.pflow.model_dump() if check.pflow else None)
+        finally:
+            session.close()
+        measured.pf_runs[key] = pf
+        result.sanity(
+            f"Power flow converges with {words}",
+            "pf",
+            "TENSA's power flow (ANDES)",
+            "converged within the iteration limit",
+            f"converged {pf['converged']} in {pf.get('iterations')} iterations, "
+            f"mismatch {float(pf.get('mismatch', math.nan)):.2g}",
+            bool(pf["converged"]),
+        )
 
 
 def _dynamic(

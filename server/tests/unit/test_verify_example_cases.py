@@ -461,6 +461,8 @@ class FakeApi:
         self.drift = 0.0
         self.grow = 0.0  # growth rate (per second) of the swing after the load step
         self.pf_converged = True
+        self.limits_converge = True  # whether a power flow with the reactive limits converges
+        self.pflow_bodies: list[Any] = []
         self.tds_converged = True
         self.fail_add: int | None = None
         self.bus_padding = 0  # buses in the listing beyond the three, ahead of the machines
@@ -540,13 +542,16 @@ class FakeApi:
             self.specs = list(body["disturbances"])
             return {"accepted": []}
         if path.endswith("/pflow"):
+            self.pflow_bodies.append(body)
+            # With the reactive limits enforced the solution is a little different.
+            limited = bool((body or {}).get("enforce_q_limits"))
             return {
-                "converged": self.pf_converged,
+                "converged": self.limits_converge if limited else self.pf_converged,
                 "iterations": 3,
                 "mismatch": 1e-9,
-                "bus_voltages": {"1": 1.04, "2": 1.02, "3": 1.0},
+                "bus_voltages": {"1": 1.04, "2": 1.021 if limited else 1.02, "3": 1.0},
                 "bus_angles": {"1": 0.0, "2": math.radians(-3.0), "3": math.radians(-5.0)},
-                "summary": {"loss_p": 2.5, "slack_p": 80.0},
+                "summary": {"loss_p": 2.5, "slack_p": 80.5 if limited else 80.0},
             }
         if path.endswith("/dae-variables"):
             limit, offset = int(query.get("limit", 100)), int(query.get("offset", 0))
@@ -947,6 +952,109 @@ def test_a_file_the_workspace_already_holds_is_used_and_said_so(
     result, _ = harness.verify_case(fake, _example(), _reference(), replace_file=False)
     assert result.file == "demo.xlsx"
     assert any("already held" in n for n in result.notes)
+
+
+def _limited_check(**changes: Any) -> dict[str, Any]:
+    """A check of the voltages the power flow gives with the reactive limits enforced."""
+    return {
+        "name": "Bus voltage magnitudes, reactive limits enforced",
+        "quantity": "pf.bus_voltage_pu",
+        "kind": "published",
+        "reference": "a report solved with the limits",
+        "expected": {"1": 1.04, "2": 1.021, "3": 1.0},
+        "tolerance": {"abs": 1e-4},
+        "pflow": {"enforce_q_limits": True},
+        **changes,
+    }
+
+
+def _static_reference(*checks: dict[str, Any]) -> ExampleReference:
+    return parse_reference(json.dumps({"version": 1, "id": "demo", "checks": list(checks)}))
+
+
+def _static_example() -> Example:
+    return _example(category="steady-state", analyses=["pf"])
+
+
+def test_a_check_with_power_flow_settings_reads_a_run_made_with_them(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    """The first check reads the power flow at the defaults and the second one made with the
+    reactive limits enforced, whose voltage at bus 2 is 1.021 and not 1.02: each passes only
+    against its own run, and the second run has a session of its own, which is closed."""
+    reference = _static_reference(
+        {
+            **_limited_check(),
+            "name": "At the defaults",
+            "pflow": None,
+            "expected": {"1": 1.04, "2": 1.02, "3": 1.0},
+        },
+        _limited_check(),
+        _limited_check(
+            name="Slack power, reactive limits enforced", quantity="pf.slack_p_mw", expected=80.5
+        ),
+    )
+    result, measured = harness.verify_case(fake, _static_example(), reference, replace_file=True)
+    failed = [(c.name, c.result) for c in result.checks if not c.passed]
+    assert result.passed, failed
+    assert fake.pflow_bodies == [{}, {"enforce_q_limits": True}]
+    # Two checks name the same settings and ask for one run, in a session that is not the first.
+    assert fake.log.count("POST /sessions/s2/pflow") == 1 and "DELETE /sessions/s2" in fake.log
+    assert len(measured.pf_runs) == 1
+    sanity = [c.name for c in result.checks if c.kind == "sanity"]
+    assert "Power flow converges with reactive limits enforced" in sanity
+    # The report says what each was held to.
+    limited = next(
+        c for c in result.checks if c.name == "Bus voltage magnitudes, reactive limits enforced"
+    )
+    assert "largest difference 0 pu" in limited.result
+
+
+def test_a_check_with_settings_fails_when_it_is_only_true_of_the_defaults(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    reference = _static_reference(
+        _limited_check(expected={"1": 1.04, "2": 1.02, "3": 1.0}),
+    )
+    result, _ = harness.verify_case(fake, _static_example(), reference, replace_file=True)
+    check = next(c for c in result.checks if c.name.startswith("Bus voltage magnitudes"))
+    assert not check.passed and "1 outside the tolerance" in check.result
+
+
+def test_a_power_flow_with_settings_that_does_not_converge_fails_its_checks_and_says_so(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    fake.limits_converge = False
+    result, _ = harness.verify_case(
+        fake, _static_example(), _static_reference(_limited_check()), replace_file=True
+    )
+    sanity = next(
+        c for c in result.checks if c.name == "Power flow converges with reactive limits enforced"
+    )
+    assert not sanity.passed and "converged False" in sanity.result
+    assert not result.passed
+
+
+def test_no_power_flow_is_run_again_for_a_reference_that_gives_no_settings(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    result, measured = _run(harness, fake)
+    assert result.passed and measured.pf_runs == {}
+    assert all(body in ({}, None) for body in fake.pflow_bodies)
+
+
+def test_the_settings_of_a_power_flow_are_a_key_and_words(harness: ModuleType) -> None:
+    plain = _static_reference(_limited_check(pflow=None)).checks[0]
+    limited = _static_reference(_limited_check()).checks[0]
+    assert (
+        harness.pflow_key(plain) is None
+        and harness.pflow_key(limited) == '{"enforce_q_limits": true}'
+    )
+    assert harness.pflow_words(limited) == "reactive limits enforced"
+    assert harness.pflow_words(plain) == "its defaults"
+    measured = harness.Measured(pf={"a": 1}, pf_runs={'{"enforce_q_limits": true}': {"b": 2}})
+    assert measured.pf_for(plain) == {"a": 1} and measured.pf_for(limited) == {"b": 2}
+    assert harness.Measured().pf_for(limited) is None
 
 
 # ---- the checks of a case in the catalog ---------------------------------------------------

@@ -3701,6 +3701,11 @@ export interface components {
              * @description The credit the licence asks a user of the data to give.
              */
             attribution?: string | null;
+            /**
+             * Notice
+             * @description A notice the licence says must appear, whole, in every copy of the data. TENSA repeats it in its own ``NOTICE.md``, in a file beside the bundled data and in the ``EXAMPLE-SOURCES.md`` it writes next to the case in a workspace.
+             */
+            notice?: string | null;
         };
         /**
          * LineFlow

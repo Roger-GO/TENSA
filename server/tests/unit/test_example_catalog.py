@@ -33,6 +33,7 @@ from tests._repo import REPO_ROOT
 pytestmark = pytest.mark.unit
 
 _SHA = "a" * 64
+CC_BY_URL = "https://creativecommons.org/licenses/by/4.0/"
 
 
 def _entry(**overrides: Any) -> dict[str, Any]:
@@ -320,9 +321,12 @@ def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_i
         assert example.citations and example.licence.name == "GPL-3.0-or-later"
     # The steady-state cases are what the dialog's second group holds, the smallest first.
     assert [e.id for e in catalog.examples if e.category == "steady-state"] == [
+        "rts24",
         "ieee30",
         "ieee57",
+        "rts_gmlc",
         "ieee118",
+        "activsg200",
         "ieee300",
     ]
     # The renewable cases are the IEEE 14-bus case with a converter, which says what it is not.
@@ -336,8 +340,16 @@ def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_i
 # SHA-1 of ``blob <size>\0`` and the bytes): a bundled file that is not the library's own is
 # found by these without a download, whatever else changed in the catalog.
 PGLIB_BLOBS = {
+    "pglib_opf_case24_ieee_rts.m": "00b024c2e583b82452392514d2c22881c708ba7c",
     "pglib_opf_case30_ieee.m": "d429394621c797fa3893d4e4b6d8efa220a4015a",
     "pglib_opf_case57_ieee.m": "d8b0c9e8b45265e57f52b7ab96880ad3a874cde5",
+}
+# The copyright line each file's header states: the archive's data was entered by R. D. Christie
+# (1999), and the RTS belongs to the IEEE (1979).
+PGLIB_COPYRIGHT = {
+    "pglib_opf_case24_ieee_rts.m": "Copyright (c) 1979 The Institute of Electrical and Electronics Engineers (IEEE)",
+    "pglib_opf_case30_ieee.m": "Copyright (c) 1999 by Richard D. Christie, University of Washington",
+    "pglib_opf_case57_ieee.m": "Copyright (c) 1999 by Richard D. Christie, University of Washington",
 }
 PGLIB_COMMIT = "dc6be4b2f85ca0e776952ec22cbd4c22396ea5a3"
 
@@ -417,7 +429,7 @@ def test_a_bundled_pglib_file_is_the_librarys_own_with_its_header(name: str) -> 
     assert lines[1].startswith("%%%%") and "IEEE PES Power Grid Library" in lines[2]
     assert "(https://github.com/power-grid-lib/pglib-opf)" in lines[3]
     header = "\n".join(lines[:30])
-    assert "Copyright (c) 1999 by Richard D. Christie, University of Washington" in header
+    assert PGLIB_COPYRIGHT[name] in header
     assert "Licensed under the Creative Commons Attribution 4.0" in header
     assert "http://creativecommons.org/licenses/by/4.0/" in header
 
@@ -437,6 +449,7 @@ def _matpower_rows(text: str, field: str) -> list[list[float]]:
 @pytest.mark.parametrize(
     ("example_id", "name", "counts", "load", "scheduled", "slack_pmax", "ratings"),
     [
+        ("rts24", "pglib_opf_case24_ieee_rts.m", (24, 33, 38), 2850.0, 2220.5, 591.0, (175.0, 500.0)),
         ("ieee30", "pglib_opf_case30_ieee.m", (30, 6, 41), 283.4, 181.5, 271.0, (20.0, 267.0)),
         ("ieee57", "pglib_opf_case57_ieee.m", (57, 7, 80), 1250.8, 991.5, 245.0, (22.0, 1617.0)),
     ],
@@ -463,23 +476,226 @@ def test_the_numbers_the_pglib_entries_quote_are_the_files(
     assert {row[7] for row in bus} == {1.0} and {row[8] for row in bus} == {0.0}
     assert {row[5] for row in gen} == {1.0}
     assert sum(row[1] for row in gen) == pytest.approx(scheduled) and scheduled < load
+    # The limit of the slack is that of every unit it has: the RTS has three of 197 MW at bus 13.
     slack_bus = next(row[0] for row in bus if row[1] == 3)
-    assert next(row[8] for row in gen if row[0] == slack_bus) == slack_pmax
+    assert sum(row[8] for row in gen if row[0] == slack_bus) == slack_pmax
     rated = [row[5] for row in branch]
     assert (min(rated), max(rated)) == ratings
     assert all(row[11:13] == [-30.0, 30.0] for row in branch)
     # A power flow makes the slack take what the dispatch leaves: 257.8 MW inside its limit in
-    # the 30-bus case, and 411.7 MW, 167 MW over its limit, in the 57-bus one.
+    # the 30-bus case, 411.7 MW, 167 MW over its limit, in the 57-bus one, and 1073.0 MW, 482 MW
+    # over, in the RTS-24 one.
     reference = load_reference(example_id)
     assert reference is not None
     solved = next(c.expected for c in reference.checks if c.quantity == "pf.slack_p_mw")
     assert isinstance(solved, float)
-    assert (solved > slack_pmax) == (example_id == "ieee57")
+    assert (solved > slack_pmax) == (example_id in ("ieee57", "rts24"))
     entry = load_catalog().get(example_id)
     assert entry is not None
     assert f"{solved:.1f} MW" in " ".join(entry.caveats)
-    if example_id == "ieee57":
+    if example_id in ("ieee57", "rts24"):
         assert f"{solved - slack_pmax:.0f} MW over" in " ".join(entry.caveats)
+
+
+def test_the_gallery_has_the_rts_24_rts_gmlc_and_activsg_200_cases_and_none_is_seeded() -> None:
+    catalog = load_catalog()
+    expected = {
+        "rts24": ("pglib_opf_case24_ieee_rts.m", 24, 33, {"independent-solver"}),
+        "rts_gmlc": ("RTS-GMLC.RAW", 73, 160, {"independent-solver", "published"}),
+        "activsg200": (
+            "case_ACTIVSg200.m",
+            200,
+            49,
+            {"independent-solver", "stored-solution"},
+        ),
+    }
+    for example_id, (path, buses, generators, kinds) in expected.items():
+        example = catalog.get(example_id)
+        assert example is not None, example_id
+        assert not example.default and example.category == "steady-state"
+        assert example.provenance.kind == "bundled" and example.provenance.path == path
+        assert example.size is not None
+        assert (example.size.buses, example.size.generators) == (buses, generators)
+        assert example.analyses == ["pf"]
+        assert example.verification is not None and example.verification.checks
+        assert all(check.passed for check in example.verification.checks), example_id
+        # A power flow only, checked against what TENSA did not compute: no baseline stands for one.
+        assert {c.kind for c in example.verification.checks} == kinds, example_id
+        # Every one is held to a solver that shares no code with TENSA, and says where its file is
+        # from, pinned to what a later change to the source cannot move.
+        assert example.provenance.retrieved is not None
+        assert "/blob/" in (example.provenance.source_url or "")
+        assert example.modifications and example.modifications[0].startswith("TENSA changed nothing")
+    names = [f.name for e in catalog.examples for f in e.files()]
+    assert len(names) == len({n.casefold() for n in names})
+    # Only the RTS-GMLC one carries a notice that must go with every copy of its data.
+    assert [e.id for e in catalog.examples if e.licence.notice] == ["rts_gmlc"]
+
+
+def test_the_rts_24_file_is_credited_to_the_ieee_and_the_library_as_its_licence_asks() -> None:
+    """CC BY 4.0 again, with another creator than the 30 and 57-bus files: the IEEE, whose
+    copyright the header of the file states."""
+    entry = load_catalog().get("rts24")
+    assert entry is not None
+    name = "pglib_opf_case24_ieee_rts.m"
+    prov = entry.provenance
+    assert prov.release == "PGLib-OPF v23.07" and prov.retrieved is not None
+    assert prov.source_url == f"https://github.com/power-grid-lib/pglib-opf/blob/{PGLIB_COMMIT}/{name}"
+    assert entry.licence.name == "CC BY 4.0" and entry.licence.url == CC_BY_URL
+    credit = entry.licence.attribution or ""
+    assert "The Institute of Electrical and Electronics Engineers (IEEE)" in credit
+    assert "IEEE Reliability Test System Task Force" in credit and "pglib-opf v23.07" in credit
+    assert "no change" in credit and "M. E. Brennan" in credit
+    assert "@" not in credit  # the header's contact address is the file's, and is not repeated
+    # The system's own paper, the library and its report, MATPOWER's paper (the file's format).
+    dois = {c.doi for c in entry.citations}
+    assert {"10.1109/TPAS.1979.319398", "10.1109/TPWRS.2010.2051168"} <= dois
+    assert any(c.url == "https://arxiv.org/abs/1908.02788" for c in entry.citations)
+    text = " ".join(c.text for c in entry.citations)
+    assert "00b024c2e583b82452392514d2c22881c708ba7c" in text and "the paper's text" in text
+    notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
+    assert PGLIB_COPYRIGHT[name] in notice and "pglib_opf_case24_ieee_rts.m" in notice
+    assert "doi:10.1109/TPAS.1979.319398" in notice
+
+
+# Where each bundled file that is not PGLib's comes from: the repository's git blob id of the file
+# at the commit its entry names (so a copy that is not the source's own is found without a
+# download), and the commit.
+MATPOWER_81_COMMIT = "1a828c7af590714499284e36ee9c81273388c594"
+RTS_GMLC_COMMIT = "3ece0d3725c844056132393ee252b3083dd4eab4"
+SOURCE_BLOBS = {
+    "case_ACTIVSg200.m": "7f707e91b414de417f25492f47ed81cee8e6c981",
+    "RTS-GMLC.RAW": "41372a04c008b48027fbec4c239014bf3791b776",
+}
+
+
+@pytest.mark.parametrize("name", sorted(SOURCE_BLOBS))
+def test_a_bundled_file_that_is_not_pglibs_is_its_sources_own_and_the_entry_pins_the_commit(
+    name: str,
+) -> None:
+    data = (example_catalog.bundled_cases_dir() / name).read_bytes()
+    assert hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest() == SOURCE_BLOBS[name]
+    assert b"\r" not in data  # git must not have touched it
+    entry = next(e for e in load_catalog().examples if e.provenance.path == name)
+    prov = entry.provenance
+    assert prov.sha256 == hashlib.sha256(data).hexdigest()
+    if name == "RTS-GMLC.RAW":
+        assert prov.source_url == (
+            f"https://github.com/GridMod/RTS-GMLC/blob/{RTS_GMLC_COMMIT}"
+            "/RTS_Data/FormattedData/PSSE/RTS-GMLC.RAW"
+        )
+        assert prov.release == "RTS-GMLC v0.2.3"
+        # The one line of header the file has: the PowerWorld version it was saved from.
+        first = data.decode("ascii").splitlines()[0]
+        assert first.startswith(" 0,    100.00, 33, 0, 0, 60.00") and "Simulator Version 19" in first
+        assert "November 07, 2017" in first
+    else:
+        assert prov.source_url == (
+            f"https://github.com/MATPOWER/matpower/blob/{MATPOWER_81_COMMIT}/data/{name}"
+        )
+        assert prov.release == "MATPOWER 8.1"
+        header = data.decode("ascii")[:2000]
+        assert (
+            "%   MATPOWER\n%   Copyright (c) 2017 by A.B. Birchfield, T. Xu, K.M. Gegner, K.S. Shetye,\n"
+            "%   and T.J. Overbye\n%   Licensed under the Creative Commons Attribution 4.0 International "
+            "license,\n%   https://creativecommons.org/licenses/by/4.0/\n"
+        ) in header
+        assert "doi: 10.1109/TPWRS.2016.2616385" in header
+
+
+def test_the_activsg_200_entry_credits_the_authors_and_says_what_the_page_it_comes_from_does_not() -> None:
+    entry = load_catalog().get("activsg200")
+    assert entry is not None
+    assert entry.licence.name == "CC BY 4.0" and entry.licence.url == CC_BY_URL
+    credit = entry.licence.attribution or ""
+    assert "A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye" in credit
+    assert "MATPOWER Copyright (c) 2017" in credit and "no change" in credit
+    assert "names no licence" in credit
+    assert "10.1109/TPWRS.2016.2616385" in {c.doi for c in entry.citations}
+    assert any("electricgrids.engr.tamu.edu" in (c.url or "") for c in entry.citations)
+    text = " ".join(entry.caveats)
+    assert "no relation to the actual grid" in text and "free for commercial or non-commercial use" in text
+    assert "Texas A&M offers the case with dynamic models, which TENSA does not bundle" in text
+
+
+def test_the_activsg_200_numbers_the_entry_quotes_are_the_file() -> None:
+    text = (example_catalog.bundled_cases_dir() / "case_ACTIVSg200.m").read_text(encoding="ascii")
+    bus, gen, branch = (_matpower_rows(text, field) for field in ("bus", "gen", "branch"))
+    assert (len(bus), len(gen), len(branch)) == (200, 49, 245)
+    # Columns: base kV of a bus; status, Vg and the limits of a generator; rate A of a branch.
+    assert {row[9] for row in bus} == {13.8, 115.0, 230.0}
+    assert sum(1 for row in bus if row[9] == 13.8) == 49  # the generator buses
+    assert sum(row[2] for row in bus) == pytest.approx(1475.69)
+    assert sum(row[3] for row in bus) == pytest.approx(420.55)
+    assert sorted(row[5] for row in bus if row[5]) == [30.0, 30.0, 50.0, 80.0]
+    assert sum(1 for row in gen if row[7]) == 38 and {row[5] for row in gen} == {1.04}
+    assert (min(row[5] for row in branch), max(row[5] for row in branch)) == (7.4, 740.0)
+    assert "mpc.dcline" not in text
+    entry = load_catalog().get("activsg200")
+    assert entry is not None
+    caveats = " ".join(entry.caveats)
+    for quoted in ("38 in service", "245 branches rated from 7.4 to 740 MVA", "1475.7 MW and 420.6 MVAr"):
+        assert quoted in caveats
+    assert "four shunts of 30 to 80 MVAr" in caveats
+
+
+# The notice of the NREL data use agreement, which must appear in all copies of the RTS-GMLC data.
+NOTICE_FILE = "RTS-GMLC-NOTICE.md"
+
+
+def test_the_nrel_notice_is_whole_in_the_catalog_beside_the_file_and_in_the_notice() -> None:
+    """The agreement lets the data be copied provided that its entire notice appears in all copies.
+    The repository's copy ends in the middle of a sentence, and TENSA's does not go further."""
+    entry = load_catalog().get("rts_gmlc")
+    assert entry is not None
+    notice = entry.licence.notice
+    assert notice is not None
+    beside = (example_catalog.bundled_cases_dir() / NOTICE_FILE).read_text(encoding="utf-8")
+    assert beside == notice + "\n"
+    in_notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
+    assert "\n".join(example_catalog.quoted_notice(notice)) in in_notice
+    # The agreement as the repository prints it: its grant, the credit it asks for, the indemnity
+    # and the disclaimer, the last of them stopping where the repository's copy stops.
+    assert notice.startswith("DATA USE DISCLAIMER AGREEMENT\n*(\u201cAgreement\u201d)*\n\n")
+    assert "provided that this entire notice appears in all copies of the Data" in notice
+    assert "the user agrees to credit DOE/NREL/ALLIANCE in any publication" in notice
+    assert "YOU AGREE TO INDEMNIFY DOE/NREL/ALLIANCE" in notice
+    assert notice.endswith("THAT ARISES OUT OF OR IN**")
+    assert len(notice.split("\n\n")) == 4
+    flowed = " ".join(in_notice.split())
+    assert "ends in the middle of a sentence" in flowed and "TENSA has not completed it" in flowed
+    # The entry's credit names what is asked and the places the notice is put.
+    credit = entry.licence.attribution or ""
+    assert "Barrows et al. (2020)" in credit and "may not be used in advertising or publicity" in credit
+    assert NOTICE_FILE in credit and "EXAMPLE-SOURCES.md" in credit
+    assert entry.licence.name == "NREL Data Use Disclaimer Agreement"
+    assert entry.licence.url == f"https://github.com/GridMod/RTS-GMLC/blob/{RTS_GMLC_COMMIT}/README.md"
+    assert "10.1109/TPWRS.2019.2925557" in {c.doi for c in entry.citations}
+
+
+def test_the_notice_field_is_for_a_licence_and_has_a_limit() -> None:
+    licence = {"name": "A licence", "notice": "Keep this with every copy."}
+    (example,) = parse_catalog(json.dumps(_catalog(_entry(licence=licence)))).examples
+    assert example.licence.notice == "Keep this with every copy."
+    assert _entry()["licence"].get("notice") is None
+    assert "notice" in _problem(_entry(licence={"name": "A licence", "notice": "x" * 4001}))
+    assert example_catalog.quoted_notice("a\n\nb\n") == ["> a", ">", "> b"]
+
+
+def test_the_rts_gmlc_entry_says_what_the_file_has_in_place_of_its_dc_line() -> None:
+    entry = load_catalog().get("rts_gmlc")
+    assert entry is not None
+    text = " ".join(entry.caveats)
+    # The DC line is not in the file: its section is empty, and two generator records named DC stand
+    # for its ends. ANDES skips the section silently (the integration test shows it).
+    assert "its two-terminal DC section is empty" in text
+    assert "two generator records named DC" in text and "100 MW transfer is not in the case" in text
+    assert "skips every other section, two-terminal DC data included, with no message" in text
+    assert "160 generator records are the 158 generators" in text
+    assert "98 of the 160 generator records are in service" in text
+    assert "the report marks every one as locked" in text
+    summary = entry.verification.summary if entry.verification else ""
+    assert "PSS/E reader written for the check" in summary and "state the file stores is not a solution" in summary
 
 
 def test_the_ieee_300_file_is_the_one_matpower_8_0_holds_and_the_entry_says_what_it_lacks() -> None:

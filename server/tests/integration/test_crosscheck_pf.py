@@ -408,7 +408,7 @@ def test_a_stored_state_has_a_basis_of_its_own_where_the_file_does_not_keep_a_so
     assert all("not a solution of it" in c["reference"] for c in mine)
     assert all("TENSA did not compute it" in c["reference"] for c in mine)
     # Only the cases that have a basis of their own do: a case that is not listed gets the RAW one.
-    assert set(script.STORED_BASES) == {"ieee118", "ieee300"}
+    assert set(script.STORED_BASES) == {"ieee118", "ieee300", "activsg200"}
 
 
 def test_a_stored_state_without_slack_power_has_no_check_of_it(script: ModuleType) -> None:
@@ -490,3 +490,627 @@ def test_the_phase_shifter_the_300_bus_file_lacks_is_why_its_stored_state_is_not
         )
     assert gaps["as it is"][1] > 9.0
     assert gaps["with the shifter"][0] < 5e-4 and gaps["with the shifter"][1] < 0.05
+
+
+# ---- the PSS/E reader of the script, the RTS-GMLC file and a PSS/E report -----------------
+
+
+def _bundled(name: str) -> Path:
+    from tensa.core.example_catalog import bundled_cases_dir
+
+    return bundled_cases_dir() / name
+
+
+# The sections of a version 33 RAW file, in order, as the end-of-section lines name them.
+_RAW_SECTION_NAMES = (
+    "BUS",
+    "LOAD",
+    "FIXED SHUNT",
+    "GENERATOR",
+    "BRANCH",
+    "TRANSFORMER",
+    "AREA",
+    "TWO-TERMINAL DC",
+    "VOLTAGE SOURCE CONVERTER",
+    "IMPEDANCE CORRECTION",
+    "MULTI-TERMINAL DC",
+    "MULTI-SECTION LINE",
+    "ZONE",
+    "INTER-AREA TRANSFER",
+    "OWNER",
+    "FACTS CONTROL DEVICE",
+    "SWITCHED SHUNT",
+    "GNE DEVICE",
+)
+
+# A small system: a swing bus and a generator bus at 138 kV and a load bus at 230 kV.
+_RAW_BASIC = {
+    "bus": [
+        "1,'SWING',138.0,3,1,1,1,1.04,0.0",
+        "2,'GEN',138.0,2,1,1,1,1.02,-2.0",
+        "3,'LOAD',230.0,1,1,1,1,1.00,-4.0",
+    ],
+    "load": ["3,'1',1,1,1,50.0,10.0,0.0,0.0,0.0,0.0,1,1"],
+    "generator": [
+        "1,'1',0.0,0.0,50.0,-50.0,1.04,0,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,200.0,0.0",
+        "2,'1',20.0,0.0,30.0,-30.0,1.02,0,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0.0",
+    ],
+    "branch": ["1,2,'1',0.01,0.05,0.02,100.0,100.0,100.0,0.0,0.0,0.0,0.0,1,1,10.0"],
+    "transformer": [
+        "2,3,0,'1',1,1,1,0.0,0.0,2,'T1',1,1,1.0",
+        "0.002,0.08,100.0",
+        "1.05,138.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+        "1.0,230.0",
+    ],
+}
+
+
+def _raw_text(sections: dict[str, list[str]] | None = None, *, revision: int = 33) -> str:
+    """A RAW file of ``_RAW_BASIC``, with the records of the sections named replaced."""
+    records = {**_RAW_BASIC, **(sections or {})}
+    lines = [f"0, 100.00, {revision}, 0, 0, 60.00 / a test case", "Title one", "Title two"]
+    for name in _RAW_SECTION_NAMES:
+        lines += records.get(name.lower(), [])
+        lines.append(f"0 / END OF {name} DATA")
+    lines.append("Q")
+    return "\n".join(lines) + "\n"
+
+
+def _read_raw(script: ModuleType, tmp_path: Path, text: str) -> dict[str, Any]:
+    path = tmp_path / "case.raw"
+    path.write_text(text, encoding="ascii")
+    return script._ppc_from_raw_file(path)  # type: ignore[no-any-return]  # noqa: SLF001
+
+
+def test_the_raw_reader_reads_a_small_case_as_pss_e_defines_it(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    ppc = _read_raw(script, tmp_path, _raw_text())
+    assert ppc["baseMVA"] == 100.0 and ppc["f_hz"] == 60.0
+    bus = {int(row[0]): row for row in ppc["bus"]}
+    assert [bus[n][1] for n in (1, 2, 3)] == [3.0, 2.0, 1.0]
+    assert (bus[3][2], bus[3][3], bus[3][9]) == (50.0, 10.0, 230.0)
+    # Generator rows: bus, P, Q, Qmax, Qmin, Vg, base, status, Pmax, Pmin.
+    assert [g[:8] for g in ppc["gen"]] == [
+        [1.0, 0.0, 0.0, 50.0, -50.0, 1.04, 100.0, 1.0],
+        [2.0, 20.0, 0.0, 30.0, -30.0, 1.02, 100.0, 1.0],
+    ]
+    line, transformer = ppc["branch"]
+    # The line keeps its charging; the transformer has its tap as the ratio of the windings and
+    # its impedance as given, per unit of the system base.
+    assert line[:5] == [1.0, 2.0, 0.01, 0.05, 0.02] and line[8] == 0.0
+    assert transformer[:4] == [2.0, 3.0, 0.002, 0.08] and transformer[8] == pytest.approx(1.05)
+
+
+@pytest.mark.parametrize(
+    ("winding1", "winding2", "codes", "ratio", "scale"),
+    [
+        # CW 1: per unit of the bus voltage, so the ratio is the two taps' quotient.
+        ("1.05,138.0,0.0,100.0,100.0,100.0", "1.02,230.0", (1, 1), 1.05 / 1.02, 1.0),
+        # CW 2: the taps are kilovolts, and the ratio is that of the per unit values.
+        ("145.0,138.0,0.0,100.0,100.0,100.0", "230.0,230.0", (2, 1), (145.0 / 138.0), 1.0),
+        # CW 3: per unit of the winding's nominal voltage, which is not the bus's (140 against 138 kV).
+        ("1.0,140.0,0.0,100.0,100.0,100.0", "1.0,230.0", (3, 1), 140.0 / 138.0, 1.0),
+        # CZ 2: the impedance is per unit of the winding base, here 50 MVA on a system of 100.
+        ("1.0,138.0,0.0,100.0,100.0,100.0", "1.0,230.0", (1, 2), 1.0, 2.0),
+    ],
+)
+def test_the_raw_reader_turns_the_windings_and_codes_of_a_transformer_into_a_ratio_and_an_impedance(
+    script: ModuleType,
+    tmp_path: Path,
+    winding1: str,
+    winding2: str,
+    codes: tuple[int, int],
+    ratio: float,
+    scale: float,
+) -> None:
+    sbase = 50.0 if codes[1] == 2 else 100.0
+    transformer = [
+        f"2,3,0,'1',{codes[0]},{codes[1]},1,0.0,0.0,2,'T1',1,1,1.0",
+        f"0.002,0.08,{sbase}",
+        winding1 + ",0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+        winding2,
+    ]
+    ppc = _read_raw(script, tmp_path, _raw_text({"transformer": transformer}))
+    row = ppc["branch"][-1]
+    assert row[8] == pytest.approx(ratio) and row[2] == pytest.approx(0.002 * scale)
+    assert row[3] == pytest.approx(0.08 * scale)
+
+
+def test_the_raw_reader_leaves_out_what_is_out_of_service_and_what_a_power_flow_does_not_use(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    # The only generator of bus 2 is out of service, so bus 2 is a load bus; a line out of
+    # service has no line-end shunt; a load out of service is no load; and a switched shunt that
+    # stays where it is is a susceptance at its bus (BINIT, in MVAr).
+    sections = {
+        "generator": [
+            "1,'1',0.0,0.0,50.0,-50.0,1.04,0,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,200.0,0.0",
+            "2,'1',20.0,0.0,30.0,-30.0,1.02,0,100.0,0.0,1.0,0.0,0.0,1.0,0,100.0,100.0,0.0",
+        ],
+        "branch": [
+            "1,2,'1',0.01,0.05,0.02,100.0,100.0,100.0,0.5,0.4,0.0,0.0,1,1,10.0",
+            "1,3,'1',0.01,0.05,0.02,100.0,100.0,100.0,0.0,0.0,0.3,0.2,0,1,10.0",
+        ],
+        "load": [
+            "3,'1',1,1,1,50.0,10.0,0.0,0.0,0.0,0.0,1,1",
+            "3,'2',0,1,1,99.0,9.0,0.0,0.0,0.0,0.0,1,1",
+        ],
+        "switched shunt": ["3,0,0,1,1.05,0.95,0,100.0,'',-25.0,1,-25.0"],
+        "area": ["1,0,0.0,1.0,'A'"],
+    }
+    ppc = _read_raw(script, tmp_path, _raw_text(sections))
+    bus = {int(row[0]): row for row in ppc["bus"]}
+    assert bus[2][1] == 1.0  # a PV bus with no generator in service is a load bus
+    assert (bus[3][2], bus[3][3], bus[3][4], bus[3][5]) == (50.0, 10.0, 0.0, -25.0)
+    # Only the line in service has its line-end shunt (PSS/E's GI and BI are per unit of the base).
+    assert (bus[1][4], bus[1][5]) == (50.0, 40.0)
+    assert [row[10] for row in ppc["branch"]] == [1.0, 0.0, 1.0]
+    assert [g[7] for g in ppc["gen"]] == [1.0, 0.0]
+
+
+def test_the_raw_reader_adds_a_fixed_shunt_and_the_magnetising_branch_of_a_transformer_to_a_bus(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    """A fixed shunt is MW and MVAr at 1 pu (one out of service is left out), and a transformer's
+    magnetising admittance, per unit of the system base, sits at the bus of its first winding."""
+    transformer = [
+        "2,3,0,'1',1,1,1,0.001,-0.01,2,'T1',1,1,1.0",
+        "0.002,0.08,100.0",
+        "1.05,138.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+        "1.0,230.0",
+    ]
+    sections = {
+        "fixed shunt": ["3,'1',1,2.0,15.0", "3,'2',0,99.0,99.0"],
+        "transformer": transformer,
+    }
+    bus = {int(r[0]): r for r in _read_raw(script, tmp_path, _raw_text(sections))["bus"]}
+    assert (bus[3][4], bus[3][5]) == (2.0, 15.0)
+    assert (bus[2][4], bus[2][5]) == (pytest.approx(0.1), pytest.approx(-1.0))
+
+
+@pytest.mark.parametrize(
+    ("section", "records", "message"),
+    [
+        ("two-terminal dc", ["'DC1',1,100.0,500.0,5.0,0,0,0,'I',0,0,1", "3,2,16,16", "2,2,16,16"], "two-terminal dc data"),
+        ("facts control device", ["'F1',3,0,1"], "facts control device data"),
+        ("load", ["3,'1',1,1,1,50.0,10.0,5.0,0.0,0.0,0.0,1,1"], "constant-current"),
+        ("load", ["3,'1',1,1,1,50.0,10.0,0.0,0.0,2.0,0.0,1,1"], "constant-admittance"),
+        (
+            "generator",
+            ["1,'1',0.0,0.0,50.0,-50.0,1.04,3,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,200.0,0.0"],
+            "regulates bus 3",
+        ),
+        ("switched shunt", ["3,1,0,1,1.05,0.95,0,100.0,'',-25.0,1,-25.0"], "adjustable"),
+        (
+            "transformer",
+            [
+                "2,3,0,'1',1,1,1,0.0,0.0,2,'T1',1,1,1.0",
+                "0.002,0.08,100.0",
+                "1.0,138.0,30.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+                "1.0,230.0",
+            ],
+            "phase shifter",
+        ),
+        (
+            "transformer",
+            [
+                "2,3,1,'1',1,1,1,0.0,0.0,2,'T1',1,1,1.0",
+                "0.002,0.08,100.0,0.002,0.08,100.0,0.002,0.08,100.0,1.0,0.0",
+            ],
+            "three windings",
+        ),
+        (
+            "transformer",
+            [
+                "2,3,0,'1',1,3,1,0.0,0.0,2,'T1',1,1,1.0",
+                "1500.0,0.08,100.0",
+                "1.0,138.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+                "1.0,230.0",
+            ],
+            "codes CW 1 and CZ 3",
+        ),
+        (
+            "transformer",
+            [
+                "2,3,0,'1',1,1,2,1500.0,0.01,2,'T1',1,1,1.0",
+                "0.002,0.08,100.0",
+                "1.0,138.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+                "1.0,230.0",
+            ],
+            "magnetising branch as losses",
+        ),
+        ("load", ["9,'1',1,1,1,50.0,10.0,0.0,0.0,0.0,0.0,1,1"], "on bus 9, which the file lacks"),
+    ],
+)
+def test_the_raw_reader_refuses_what_would_make_its_network_another_one(
+    script: ModuleType, tmp_path: Path, section: str, records: list[str], message: str
+) -> None:
+    """A power flow of a file the reader did not model would be a reference for another network,
+    so a file with a DC line, a FACTS device, a three-winding transformer, a phase shifter, a load
+    with a constant-current part, a generator that regulates another bus, an adjustable shunt or a
+    transformer whose data it does not convert stops with an error that names it."""
+    with pytest.raises(script.CrosscheckError, match=message):
+        _read_raw(script, tmp_path, _raw_text({section: records}))
+
+
+def test_the_raw_reader_refuses_a_file_that_is_not_version_33_or_is_cut_short(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    with pytest.raises(script.CrosscheckError, match="revision 34"):
+        _read_raw(script, tmp_path, _raw_text(revision=34))
+    cut = "\n".join(_raw_text().splitlines()[:12]) + "\nQ\n"
+    with pytest.raises(script.CrosscheckError, match="sections where version 33 has 19"):
+        _read_raw(script, tmp_path, cut)
+    with pytest.raises(script.CrosscheckError, match="too short"):
+        _read_raw(script, tmp_path, "0, 100.00, 33\n")
+
+
+def test_the_raw_reader_splits_a_line_at_its_commas_outside_quotes_and_drops_the_comment(
+    script: ModuleType,
+) -> None:
+    assert script._raw_fields("  101,'AB, CD  ', 138.0 ,2 / the rest, is a comment") == [  # noqa: SLF001
+        "101",
+        "AB, CD",
+        "138.0",
+        "2",
+    ]
+    assert script._raw_number(["1", ""], 1, 7.0) == 7.0  # noqa: SLF001
+    assert script._raw_number(["1"], 4) == 0.0  # noqa: SLF001
+
+
+def test_the_rts_gmlc_file_has_what_its_entry_counts_and_no_dc_line(script: ModuleType) -> None:
+    path = _bundled("RTS-GMLC.RAW")
+    ppc = script._ppc_from_raw_file(path)  # noqa: SLF001
+    assert (len(ppc["bus"]), len(ppc["gen"]), len(ppc["branch"])) == (73, 160, 120)
+    assert sum(1 for g in ppc["gen"] if g[7]) == 98
+    assert sum(g[3] for g in ppc["gen"] if g[7]) > 0 and ppc["baseMVA"] == 100.0
+    assert sum(row[2] for row in ppc["bus"]) == pytest.approx(8550.0)
+    assert sum(row[3] for row in ppc["bus"]) == pytest.approx(1740.0)
+    assert sorted(row[5] for row in ppc["bus"] if row[5]) == [-100.0] * 3
+    assert sum(1 for row in ppc["branch"] if row[8]) == 15 and {
+        round(row[8], 3) for row in ppc["branch"] if row[8]
+    } == {1.015, 1.03}
+    # The one bus of the swing is bus 113, which has six of the generator records, and a type 2
+    # bus with nothing in service on it was made a load bus (45 of the file's, 32 left).
+    types = {int(row[0]): int(row[1]) for row in ppc["bus"]}
+    assert [n for n, t in types.items() if t == 3] == [113]
+    assert sum(1 for t in types.values() if t == 2) == 32
+    assert sum(1 for g in ppc["gen"] if g[0] == 113) == 6
+    # Its two-terminal DC section is empty, and the DC line is two generator records named DC.
+    header, sections = script._raw_sections(path.read_text(encoding="ascii"))  # noqa: SLF001
+    assert sections["two-terminal dc"] == [] and header[1].strip() == "100.00"
+    named = [(f[0], f[2], f[14]) for f in sections["generator"] if f[1] == "DC"]
+    assert named == [("113", "0.000", "1"), ("316", "0.000", "1")]
+
+
+def test_andes_reads_the_rts_gmlc_file_as_the_independent_reader_does(script: ModuleType) -> None:
+    """The reference solves the network the script's reader makes of the RAW file, so the reader
+    is held to ANDES's: every load, shunt, generator (160, with its set-point and limits) and
+    branch (120, with its tap, impedance and charging) of the file is the same in both."""
+    import andes
+
+    path = _bundled("RTS-GMLC.RAW")
+    mine = script._ppc_from_raw_file(path)  # noqa: SLF001
+    system = andes.load(str(path), setup=False, no_output=True, default_config=True)
+    system.setup()
+    base = float(system.config.mva)
+    for row in mine["bus"]:
+        number = int(row[0])
+        loads = [k for k in range(system.PQ.n) if system.PQ.bus.v[k] == number and system.PQ.u.v[k]]
+        assert sum(system.PQ.p0.v[k] for k in loads) * base == pytest.approx(row[2], abs=1e-9)
+        assert sum(system.PQ.q0.v[k] for k in loads) * base == pytest.approx(row[3], abs=1e-9)
+        shunts = [k for k in range(system.Shunt.n) if system.Shunt.bus.v[k] == number]
+        assert sum(system.Shunt.b.v[k] for k in shunts) * base == pytest.approx(row[5], abs=1e-9)
+    ours = sorted(
+        (int(g[0]), round(g[1], 6), round(g[2], 6), round(g[3], 6), round(g[4], 6), round(g[5], 6), int(g[7]))
+        for g in mine["gen"]
+    )
+    theirs = sorted(
+        (
+            int(model.bus.v[k]),
+            round(model.p0.v[k] * base, 6),
+            round(model.q0.v[k] * base, 6),
+            round(model.qmax.v[k] * base, 6),
+            round(model.qmin.v[k] * base, 6),
+            round(model.v0.v[k], 6),
+            int(model.u.v[k]),
+        )
+        for model in (system.PV, system.Slack)
+        for k in range(model.n)
+    )
+    assert ours == theirs and len(ours) == 160
+    line = system.Line
+
+    def andes_branch(k: int) -> tuple[float, ...]:
+        tap = line.tap.v[k] or 1.0
+        ends = sorted((int(line.bus1.v[k]), int(line.bus2.v[k]))) if tap == 1.0 else [
+            int(line.bus1.v[k]),
+            int(line.bus2.v[k]),
+        ]
+        return (*ends, *(round(float(v), 9) for v in (line.r.v[k], line.x.v[k], line.b.v[k], tap)), int(line.u.v[k]))
+
+    def my_branch(row: list[float]) -> tuple[float, ...]:
+        tap = row[8] or 1.0
+        ends = sorted((int(row[0]), int(row[1]))) if tap == 1.0 else [int(row[0]), int(row[1])]
+        return (*ends, *(round(v, 9) for v in (row[2], row[3], row[4], tap)), int(row[10]))
+
+    assert sorted(andes_branch(k) for k in range(line.n)) == sorted(my_branch(r) for r in mine["branch"])
+
+
+def test_andes_reads_no_dc_line_from_a_raw_file_and_says_nothing_of_it(
+    script: ModuleType, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A two-terminal DC line put in the file's DC section is skipped by ANDES's reader with no
+    message and no model, and the script's reader refuses the file. The RTS-GMLC entry says this;
+    if a release of ANDES reads DC lines this fails and the entry has to be revised."""
+    import logging
+
+    import andes
+
+    lines = _bundled("RTS-GMLC.RAW").read_text(encoding="ascii").splitlines()
+    at = next(i for i, line in enumerate(lines) if "BEGIN TWO-TERMINAL DC DATA" in line)
+    record = [
+        "'DC1',1,100.0,500.0,5.0,0.0,0.0,0,'I',0.0,0.0,1.0",
+        "113,2,16.0,16.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,'1',0.0",
+        "316,2,16.0,16.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,1.0,0.0,0.0,'1',0.0",
+    ]
+    with_dc = tmp_path / "with_dc.raw"
+    with_dc.write_text("\n".join([*lines[: at + 1], *record, *lines[at + 1 :]]) + "\n", encoding="ascii")
+    with pytest.raises(script.CrosscheckError, match="two-terminal dc data"):
+        script._ppc_from_raw_file(with_dc)  # noqa: SLF001
+    said: list[list[str]] = []
+    for path in (_bundled("RTS-GMLC.RAW"), with_dc):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            system = andes.load(str(path), setup=True, no_output=True, default_config=True)
+        said.append([r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING])
+    # What it says of the file with the DC line is what it says of the file without it (the
+    # five slack generators on one bus), and nothing of the line.
+    assert said[0] == said[1] and "slack generators" in said[0][0]
+    assert (system.Bus.n, system.Line.n, system.PV.n + system.Slack.n) == (73, 120, 160)
+    assert not [name for name, model in system.models.items() if model.n and "DC" in name.upper()]
+
+
+# A PSS/E report of the small system above, in the layout PSS/E prints: a block per bus, with the
+# voltage and angle on its first line and the generation under it for a bus that has any.
+_REPORT = """\
+This report is provided by someone on a date.
+
+ BUS      1     SWING       138.00 CKT     MW     MVAR     MVA   % 1.0400PU    0.00  X--- LOSSES ---X X---- AREA -----X
+  FROM GENERATION                         70.2    12.3R   71.3  71 143.52KV               MW     MVAR    1 1
+  TO    2     GEN         138.00  1     70.2    12.3     71.3  71                       0.10    0.20    1 1
+
+ BUS      2     GEN         138.00 CKT     MW     MVAR     MVA   % 1.0200PU   -2.00  X--- LOSSES ---X X---- AREA -----X
+  FROM GENERATION                         20.0     4.0H   20.4  20 140.76KV               MW     MVAR    1 1
+
+ BUS      3     LOAD        230.00 CKT     MW     MVAR     MVA   % 0.9900PU   -4.50  X--- LOSSES ---X X---- AREA -----X
+"""
+
+
+def test_a_pss_e_report_gives_each_buss_voltage_and_angle_and_the_generation_of_those_with_any(
+    script: ModuleType,
+) -> None:
+    state, generation = script.parse_psse_report(_REPORT)
+    assert state == {1: (1.04, 0.0), 2: (1.02, -2.0), 3: (0.99, -4.5)}
+    assert generation == {1: 70.2, 2: 20.0}
+    with pytest.raises(script.CrosscheckError, match="no bus block"):
+        script.parse_psse_report("nothing of the kind\n")
+
+
+def test_two_raw_files_are_one_network_apart_from_what_a_power_flow_does_not_use(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    base = _read_raw(script, tmp_path, _raw_text())
+    # Not compared: the state a bus is stored at, a generator out of service, the order of the
+    # branches and the end a line is listed from.
+    reversed_line = ["2,1,'1',0.01,0.05,0.02,100.0,100.0,100.0,0.0,0.0,0.0,0.0,1,1,10.0"]
+    stored = [row.replace("1.04,0.0", "1.0431,-0.3") for row in _RAW_BASIC["bus"]]
+    same = _read_raw(script, tmp_path, _raw_text({"branch": reversed_line, "bus": stored}))
+    assert script.network_differences(base, same) == []
+    # Compared: the dispatch, the loads, a transformer's tap, the branches, the system base.
+    other_gen = _RAW_BASIC["generator"][:1] + [
+        "2,'1',25.0,0.0,30.0,-30.0,1.02,0,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,100.0,0.0"
+    ]
+    assert "generators in service" in "; ".join(
+        script.network_differences(base, _read_raw(script, tmp_path, _raw_text({"generator": other_gen})))
+    )
+    heavier = _read_raw(script, tmp_path, _raw_text({"load": ["3,'1',1,1,1,51.0,10.0,0,0,0,0,1,1"]}))
+    assert "bus 3 differs" in "; ".join(script.network_differences(base, heavier))
+    longer = _read_raw(script, tmp_path, _raw_text({"branch": [_RAW_BASIC["branch"][0].replace("0.05", "0.06")]}))
+    assert "branches and transformers differ" in "; ".join(script.network_differences(base, longer))
+    tapped = _RAW_BASIC["transformer"][:2] + ["1.04,138.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0", "1.0,230.0"]
+    assert script.network_differences(base, _read_raw(script, tmp_path, _raw_text({"transformer": tapped})))
+    # A transformer's ends are not interchangeable the way a line's are.
+    flipped = ["3,2,0,'1',1,1,1,0.0,0.0,2,'T1',1,1,1.0", *_RAW_BASIC["transformer"][1:]]
+    assert script.network_differences(base, _read_raw(script, tmp_path, _raw_text({"transformer": flipped})))
+    smaller = dict(base, baseMVA=50.0)
+    assert "system base differs" in "; ".join(script.network_differences(base, smaller))
+
+
+def _report_args(tmp_path: Path, **more: Any) -> SimpleNamespace:
+    (tmp_path / "case.raw").write_text(_raw_text(), encoding="ascii")
+    (tmp_path / "solved.raw").write_text(_raw_text(), encoding="ascii")
+    (tmp_path / "report.txt").write_text(_REPORT, encoding="utf-8")
+    values: dict[str, Any] = {
+        "report": str(tmp_path / "report.txt"),
+        "raw": str(tmp_path / "case.raw"),
+        "solved_raw": str(tmp_path / "solved.raw"),
+        "example": "demo",
+        "origin": "a report of someone",
+        "write": True,
+        "reference": str(tmp_path / "demo.json"),
+        "enforce_q_limits": False,
+    }
+    return SimpleNamespace(**{**values, **more})
+
+
+def test_a_pss_e_report_is_written_as_published_checks_with_its_rounding_as_the_tolerance(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    assert script.cmd_report(_report_args(tmp_path)) == 0
+    checks = json.loads((tmp_path / "demo.json").read_text(encoding="utf-8"))["checks"]
+    assert [c["quantity"] for c in checks] == [
+        "pf.bus_voltage_pu",
+        "pf.bus_angle_deg",
+        "pf.slack_p_mw",
+    ]
+    assert {c["kind"] for c in checks} == {"published"}
+    assert {c["generated_by"] for c in checks} == {script.REPORT_BY}
+    assert all("pflow" not in c for c in checks)
+    assert checks[0]["expected"] == {"1": 1.04, "2": 1.02, "3": 0.99}
+    assert checks[1]["expected"] == {"1": 0.0, "2": -2.0, "3": -4.5}
+    assert checks[2]["expected"] == 70.2  # the generation of the swing bus
+    assert [c["tolerance"]["abs"] for c in checks] == [2e-4, 0.02, 0.1]
+    assert all(
+        "a report of someone" in c["reference"] and "TENSA did not compute it" in c["reference"]
+        and "same network and dispatch as case.raw" in c["reference"]
+        for c in checks
+    )
+
+
+def test_a_report_solved_with_the_reactive_limits_is_written_beside_the_one_without(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    assert script.cmd_report(_report_args(tmp_path)) == 0
+    assert script.cmd_report(_report_args(tmp_path, enforce_q_limits=True)) == 0
+    checks = json.loads((tmp_path / "demo.json").read_text(encoding="utf-8"))["checks"]
+    limited = [c for c in checks if c.get("pflow")]
+    assert len(checks) == 6 and len(limited) == 3
+    assert {c["generated_by"] for c in limited} == {script.REPORT_BY + script.LIMITS_FLAG}
+    assert all(c["pflow"] == {"enforce_q_limits": True} for c in limited)
+    assert all(c["name"].endswith(", reactive limits enforced") for c in limited)
+    assert [c["tolerance"]["abs"] for c in limited] == [1e-4, 0.01, 0.1]
+    assert all("run that way" in c["reference"] for c in limited)
+    # Written again, each replaces its own and leaves the other.
+    assert script.cmd_report(_report_args(tmp_path, enforce_q_limits=True)) == 0
+    again = json.loads((tmp_path / "demo.json").read_text(encoding="utf-8"))["checks"]
+    assert [c["name"] for c in again].count("Slack active power against the PSS/E solution") == 1
+    assert len(again) == 6
+    # The checks the script writes are the ones the reference schema takes.
+    from tensa.core.example_references import parse_reference
+
+    assert len(parse_reference((tmp_path / "demo.json").read_text(encoding="utf-8")).checks) == 6
+
+
+def test_a_report_of_another_network_or_missing_a_bus_is_refused(
+    script: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = _report_args(tmp_path)
+    heavier = _raw_text({"load": ["3,'1',1,1,1,60.0,10.0,0.0,0.0,0.0,0.0,1,1"]})
+    Path(args.solved_raw).write_text(heavier, encoding="ascii")
+    with pytest.raises(script.CrosscheckError, match=r"solved.raw is not the network of case.raw: bus 3 differs"):
+        script.cmd_report(args)
+    Path(args.solved_raw).write_text(_raw_text(), encoding="ascii")
+    Path(args.report).write_text(_REPORT.split(" BUS      3")[0], encoding="utf-8")
+    with pytest.raises(script.CrosscheckError, match="no block for bus 3"):
+        script.cmd_report(args)
+    Path(args.report).write_text(_REPORT.replace("FROM GENERATION", "FROM OTHER"), encoding="utf-8")
+    with pytest.raises(script.CrosscheckError, match="no generation for the slack"):
+        script.cmd_report(args)
+    # Not asked to write, it prints the checks.
+    Path(args.report).write_text(_REPORT, encoding="utf-8")
+    assert script.cmd_report(_report_args(tmp_path, write=False)) == 0
+    assert json.loads(capsys.readouterr().out)[0]["quantity"] == "pf.bus_voltage_pu"
+
+
+def test_the_stored_checks_of_a_power_flow_with_the_reactive_limits_say_so_and_ask_for_it(
+    script: ModuleType,
+) -> None:
+    state = {"bus_voltage": {"1": 1.01}, "bus_angle": {"1": 0.5}, "slack_p_mw": 12.5}
+    basis = script.STORED_BASES_ENFORCED["activsg200"]
+    checks = script._stored_checks(state, "case_ACTIVSg200.m", basis, True)  # noqa: SLF001
+    assert [c["pflow"] for c in checks] == [{"enforce_q_limits": True}] * 3
+    assert {c["generated_by"] for c in checks} == {script.STORED_BY + script.LIMITS_FLAG}
+    assert all(c["name"].endswith(", reactive limits enforced") for c in checks)
+    assert [c["tolerance"]["abs"] for c in checks] == [1e-4, 0.005, 0.05]
+    assert all("run with the reactive limits enforced" in c["reference"] for c in checks)
+    assert all("PowerWorld Simulator's solution" in c["reference"] for c in checks)
+    # The default stored checks of the same case are those that came before, with no settings.
+    plain = script._stored_checks(state, "case_ACTIVSg200.m", script.STORED_BASES["activsg200"])  # noqa: SLF001
+    assert all("pflow" not in c for c in plain)
+    assert [c["tolerance"]["abs"] for c in plain] == [0.005, 0.05, 0.05]
+    assert set(script.STORED_BASES_ENFORCED) == {"activsg200"}
+
+
+def test_the_stored_command_with_the_reactive_limits_needs_a_state_solved_so(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    _case_path("ieee14/ieee14_full.xlsx")  # skips without ANDES
+    with pytest.raises(script.CrosscheckError, match="no stored state solved with the reactive limits"):
+        script.cmd_stored(
+            SimpleNamespace(id="ieee14", write=False, reference=None, enforce_q_limits=True)
+        )
+    target = tmp_path / "activsg200.json"
+    for flag in (False, True):
+        args = SimpleNamespace(id="activsg200", write=True, reference=str(target), enforce_q_limits=flag)
+        assert script.cmd_stored(args) == 0
+    checks = json.loads(target.read_text(encoding="utf-8"))["checks"]
+    assert [c.get("pflow") for c in checks] == [{"enforce_q_limits": True}] * 3 + [None] * 3
+
+
+def test_the_stored_checks_of_activsg_200_that_ship_are_what_the_script_reads_from_the_file(
+    script: ModuleType,
+) -> None:
+    import andes
+
+    system = andes.load(
+        str(_bundled("case_ACTIVSg200.m")), setup=False, no_output=True, default_config=True
+    )
+    state = script.stored_solution(system)
+    shipped = load_reference("activsg200")
+    assert shipped is not None
+    stored = [c for c in shipped.checks if c.kind == "stored-solution"]
+    assert len(stored) == 6
+    for check in stored:
+        if check.quantity == "pf.slack_p_mw":
+            assert check.expected == pytest.approx(state["slack_p_mw"], abs=1e-5)
+            assert state["slack_p_mw"] == pytest.approx(384.37)
+        elif check.quantity == "pf.bus_voltage_pu":
+            assert check.expected == pytest.approx(state["bus_voltage"], abs=1e-8)
+        else:
+            assert check.expected == pytest.approx(state["bus_angle"], abs=1e-6)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TENSA_VERIFY_PYTHON"),
+    reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
+)
+@pytest.mark.parametrize(
+    ("example_id", "name"),
+    [
+        ("rts24", "pglib_opf_case24_ieee_rts.m"),
+        ("rts_gmlc", "RTS-GMLC.RAW"),
+        ("activsg200", "case_ACTIVSg200.m"),
+    ],
+)
+def test_pandapower_solves_the_bundled_files_to_the_values_that_ship_in_their_references(
+    example_id: str, name: str
+) -> None:
+    """Solved from the file itself (the .m by matpowercaseframes, the RAW by the script's reader),
+    with no ANDES: the reference of a bundled case holds what ``solve`` prints for its file."""
+    done = subprocess.run(
+        [
+            os.environ["TENSA_VERIFY_PYTHON"],
+            str(SCRIPTS_DIR / "crosscheck_pf.py"),
+            "solve",
+            str(_bundled(name)),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    solved = json.loads(done.stdout)
+    assert solved["admittance_gap_pu"] < 1e-9
+    shipped = load_reference(example_id)
+    assert shipped is not None
+    expected = {
+        c.quantity: c.expected
+        for c in shipped.checks
+        if c.generated_by == "scripts/crosscheck_pf.py"
+    }
+    assert solved["bus_voltage"] == pytest.approx(expected["pf.bus_voltage_pu"], abs=1e-6)
+    assert solved["bus_angle"] == pytest.approx(expected["pf.bus_angle_deg"], abs=1e-5)
+    assert solved["loss_mw"] == pytest.approx(expected["pf.loss_mw"], abs=1e-5)
+    assert solved["slack_p_mw"] == pytest.approx(expected["pf.slack_p_mw"], abs=1e-5)

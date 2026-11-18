@@ -202,3 +202,26 @@ def test_a_link_only_entry_has_links_and_no_file_row(script: ModuleType) -> None
     assert "- [Mirror](https://example.org/mirror)\n" in page
     assert "- **File:**" not in page and "- **First run:**" not in page
     assert "| Link |" in page and "| - |" in page
+
+
+def test_a_licence_notice_is_in_the_page_whole_as_a_quotation_after_the_licence(
+    script: ModuleType,
+) -> None:
+    """A notice the licence says must appear in every copy goes into the page with its own
+    paragraphs, so that the page is one more place that carries it."""
+    notice = "AGREEMENT\n\nKeep this with every copy.\n\n**NO WARRANTY**"
+    entry = {**_BUNDLED, "licence": {**_BUNDLED["licence"], "notice": notice}}
+    page = script.render_page(_catalog(entry))
+    block = "> AGREEMENT\n>\n> Keep this with every copy.\n>\n> **NO WARRANTY**\n"
+    assert block in page
+    assert page.index("**Licence.**") < page.index(block) < page.index("**Citations**")
+    assert "The licence asks that this notice appear, in full, in every copy of the data:" in page
+    # An entry whose licence has none has no such block.
+    assert "every copy of the data" not in script.render_page(_catalog(_BUNDLED))
+
+
+def test_the_shipped_page_carries_the_nrel_notice_of_the_rts_gmlc_case() -> None:
+    page = _page_on_disk()
+    notice = next(e for e in load_catalog().examples if e.id == "rts_gmlc").licence.notice
+    assert notice is not None
+    assert "\n".join(f"> {line}" if line else ">" for line in notice.split("\n")) in page

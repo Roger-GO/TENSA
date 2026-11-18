@@ -11,12 +11,16 @@
  *   the wind turbine gallery case (IEEE 14-bus with a type-3 wind turbine): Add and Open put its 14 buses on
  *   the diagram, and the chain of the unit at bus 8 holds the converter, its two controls and the four models of
  *   the turbine, none of them an orphan badge
- *   the steady-state gallery cases (IEEE 30, 57, 118 and 300-bus): the dialog lists them in a group of their own,
- *   Add and Open put the 118 buses of IEEE 118 on the diagram as a static case, and a power flow leaves the six
- *   generators past a reactive limit that its catalog entry names
+ *   the steady-state gallery cases (IEEE RTS-24, IEEE 30, 57, RTS-GMLC, IEEE 118, ACTIVSg200 and IEEE 300-bus): the
+ *   dialog lists them in a group of their own, smallest first, Add and Open put the 118 buses of IEEE 118 on the
+ *   diagram as a static case, and a power flow leaves the six generators past a reactive limit that its catalog
+ *   entry names
  *   a steady-state case bundled with TENSA (IEEE 30-bus, from the PGLib-OPF library): its card credits the library
  *   and links the licence, Add copies it from the package, Open puts its 30 buses on the diagram, and a power
  *   flow leaves the five violations its entry names
+ *   the RTS-GMLC case, a PSS/E file bundled under the NREL data use agreement: its card links the agreement and
+ *   says what it asks, the server lists the whole notice with the case, Add copies the .RAW file, Open puts its 73
+ *   buses on the diagram as a static case, and a power flow leaves the 22 violations its entry names
  *   the Exciters and Governors tables hold every exciter and governor the catalog counts for the case: the
  *   IEEE 39 governors (TGOV1N), the exciters of Kundur (EXDC2) and the 29 exciters and 29 governors of WECC
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
@@ -77,8 +81,8 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
   const steady = dialog.getByTestId('example-group-steady-state');
   await expect(steady).toBeVisible();
-  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(4);
-  for (const id of ['ieee30', 'ieee57', 'ieee118', 'ieee300']) {
+  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(7);
+  for (const id of ['rts24', 'ieee30', 'ieee57', 'rts_gmlc', 'ieee118', 'activsg200', 'ieee300']) {
     await expect(steady.getByTestId(`example-card-${id}`)).toBeVisible();
   }
   for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
@@ -101,6 +105,11 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(dialog.getByTestId('example-size-ieee30')).toHaveText('30 buses, 6 generators');
   await expect(dialog.getByTestId('example-size-ieee57')).toHaveText('57 buses, 7 generators');
   await expect(dialog.getByTestId('example-size-ieee300')).toHaveText('300 buses, 69 generators');
+  await expect(dialog.getByTestId('example-size-rts24')).toHaveText('24 buses, 33 generators');
+  await expect(dialog.getByTestId('example-size-rts_gmlc')).toHaveText('73 buses, 160 generators');
+  await expect(dialog.getByTestId('example-size-activsg200')).toHaveText(
+    '200 buses, 49 generators',
+  );
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
     'already in your workspace and say Added',
@@ -362,6 +371,79 @@ test('a steady-state case bundled with TENSA credits its library, is added from 
   // their maximum: what the entry's caveats list.
   await page.getByTestId('run-pflow-button').click();
   await expect(page.getByTestId('bottom-drawer-tab-violations')).toHaveText(/Violations\s*5$/, {
+    timeout: 60_000,
+  });
+});
+
+test('the RTS-GMLC case links its data use agreement, is listed with the whole notice, is added from the package and opened, and a power flow leaves 22 violations', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  const card = dialog.getByTestId('example-card-rts_gmlc');
+  await expect(card).toContainText('Power flow');
+  await expect(card).not.toContainText('Time domain');
+  // The agreement is the licence: its link opens in a new tab and keeps no hold on this one, the
+  // credit it asks for is on the card, and the source is the commit of the release of the file.
+  const licence = dialog.getByTestId('example-licence-rts_gmlc');
+  await expect(licence).toContainText('NREL Data Use Disclaimer Agreement');
+  await expect(licence).toHaveAttribute(
+    'href',
+    /^https:\/\/github\.com\/GridMod\/RTS-GMLC\/blob\/3ece0d3725c844056132393ee252b3083dd4eab4\/README\.md$/,
+  );
+  await expect(licence).toHaveAttribute('target', '_blank');
+  await expect(licence).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(dialog.getByTestId('example-source-rts_gmlc')).toContainText('RTS-GMLC v0.2.3');
+  await expect(dialog.getByTestId('example-source-rts_gmlc')).toHaveAttribute(
+    'href',
+    /RTS-GMLC\/blob\/3ece0d3725c844056132393ee252b3083dd4eab4\/RTS_Data\/FormattedData\/PSSE\/RTS-GMLC\.RAW$/,
+  );
+  // The credit the agreement asks for is with the references of the card.
+  await dialog.getByTestId('example-cite-rts_gmlc').click();
+  const references = dialog.getByTestId('example-cite-panel-rts_gmlc');
+  await expect(references).toContainText('Credit DOE/NREL/ALLIANCE');
+  await expect(references).toContainText(
+    'The IEEE Reliability Test System: A Proposed 2019 Update',
+  );
+  // The server gives the notice that must go with every copy, whole, and nothing is cut short.
+  const listed = (await (await page.request.get('/api/examples')).json()) as {
+    examples: {
+      id: string;
+      in_workspace: boolean;
+      differs: boolean;
+      licence: { notice?: string | null };
+    }[];
+  };
+  const entry = listed.examples.find((example) => example.id === 'rts_gmlc');
+  expect(entry?.licence.notice).toMatch(/^DATA USE DISCLAIMER AGREEMENT\n/);
+  expect(entry?.licence.notice).toContain('provided that this entire notice appears in all copies');
+  expect(entry?.licence.notice?.endsWith('ARISES OUT OF OR IN**')).toBe(true);
+  expect(listed.examples.filter((example) => example.licence.notice)).toHaveLength(1);
+  // Not seeded: Add copies the file from the package. (A run on the same workspace may have added
+  // it already, and the card then says Added at once.)
+  const add = dialog.getByTestId('example-add-rts_gmlc');
+  if ((await add.count()) > 0) {
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-rts_gmlc')).toHaveText('Added');
+  const after = (await (await page.request.get('/api/examples')).json()) as typeof listed;
+  expect(after.examples.find((example) => example.id === 'rts_gmlc')).toMatchObject({
+    in_workspace: true,
+    differs: false,
+  });
+  await dialog.getByTestId('example-open-rts_gmlc').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('RTS-GMLC.RAW', {
+    timeout: 90_000,
+  });
+  await expect(page.getByText('73 buses', { exact: true })).toBeVisible();
+  await expect(page.getByText('Static-only')).toBeVisible();
+
+  // The 21 generators above their reactive maximum and the one below its minimum, which a power
+  // flow that does not enforce limits leaves: what the entry's caveats list.
+  await page.getByTestId('run-pflow-button').click();
+  await expect(page.getByTestId('bottom-drawer-tab-violations')).toHaveText(/Violations\s*22$/, {
     timeout: 60_000,
   });
 });
