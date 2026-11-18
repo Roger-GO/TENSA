@@ -904,7 +904,9 @@ function useCommandSets(): CommandSets {
             ? null
             : resultsViewActive
               ? 'The diagram is hidden by the results view. Show the diagram first.'
-              : 'The diagram has no buses yet, so there is nothing to draw.',
+              : diagramHeld
+                ? 'The diagram of this case is not drawn, so there is nothing to make a figure of.'
+                : 'The diagram has no buses yet, so there is nothing to draw.',
       },
 
       // ---- view ----------------------------------------------------------
@@ -1489,9 +1491,10 @@ function useCommandSets(): CommandSets {
     abortableRun,
     abortMutation,
     diagramVisible,
-    // Not only through `diagramVisible`: the figure says which of the two
+    // Not only through `diagramVisible`: the figure says which of the three
     // reasons it has for not being there to draw.
     resultsViewActive,
+    diagramHeld,
     layoutUndoLabel,
     layoutRedoLabel,
     diagramLocked,

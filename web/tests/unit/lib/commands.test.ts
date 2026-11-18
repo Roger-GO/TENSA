@@ -1465,6 +1465,23 @@ describe('useCommandRegistry: Figure for a paper', () => {
   });
 });
 
+describe('useCommandRegistry: Figure for a paper, on a case whose diagram is held back', () => {
+  it('says the diagram is not drawn, and not that it has no buses', () => {
+    // A case with buses whose diagram is not drawn: the note stands where the diagram would.
+    MOCK_TOPOLOGY = oneBusTopology();
+    act(() => useSldStore.setState({ diagramHeld: true }));
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    try {
+      expect(menu.result.current.find((c) => c.id === 'export.figure')?.unavailable).toBe(
+        'The diagram of this case is not drawn, so there is nothing to make a figure of.',
+      );
+    } finally {
+      menu.unmount();
+      act(() => useSldStore.setState({ diagramHeld: false }));
+    }
+  });
+});
+
 describe('useMenuCommands: the reason the figure cannot be made follows what is in the way', () => {
   it('names the results view while that covers the diagram, and the empty diagram otherwise', () => {
     // One menu, kept up while the view changes. No buses, so there is no
