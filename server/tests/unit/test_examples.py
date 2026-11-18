@@ -852,6 +852,50 @@ def test_the_activsg_200_case_is_added_byte_for_byte_with_its_authors_credited(
     assert "doi:10.1109/TPWRS.2016.2616385" in text and "in every copy of the data" not in text
 
 
+def test_the_activsg_2000_case_is_added_byte_for_byte_with_its_authors_credited(
+    workspace: Path,
+) -> None:
+    result = add_example("activsg2000", workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    assert written.name == "case_ACTIVSg2000.m"
+    source = examples.bundled_cases_dir() / "case_ACTIVSg2000.m"
+    assert (workspace / written.name).read_bytes() == source.read_bytes()
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye" in text
+    assert "MATPOWER Copyright (c) 2017-2018" in text
+    assert "/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m" in text
+    assert "electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/" in text
+    assert "- Modifications: TENSA changed nothing" in text and "in every copy of the data" not in text
+
+
+@pytest.mark.parametrize(
+    ("example_id", "name"),
+    [("pegase89", "case89pegase.m"), ("pegase1354", "case1354pegase.m")],
+)
+def test_a_pegase_case_is_added_byte_for_byte_with_the_credit_of_rte_s_authors_in_utf_8(
+    workspace: Path, example_id: str, name: str
+) -> None:
+    """The files carry accented names (C\u00e9dric Josz, St\u00e9phane Fliscounakis) in UTF-8: the copy
+    is the bundled bytes, and the sources file written beside it keeps the names as they are."""
+    source = examples.bundled_cases_dir() / name
+    data = source.read_bytes()
+    assert "C\u00e9dric Josz".encode() in data and b"\r" not in data
+    result = add_example(example_id, workspace)
+    assert result.warnings == ()
+    (written,) = result.files
+    assert written.name == name
+    assert (workspace / name).read_bytes() == data
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "C\u00e9dric Josz, St\u00e9phane Fliscounakis, Jean Maeght and Patrick Panciatici" in text
+    assert "R\u00e9seau de Transport d'Electricit\u00e9 (RTE)" in text
+    assert "arXiv:1603.01533" in text and "doi:10.1109/TPWRS.2013.2251015" in text
+    assert f"/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/{name}" in text
+    assert "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)" in text
+    assert "- Modifications: TENSA changed nothing" in text and "in every copy of the data" not in text
+    assert name in [p.name for p in list_workspace_files(workspace, SUPPORTED_CASE_EXTENSIONS)]
+
+
 def test_the_rts_gmlc_case_is_added_with_the_whole_nrel_notice_beside_it(workspace: Path) -> None:
     """The agreement lets the data be copied provided its entire notice appears in all copies, so
     the sources file the case is added with holds the notice, every word, as a quotation, and

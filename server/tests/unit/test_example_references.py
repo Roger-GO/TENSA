@@ -73,6 +73,14 @@ def test_a_per_bus_value_is_given_for_every_bus_of_the_case() -> None:
                 if check.kind == "published":
                     # A source may print the values of some of the buses only.
                     assert 0 < len(check.expected) <= example.size.buses, check.name
+                elif (stem, check.kind, check.quantity) == (
+                    "pegase89",
+                    "stored-solution",
+                    "pf.bus_angle_deg",
+                ):
+                    # RTE's state is a solution except at the angles of three buses, which the
+                    # check leaves out, and the entry says so.
+                    assert len(check.expected) == example.size.buses - 3, check.name
                 else:
                     assert len(check.expected) == example.size.buses, check.name
     assert seen
@@ -803,3 +811,138 @@ def test_the_activsg_200_stored_state_is_a_solution_with_the_reactive_limits_enf
     text = " ".join(_caveats("activsg200"))
     assert "(bus 114, stored 1.0362 against the 1.04 set-point) and 0.031 degrees" in text
     assert "0.027 MW" in text and "buses 67, 94, 114 and 167" in text
+
+
+def _matpower_block(text: str, field: str) -> list[list[float]]:
+    """The numbers of one block of a MATPOWER case file; ``Inf`` is read as infinity."""
+    import re
+
+    block = re.search(rf"mpc\.{field} = \[(.*?)\];", text, re.S)
+    assert block is not None, field
+    rows = []
+    for line in block.group(1).splitlines():
+        line = line.split("%")[0].strip().rstrip(";")
+        if line:
+            rows.append([float(v.replace("Inf", "inf")) for v in line.split()])
+    return rows
+
+
+def _stored_bus_state(name: str) -> dict[str, tuple[float, float]]:
+    """The voltage (pu) and angle (degrees) a MATPOWER file stores for each bus, by its number."""
+    text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8")
+    return {str(int(row[0])): (row[7], row[8]) for row in _matpower_block(text, "bus")}
+
+
+
+def test_the_pegase_references_are_the_solution_of_the_network_as_andes_reads_it() -> None:
+    """The files give three and six branches a phase shift and a ratio of 0, which ANDES's reader
+    drops, so the solver's checks say they leave them out and by how much the solution with them
+    differs (the entries quote the same numbers)."""
+    for example_id, branches, volts, degrees in (
+        ("pegase89", 3, "0 pu", "0.43 degrees"),
+        ("pegase1354", 6, "6e-05 pu", "0.087 degrees"),
+    ):
+        reference = load_reference(example_id)
+        assert reference is not None
+        solver = [c for c in reference.checks if c.kind == "independent-solver"]
+        assert len(solver) == 4
+        for check in solver:
+            assert f"phase shift of {branches} branches that have a ratio of 0 left out" in check.reference
+            assert f"by at most {volts} in a bus voltage and {degrees} in a bus angle" in check.reference
+            assert "read by matpowercaseframes" in check.reference
+    # A file with no such branch says nothing of the kind.
+    plain = load_reference("activsg2000")
+    assert plain is not None
+    assert not any("phase shift" in c.reference for c in plain.checks)
+
+
+def test_the_pegase_89_stored_state_is_held_to_the_buses_that_are_a_solution() -> None:
+    """RTE's state is a solution at 86 of the 89 buses, to 1.6e-6 pu and 0.002 degrees; at three leaf
+    buses that carry a negative load its angle is 8.9 to 25 degrees off, so the check of the angles
+    leaves them out, and the voltage check, which agrees there, does not."""
+    reference = load_reference("pegase89")
+    assert reference is not None
+    by = _by_kind("pegase89")
+    stored_v = by[("stored-solution", "pf.bus_voltage_pu", False)]
+    stored_a = by[("stored-solution", "pf.bus_angle_deg", False)]
+    stored_p = by[("stored-solution", "pf.slack_p_mw", False)]
+    solved_v = by[("independent-solver", "pf.bus_voltage_pu", False)].expected
+    solved_a = by[("independent-solver", "pf.bus_angle_deg", False)].expected
+    assert isinstance(stored_v.expected, dict) and isinstance(stored_a.expected, dict)
+    assert isinstance(solved_v, dict) and isinstance(solved_a, dict)
+    assert len(stored_v.expected) == 89 and len(stored_a.expected) == 86
+    assert set(solved_a) - set(stored_a.expected) == {"8581", "7526", "2154"}
+    dv = max(abs(stored_v.expected[k] - solved_v[k]) for k in solved_v)
+    da = max(abs(stored_a.expected[k] - solved_a[k]) for k in stored_a.expected)
+    assert dv == pytest.approx(1.6e-6, abs=5e-8) and da == pytest.approx(0.002, abs=5e-4)
+    assert stored_v.tolerance.abs == 1e-5 and stored_a.tolerance.abs == 0.01
+    assert stored_p.expected == pytest.approx(1249.4)
+    solved_p = by[("independent-solver", "pf.slack_p_mw", False)].expected
+    assert abs(float(stored_p.expected) - float(solved_p)) == pytest.approx(0.3, abs=0.01)  # type: ignore[arg-type]
+    # The three leaves: the stored angle is far off the solution's, and the voltage is not.
+    stored = _stored_bus_state("case89pegase.m")
+    gaps = {k: abs(stored[k][1] - solved_a[k]) for k in ("8581", "7526", "2154")}
+    assert gaps["8581"] == pytest.approx(24.535, abs=5e-3)
+    assert gaps["7526"] == pytest.approx(10.231, abs=5e-3)
+    assert gaps["2154"] == pytest.approx(8.776, abs=5e-3)
+    # With the three phase shifts applied, as MATPOWER defines the network, each gap is the shift larger.
+    assert gaps["8581"] + 0.428 == pytest.approx(24.96, abs=5e-3)
+    assert all(abs(stored[k][0] - solved_v[k]) < 2e-6 for k in gaps)
+    text = " ".join(_caveats("pegase89"))
+    assert "24.5, 10.2 and 8.8 degrees" in text and "24.96, 10.41 and 8.93" in text
+
+
+def test_the_pegase_1354_stored_state_is_not_a_solution_and_no_check_rests_on_it() -> None:
+    reference = load_reference("pegase1354")
+    assert reference is not None and "stored-solution" not in {c.kind for c in reference.checks}
+    by = _by_kind("pegase1354")
+    solved_v = by[("independent-solver", "pf.bus_voltage_pu", False)].expected
+    solved_a = by[("independent-solver", "pf.bus_angle_deg", False)].expected
+    assert isinstance(solved_v, dict) and isinstance(solved_a, dict) and len(solved_v) == 1354
+    stored = _stored_bus_state("case1354pegase.m")
+    dv = {k: abs(stored[k][0] - solved_v[k]) for k in stored}
+    da = {k: abs(stored[k][1] - solved_a[k]) for k in stored}
+    assert sum(1 for gap in dv.values() if gap > 1e-4) == 117
+    assert sum(1 for gap in da.values() if gap > 0.1) == 561
+    assert max(dv.values()) == pytest.approx(0.004, abs=5e-4)
+    assert max(da.values()) == pytest.approx(5.5, abs=0.05)
+    text = (example_catalog.bundled_cases_dir() / "case1354pegase.m").read_text(encoding="utf-8")
+    gens = _matpower_block(text, "gen")
+    slack_stored = next(row[1] for row in gens if row[0] == 4231.0)
+    slack_solved = by[("independent-solver", "pf.slack_p_mw", False)].expected
+    assert slack_stored == pytest.approx(2641.24)
+    assert float(slack_stored) - float(slack_solved) == pytest.approx(30.0, abs=0.5)  # type: ignore[arg-type]
+    text = " ".join(_caveats("pegase1354"))
+    assert "117 stored voltages are more than 1e-4 pu" in text and "21 buses" in text
+    assert "561 stored angles are more than 0.1 degrees" in text
+
+
+def test_the_activsg_2000_stored_state_is_held_to_the_gaps_it_has_and_the_entry_says_so() -> None:
+    """PowerWorld's state is a solution, with 153 of the 392 generator buses at a limit, and no power
+    flow of TENSA lands on it: the checks are the gaps rounded up, and weak by construction."""
+    reference = load_reference("activsg2000")
+    assert reference is not None
+    assert {c.kind for c in reference.checks} == {"independent-solver", "stored-solution"}
+    by = _by_kind("activsg2000")
+    solved_v = by[("independent-solver", "pf.bus_voltage_pu", False)].expected
+    solved_a = by[("independent-solver", "pf.bus_angle_deg", False)].expected
+    assert isinstance(solved_v, dict) and isinstance(solved_a, dict) and len(solved_v) == 2000
+    for limited, (volts, degrees, megawatts) in ((False, (0.04, 0.7, 17.0)), (True, (0.035, 1.0, 4.0))):
+        v = by[("stored-solution", "pf.bus_voltage_pu", limited)]
+        a = by[("stored-solution", "pf.bus_angle_deg", limited)]
+        p = by[("stored-solution", "pf.slack_p_mw", limited)]
+        assert (v.tolerance.abs, a.tolerance.abs, p.tolerance.abs) == (volts, degrees, megawatts)
+        assert p.expected == pytest.approx(1236.1)
+        assert (v.pflow is not None) is limited
+    stored_v = by[("stored-solution", "pf.bus_voltage_pu", False)].expected
+    stored_a = by[("stored-solution", "pf.bus_angle_deg", False)].expected
+    assert isinstance(stored_v, dict) and isinstance(stored_a, dict)
+    dv = {k: abs(stored_v[k] - solved_v[k]) for k in solved_v}
+    da = {k: abs(stored_a[k] - solved_a[k]) for k in solved_a}
+    # The solver's solution (no limits) against the stored state: the gaps the tolerances are made of.
+    assert max(dv, key=lambda k: dv[k]) == "4195" and max(dv.values()) == pytest.approx(0.0352, abs=5e-4)
+    assert max(da, key=lambda k: da[k]) == "3137" and max(da.values()) == pytest.approx(0.639, abs=5e-3)
+    assert max(dv.values()) < 0.04 < 1.2 * max(dv.values())
+    text = " ".join(_caveats("activsg2000"))
+    assert "153 of the 392 generator buses" in text and "so they catch only a gross" in text
+    assert "no power flow of TENSA lands on the stored state" in text

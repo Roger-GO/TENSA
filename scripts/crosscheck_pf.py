@@ -145,6 +145,12 @@ Where the pandapower network differs from what ANDES solves:
 - The conductance a line shares and the conductance and susceptance ANDES holds at one end of a
   line go in as shunts on the end buses (divided by the tap squared on the from side), which
   is what the ANDES line equations say; the susceptance a line shares is the branch's own.
+- A MATPOWER branch with a ratio of 0 and a phase shift: MATPOWER takes the ratio as 1 and
+  applies the shift, ANDES 2.0.0's reader (``andes/io/matpower.py``) calls a branch a
+  transformer only when its ratio is not 0 (or is 1 with a shift) and drops the shift of any
+  other. ``solve`` of a ``.m`` file leaves those shifts out too, so that the reference is the
+  solution of the network ANDES holds, says which it left out, and gives how far the solution
+  with them is (``shift_effect``). The dump holds what ANDES holds, so it needs no such step.
 """
 
 # What the dump can be sure of: the models the power flow solves that it translates.
@@ -462,13 +468,16 @@ class StoredBasis(NamedTuple):
     """Where a case file's stored state comes from and how close it is to a solution.
 
     ``slack_p`` is ``None`` for a file that stores no power for its slack (the IEEE 300-bus
-    file holds 0 there), and the check of it is then left out.
+    file holds 0 there), and the check of it is then left out. ``omitted`` lists the buses
+    (by idx) whose stored state is not a solution while the rest of the file's is, which the
+    angle check leaves out and ``origin`` says why.
     """
 
     origin: str
     voltage: float
     angle: float
     slack_p: float | None
+    omitted: tuple[str, ...] = ()
 
 
 # A RAW file written by PSS/E after it solved the case: the digits the file keeps are the whole
@@ -537,12 +546,68 @@ STORED_BASES: dict[str, StoredBasis] = {
         angle=10.0,
         slack_p=None,
     ),
+    # The state RTE's snapshot gives the PEGASE 89-bus data, which MATPOWER's case89pegase.m carries
+    # (six decimals of a voltage, six of an angle). It is a solution of the file's equations at 86
+    # of the 89 buses: voltages to 1.6e-6 pu and angles to 0.002 degrees of pandapower's, and the
+    # slack's power to 0.3 MW. At the three buses that hold a negative load behind a branch of one
+    # bus (8581, 7526 and 2154, which are also the ends of the file's three phase shifters) the
+    # stored angle is 24.5, 10.2 and 8.8 degrees from the solution of the network as ANDES reads it
+    # (24.96, 10.41 and 8.93 from the one with the shifts) and the power left over at their
+    # neighbours is up to 3,000 MW, so their angles are left out of the check (the voltages there
+    # agree to 1.4e-6 pu). The cause was not found.
+    "pegase89": StoredBasis(
+        origin=(
+            "the voltages and angles of RTE's snapshot that the PEGASE 89-bus data was made from, "
+            "as this file carries them to six decimals; a solution of the file's equations "
+            "except at the three buses 8581, 7526 and 2154, where the stored angle is 8.8 to 24.5 "
+            "degrees from it (cause not found), so the angles of those three are left out"
+        ),
+        voltage=1e-5,
+        angle=0.01,
+        slack_p=0.5,
+        omitted=("8581", "7526", "2154"),
+    ),
+    # PowerWorld's solution of the original ACTIV_SG_2000 case, as case_ACTIVSg2000.m carries it
+    # (to nine decimals of a voltage and six of an angle). It is a solution of the file's equations
+    # (no bus is left more than 0.06 MW unaccounted for) with 153 of its 392 generator buses at a
+    # reactive limit (to 0.001 MVAr), which is not the set TENSA's enforcement ends with. A power
+    # flow at the defaults differs from it by up to 0.0352 pu (bus 4195) and 0.639 degrees (bus
+    # 3137), and the slack's power by 16.15 MW; with the limits enforced by up to 0.0308 pu (bus
+    # 1070) and 0.885 degrees (bus 2059), and 3.5 MW. The tolerances are those gaps rounded up, so
+    # the check catches only a gross error, and the case's entry says so.
+    "activsg2000": StoredBasis(
+        origin=(
+            "the final voltages and angles of PowerWorld Simulator's solution of the original "
+            "ACTIVSg2000 case, which this file was created from; a state solved with 153 of the "
+            "392 generator buses at a reactive limit, not the set a power flow of TENSA holds "
+            "there, so it differs from a power flow without the limits by up to 0.035 pu and "
+            "0.64 degrees"
+        ),
+        voltage=0.04,
+        angle=0.7,
+        slack_p=17.0,
+    ),
 }
 
 
 # The same, for a state that was solved with the generators held to their reactive limits, which a
 # power flow run with ``enforce_q_limits`` is compared with (TENSA's default does not enforce them).
 STORED_BASES_ENFORCED: dict[str, StoredBasis] = {
+    # With the limits enforced TENSA's power flow is 0.0308 pu, 0.885 degrees and 3.5 MW from
+    # PowerWorld's state (it holds another set of generators at their limits), held to those
+    # gaps rounded up.
+    "activsg2000": StoredBasis(
+        origin=(
+            "the final voltages and angles of PowerWorld Simulator's solution of the original "
+            "ACTIVSg2000 case, which this file was created from; a state solved with 153 of the "
+            "392 generator buses at a reactive limit, where a power flow of TENSA with the "
+            "limits enforced ends with another set, so it differs from it by up to 0.031 pu "
+            "and 0.89 degrees"
+        ),
+        voltage=0.035,
+        angle=1.0,
+        slack_p=4.0,
+    ),
     # With the limits enforced, TENSA lands on PowerWorld's state to 1.4e-5 pu and 0.0009 degrees;
     # the slack's power is 384.399 MW against the 384.37 the file stores, 0.029 MW.
     "activsg200": StoredBasis(
@@ -581,6 +646,7 @@ def _stored_checks(
         common["reference"] += LIMITS_FLAG + "; the power flow compared with it is run with the reactive limits enforced"
         common["generated_by"] += LIMITS_FLAG
         common["pflow"] = {"enforce_q_limits": True}
+    left_out = set(basis.omitted)
     checks = [
         {
             "name": "Bus voltage magnitudes against the solution stored in the case file" + suffix,
@@ -592,7 +658,7 @@ def _stored_checks(
         {
             "name": "Bus voltage angles against the solution stored in the case file" + suffix,
             "quantity": "pf.bus_angle_deg",
-            "expected": {k: round(v, 7) for k, v in state["bus_angle"].items()},
+            "expected": {k: round(v, 7) for k, v in state["bus_angle"].items() if k not in left_out},
             "tolerance": {"abs": basis.angle},
             **common,
         },
@@ -820,6 +886,23 @@ def _ppc_from_matpower_file(path: Path) -> dict[str, Any]:
         "gen": frames.gen.to_numpy(dtype=float),
         "branch": frames.branch.to_numpy(dtype=float),
     }
+
+
+def andes_reads(ppc: dict[str, Any]) -> dict[str, Any]:
+    """The case as ANDES's MATPOWER reader holds it (see ``MODELLING``): the phase shift of a
+    branch whose ratio is 0 is dropped, and ``dropped_shifts`` lists ``[from, to, degrees]``
+    of each one.
+
+    A branch with a ratio of 0 is the plain line of the format (MATPOWER reads the ratio as 1),
+    and a phase shifter that does not say its ratio is how RTE's PEGASE data gives one.
+    """
+    import numpy as np
+
+    branch = np.array(ppc["branch"], dtype=float)
+    dropping = (branch[:, 8] == 0.0) & (branch[:, 9] != 0.0)
+    dropped = [[int(r[0]), int(r[1]), float(r[9])] for r in branch[dropping]]
+    branch[dropping, 9] = 0.0
+    return {**ppc, "branch": branch, "dropped_shifts": dropped}
 
 
 def _raw_fields(line: str) -> list[str]:
@@ -1277,9 +1360,19 @@ def solve_ppc(
 
 def _reference_checks(result: dict[str, Any], source: str) -> list[dict[str, Any]]:
     """The checks of a reference file that a pandapower solution gives."""
+    held = ""
+    if result.get("dropped_shifts"):
+        effect = result["shift_effect"]
+        held = (
+            f", with the phase shift of {len(result['dropped_shifts'])} branches that have a "
+            "ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies "
+            f"them, and the solution with them differs from this one by at most "
+            f"{effect['bus_voltage_pu']:.2g} pu in a bus voltage and "
+            f"{effect['bus_angle_deg']:.2g} degrees in a bus angle)"
+        )
     why = (
         f"pandapower {result['pandapower']}, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive "
-        f"limits not enforced) on {source}; written by scripts/crosscheck_pf.py"
+        f"limits not enforced) on {source}{held}; written by scripts/crosscheck_pf.py"
     )
     common = {
         "kind": "independent-solver",
@@ -1367,12 +1460,28 @@ def format_json(value: Any, indent: int = 0) -> str:
     return json.dumps(value)
 
 
+def _shift_effect(held: dict[str, Any], kept: dict[str, Any]) -> dict[str, Any]:
+    """How far the solution with the phase shifts kept is from the one without them: the
+    largest difference of a bus voltage (pu) and of a bus angle (degrees), and the bus of each."""
+    volts = {b: abs(held["bus_voltage"][b] - v) for b, v in kept["bus_voltage"].items()}
+    angles = {b: abs(held["bus_angle"][b] - a) for b, a in kept["bus_angle"].items()}
+    v_bus = max(volts, key=lambda b: volts[b])
+    a_bus = max(angles, key=lambda b: angles[b])
+    return {
+        "bus_voltage_pu": round(volts[v_bus], 9),
+        "bus_voltage_bus": v_bus,
+        "bus_angle_deg": round(angles[a_bus], 7),
+        "bus_angle_bus": a_bus,
+    }
+
+
 def cmd_solve(args: argparse.Namespace) -> int:
     source = Path(args.network)
     bus_idx = None
     suffix = source.suffix.lower()
     if suffix == ".m":
-        ppc = _ppc_from_matpower_file(source)
+        file_ppc = _ppc_from_matpower_file(source)
+        ppc = andes_reads(file_ppc)
         f_hz = 60.0
     elif suffix == ".raw":
         ppc = _ppc_from_raw_file(source)
@@ -1383,6 +1492,9 @@ def cmd_solve(args: argparse.Namespace) -> int:
         f_hz = float(network.get("f_hz", 60.0))
         bus_idx = network["bus_idx"]
     result = solve_ppc(ppc, f_hz, bus_idx)
+    if ppc.get("dropped_shifts"):
+        result["dropped_shifts"] = ppc["dropped_shifts"]
+        result["shift_effect"] = _shift_effect(result, solve_ppc(file_ppc, f_hz, bus_idx))
     if args.write:
         if not args.example:
             raise CrosscheckError("--write needs --example ID, the case the reference belongs to")

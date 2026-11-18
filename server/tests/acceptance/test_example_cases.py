@@ -104,9 +104,12 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
         "ieee30",
         "ieee57",
         "rts_gmlc",
+        "pegase89",
         "ieee118",
         "activsg200",
         "ieee300",
+        "pegase1354",
+        "activsg2000",
     } <= set(gallery)
     report_json = tmp_path / "report.json"
     done = _run([*gallery, "--json", str(report_json), "--markdown", str(tmp_path / "r.md")], 900)
@@ -158,10 +161,16 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
     # RTS-GMLC one is also held to the solution PSS/E printed (at the defaults and with the reactive
     # limits enforced, each in a power flow of its own), and the ACTIVSg200 one to the state
     # PowerWorld stored, the same two ways.
+    # The PEGASE 89-bus file stores RTE's snapshot, a solution but at three angles, which one check
+    # leaves out; the 1354-bus file's is not a solution, so the solver is all it has; the ACTIVSg2000
+    # one stores PowerWorld's, held to the gaps it has, in both ways of running the power flow.
     for steady, kinds, runs in (
         ("rts24", {"sanity", "independent-solver"}, 1),
         ("rts_gmlc", {"sanity", "independent-solver", "published"}, 2),
+        ("pegase89", {"sanity", "independent-solver", "stored-solution"}, 1),
         ("activsg200", {"sanity", "independent-solver", "stored-solution"}, 2),
+        ("pegase1354", {"sanity", "independent-solver"}, 1),
+        ("activsg2000", {"sanity", "independent-solver", "stored-solution"}, 2),
     ):
         case = next(c for c in report["cases"] if c["id"] == steady)
         assert {c["kind"] for c in case["checks"]} == kinds, steady

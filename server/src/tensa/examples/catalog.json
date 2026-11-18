@@ -2517,6 +2517,145 @@
       }
     },
     {
+      "id": "pegase89",
+      "title": "PEGASE 89-bus test case (part of the European transmission system)",
+      "summary": "A part of the European high-voltage transmission system as the PEGASE project of the French operator RTE made it, in MATPOWER 8.1's case89pegase: 89 buses at 380, 220 and 150 kV, 12 generators and 210 branches (47 of them transformers), with a load of 5,728 MW. The data is fictitious: it is made to look like part of the European system and does not describe it. A small case for the power flow, for the diagram and the tables of a network with transformers and aggregated generation, and for what a power flow makes of a state that a snapshot stored. It has no machine models, so there is no time-domain run.",
+      "category": "steady-state",
+      "tags": [
+        "pegase",
+        "89-bus",
+        "european",
+        "rte",
+        "power flow",
+        "matpower",
+        "small",
+        "static"
+      ],
+      "size": {
+        "buses": 89,
+        "generators": 12
+      },
+      "analyses": [
+        "pf"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "bundled",
+        "path": "case89pegase.m",
+        "sha256": "7eb25c591f04a08dcd99ab433451054eaafd8bb3d7999d9279a8ddb23d8ffe58",
+        "release": "MATPOWER 8.1",
+        "source_url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m",
+        "retrieved": "2026-11-18"
+      },
+      "citations": [
+        {
+          "text": "C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, \"AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE,\" arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read.",
+          "bibtex": "@misc{josz2016acpf,\n  author        = {Josz, C{\\'e}dric and Fliscounakis, St{\\'e}phane and Maeght, Jean and Panciatici, Patrick},\n  title         = {{AC} Power Flow Data in {MATPOWER} and {QCQP} Format: i{T}esla, {RTE} Snapshots, and {PEGASE}},\n  year          = {2016},\n  eprint        = {1603.01533},\n  archivePrefix = {arXiv}\n}",
+          "url": "https://arxiv.org/abs/1603.01533"
+        },
+        {
+          "text": "S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, \"Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions,\" IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read.",
+          "bibtex": "@article{fliscounakis2013contingency,\n  author  = {Fliscounakis, St{\\'e}phane and Panciatici, Patrick and Capitanescu, Florin and Wehenkel, Louis},\n  title   = {Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {28},\n  number  = {4},\n  pages   = {4909--4917},\n  year    = {2013},\n  month   = nov,\n  doi     = {10.1109/TPWRS.2013.2251015}\n}",
+          "doi": "10.1109/TPWRS.2013.2251015",
+          "url": "https://doi.org/10.1109/TPWRS.2013.2251015"
+        },
+        {
+          "text": "MATPOWER, data/case89pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m (accessed 2026-11-18). Its header describes the data as a part of the European high voltage transmission network of 89 buses, 12 generators and 210 branches at 380, 220 and 150 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is 71f1cf78dc523e4a3ffe532261d0525297cbab8b, the one of the file TENSA bundles.",
+          "bibtex": "@misc{matpower_case89pegase,\n  title        = {{MATPOWER} data/case89pegase.m},\n  howpublished = {MATPOWER release 8.1},\n  url          = {https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m},\n  urldate      = {2026-11-18}\n}",
+          "url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case89pegase.m"
+        },
+        {
+          "text": "R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, \"MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education,\" IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in.",
+          "bibtex": "@article{zimmerman2011matpower,\n  author  = {Zimmerman, Ray D. and Murillo-S{\\'a}nchez, Carlos E. and Thomas, Robert J.},\n  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {26},\n  number  = {1},\n  pages   = {12--19},\n  year    = {2011},\n  month   = feb,\n  doi     = {10.1109/TPWRS.2010.2051168}\n}",
+          "doi": "10.1109/TPWRS.2010.2051168",
+          "url": "https://doi.org/10.1109/TPWRS.2010.2051168"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "CC BY 4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "Credit: Cédric Josz, Stéphane Fliscounakis, Jean Maeght and Patrick Panciatici of Réseau de Transport d'Electricité (RTE), whose copyright the file's header states (\"MATPOWER Copyright (c) 2015, 2016 by Cédric Josz, Stéphane Fliscounakis, Jean Maeght, and Patrick Panciatici Licensed under the Creative Commons Attribution 4.0 International license\"), whose two papers (above) publications that use the data are asked to cite, and MATPOWER, which distributes the file (release 8.1, case89pegase.m). The licence is at the link above. TENSA made no change: the file is bundled byte for byte, with its header. Anyone who passes the file on gives this credit, the licence link and the same statement."
+      },
+      "modifications": [
+        "TENSA changed nothing: the file is the one of MATPOWER 8.1, byte for byte and with its header comments"
+      ],
+      "caveats": [
+        "The data is fictitious. The header says it does not correspond to real world data and may be used to validate methods and tools, not for the operation and planning of the European grid. The network has 89 buses (50 at 380 kV, 5 at 220 kV and 34 at 150 kV), 12 generators in service (5,866 MW of output, the slack at bus 913 holding 1,249.4 MW against its limit of 1,700 MW), 210 branches (47 between buses of different base voltages, which TENSA draws as transformers; 32 of them have a tap ratio), a load of 5,727.9 MW and 1,374.9 MVAr, and shunts at 44 buses.",
+        "Parts of the network are aggregated, which the header says (its remark 4): six buses carry a negative load, 2,430.8 MW in all, and two generators a negative minimum output, where the data stands for loads and generators together. The header's remark 2 says the line charging of every branch is set to 0 and the shunts of PEGASE's lines are put on the buses, which leaves the power flow equations as the original's: all 210 branches have a charging of 0 in the file.",
+        "Three branches (7637-8581, 5848-7526 and 2154-5996) have a phase shift (-0.428, 0.179 and -0.153 degrees) and a tap ratio of 0, which MATPOWER reads as 1 and applies the shift for (its lib/makeYbus.m of the same release does both). ANDES 2.0.0's reader takes a branch with a ratio of 0 for a plain line and drops the shift (andes/io/matpower.py), so TENSA solves the network without those three shifts: the voltages are the same, since each shifter ends at a bus with one branch, and the angle of each of those three buses is 0.428, 0.179 and 0.153 degrees off the solution with the shifts (the angles of the others are not). The reference solution is pandapower's for the network as ANDES reads it, and says so in each check; a test shows that ANDES drops the three, and repeats it for the file of the 1354-bus case.",
+        "133 of the 210 branches have a rating of 0, which means no limit, and the Violations table does not check them; the 77 that have one (306 to 1,863 MVA) are 20 MVA above the current limits of the PEGASE data (the header's remark 1). After a power flow the Violations table reads 1 violation, line 5416-7637 at 100.1% of its rating, and 6 warnings (bus 2449 at 1.087 pu against the 1.1 pu maximum, and five lines at 80 to 93% of their rating). No generator is outside its reactive limits. On the diagram (180 symbols, 301 lines, none drawn over another), the values of a power flow have no clear place for 19 of the devices and are left off, which the diagram says over its corner; the tables have every value.",
+        "The file stores a state, RTE's snapshot, and it is a solution of the file's equations at 86 of the 89 buses: against pandapower's solution its voltages differ by up to 1.6e-6 pu and its angles by up to 0.002 degrees, and its slack power by 0.3 MW. At the three buses that carry a negative load behind a branch of their own (8581, 7526 and 2154, the same three that have a phase shifter) the stored angle is 24.5, 10.2 and 8.8 degrees from the solution TENSA finds (24.96, 10.41 and 8.93 from the one with the phase shifts applied), and the power left over at the buses beside them is up to 3,000 MW; the voltages there agree. The cause was not found, so the check of the angles leaves those three buses out and every other check includes them.",
+        "The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis. The file also holds the cost data of the optimal power flow, which TENSA does not use."
+      ],
+      "verification": {
+        "summary": "The power flow agrees with two independent references. The first is the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved, for the network as ANDES reads it (three phase shifts left out, see the caveats): bus voltages to 2.6e-7 pu, angles to 1.2e-5 degrees, and the losses (132.43 MW) and the slack's power (1249.10 MW) to 0.002 MW. The second is the state RTE's snapshot stored in the file, which is a solution of the file's equations except at the angles of three buses: TENSA's voltages are within 1.7e-6 pu of it at all 89 buses, its angles within 0.0017 degrees at the other 86, and its slack power 0.3 MW off. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.",
+        "checks": [
+          {
+            "name": "Bus voltage magnitudes against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case89pegase.m (the voltages and angles of RTE's snapshot that the PEGASE 89-bus data was made from, as this file carries them to six decimals; a solution of the file's equations except at the three buses 8581, 7526 and 2154, where the stored angle is 8.8 to 24.5 degrees from it (cause not found), so the angles of those three are left out; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "1e-05 pu",
+            "result": "largest difference 1.71e-06 pu (bus 5210) over 89 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case89pegase.m (the voltages and angles of RTE's snapshot that the PEGASE 89-bus data was made from, as this file carries them to six decimals; a solution of the file's equations except at the three buses 8581, 7526 and 2154, where the stored angle is 8.8 to 24.5 degrees from it (cause not found), so the angles of those three are left out; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 0.00166 deg (bus 2267) over 86 buses",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case89pegase.m (the voltages and angles of RTE's snapshot that the PEGASE 89-bus data was made from, as this file carries them to six decimals; a solution of the file's equations except at the three buses 8581, 7526 and 2154, where the stored angle is 8.8 to 24.5 degrees from it (cause not found), so the angles of those three are left out; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.5 MW",
+            "result": "measured 1249.1, expected 1249.4, difference 0.296 MW",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case89pegase.m, read by matpowercaseframes, with the phase shift of 3 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 0 pu in a bus voltage and 0.43 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 2.61e-07 pu (bus 8964) over 89 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case89pegase.m, read by matpowercaseframes, with the phase shift of 3 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 0 pu in a bus voltage and 0.43 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 1.24e-05 deg (bus 8581) over 89 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case89pegase.m, read by matpowercaseframes, with the phase shift of 3 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 0 pu in a bus voltage and 0.43 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 132.428, expected 132.427, difference 0.00185 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case89pegase.m, read by matpowercaseframes, with the phase shift of 3 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 0 pu in a bus voltage and 0.43 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 1249.1, expected 1249.1, difference 0.00185 MW",
+            "passed": true
+          }
+        ]
+      }
+    },
+    {
       "id": "ieee118",
       "title": "IEEE 118-bus test case",
       "summary": "The IEEE 118-bus test case of the University of Washington archive as MATPOWER holds it (case118): 118 buses, 54 generators and 186 branches, a network and its loading only. A medium-size case for the power flow, and for how the diagram and the tables handle a hundred buses; it has no machine models, so there is no time-domain run.",
@@ -2926,6 +3065,286 @@
             "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
             "tolerance": "0.01 + 0.001 of the value MW",
             "result": "measured 455.949, expected 455.946, difference 0.00244 MW",
+            "passed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "pegase1354",
+      "title": "PEGASE 1354-bus test case (part of the European transmission system)",
+      "summary": "A medium part of the European high-voltage transmission system as the PEGASE project of the French operator RTE made it, in MATPOWER 8.1's case1354pegase: 1,354 buses at 380 and 220 kV, 260 generators and 1,991 branches (234 of them transformers), with a load of 73,060 MW. The data is fictitious: it is made to look like part of the European system and does not describe it. A large case for the power flow and for how the tables, exports and diagram work at over a thousand buses. It has no machine models, so there is no time-domain run.",
+      "category": "steady-state",
+      "tags": [
+        "pegase",
+        "1354-bus",
+        "european",
+        "rte",
+        "power flow",
+        "matpower",
+        "large",
+        "static"
+      ],
+      "size": {
+        "buses": 1354,
+        "generators": 260
+      },
+      "analyses": [
+        "pf"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "bundled",
+        "path": "case1354pegase.m",
+        "sha256": "1b08b25a2f6c1d540d090009dfaff41ff2b05784a2d8d302a7ad695821557b89",
+        "release": "MATPOWER 8.1",
+        "source_url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m",
+        "retrieved": "2026-11-18"
+      },
+      "citations": [
+        {
+          "text": "C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, \"AC Power Flow Data in MATPOWER and QCQP Format: iTesla, RTE Snapshots, and PEGASE,\" arXiv:1603.01533, March 2016. The paper the file's header asks that publications based on the data cite. Its abstract page was opened and gives the title, the authors and the dates; the abstract says the paper publishes nine MATPOWER test cases, the largest a pan-European fictitious data set from the PEGASE project, which complements the four PEGASE cases published in MATPOWER 5.1 in March 2015 (the cases of this entry). The text of the paper was not read.",
+          "bibtex": "@misc{josz2016acpf,\n  author        = {Josz, C{\\'e}dric and Fliscounakis, St{\\'e}phane and Maeght, Jean and Panciatici, Patrick},\n  title         = {{AC} Power Flow Data in {MATPOWER} and {QCQP} Format: i{T}esla, {RTE} Snapshots, and {PEGASE}},\n  year          = {2016},\n  eprint        = {1603.01533},\n  archivePrefix = {arXiv}\n}",
+          "url": "https://arxiv.org/abs/1603.01533"
+        },
+        {
+          "text": "S. Fliscounakis, P. Panciatici, F. Capitanescu and L. Wehenkel, \"Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions,\" IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, November 2013, doi:10.1109/TPWRS.2013.2251015. The second paper the file's header asks that publications based on the data cite. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, authors, volume and pages; its text is behind a paywall and was not read.",
+          "bibtex": "@article{fliscounakis2013contingency,\n  author  = {Fliscounakis, St{\\'e}phane and Panciatici, Patrick and Capitanescu, Florin and Wehenkel, Louis},\n  title   = {Contingency ranking with respect to overloads in very large power systems taking into account uncertainty, preventive and corrective actions},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {28},\n  number  = {4},\n  pages   = {4909--4917},\n  year    = {2013},\n  month   = nov,\n  doi     = {10.1109/TPWRS.2013.2251015}\n}",
+          "doi": "10.1109/TPWRS.2013.2251015",
+          "url": "https://doi.org/10.1109/TPWRS.2013.2251015"
+        },
+        {
+          "text": "MATPOWER, data/case1354pegase.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m (accessed 2026-11-18). Its header describes the data as a medium part of the European high voltage transmission network of 1,354 buses, 260 generators and 1,991 branches at 380 and 220 kV, says that the data are fictitious and do not correspond to real world data, that they stem from the PEGASE project (Pan European Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European Union, and states the copyright of 2015 and 2016 of its four authors under the Creative Commons Attribution 4.0 International licence. The address it gives for the project (www.fp7-pegase.com) did not resolve when checked. The git blob of the file at the commit is d6ede376f35af472b45b93ae771209c483427c26, the one of the file TENSA bundles.",
+          "bibtex": "@misc{matpower_case1354pegase,\n  title        = {{MATPOWER} data/case1354pegase.m},\n  howpublished = {MATPOWER release 8.1},\n  url          = {https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m},\n  urldate      = {2026-11-18}\n}",
+          "url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case1354pegase.m"
+        },
+        {
+          "text": "R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, \"MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education,\" IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in.",
+          "bibtex": "@article{zimmerman2011matpower,\n  author  = {Zimmerman, Ray D. and Murillo-S{\\'a}nchez, Carlos E. and Thomas, Robert J.},\n  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {26},\n  number  = {1},\n  pages   = {12--19},\n  year    = {2011},\n  month   = feb,\n  doi     = {10.1109/TPWRS.2010.2051168}\n}",
+          "doi": "10.1109/TPWRS.2010.2051168",
+          "url": "https://doi.org/10.1109/TPWRS.2010.2051168"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "CC BY 4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "Credit: Cédric Josz, Stéphane Fliscounakis, Jean Maeght and Patrick Panciatici of Réseau de Transport d'Electricité (RTE), whose copyright the file's header states (\"MATPOWER Copyright (c) 2015, 2016 by Cédric Josz, Stéphane Fliscounakis, Jean Maeght, and Patrick Panciatici Licensed under the Creative Commons Attribution 4.0 International license\"), whose two papers (above) publications that use the data are asked to cite, and MATPOWER, which distributes the file (release 8.1, case1354pegase.m). The licence is at the link above. TENSA made no change: the file is bundled byte for byte, with its header. Anyone who passes the file on gives this credit, the licence link and the same statement."
+      },
+      "modifications": [
+        "TENSA changed nothing: the file is the one of MATPOWER 8.1, byte for byte and with its header comments"
+      ],
+      "caveats": [
+        "The data is fictitious. The header says it does not correspond to real world data and may be used to validate methods and tools, not for the operation and planning of the European grid. The network has 1,354 buses (1,113 at 220 kV and 241 at 380 kV), 260 generators in service (74,753 MW of output, the slack at bus 4231 holding 2,641.2 MW in the file and 2,611.6 MW after a power flow), 1,991 branches (234 of them transformers, all with a tap ratio), a load of 73,059.7 MW and 13,401.4 MVAr, and shunts at 1,082 buses.",
+        "Parts of the network are aggregated, which the header says (its remark 4): 52 buses carry a negative load, 1,086.3 MW in all, and 67 generators a negative minimum output, where the data stands for loads and generators together. The header's remark 2 says the line charging of every branch is set to 0 and the shunts of PEGASE's lines are put on the buses, which leaves the power flow equations as the original's: all 1,991 branches have a charging of 0 in the file. Two generators (the slack at bus 4231 and the one at bus 8109) have reactive limits of plus and minus infinity, and seven buses a voltage range of 0.7 to 1.3 pu where the others have 0.9 to 1.1.",
+        "Six branches (549-5002, 3069-6115, 7256-4491, 6153-58, 749-4324 and 7466-3649) have a phase shift (up to 0.087 degrees) and a tap ratio of 0, which MATPOWER reads as 1 and applies the shift for (its lib/makeYbus.m of the same release does both). ANDES 2.0.0's reader takes a branch with a ratio of 0 for a plain line and drops the shift (andes/io/matpower.py), so TENSA solves the network without them: the solution with them is up to 6.0e-5 pu and 0.087 degrees from TENSA's. The reference solution is pandapower's for the network as ANDES reads it, and says so in each check; a test shows that ANDES drops the six.",
+        "559 of the 1,991 branches have a rating of 0, which means no limit, and the Violations table does not check them; the 1,432 that have one (281 to 1,842 MVA) are 100 MVA below the current limits of the PEGASE data (the header's remark 1). After a power flow at the defaults the Violations table reads 29 violations and 60 warnings: 10 lines over their rating (up to 109.3%, line 1758-1923), 19 generators above their maximum reactive power (up to 368.7 MVAr against 37.1, the generator PV 3346), and, as warnings, 16 buses near the 1.1 pu maximum and 44 lines near their rating; a power flow does not enforce reactive limits unless asked to. With the limits enforced it reads 10 violations (the same lines) and 82 warnings, 25 of them generators at their maximum.",
+        "The file stores a state, RTE's snapshot, and it is not a solution of the file's equations: at 21 buses the stored voltages and angles leave more than 0.1 MW unaccounted for (up to 1,300 MW at bus 58), 117 stored voltages are more than 1e-4 pu from pandapower's solution (up to 0.004 pu), 561 stored angles are more than 0.1 degrees from it (up to 5.5 degrees), and the stored power of the slack is 30 MW above what a power flow gives. The cause was not found. No check rests on the stored state.",
+        "The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis. The file also holds the cost data of the optimal power flow, which TENSA does not use.",
+        "The diagram is not drawn when the case opens, because it has more than 400 buses: the picture of a diagram is made again whenever something on it changes, and for this case one picture (3,369 nodes and 4,006 lines) took 276 seconds in a measurement, 86% of it placing the symbols of the transformers, where the 300-bus case takes 0.7 seconds; opening it in a headless browser, the page had not answered after 13 minutes. So TENSA asks first (Draw the diagram anyway, which takes minutes), and the case itself opens, with its tables, power flow and violations and their exports, without it."
+      ],
+      "verification": {
+        "summary": "The power flow agrees with the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved, for the network as ANDES reads it (six phase shifts left out, see the caveats): bus voltages to 4.3e-7 pu, angles to 1.3e-4 degrees, and the losses (1663.6 MW) and the slack's power (2611.6 MW) to 0.02 MW. That is the independent reference there is: the state the file stores is not a solution of its equations (see the caveats), so no check rests on it, and no published solution of the file was found. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.",
+        "checks": [
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case1354pegase.m, read by matpowercaseframes, with the phase shift of 6 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 6e-05 pu in a bus voltage and 0.087 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 4.26e-07 pu (bus 747) over 1354 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case1354pegase.m, read by matpowercaseframes, with the phase shift of 6 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 6e-05 pu in a bus voltage and 0.087 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 0.000133 deg (bus 8748) over 1354 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case1354pegase.m, read by matpowercaseframes, with the phase shift of 6 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 6e-05 pu in a bus voltage and 0.087 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 1663.61, expected 1663.6, difference 0.0187 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case1354pegase.m, read by matpowercaseframes, with the phase shift of 6 branches that have a ratio of 0 left out, as ANDES's MATPOWER reader holds them (MATPOWER applies them, and the solution with them differs from this one by at most 6e-05 pu in a bus voltage and 0.087 degrees in a bus angle); written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 2611.58, expected 2611.57, difference 0.0187 MW",
+            "passed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "activsg2000",
+      "title": "ACTIVSg2000 synthetic 2000-bus test case (Texas)",
+      "summary": "A synthetic 2,000-bus power system built to look like a transmission system on the footprint of Texas, from the ARPA-E GRID DATA project of Texas A&M University, as MATPOWER 8.1 holds it (case_ACTIVSg2000): 2,000 buses at 500, 230, 161 and 115 kV and at generator voltages, 544 generators and 3,206 branches, with a load of 67,109 MW. The largest case of the gallery: a case for the power flow, and for how the diagram and the tables handle two thousand buses. It has no machine models, so there is no time-domain run; a version with dynamic models is Texas A&M's, and is not bundled.",
+      "category": "steady-state",
+      "tags": [
+        "synthetic",
+        "activsg",
+        "2000-bus",
+        "texas",
+        "tamu",
+        "power flow",
+        "matpower",
+        "large",
+        "static"
+      ],
+      "size": {
+        "buses": 2000,
+        "generators": 544
+      },
+      "analyses": [
+        "pf"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "bundled",
+        "path": "case_ACTIVSg2000.m",
+        "sha256": "8d00618de8fd10bf35a599f59d2deebfecd0d86e28fcff73219ad7c4ebab860b",
+        "release": "MATPOWER 8.1",
+        "source_url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m",
+        "retrieved": "2026-11-18"
+      },
+      "citations": [
+        {
+          "text": "A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, \"Grid Structural Characteristics as Validation Criteria for Synthetic Networks,\" IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read.",
+          "bibtex": "@article{birchfield2017grid,\n  author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},\n  title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {32},\n  number  = {4},\n  pages   = {3258--3265},\n  year    = {2017},\n  month   = jul,\n  doi     = {10.1109/TPWRS.2016.2616385}\n}",
+          "doi": "10.1109/TPWRS.2016.2616385",
+          "url": "https://doi.org/10.1109/TPWRS.2016.2616385"
+        },
+        {
+          "text": "ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case.",
+          "bibtex": "@misc{tamu_activsg2000,\n  title        = {{ACTIVSg2000}: 2000-bus synthetic grid on footprint of Texas},\n  howpublished = {Electric Grid Test Case Repository, Texas A\\&M University},\n  url          = {https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/},\n  urldate      = {2026-11-18}\n}",
+          "url": "https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/"
+        },
+        {
+          "text": "MATPOWER, data/case_ACTIVSg2000.m, release 8.1 (commit 1a828c7af590), https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m (accessed 2026-11-18). Its header says it was created from ACTIVSg2000_AUG-09-2018.pwb, saved by PowerWorld Simulator version 21 (build date August 30, 2018), then by MATPOWER 6, dated August 9, 2018, and states the authors' copyright of 2017 to 2018 under the Creative Commons Attribution 4.0 International licence. The git blob of the file at the commit is 26c5add5b09e3d24d16cef254932ac385a37ebcc, the one of the file TENSA bundles.",
+          "bibtex": "@misc{matpower_case_activsg2000,\n  title        = {{MATPOWER} data/case\\_ACTIVSg2000.m},\n  howpublished = {MATPOWER release 8.1},\n  url          = {https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m},\n  urldate      = {2026-11-18}\n}",
+          "url": "https://github.com/MATPOWER/matpower/blob/1a828c7af590714499284e36ee9c81273388c594/data/case_ACTIVSg2000.m"
+        },
+        {
+          "text": "R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, \"MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education,\" IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, whose case format the file is written in.",
+          "bibtex": "@article{zimmerman2011matpower,\n  author  = {Zimmerman, Ray D. and Murillo-S{\\'a}nchez, Carlos E. and Thomas, Robert J.},\n  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {26},\n  number  = {1},\n  pages   = {12--19},\n  year    = {2011},\n  month   = feb,\n  doi     = {10.1109/TPWRS.2010.2051168}\n}",
+          "doi": "10.1109/TPWRS.2010.2051168",
+          "url": "https://doi.org/10.1109/TPWRS.2010.2051168"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "CC BY 4.0",
+        "url": "https://creativecommons.org/licenses/by/4.0/",
+        "attribution": "Credit: A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, whose copyright the file's header states (\"MATPOWER Copyright (c) 2017-2018 by A.B. Birchfield, T. Xu, K.M. Gegner, K.S. Shetye, and T.J. Overbye Licensed under the Creative Commons Attribution 4.0 International license\"), whose paper publications that use the data are asked to cite (above), and MATPOWER, which distributes the file (release 8.1, case_ACTIVSg2000.m). The licence is at the link above. TENSA made no change: the file is bundled byte for byte, with its header. Anyone who passes the file on gives this credit, the licence link and the same statement. The page of Texas A&M University for this case names no licence; the licence is the one the file's header states."
+      },
+      "modifications": [
+        "TENSA changed nothing: the file is the one of MATPOWER 8.1, byte for byte and with its header comments"
+      ],
+      "caveats": [
+        "The system is synthetic. The header calls it an entirely synthetic 2000-bus case, geographically situated in the US state of Texas, designed with a 500, 230, 161 and 115 kV transmission network by algorithms to be statistically similar to actual transmission system models without modelling any actual lines, and says it contains no critical energy infrastructure information; the Texas A&M page says it bears no relation to the actual grid except that generation and load profiles are similar. It has 2,000 buses (120 at 500 kV, 152 at 230 kV, 453 at 161 kV, 826 at 115 kV and 449 at generator voltages of 13.2 to 24 kV), 544 generators (432 in service, 68,724.7 MW of output, all with a set-point of 0.99 to 1.04 pu), 3,206 branches (847 between buses of different base voltages, which TENSA draws as transformers) rated from 19 to 4,352 MVA, shunts at 149 buses, a load of 67,109.2 MW and 19,014.3 MVAr, and 8 areas.",
+        "The file stores a state, and it is a solution of the file's equations: PowerWorld's, at which no bus is left more than 0.06 MW unaccounted for, and 153 of the 392 generator buses are at a reactive limit. A power flow that does not hold the limits, which is TENSA's default, differs from it by up to 0.035 pu (bus 4195) and 0.64 degrees (bus 3137), and the slack's power by 16.2 MW (1,252.3 MW against the 1,236.1 the file stores); one that enforces them differs by up to 0.031 pu (bus 1070) and 0.89 degrees (bus 2059), and by 3.5 MW, because the set of generators it holds at a limit is not PowerWorld's. Unlike the 200-bus case, no power flow of TENSA lands on the stored state. The checks against it are held to those gaps rounded up (0.04 pu, 0.7 degrees and 17 MW at the defaults; 0.035 pu, 1 degree and 4 MW with the limits enforced), so they catch only a gross error; the check that means something is the solver's.",
+        "After a power flow at the defaults the Violations table reads 197 violations and 26 warnings: 103 generators above their maximum reactive power and 94 below their minimum (up to 848 MVAr against a maximum of 51.3, the generator PV 3048), and 26 lines near their rating; no line is over its rating and no bus is outside its voltage limits. A power flow does not enforce reactive limits unless asked to, and these generators are far past theirs (the case sets one voltage for each of its generator buses and the generators take up whatever the network needs). With the limits enforced it reads no violation and 235 warnings: 111 generators at their maximum, 101 at their minimum and 23 lines near their rating.",
+        "The file is MATPOWER's, made from a PowerWorld case: it also holds the generators' cost data, the type and fuel of each generator and bus names, none of which TENSA uses except the names. It has no DC line. The case has no dynamic data, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis; Texas A&M offers the case with dynamic models, which TENSA does not bundle.",
+        "The Texas A&M page for the case names no licence: it says the data is free for commercial or non-commercial use and asks users to cite the appropriate papers. The licence stated is the one in the header of the file as MATPOWER distributes it, CC BY 4.0.",
+        "The diagram is not drawn when the case opens, as for the 1,354-bus case, which is smaller: a case of more than 400 buses is drawn only when asked for (Draw the diagram anyway, which takes minutes). The case itself opens, and its tables, power flow, violations and their exports work without it."
+      ],
+      "verification": {
+        "summary": "The power flow agrees with the solution pandapower 3.5.6 finds for the same file, which it reads from the .m with no ANDES involved: bus voltages to 3.5e-7 pu, angles to 6.2e-4 degrees, and the losses (1631.7 MW) and the slack's power (1252.2 MW) to 0.02 MW. The file also stores PowerWorld's solution, which is a solution of the file's equations with 153 of its 392 generator buses at a reactive limit, a set that TENSA's own enforcement of the limits does not reach: TENSA's power flow is up to 0.035 pu and 0.64 degrees from it at the defaults, and up to 0.031 pu and 0.89 degrees with the limits enforced. The checks against the stored state are held to those gaps, rounded up, so they catch only a gross error, and nothing in the entry rests on them. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.",
+        "checks": [
+          {
+            "name": "Bus voltage magnitudes against the solution stored in the case file, reactive limits enforced",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, which a power flow of TENSA with the limits enforced reaches with another set of generators, so it differs from it by up to 0.031 pu and 0.89 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored --enforce-q-limits; the power flow compared with it is run with the reactive limits enforced",
+            "tolerance": "0.035 pu",
+            "result": "largest difference 0.0308 pu (bus 1070) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against the solution stored in the case file, reactive limits enforced",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, which a power flow of TENSA with the limits enforced reaches with another set of generators, so it differs from it by up to 0.031 pu and 0.89 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored --enforce-q-limits; the power flow compared with it is run with the reactive limits enforced",
+            "tolerance": "1 deg",
+            "result": "largest difference 0.885 deg (bus 2059) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against the solution stored in the case file, reactive limits enforced",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, which a power flow of TENSA with the limits enforced reaches with another set of generators, so it differs from it by up to 0.031 pu and 0.89 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored --enforce-q-limits; the power flow compared with it is run with the reactive limits enforced",
+            "tolerance": "4 MW",
+            "result": "measured 1232.61, expected 1236.1, difference 3.49 MW",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, not the generators a power flow of TENSA holds at one, so it differs from a power flow without the limits by up to 0.035 pu and 0.64 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.04 pu",
+            "result": "largest difference 0.0352 pu (bus 4195) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, not the generators a power flow of TENSA holds at one, so it differs from a power flow without the limits by up to 0.035 pu and 0.64 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.7 deg",
+            "result": "largest difference 0.639 deg (bus 3137) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case_ACTIVSg2000.m (the final voltages and angles of PowerWorld Simulator's solution of the original ACTIVSg2000 case, which this file was created from; a state solved with 170 of the 392 generator buses held at a reactive limit, not the generators a power flow of TENSA holds at one, so it differs from a power flow without the limits by up to 0.035 pu and 0.64 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "17 MW",
+            "result": "measured 1252.25, expected 1236.1, difference 16.2 MW",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 3.46e-07 pu (bus 5184) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 0.000617 deg (bus 5139) over 2000 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 1631.68, expected 1631.66, difference 0.02 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 1252.25, expected 1252.23, difference 0.02 MW",
             "passed": true
           }
         ]

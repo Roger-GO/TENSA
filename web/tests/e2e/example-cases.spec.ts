@@ -11,7 +11,8 @@
  *   the wind turbine gallery case (IEEE 14-bus with a type-3 wind turbine): Add and Open put its 14 buses on
  *   the diagram, and the chain of the unit at bus 8 holds the converter, its two controls and the four models of
  *   the turbine, none of them an orphan badge
- *   the steady-state gallery cases (IEEE RTS-24, IEEE 30, 57, RTS-GMLC, IEEE 118, ACTIVSg200 and IEEE 300-bus): the
+ *   the steady-state gallery cases (IEEE RTS-24, IEEE 30, 57, RTS-GMLC, PEGASE 89, IEEE 118, ACTIVSg200, IEEE 300,
+ *   PEGASE 1354 and ACTIVSg2000): the
  *   dialog lists them in a group of their own, smallest first, Add and Open put the 118 buses of IEEE 118 on the
  *   diagram as a static case, and a power flow leaves the six generators past a reactive limit that its catalog
  *   entry names
@@ -81,8 +82,19 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
   const steady = dialog.getByTestId('example-group-steady-state');
   await expect(steady).toBeVisible();
-  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(7);
-  for (const id of ['rts24', 'ieee30', 'ieee57', 'rts_gmlc', 'ieee118', 'activsg200', 'ieee300']) {
+  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(10);
+  for (const id of [
+    'rts24',
+    'ieee30',
+    'ieee57',
+    'rts_gmlc',
+    'pegase89',
+    'ieee118',
+    'activsg200',
+    'ieee300',
+    'pegase1354',
+    'activsg2000',
+  ]) {
     await expect(steady.getByTestId(`example-card-${id}`)).toBeVisible();
   }
   for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
@@ -109,6 +121,13 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(dialog.getByTestId('example-size-rts_gmlc')).toHaveText('73 buses, 160 generators');
   await expect(dialog.getByTestId('example-size-activsg200')).toHaveText(
     '200 buses, 49 generators',
+  );
+  await expect(dialog.getByTestId('example-size-pegase89')).toHaveText('89 buses, 12 generators');
+  await expect(dialog.getByTestId('example-size-pegase1354')).toHaveText(
+    '1354 buses, 260 generators',
+  );
+  await expect(dialog.getByTestId('example-size-activsg2000')).toHaveText(
+    '2000 buses, 544 generators',
   );
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(

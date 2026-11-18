@@ -55,7 +55,7 @@
  *   anything else, and the generators' reactive limits that the power flow leaves are counted
  *
  *   in IEEE RTS-24, IEEE 30 and 57 (bundled with TENSA from the PGLib-OPF library), RTS-GMLC (bundled from its
- *   repository, a PSS/E file with up to six generators at one bus), ACTIVSg200 (bundled from MATPOWER) and IEEE 300
+ *   repository, a PSS/E file with up to six generators at one bus), PEGASE 89 and ACTIVSg200 (bundled from MATPOWER) and IEEE 300
  *   (a steady-state gallery case of 300 buses and 710 connectors), each added to the workspace first -> as it
  *   opens, after a tidy, with the values of a power flow and laid out again, nothing is drawn over anything else,
  *   the device connectors that do not drop square are those listed, and the Violations tab counts what the
@@ -605,6 +605,7 @@ const STEADY_GALLERY: [string, string, string[], string][] = [
   ['ieee30', 'pglib_opf_case30_ieee.m', ['stub-load-PQ_1'], '5'],
   ['ieee57', 'pglib_opf_case57_ieee.m', [], '5'],
   ['rts_gmlc', 'RTS-GMLC.RAW', ['stub-generator-52', 'stub-generator-84'], '22'],
+  ['pegase89', 'case89pegase.m', [], '1'],
   ['activsg200', 'case_ACTIVSg200.m', [], '4'],
   ['ieee300', 'case300.m', ['stub-load-PQ_137', 'stub-shunt-Shunt_9'], '21'],
 ];

@@ -56,8 +56,10 @@ def _dumped_and_solved(script: ModuleType, relative: str) -> tuple[dict[str, Any
     return network, system
 
 
-def _unaccounted_power(network: dict[str, Any], system: Any) -> np.ndarray:
-    """What MATPOWER's equations of ``network`` leave at each bus at ANDES's solution, in pu."""
+def _unaccounted_power(network: dict[str, Any], system: Any, eps: float = 1e-8) -> np.ndarray:
+    """What MATPOWER's equations of ``network`` leave at each bus at ANDES's solution, in pu.
+
+    ``eps`` is what ANDES adds to a line's r and x (zero for the network as a file gives it)."""
     base = network["baseMVA"]
     bus = np.array(network["bus"])
     branch = np.array(network["branch"])
@@ -72,7 +74,7 @@ def _unaccounted_power(network: dict[str, Any], system: Any) -> np.ndarray:
         # ANDES adds 1e-8 to r and x to keep a zero impedance off a division by zero. The dump
         # leaves that out (see ``MODELLING``), and a transformer with no resistance and a small
         # reactance would be off by 1e-5 pu without it.
-        ys = 1 / complex(row[2] + 1e-8, row[3] + 1e-8)
+        ys = 1 / complex(row[2] + eps, row[3] + eps)
         y[f, f] += (ys + 0.5j * row[4]) / abs(tap) ** 2
         y[t, t] += ys + 0.5j * row[4]
         y[f, t] -= ys / np.conj(tap)
@@ -408,7 +410,13 @@ def test_a_stored_state_has_a_basis_of_its_own_where_the_file_does_not_keep_a_so
     assert all("not a solution of it" in c["reference"] for c in mine)
     assert all("TENSA did not compute it" in c["reference"] for c in mine)
     # Only the cases that have a basis of their own do: a case that is not listed gets the RAW one.
-    assert set(script.STORED_BASES) == {"ieee118", "ieee300", "activsg200"}
+    assert set(script.STORED_BASES) == {
+        "ieee118",
+        "ieee300",
+        "activsg200",
+        "pegase89",
+        "activsg2000",
+    }
 
 
 def test_a_stored_state_without_slack_power_has_no_check_of_it(script: ModuleType) -> None:
@@ -1030,7 +1038,7 @@ def test_the_stored_checks_of_a_power_flow_with_the_reactive_limits_say_so_and_a
     plain = script._stored_checks(state, "case_ACTIVSg200.m", script.STORED_BASES["activsg200"])  # noqa: SLF001
     assert all("pflow" not in c for c in plain)
     assert [c["tolerance"]["abs"] for c in plain] == [0.005, 0.05, 0.05]
-    assert set(script.STORED_BASES_ENFORCED) == {"activsg200"}
+    assert set(script.STORED_BASES_ENFORCED) == {"activsg200", "activsg2000"}
 
 
 def test_the_stored_command_with_the_reactive_limits_needs_a_state_solved_so(
@@ -1082,6 +1090,9 @@ def test_the_stored_checks_of_activsg_200_that_ship_are_what_the_script_reads_fr
         ("rts24", "pglib_opf_case24_ieee_rts.m"),
         ("rts_gmlc", "RTS-GMLC.RAW"),
         ("activsg200", "case_ACTIVSg200.m"),
+        ("pegase89", "case89pegase.m"),
+        ("pegase1354", "case1354pegase.m"),
+        ("activsg2000", "case_ACTIVSg2000.m"),
     ],
 )
 def test_pandapower_solves_the_bundled_files_to_the_values_that_ship_in_their_references(
@@ -1114,3 +1125,226 @@ def test_pandapower_solves_the_bundled_files_to_the_values_that_ship_in_their_re
     assert solved["bus_angle"] == pytest.approx(expected["pf.bus_angle_deg"], abs=1e-5)
     assert solved["loss_mw"] == pytest.approx(expected["pf.loss_mw"], abs=1e-5)
     assert solved["slack_p_mw"] == pytest.approx(expected["pf.slack_p_mw"], abs=1e-5)
+
+
+# ---- the phase shift of a branch with a ratio of 0, and the stored states of three more files --
+
+
+def _branch_row(
+    f: int, t: int, tap: float, shift: float, status: float = 1.0
+) -> list[float]:
+    """A MATPOWER branch row: from, to, r, x, b, the three ratings, ratio, shift, status, limits."""
+    return [f, t, 0.01, 0.1, 0.0, 0.0, 0.0, 0.0, tap, shift, status, -360.0, 360.0]
+
+
+def test_andes_reads_a_branch_with_a_ratio_of_0_without_its_phase_shift(script: ModuleType) -> None:
+    """MATPOWER reads a ratio of 0 as 1 and applies the shift; ANDES's reader calls such a branch
+    a plain line and drops the shift. A branch with a ratio, or with a ratio of 1 and a shift, is a
+    transformer for both, and a branch with no shift has nothing to drop."""
+    branch = np.array(
+        [
+            _branch_row(1, 2, 0.0, 0.5),
+            _branch_row(2, 3, 0.0, 0.0),
+            _branch_row(3, 4, 1.02, 0.3),
+            _branch_row(4, 5, 1.0, 0.2),
+            _branch_row(5, 6, 0.0, -1.25, status=0.0),
+        ]
+    )
+    ppc = {"baseMVA": 100.0, "bus": [], "gen": [], "branch": branch}
+    held = script.andes_reads(ppc)
+    assert held["dropped_shifts"] == [[1, 2, 0.5], [5, 6, -1.25]]
+    assert list(held["branch"][:, 9]) == [0.0, 0.0, 0.3, 0.2, 0.0]
+    # Nothing else changes, and the case it was given is left as it was.
+    assert np.array_equal(held["branch"][:, [0, 1, 8, 10]], branch[:, [0, 1, 8, 10]])
+    assert list(branch[:, 9]) == [0.5, 0.0, 0.3, 0.2, -1.25]
+    assert script.andes_reads({**ppc, "branch": branch[1:4]})["dropped_shifts"] == []
+
+
+def test_the_effect_of_the_dropped_shifts_names_the_worst_bus_of_each_kind(
+    script: ModuleType,
+) -> None:
+    held = {"bus_voltage": {"1": 1.0, "2": 1.0}, "bus_angle": {"1": 0.0, "2": 5.0}}
+    kept = {"bus_voltage": {"1": 1.0002, "2": 0.9999}, "bus_angle": {"1": 0.1, "2": 5.4}}
+    effect = script._shift_effect(held, kept)  # noqa: SLF001
+    assert effect == {
+        "bus_voltage_pu": pytest.approx(2e-4),
+        "bus_voltage_bus": "1",
+        "bus_angle_deg": pytest.approx(0.4),
+        "bus_angle_bus": "2",
+    }
+    # The reference says which shifts it left out and how far the solution with them is.
+    result = {
+        "pandapower": "3.5.6",
+        "bus_voltage": held["bus_voltage"],
+        "bus_angle": held["bus_angle"],
+        "loss_mw": 1.0,
+        "slack_p_mw": 2.0,
+        "dropped_shifts": [[1, 2, 0.4]],
+        "shift_effect": effect,
+    }
+    checks = script._reference_checks(result, "case.m")  # noqa: SLF001
+    assert all("phase shift of 1 branches that have a ratio of 0 left out" in c["reference"] for c in checks)
+    assert all(
+        "differs from this one by at most 0.0002 pu in a bus voltage and 0.4 degrees in a bus angle"
+        in c["reference"]
+        for c in checks
+    )
+    plain = script._reference_checks({**result, "dropped_shifts": []}, "case.m")  # noqa: SLF001
+    assert not any("phase shift" in c["reference"] for c in plain)
+
+
+def _branch_rows(name: str) -> list[list[float]]:
+    from tests.unit.test_example_catalog import _matpower_rows
+
+    text = _bundled(name).read_text(encoding="utf-8")
+    return _matpower_rows(text, "branch")
+
+
+@pytest.mark.parametrize(
+    ("name", "shifts"),
+    [
+        ("case89pegase.m", [-0.428189, 0.178581, -0.153178]),
+        (
+            "case1354pegase.m",
+            [0.072386, -0.072388, 0.084507, -0.086984, 0.04898, -0.06138],
+        ),
+        ("case_ACTIVSg2000.m", []),
+    ],
+)
+def test_andes_drops_the_shifts_the_pegase_files_give_branches_with_a_ratio_of_0(
+    name: str, shifts: list[float]
+) -> None:
+    """The reason the references of the PEGASE cases leave six or fewer shifts out (the entries
+    say so): ANDES 2.0.0 holds a branch of the file with a ratio of 0 and a shift as a line with no
+    shift. If a later ANDES applies them, this fails, and the references and the caveats are
+    to be rewritten."""
+    import andes
+
+    rows = _branch_rows(name)
+    system = andes.load(str(_bundled(name)), setup=False, no_output=True, default_config=True)
+    assert system.Line.n == len(rows)
+    phi = np.degrees(np.asarray(system.Line.phi.v))
+    dropped = [row[9] for row in rows if row[8] == 0.0 and row[9] != 0.0]
+    assert dropped == shifts
+    for k, row in enumerate(rows):
+        if row[8] == 0.0:
+            assert phi[k] == 0.0 and system.Line.tap.v[k] == 1.0, (name, k)
+        else:
+            assert system.Line.tap.v[k] == pytest.approx(row[8]), (name, k)
+            assert phi[k] == pytest.approx(row[9], abs=1e-9), (name, k)
+
+
+def test_the_stored_checks_leave_out_the_angle_of_the_buses_named_and_only_that(
+    script: ModuleType,
+) -> None:
+    state = {
+        "bus_voltage": {"1": 1.01, "2": 1.02, "3": 1.03},
+        "bus_angle": {"1": 0.1, "2": 0.2, "3": 0.3},
+        "slack_p_mw": 5.0,
+    }
+    basis = script.StoredBasis("somewhere", 1e-5, 0.01, 0.5, omitted=("2",))
+    by = {c["quantity"]: c for c in script._stored_checks(state, "case.m", basis)}  # noqa: SLF001
+    assert set(by["pf.bus_voltage_pu"]["expected"]) == {"1", "2", "3"}
+    assert set(by["pf.bus_angle_deg"]["expected"]) == {"1", "3"}
+    assert by["pf.slack_p_mw"]["expected"] == 5.0
+    # A basis that names none leaves every bus in.
+    plain = script._stored_checks(state, "case.m", script.StoredBasis("x", 1e-5, 0.01, 0.5))  # noqa: SLF001
+    assert set(plain[1]["expected"]) == {"1", "2", "3"}
+    assert script.STORED_BASES["pegase89"].omitted == ("8581", "7526", "2154")
+
+
+@pytest.mark.parametrize(
+    ("example_id", "name", "buses", "omitted"),
+    [
+        ("pegase89", "case89pegase.m", 89, 3),
+        ("activsg2000", "case_ACTIVSg2000.m", 2000, 0),
+    ],
+)
+def test_the_stored_checks_of_the_pegase_89_and_activsg_2000_files_that_ship_are_what_the_script_reads(
+    script: ModuleType, example_id: str, name: str, buses: int, omitted: int
+) -> None:
+    import andes
+
+    system = andes.load(str(_bundled(name)), setup=False, no_output=True, default_config=True)
+    state = script.stored_solution(system)
+    assert len(state["bus_voltage"]) == buses
+    shipped = load_reference(example_id)
+    assert shipped is not None
+    stored = [c for c in shipped.checks if c.kind == "stored-solution" and c.pflow is None]
+    assert [c.quantity for c in stored] == ["pf.bus_voltage_pu", "pf.bus_angle_deg", "pf.slack_p_mw"]
+    for check in stored:
+        if check.quantity == "pf.slack_p_mw":
+            assert check.expected == pytest.approx(state["slack_p_mw"], abs=1e-5)
+        elif check.quantity == "pf.bus_voltage_pu":
+            assert check.expected == pytest.approx(state["bus_voltage"], abs=1e-8)
+        else:
+            assert isinstance(check.expected, dict) and len(check.expected) == buses - omitted
+            for bus, angle in check.expected.items():
+                assert angle == pytest.approx(state["bus_angle"][bus], abs=1e-6)
+    if example_id == "activsg2000":
+        assert state["slack_p_mw"] == pytest.approx(1236.1)
+        # The state is also compared with a power flow that holds the generators to their limits.
+        assert len([c for c in shipped.checks if c.pflow is not None]) == 3
+    else:
+        assert state["slack_p_mw"] == pytest.approx(1249.4)
+
+
+def _stored_mismatch(script: ModuleType, name: str) -> tuple[np.ndarray, dict[str, Any], Any]:
+    """What the equations of the file's network leave unaccounted for, at each bus, in the state the
+    file stores (MW), with the network ANDES holds and the system."""
+    import andes
+
+    path = str(_bundled(name))
+    stored = script.stored_solution(
+        andes.load(path, setup=False, no_output=True, default_config=True)
+    )
+    system = andes.load(path, setup=True, no_output=True, default_config=True)
+    network = script.dump_network(system)
+    for i, idx in enumerate(network["bus_idx"]):
+        system.Bus.v.v[i] = stored["bus_voltage"][str(idx)]
+        system.Bus.a.v[i] = math.radians(stored["bus_angle"][str(idx)])
+    mismatch = _unaccounted_power(network, system, eps=0.0) * network["baseMVA"]
+    return mismatch, network, system
+
+
+def test_the_stored_state_of_activsg_2000_is_a_solution_of_the_file_s_equations(
+    script: ModuleType,
+) -> None:
+    """The entry says no bus is left more than 0.06 MW unaccounted for, and that 153 of the 392
+    buses that have a generator hold it at a reactive limit (it is PowerWorld's solution with
+    the limits on, which is why a power flow without them is 0.035 pu from it)."""
+    mismatch, network, _ = _stored_mismatch(script, "case_ACTIVSg2000.m")
+    kinds = np.array(network["bus"])[:, 1]
+    assert np.max(np.abs(mismatch[kinds == 1].real)) < 0.06
+    assert np.max(np.abs(mismatch[kinds == 2].real)) < 0.06
+    # The reactive power each bus gives at the stored state (what the network takes plus what the
+    # dump's generation leaves over), against the limits of its generators.
+    gens = np.array(network["gen"])
+    held = 0
+    buses_with_generator = 0
+    for i in range(len(kinds)):
+        rows = gens[(gens[:, 0] == i + 1) & (gens[:, 7] > 0)]
+        if not len(rows):
+            continue
+        buses_with_generator += 1
+        given = mismatch[i].imag + rows[:, 2].sum()
+        if min(abs(given - rows[:, 3].sum()), abs(given - rows[:, 4].sum())) < 1e-3:
+            held += 1
+    assert (held, buses_with_generator) == (153, 392)
+
+
+def test_the_stored_state_of_the_pegase_files_is_a_solution_only_in_part(script: ModuleType) -> None:
+    """The 89-bus file's state satisfies the equations except around three buses, whose angles the
+    check leaves out; the 1354-bus file's does not, at 21 buses, so no check rests on it."""
+    mismatch, network, _ = _stored_mismatch(script, "case89pegase.m")
+    kinds = np.array(network["bus"])[:, 1]
+    active = np.abs(mismatch.real)
+    active[kinds == 3] = 0.0
+    assert int(np.sum(active > 0.1)) == 8
+    worst = int(np.argmax(active))
+    assert network["bus_idx"][worst] == 7637 and 2900 < active[worst] < 3100
+    mismatch, network, _ = _stored_mismatch(script, "case1354pegase.m")
+    kinds = np.array(network["bus"])[:, 1]
+    active = np.abs(mismatch.real)
+    active[kinds == 3] = 0.0
+    assert int(np.sum(active > 0.1)) == 21 and active.max() > 1000

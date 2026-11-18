@@ -142,26 +142,54 @@ PowerFactory folder; TENSA has not completed it.
 
 Changes: TENSA made none.
 
-## Case bundled from MATPOWER
+## Cases bundled from MATPOWER
 
-ACTIVSg200 synthetic 200-bus test case (`case_ACTIVSg200.m`).
+ACTIVSg200 synthetic 200-bus test case (`case_ACTIVSg200.m`), ACTIVSg2000 synthetic 2000-bus
+test case (`case_ACTIVSg2000.m`), PEGASE 89-bus test case (`case89pegase.m`) and PEGASE
+1354-bus test case (`case1354pegase.m`).
 
-This file is part of MATPOWER, release 8.1 (commit `1a828c7af590714499284e36ee9c81273388c594`,
-`data/case_ACTIVSg200.m`; the file of release 8.0 is the same), https://github.com/MATPOWER/matpower,
-and TENSA bundles it as it is there, retrieved on 2026-11-18. TENSA changed nothing in it: it
-is MATPOWER's file byte for byte, header comments included, and the catalog holds its SHA-256,
-which TENSA checks whenever it is added to a workspace.
+These four files are part of MATPOWER, release 8.1 (commit
+`1a828c7af590714499284e36ee9c81273388c594`, `data/case_ACTIVSg200.m`,
+`data/case_ACTIVSg2000.m`, `data/case89pegase.m` and `data/case1354pegase.m`; the file of
+`case_ACTIVSg200.m` in release 8.0 is the same), https://github.com/MATPOWER/matpower, and
+TENSA bundles them as they are there, retrieved on 2026-11-18. TENSA changed nothing in
+them: each is MATPOWER's file byte for byte, header comments included, and the catalog holds
+the SHA-256 of each, which TENSA checks whenever one is added to a workspace.
 
-Credit: the header of the file reads "MATPOWER Copyright (c) 2017 by A.B. Birchfield, T. Xu,
-K.M. Gegner, K.S. Shetye, and T.J. Overbye Licensed under the Creative Commons Attribution 4.0
-International license, https://creativecommons.org/licenses/by/4.0/", and asks that
-publications based on the data cite A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and
-T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks,"
-IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, 2017,
+Credit, ACTIVSg200: the header of the file reads "MATPOWER Copyright (c) 2017 by A.B.
+Birchfield, T. Xu, K.M. Gegner, K.S. Shetye, and T.J. Overbye Licensed under the Creative
+Commons Attribution 4.0 International license, https://creativecommons.org/licenses/by/4.0/",
+and asks that publications based on the data cite A. B. Birchfield, T. Xu, K. M. Gegner, K. S.
+Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for
+Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, 2017,
 doi:10.1109/TPWRS.2016.2616385. The system is synthetic, from the ARPA-E GRID DATA project of
 Texas A&M University (https://electricgrids.engr.tamu.edu/), whose page for the case names no
 licence and says the data is free for commercial or non-commercial use; the licence stated is
 the one in the header above.
+
+Credit, ACTIVSg2000: the header of the file reads "MATPOWER Copyright (c) 2017-2018 by A.B.
+Birchfield, T. Xu, K.M. Gegner, K.S. Shetye, and T.J. Overbye Licensed under the Creative
+Commons Attribution 4.0 International license, https://creativecommons.org/licenses/by/4.0/",
+and asks that publications based on the data cite the same paper of Birchfield et al. The
+system is synthetic, on the footprint of Texas, from the same project, whose page for the case
+(https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/) names no licence
+either and says the data is free for commercial or non-commercial use; the licence stated is
+the one in the header above.
+
+Credit, PEGASE 89-bus and 1354-bus: the header of each file reads "MATPOWER Copyright (c)
+2015, 2016 by Cédric Josz, Stéphane Fliscounakis, Jean Maeght, and Patrick Panciatici Licensed
+under the Creative Commons Attribution 4.0 International license,
+https://creativecommons.org/licenses/by/4.0/", and asks that publications based on the data
+cite C. Josz, S. Fliscounakis, J. Maeght and P. Panciatici, "AC Power Flow Data in MATPOWER and
+QCQP Format: iTesla, RTE Snapshots, and PEGASE," arXiv:1603.01533, 2016, and S. Fliscounakis,
+P. Panciatici, F. Capitanescu and L. Wehenkel, "Contingency ranking with respect to overloads in
+very large power systems taking into account uncertainty, preventive and corrective actions,"
+IEEE Transactions on Power Systems, vol. 28, no. 4, pp. 4909-4917, 2013,
+doi:10.1109/TPWRS.2013.2251015. The authors are with Réseau de Transport d'Electricité (RTE),
+the French transmission system operator. The data stems from the PEGASE project (Pan European
+Grid Advanced Simulation and State Estimation) of the 7th Framework Program of the European
+Union and is fictitious: the header says it does not correspond to real world data and is not to
+be used for the operation or planning of the European grid.
 
 Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
 https://creativecommons.org/licenses/by/4.0/. MATPOWER's own software is under the BSD

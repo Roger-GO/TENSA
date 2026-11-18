@@ -325,9 +325,12 @@ def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_i
         "ieee30",
         "ieee57",
         "rts_gmlc",
+        "pegase89",
         "ieee118",
         "activsg200",
         "ieee300",
+        "pegase1354",
+        "activsg2000",
     ]
     # The renewable cases are the IEEE 14-bus case with a converter, which says what it is not.
     for example_id in ("ieee14_solar", "ieee14_wt3"):
@@ -565,7 +568,37 @@ MATPOWER_81_COMMIT = "1a828c7af590714499284e36ee9c81273388c594"
 RTS_GMLC_COMMIT = "3ece0d3725c844056132393ee252b3083dd4eab4"
 SOURCE_BLOBS = {
     "case_ACTIVSg200.m": "7f707e91b414de417f25492f47ed81cee8e6c981",
+    "case_ACTIVSg2000.m": "26c5add5b09e3d24d16cef254932ac385a37ebcc",
+    "case89pegase.m": "71f1cf78dc523e4a3ffe532261d0525297cbab8b",
+    "case1354pegase.m": "d6ede376f35af472b45b93ae771209c483427c26",
     "RTS-GMLC.RAW": "41372a04c008b48027fbec4c239014bf3791b776",
+}
+# What the header of each MATPOWER file says about who holds the copyright and under which licence.
+MATPOWER_HEADERS = {
+    "case_ACTIVSg200.m": (
+        "%   MATPOWER\n%   Copyright (c) 2017 by A.B. Birchfield, T. Xu, K.M. Gegner, K.S. Shetye,\n"
+        "%   and T.J. Overbye\n%   Licensed under the Creative Commons Attribution 4.0 International "
+        "license,\n%   https://creativecommons.org/licenses/by/4.0/\n",
+        "doi: 10.1109/TPWRS.2016.2616385",
+    ),
+    "case_ACTIVSg2000.m": (
+        "%   MATPOWER\n%   Copyright (c) 2017-2018 by A.B. Birchfield, T. Xu, K.M. Gegner, K.S. Shetye,\n"
+        "%   and T.J. Overbye\n%   Licensed under the Creative Commons Attribution 4.0 International "
+        "license,\n%   https://creativecommons.org/licenses/by/4.0/\n",
+        "doi: 10.1109/TPWRS.2016.2616385",
+    ),
+    "case89pegase.m": (
+        "%   MATPOWER\n%   Copyright (c) 2015, 2016 by C\u00e9dric Josz, St\u00e9phane Fliscounakis, Jean Maeght,\n"
+        "%   and Patrick Panciatici\n%   Licensed under the Creative Commons Attribution 4.0 International "
+        "license,\n%   https://creativecommons.org/licenses/by/4.0/\n",
+        "https://doi.org/10.1109/TPWRS.2013.2251015",
+    ),
+    "case1354pegase.m": (
+        "%   MATPOWER\n%   Copyright (c) 2015, 2016 by C\u00e9dric Josz, St\u00e9phane Fliscounakis, Jean Maeght,\n"
+        "%   and Patrick Panciatici\n%   Licensed under the Creative Commons Attribution 4.0 International "
+        "license,\n%   https://creativecommons.org/licenses/by/4.0/\n",
+        "https://doi.org/10.1109/TPWRS.2013.2251015",
+    ),
 }
 
 
@@ -594,13 +627,10 @@ def test_a_bundled_file_that_is_not_pglibs_is_its_sources_own_and_the_entry_pins
             f"https://github.com/MATPOWER/matpower/blob/{MATPOWER_81_COMMIT}/data/{name}"
         )
         assert prov.release == "MATPOWER 8.1"
-        header = data.decode("ascii")[:2000]
-        assert (
-            "%   MATPOWER\n%   Copyright (c) 2017 by A.B. Birchfield, T. Xu, K.M. Gegner, K.S. Shetye,\n"
-            "%   and T.J. Overbye\n%   Licensed under the Creative Commons Attribution 4.0 International "
-            "license,\n%   https://creativecommons.org/licenses/by/4.0/\n"
-        ) in header
-        assert "doi: 10.1109/TPWRS.2016.2616385" in header
+        header = data.decode("utf-8")[:4000]
+        copyright_lines, cited = MATPOWER_HEADERS[name]
+        assert copyright_lines in header
+        assert cited in header
 
 
 def test_the_activsg_200_entry_credits_the_authors_and_says_what_the_page_it_comes_from_does_not() -> None:
@@ -637,6 +667,128 @@ def test_the_activsg_200_numbers_the_entry_quotes_are_the_file() -> None:
     for quoted in ("38 in service", "245 branches rated from 7.4 to 740 MVA", "1475.7 MW and 420.6 MVAr"):
         assert quoted in caveats
     assert "four shunts of 30 to 80 MVAr" in caveats
+
+
+def test_the_gallery_has_the_pegase_and_activsg_2000_cases_and_none_is_seeded() -> None:
+    catalog = load_catalog()
+    expected = {
+        "pegase89": ("case89pegase.m", 89, 12, {"independent-solver", "stored-solution"}),
+        "pegase1354": ("case1354pegase.m", 1354, 260, {"independent-solver"}),
+        "activsg2000": (
+            "case_ACTIVSg2000.m",
+            2000,
+            544,
+            {"independent-solver", "stored-solution"},
+        ),
+    }
+    for example_id, (path, buses, generators, kinds) in expected.items():
+        example = catalog.get(example_id)
+        assert example is not None, example_id
+        assert not example.default and example.category == "steady-state"
+        assert example.provenance.kind == "bundled" and example.provenance.path == path
+        assert example.size is not None
+        assert (example.size.buses, example.size.generators) == (buses, generators)
+        assert example.analyses == ["pf"]
+        assert example.verification is not None and example.verification.checks
+        assert all(check.passed for check in example.verification.checks), example_id
+        # A power flow only, checked against what TENSA did not compute: no baseline stands for one.
+        assert {c.kind for c in example.verification.checks} == kinds, example_id
+        assert example.provenance.retrieved is not None
+        assert "/blob/" in (example.provenance.source_url or "")
+        assert example.modifications and example.modifications[0].startswith("TENSA changed nothing")
+        assert example.licence.name == "CC BY 4.0" and example.licence.url == CC_BY_URL
+        assert example.licence.notice is None
+        # A case with no time-domain run has no baseline, and the entry says nothing rests on TENSA's own output.
+        assert "nothing in it is a regression baseline" in example.verification.summary
+    # The one that has the fewest buses and the ones with the most close the steady-state group.
+    assert [e.id for e in catalog.examples if e.category == "steady-state"][-2:] == [
+        "pegase1354",
+        "activsg2000",
+    ]
+
+
+def test_the_pegase_files_are_credited_to_their_authors_at_rte_and_say_their_data_is_fictitious() -> None:
+    catalog = load_catalog()
+    for example_id, name in (("pegase89", "case89pegase.m"), ("pegase1354", "case1354pegase.m")):
+        entry = catalog.get(example_id)
+        assert entry is not None
+        credit = entry.licence.attribution or ""
+        assert "C\u00e9dric Josz, St\u00e9phane Fliscounakis, Jean Maeght and Patrick Panciatici" in credit
+        assert "R\u00e9seau de Transport d'Electricit\u00e9 (RTE)" in credit
+        assert "MATPOWER Copyright (c) 2015, 2016 by C\u00e9dric Josz" in credit and "no change" in credit
+        assert f"release 8.1, {name}" in credit
+        # The two papers the header of the file asks that a publication cite, each opened or checked.
+        dois = {c.doi for c in entry.citations}
+        assert {"10.1109/TPWRS.2013.2251015", "10.1109/TPWRS.2010.2051168"} <= dois
+        assert any(c.url == "https://arxiv.org/abs/1603.01533" for c in entry.citations)
+        text = " ".join(c.text for c in entry.citations)
+        assert "The text of the paper was not read" in text and "behind a paywall and was not read" in text
+        assert "did not resolve when checked" in text
+        # The system is not a real one, and the entry says so before anything else.
+        caveats = " ".join(entry.caveats)
+        assert caveats.startswith("The data is fictitious.") and "not for the operation and planning" in caveats
+        assert "phase shift" in caveats and "andes/io/matpower.py" in caveats
+    # The authors' names are the file's own, accents and all, in the catalog and in the notice.
+    notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
+    assert "Credit, PEGASE 89-bus and 1354-bus" in notice and "C\u00e9dric Josz, St\u00e9phane" in notice
+    assert "doi:10.1109/TPWRS.2013.2251015" in notice and "arXiv:1603.01533" in notice
+
+
+def test_the_activsg_2000_entry_credits_the_authors_and_says_what_the_page_it_comes_from_does_not() -> None:
+    entry = load_catalog().get("activsg2000")
+    assert entry is not None
+    credit = entry.licence.attribution or ""
+    assert "A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye" in credit
+    assert "MATPOWER Copyright (c) 2017-2018" in credit and "no change" in credit
+    assert "names no licence" in credit
+    assert "10.1109/TPWRS.2016.2616385" in {c.doi for c in entry.citations}
+    assert any(
+        c.url == "https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/"
+        for c in entry.citations
+    )
+    text = " ".join(entry.caveats)
+    assert "bears no relation to the actual grid" in text and "free for commercial or non-commercial use" in text
+    assert "Texas A&M offers the case with dynamic models, which TENSA does not bundle" in text
+    notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
+    assert "Credit, ACTIVSg2000" in notice and "MATPOWER Copyright (c) 2017-2018" in notice
+
+
+def test_the_numbers_the_new_entries_quote_are_the_files() -> None:
+    """Counts and totals as the entries give them, read from the files themselves (the PEGASE files
+    are UTF-8: their authors' names have accents)."""
+    quoted = {
+        # file: (buses, generators, branches, load MW, load MVAr, generators in service,
+        #        branches between buses of different base voltages, buses with a shunt)
+        "case89pegase.m": (89, 12, 210, 5727.9, 1374.9, 12, 47, 44),
+        "case1354pegase.m": (1354, 260, 1991, 73059.7, 13401.4, 260, 234, 1082),
+        "case_ACTIVSg2000.m": (2000, 544, 3206, 67109.2, 19014.3, 432, 847, 149),
+    }
+    for name, (buses, gens, branches, mw, mvar, in_service, transformers, shunts) in quoted.items():
+        text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8")
+        bus, gen, branch = (_matpower_rows(text.replace("Inf", "1e999"), f) for f in ("bus", "gen", "branch"))
+        assert (len(bus), len(gen), len(branch)) == (buses, gens, branches), name
+        assert sum(row[2] for row in bus) == pytest.approx(mw, abs=0.05), name
+        assert sum(row[3] for row in bus) == pytest.approx(mvar, abs=0.05), name
+        assert sum(1 for row in gen if row[7]) == in_service, name
+        assert sum(1 for row in bus if row[4] or row[5]) == shunts, name
+        kv = {row[0]: row[9] for row in bus}
+        assert sum(1 for row in branch if kv[row[0]] != kv[row[1]]) == transformers, name
+        # Nothing is out of service among the branches, and every branch's charging is 0 in the PEGASE files.
+        assert all(row[10] == 1.0 for row in branch), name
+        if "pegase" in name:
+            assert all(row[4] == 0.0 for row in branch), name
+        # The slack is the one bus of type 3, and its generator is in service.
+        assert sum(1 for row in bus if row[1] == 3) == 1, name
+    # The buses that carry a negative load: six, 2430.8 MW in all, in the 89-bus file; 52 and 1086.3 MW in the other.
+    for name, count, total in (("case89pegase.m", 6, -2430.8), ("case1354pegase.m", 52, -1086.3)):
+        rows = _matpower_rows((example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8"), "bus")
+        negative = [row[2] for row in rows if row[2] < 0]
+        assert len(negative) == count and sum(negative) == pytest.approx(total, abs=0.05), name
+    # The two PEGASE files give a generator reactive limits of plus and minus infinity: 1354 two, 89 none.
+    big = (example_catalog.bundled_cases_dir() / "case1354pegase.m").read_text(encoding="utf-8")
+    assert len(re.findall(r"\bInf\b", big)) == 4 and "-Inf" in big
+    entry = load_catalog().get("pegase1354")
+    assert entry is not None and "of plus and minus infinity" in " ".join(entry.caveats)
 
 
 # The notice of the NREL data use agreement, which must appear in all copies of the RTS-GMLC data.
