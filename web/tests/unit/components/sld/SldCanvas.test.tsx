@@ -1002,6 +1002,65 @@ describe('SldCanvas', () => {
     expect(elkLayout).toHaveBeenCalled();
   });
 
+  it('does not offer the diagram of a case of over 500 buses at all', async () => {
+    const buses = Array.from({ length: 501 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('huge-synthetic-3.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    const card = await screen.findByTestId('sld-too-large');
+    expect(card).toHaveTextContent('The diagram of 501 buses is not drawn');
+    expect(card).toHaveTextContent('The tables, the power flow');
+    expect(screen.queryByTestId('sld-draw-anyway')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rf-root')).not.toBeInTheDocument();
+    expect(elkLayout).not.toHaveBeenCalled();
+  });
+
+  it('keeps the note up, saying the page will not answer, until the next paint, and only then draws', async () => {
+    // The diagram is mounted after a frame, so that the line is on screen
+    // before the page stops answering: hold the frame to see the line alone.
+    let frame: FrameRequestCallback | null = null;
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frame = callback;
+      return 1;
+    });
+    try {
+      const buses = Array.from({ length: 401 }, (_, i) => bus(i + 1));
+      mockTopology = makeTopology(buses);
+      act(() => {
+        useCaseStore.setState({
+          selection: {
+            primaryPath: parseWorkspacePath('huge-synthetic-2.raw'),
+            addfiles: [],
+          },
+        });
+      });
+      render(withQueryClient(<SldCanvas />));
+      await userEvent.setup().click(await screen.findByTestId('sld-draw-anyway'));
+      expect(await screen.findByTestId('sld-drawing')).toHaveTextContent(
+        'The page does not answer until it is done',
+      );
+      expect(screen.queryByTestId('sld-draw-anyway')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('rf-root')).not.toBeInTheDocument();
+      expect(elkLayout).not.toHaveBeenCalled();
+      act(() => {
+        (frame as FrameRequestCallback | null)?.(0);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('rf-root')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('sld-too-large')).not.toBeInTheDocument();
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   it('draws a case of exactly 400 buses at once', async () => {
     const buses = Array.from({ length: 400 }, (_, i) => bus(i + 1));
     mockTopology = makeTopology(buses);

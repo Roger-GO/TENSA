@@ -4811,6 +4811,24 @@ export function SldCanvas() {
   // The case whose diagram was asked for although it has more buses than are
   // drawn at once (`SldTooLarge`).
   const [askedFor, setAskedFor] = useState<string | null>(null);
+  // The case whose diagram was just asked for. The note stays up, saying the
+  // page will not answer, until after the next paint; only then is the
+  // diagram mounted, since mounting it is what stops the page answering.
+  const [drawingFor, setDrawingFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (drawingFor === null) return undefined;
+    let timer = 0;
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(() => {
+        setAskedFor(drawingFor);
+        setDrawingFor(null);
+      }, 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [drawingFor]);
 
   // TanStack Query v5 recreates the mutation result object every render but
   // guarantees `.mutate` is referentially stable; depend on it directly so
@@ -4838,11 +4856,18 @@ export function SldCanvas() {
   if (topology.buses.length === 0 && !hasDrafts && !placing) {
     return <SldEmptySystem />;
   }
-  // A case with a great many buses is not drawn until it is asked for: its
-  // picture takes minutes and the page does not answer while it is made. The
-  // tables, the power flow and the exports do not wait for it.
+  // A case with a great many buses is not drawn until it is asked for, and one
+  // with more than `DRAW_ON_REQUEST_BUSES` not at all: its picture takes
+  // minutes, and the page does not answer while it is made. The tables, the
+  // power flow and the exports do not wait for it.
   if (tooLargeToDraw(topology.buses.length) && askedFor !== primaryPath) {
-    return <SldTooLarge buses={topology.buses.length} onDraw={() => setAskedFor(primaryPath)} />;
+    return (
+      <SldTooLarge
+        buses={topology.buses.length}
+        drawing={drawingFor === primaryPath}
+        onDraw={() => setDrawingFor(primaryPath)}
+      />
+    );
   }
 
   return (

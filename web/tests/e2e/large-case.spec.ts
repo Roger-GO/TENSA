@@ -2,11 +2,12 @@
  * Large cases e2e: a case with more buses than a diagram is drawn for at once (400) opens without one.
  *
  *   PEGASE 1354-bus and ACTIVSg2000 (bundled steady-state gallery cases), each added to the workspace first
- *   -> the case opens in seconds with a note where the diagram would be, no node on the canvas, the Buses
+ *   -> the case opens in seconds with a note where the diagram would be, no node on the canvas, no button to
+ *   draw it (above 500 buses the page would be silent for longer than the server keeps its session), the Buses
  *   table holds its buses, a power flow runs, and the Violations tab counts what the catalog's entry names
  *
- * The note's button draws the diagram all the same. That takes minutes on these cases, so it is held by a
- * unit test of the canvas, with a case of 401 buses, and not here.
+ * The button that draws a case of 401 to 500 buses on request is held by a unit test of the canvas, with a
+ * case of 401 buses, since none of the bundled cases has that many.
  */
 import { test, expect } from './fixtures';
 import { openCase } from './sldDrawing';
@@ -42,9 +43,11 @@ for (const [id, file, buses, violations, firstBus] of LARGE) {
     const note = page.getByTestId('sld-too-large');
     await expect(note).toBeVisible({ timeout: 30_000 });
     await expect(note).toContainText(
-      `The diagram of ${buses.toLocaleString('en-US')} buses is not drawn yet`,
+      `The diagram of ${buses.toLocaleString('en-US')} buses is not drawn`,
     );
-    await expect(page.getByRole('button', { name: 'Draw the diagram anyway' })).toBeVisible();
+    // Not offered for a case this large, and the note says why.
+    await expect(note).toContainText('The page does not answer for that long');
+    await expect(page.getByRole('button', { name: 'Draw the diagram anyway' })).toHaveCount(0);
     // Nothing is laid out or drawn, and the page answers at once.
     await expect(page.locator('.react-flow__node')).toHaveCount(0);
     await expect(page.getByTestId('sld-layout-skeleton')).toHaveCount(0);
