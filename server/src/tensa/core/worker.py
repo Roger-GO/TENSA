@@ -63,11 +63,13 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import faulthandler
+import mimetypes
 import os
 import signal
 import site
 import sys
 import sysconfig
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -298,6 +300,64 @@ def _interpreter_roots() -> tuple[str, ...]:
 # worth a log line wherever the file lives.
 _QUIET_OPEN_SUFFIXES = (".py", ".pyc", ".so", ".pyd", ".pth")
 
+# The ``tempfile`` module says what it creates through two audit events, which the hook
+# below listens for: a file or directory made by this process is opened again as a matter
+# of course (the pieces xlsxwriter saves a workbook from, the directory a report is written
+# in). The set that remembers them is emptied when it passes this many.
+_TEMPFILE_EVENTS = frozenset({"tempfile.mkstemp", "tempfile.mkdtemp"})
+_MAX_REMEMBERED_TEMP_PATHS = 10_000
+
+
+def _routine_files(*directories: str) -> frozenset[str]:
+    """The files the libraries the worker imports open as a matter of course, normalized.
+
+    ``dill`` opens the null device when it is imported, to learn the type of a file object, and
+    ``mimetypes`` reads the system's MIME type maps (``mimetypes.knownfiles``) the first time
+    anything asks for a type, which ``openpyxl`` does. Neither reads anything of a case. Each
+    of ``directories`` is itself one too (not what is in it): on Linux ``NamedTemporaryFile``
+    opens the temporary directory to make a file that has no name.
+    """
+    names = (os.devnull, *getattr(mimetypes, "knownfiles", ()), *directories)
+    return frozenset(_normalized_path(name) for name in names)
+
+
+def _remember_temp_path(made: set[str], path: object) -> None:
+    """Note a file or directory that ``tempfile`` created, as the hook sees it before the open.
+
+    Never raises: an exception from an audit hook comes out of the call it audits, here
+    ``tempfile.mkstemp`` itself.
+    """
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return
+    try:
+        key = _normalized_path(os.fsdecode(path))
+    except (OSError, ValueError):
+        return
+    if len(made) >= _MAX_REMEMBERED_TEMP_PATHS:
+        made.clear()
+    made.add(key)
+
+
+def _is_routine_open(real: str, routine_files: frozenset[str], made: set[str]) -> bool:
+    """Whether an open outside the workspace is one the worker makes by design: a file the
+    libraries it imports open (``routine_files``), or a file or a directory this process made
+    through ``tempfile`` (``made``, from ``_remember_temp_path``), or something inside such a
+    directory.
+
+    ``real`` is what ``_out_of_workspace_open`` answered. Another file of the temporary
+    directory, one the process did not make, is not routine.
+    """
+    key = os.path.normcase(real)
+    if key in routine_files:
+        return True
+    while True:
+        if key in made:
+            return True
+        parent = os.path.dirname(key)
+        if parent == key:
+            return False
+        key = parent
+
 
 def _out_of_workspace_open(
     path: object, workspace_root: str, interpreter_roots: Sequence[str]
@@ -336,6 +396,12 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
     file opens occurring outside the configured workspace.
 
+    An open that is a stray is a warning. One the worker makes by design (see
+    ``_is_routine_open``) is logged at debug, so a run of a bundled case is quiet and a
+    read of anything else still shows. A worker has no log handler of its own beyond
+    Python's default, which prints warnings, so the debug lines are for a developer who
+    configures one.
+
     Best-effort only — the hook fires for ``open()`` events that travel
     through the Python interpreter. Reads from C extensions
     (numpy/openpyxl/pandas/SymEngine) bypass the hook and are NOT caught.
@@ -350,12 +416,28 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     log = logging.getLogger("tensa.worker.audit")
     workspace_root = _normalized_path(workspace)
     interpreter_roots = _interpreter_roots()
+    made: set[str] = set()
+    # The standard library finds the temporary directory by creating a file with a random
+    # name in a candidate directory the first time it is asked, which is an open outside the
+    # workspace that ``tempfile`` does not announce. It is asked here, before the hook is in.
+    try:
+        routine_files = _routine_files(tempfile.gettempdir())
+    except OSError:  # no usable temporary directory: nothing is made in one
+        routine_files = _routine_files()
 
     def _hook(event: str, args: tuple[Any, ...]) -> None:
-        if event != "open" or not args:
+        if event != "open":
+            if event in _TEMPFILE_EVENTS and args:
+                _remember_temp_path(made, args[0])
+            return
+        if not args:
             return
         real = _out_of_workspace_open(args[0], workspace_root, interpreter_roots)
-        if real is not None:
+        if real is None:
+            return
+        if _is_routine_open(real, routine_files, made):
+            log.debug("strict-fs: routine open outside the workspace: %s", real)
+        else:
             log.warning("strict-fs: out-of-workspace open: %s", real)
 
     sys.addaudithook(_hook)
@@ -869,7 +951,6 @@ def _handle_export_bundle(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     Returns the zip bytes (under a few MB for typical sessions —
     well within Pipe-send-tolerance).
     """
-    import tempfile
     from pathlib import Path
 
     # ANDES version is the only ANDES-side fact we need; lazy-import keeps

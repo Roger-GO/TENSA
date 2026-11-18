@@ -5,10 +5,13 @@ the path test behind the ``sys.audit`` hook, SIGINT handling and ``faulthandler`
 from __future__ import annotations
 
 import faulthandler
+import mimetypes
 import os
 import signal
 import subprocess
 import sys
+import tempfile
+import textwrap
 import threading
 from pathlib import Path
 from typing import Any
@@ -186,6 +189,204 @@ def test_the_installed_hook_logs_only_opens_outside_the_workspace(
     messages = [r.getMessage() for r in caplog.records]
     assert len(messages) == 1
     assert "stolen.dat" in messages[0]
+
+
+# ---- opens the worker makes by design ---------------------------------------
+
+
+def _routine(
+    path: Path | str, made: set[str] | None = None, directories: tuple[str, ...] = ()
+) -> bool:
+    return worker._is_routine_open(
+        os.path.realpath(path),
+        worker._routine_files(*directories),
+        set() if made is None else made,
+    )
+
+
+def test_the_null_device_and_the_system_mime_maps_are_routine_opens(
+    layout: dict[str, Path],
+) -> None:
+    """``dill`` opens the null device when it is imported and ``mimetypes`` reads the
+    system's maps when ``openpyxl`` first asks for a type: about a hundred warnings a run."""
+    assert _routine(os.devnull)
+    assert _routine(mimetypes.knownfiles[0])
+    assert not _routine(layout["other"] / "x.dat")
+    # A file named like a map is not one: the list holds whole paths.
+    assert not _routine(layout["other"] / Path(mimetypes.knownfiles[0]).name)
+
+
+def test_the_temporary_directory_itself_is_a_routine_open_and_what_is_in_it_is_not(
+    layout: dict[str, Path],
+) -> None:
+    """On Linux ``NamedTemporaryFile`` opens the directory to make a file with no name."""
+    temp = str(layout["other"])
+    assert _routine(layout["other"], directories=(temp,))
+    assert not _routine(layout["other"], directories=())
+    assert not _routine(layout["other"] / "x.dat", directories=(temp,))
+
+
+def test_what_this_process_made_through_tempfile_is_routine_with_everything_in_it(
+    layout: dict[str, Path],
+) -> None:
+    """xlsxwriter saves a workbook from files it makes in the temporary directory and a
+    report is written into a directory made for it: 66 warnings for one saved case."""
+    made: set[str] = set()
+    worker._remember_temp_path(made, layout["other"] / "scratch")
+    worker._remember_temp_path(made, os.fsencode(layout["other"] / "tmpab12cd34"))
+
+    assert _routine(layout["other"] / "scratch", made)
+    assert _routine(layout["other"] / "scratch" / "report.txt", made)
+    assert _routine(layout["other"] / "scratch" / "deep" / "er.txt", made)
+    assert _routine(layout["other"] / "tmpab12cd34", made)
+    # Only what was made: a neighbour, a name that merely starts alike, a parent, and a file
+    # another process left in the same directory are strays.
+    assert not _routine(layout["other"] / "scratch2" / "x.txt", made)
+    assert not _routine(layout["other"] / "tmpab12cd35", made)
+    assert not _routine(layout["other"] / "x.dat", made)
+    assert not _routine(layout["other"], made)
+    assert not _routine(layout["cases2"] / "scratch" / "x.txt", made)
+
+
+def test_remembering_a_temporary_path_never_raises_and_stays_bounded(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exception from an audit hook comes out of the call it audits, so a path the hook
+    cannot read must not break ``tempfile.mkstemp``."""
+    made: set[str] = set()
+    for odd in (None, 3, 1.5, "bad\0path", b"bad\0path"):
+        worker._remember_temp_path(made, odd)
+    assert made == set()
+
+    monkeypatch.setattr(worker, "_MAX_REMEMBERED_TEMP_PATHS", 3)
+    for number in range(8):
+        worker._remember_temp_path(made, layout["other"] / f"t{number}")
+    assert 1 <= len(made) <= 3
+    # The newest is always remembered, whatever was dropped to make room.
+    assert _routine(layout["other"] / "t7" / "x", made)
+
+
+def _install_with_captured_hook(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Run the real installer against a stand-in for ``sys.addaudithook`` (a real hook
+    cannot be removed)."""
+    hooks: list[Any] = []
+    monkeypatch.setattr(sys, "addaudithook", hooks.append)
+    worker._install_strict_fs_audit_hook(str(workspace))
+    (hook,) = hooks
+    return hook
+
+
+def test_the_hook_logs_a_routine_open_at_debug_and_a_stray_as_a_warning(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    hook = _install_with_captured_hook(layout["cases"], monkeypatch)
+    caplog.set_level("DEBUG", logger="tensa.worker.audit")
+    scratch = layout["other"] / "scratch"
+
+    # ``tempfile`` announces what it makes before it opens it.
+    hook("tempfile.mkdtemp", (str(scratch),))
+    for opened in (
+        os.devnull,
+        mimetypes.knownfiles[0],
+        scratch / "report.txt",
+        layout["cases"] / "ieee14.raw",
+    ):
+        hook("open", (str(opened), "r", 0))
+    hook("open", (str(layout["other"] / "stolen.dat"), "r", 0))
+    hook("open", (str(layout["cases2"] / "secret.dat"), "r", 0))
+    hook("tempfile.mkstemp", ())  # an event with no argument is ignored
+
+    seen = [(r.levelname, r.getMessage()) for r in caplog.records]
+    debug = [text for level, text in seen if level == "DEBUG"]
+    warnings = [text for level, text in seen if level == "WARNING"]
+    # Three routine opens, nothing for the one inside the workspace, and two strays.
+    assert len(debug) == 3
+    assert len(warnings) == 2
+    assert "stolen.dat" in warnings[0] and "secret.dat" in warnings[1]
+    assert all(text.startswith("strict-fs: out-of-workspace open:") for text in warnings)
+
+
+def test_the_hook_asks_for_the_temporary_directory_before_it_goes_in(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The standard library finds that directory by creating a file in it, an open the hook
+    would report and ``tempfile`` does not announce, so it must have been asked for already."""
+    order: list[str] = []
+    monkeypatch.setattr(
+        tempfile, "gettempdir", lambda: order.append("tempdir") or str(layout["other"])
+    )
+    monkeypatch.setattr(sys, "addaudithook", lambda _hook: order.append("hook"))
+
+    worker._install_strict_fs_audit_hook(str(layout["cases"]))
+
+    assert order == ["tempdir", "hook"]
+
+
+def test_a_missing_temporary_directory_does_not_keep_the_hook_out(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def no_directory() -> str:
+        raise FileNotFoundError("No usable temporary directory found")
+
+    monkeypatch.setattr(tempfile, "gettempdir", no_directory)
+    hook = _install_with_captured_hook(layout["cases"], monkeypatch)
+    caplog.set_level("DEBUG", logger="tensa.worker.audit")
+
+    hook("open", (str(layout["other"] / "x.dat"), "r", 0))
+    hook("open", (os.devnull, "r", 0))
+    assert [r.levelname for r in caplog.records] == ["WARNING", "DEBUG"]
+
+
+def test_a_real_worker_hook_is_quiet_about_what_the_libraries_open_and_says_what_else_is(
+    tmp_path: Path,
+) -> None:
+    """In a fresh interpreter with the real hook: the null device, the MIME maps, the search
+    for a temporary directory, a file and a directory made through ``tempfile`` and read
+    again are what ``dill``, ``openpyxl``, ``tempfile`` and xlsxwriter do, and the only line
+    the process prints is the one for the file that is none of them."""
+    pytest.importorskip("dill")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    stray = tmp_path / "stray.dat"
+    stray.write_text("x", encoding="utf-8")
+    code = textwrap.dedent(
+        """
+        import os, sys, tempfile
+        from pathlib import Path
+        from tensa.core import worker
+
+        worker._install_strict_fs_audit_hook(sys.argv[1])
+        tempfile.gettempdir()
+        import mimetypes
+        mimetypes.init()
+        import dill
+        fd, name = tempfile.mkstemp()
+        os.close(fd)
+        Path(name).read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "report.txt").write_text("x", encoding="utf-8")
+            (Path(td) / "report.txt").read_text(encoding="utf-8")
+        with tempfile.NamedTemporaryFile() as handle:
+            handle.write(b"x")  # on Linux this opens the temporary directory itself
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            pass
+        Path(handle.name).read_text(encoding="utf-8")
+        os.unlink(handle.name)
+        os.unlink(name)
+        Path(sys.argv[2]).read_text(encoding="utf-8")
+        """
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code, str(workspace), str(stray)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    lines = [line for line in done.stderr.splitlines() if "strict-fs" in line]
+    assert lines == [f"strict-fs: out-of-workspace open: {os.path.realpath(stray)}"]
 
 
 # ---- SIGINT -----------------------------------------------------------------

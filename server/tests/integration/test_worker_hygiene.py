@@ -4,6 +4,8 @@
 - A worker that dies in native code leaves the Python stack of its threads on stderr.
 - The clone scratch dir records the server (pid, pid space, start time), so a later
   server can tell it was abandoned, and closing the session removes it.
+- A worker's ordinary work, a power flow, a report and the bundle of an edited case, prints no out-of-workspace warning: its libraries and its own scratch directories
+  are not strays.
 """
 
 from __future__ import annotations
@@ -117,3 +119,36 @@ async def test_a_worker_that_crashes_natively_prints_its_stack(
     err = capfd.readouterr().err
     assert "Fatal Python error: Segmentation fault" in err
     assert "most recent call first" in err
+
+
+async def test_a_worker_prints_no_out_of_workspace_warning_for_its_ordinary_work(
+    manager: SessionManager, tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Every worker logged about eleven warnings before its first power flow finished (the
+    null device ``dill`` opens when it is imported, the system's MIME maps, the probe the
+    standard library makes for a temporary directory), and three more for every report: the
+    files and the directory ANDES wrote into. A user who read the server's console took them
+    for something a case file had done. The worker inherits this test's stderr, which
+    ``capfd`` reads."""
+    import andes
+
+    shutil.copy2(
+        Path(andes.__file__).parent / "cases" / "ieee14" / "ieee14_full.xlsx",
+        tmp_path / "ws" / "ieee14_full.xlsx",
+    )
+    sid = await manager.create_session()
+    await manager.invoke(sid, "load_case", {"path": str(tmp_path / "ws" / "ieee14_full.xlsx")})
+    assert (await manager.invoke(sid, "run_pflow", {}))["converged"] is True
+    report = await manager.invoke(sid, "generate_report", {"routine": "pflow"})
+    assert report["routine"] == "pflow"
+    await manager.close_session(sid)
+    # A case that was edited is exported through a scratch directory of its own.
+    edited = await manager.create_session()
+    await manager.invoke(edited, "load_case", {"path": str(tmp_path / "ws" / "ieee14_full.xlsx")})
+    await manager.invoke(edited, "edit_element", {"model": "Bus", "idx": 1, "params": {"Vn": 138}})
+    bundle = await manager.invoke(edited, "export_bundle", {})
+    assert isinstance(bundle, bytes)
+    await manager.close_session(edited)
+
+    err = capfd.readouterr().err
+    assert "strict-fs" not in err, err
