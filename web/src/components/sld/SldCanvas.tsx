@@ -26,7 +26,13 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useCaseStore } from '@/store/case';
-import type { DragOverrides, RouteOverride, RouteOverrides, SelectedElement } from '@/store/case';
+import type {
+  CaseSelection,
+  DragOverrides,
+  RouteOverride,
+  RouteOverrides,
+  SelectedElement,
+} from '@/store/case';
 import {
   draftCaseKey,
   draftsOf,
@@ -176,7 +182,7 @@ import {
   type FigureSettings,
 } from './figure/figureSettings';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
-import { tooLargeToDraw } from './largeCase';
+import { tooLargeToDraw, tooLargeToOffer } from './largeCase';
 import { SldTooLarge } from './SldTooLarge';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldValuesLeftOff } from './SldValuesLeftOff';
@@ -4808,17 +4814,19 @@ export function SldCanvas() {
   const hasDrafts = useDrafts().length > 0;
   // An element was just added from a draft and its node is still to come.
   const placing = useDraftsStore((s) => Object.keys(s.placements).length > 0);
-  // The case whose diagram was asked for although it has more buses than are
-  // drawn at once (`SldTooLarge`).
-  const [askedFor, setAskedFor] = useState<string | null>(null);
-  // The case whose diagram is on screen. A diagram that is drawn stays drawn when an edit takes
+  // The load whose diagram was asked for although it has more buses than are
+  // drawn at once (`SldTooLarge`). These three hold the load (the `selection`, which
+  // every opening of a case makes anew), not its path: a file replaced under the same name
+  // and opened again is another case, and what was asked of the first is not asked of it.
+  const [askedFor, setAskedFor] = useState<CaseSelection | null>(null);
+  // The load whose diagram is on screen. A diagram that is drawn stays drawn when an edit takes
   // the case past the size it is held back at: an add of the 401st bus must not put up the note
   // in place of the diagram being edited.
-  const [drawnFor, setDrawnFor] = useState<string | null>(null);
-  // The case whose diagram was just asked for. The note stays up, saying the
+  const [drawnFor, setDrawnFor] = useState<CaseSelection | null>(null);
+  // The load whose diagram was just asked for. The note stays up, saying the
   // page will not answer, until after the next paint; only then is the
   // diagram mounted, since mounting it is what stops the page answering.
-  const [drawingFor, setDrawingFor] = useState<string | null>(null);
+  const [drawingFor, setDrawingFor] = useState<CaseSelection | null>(null);
   useEffect(() => {
     if (drawingFor === null) return undefined;
     let timer = 0;
@@ -4849,17 +4857,18 @@ export function SldCanvas() {
 
   // The diagram is held back (the note below stands in its place): the commands that arrange
   // it have no canvas to run on, so they say they are not available instead of doing nothing.
+  // One above `DRAW_ON_REQUEST_BUSES` is held whatever was asked or drawn before it grew to
+  // that: its picture is not made at any price.
   const diagramHeld =
     selection !== null &&
     topology !== null &&
     tooLargeToDraw(topology.buses.length) &&
-    askedFor !== primaryPath &&
-    drawnFor !== primaryPath;
+    (tooLargeToOffer(topology.buses.length) || (askedFor !== selection && drawnFor !== selection));
   const diagramOnScreen =
     selection !== null && topology !== null && topology.buses.length > 0 && !diagramHeld;
   useEffect(() => {
-    if (diagramOnScreen) setDrawnFor(primaryPath);
-  }, [diagramOnScreen, primaryPath]);
+    if (diagramOnScreen) setDrawnFor(selection);
+  }, [diagramOnScreen, selection]);
   const setDiagramHeld = useSldStore((s) => s.setDiagramHeld);
   useEffect(() => {
     setDiagramHeld(diagramHeld);
@@ -4883,16 +4892,12 @@ export function SldCanvas() {
   // with more than `DRAW_ON_REQUEST_BUSES` not at all: its picture takes
   // minutes, and the page does not answer while it is made. The tables, the
   // power flow and the exports do not wait for it.
-  if (
-    tooLargeToDraw(topology.buses.length) &&
-    askedFor !== primaryPath &&
-    drawnFor !== primaryPath
-  ) {
+  if (diagramHeld) {
     return (
       <SldTooLarge
         buses={topology.buses.length}
-        drawing={drawingFor === primaryPath}
-        onDraw={() => setDrawingFor(primaryPath)}
+        drawing={drawingFor === selection}
+        onDraw={() => setDrawingFor(selection)}
       />
     );
   }

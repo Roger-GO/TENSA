@@ -1074,6 +1074,61 @@ describe('SldCanvas', () => {
     expect(useSldStore.getState().diagramHeld).toBe(false);
   });
 
+  it('holds back a case opened again under the name of one that was drawn, by the size it has now', async () => {
+    const path = parseWorkspacePath('replaced-under-one-name.raw');
+    const select = (selection: { primaryPath: typeof path; addfiles: never[] } | null) =>
+      act(() => {
+        useCaseStore.setState({ selection });
+      });
+    mockTopology = makeTopology(Array.from({ length: 30 }, (_, i) => bus(i + 1)));
+    select({ primaryPath: path, addfiles: [] });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    // The file is replaced by one of 2000 buses and opened again under the same name.
+    select(null);
+    mockTopology = makeTopology(Array.from({ length: 2000 }, (_, i) => bus(i + 1)));
+    select({ primaryPath: path, addfiles: [] });
+    const card = await screen.findByTestId('sld-too-large');
+    expect(card).toHaveTextContent('The diagram of 2,000 buses is not drawn');
+    expect(screen.queryByTestId('sld-draw-anyway')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rf-root')).not.toBeInTheDocument();
+    expect(useSldStore.getState().diagramHeld).toBe(true);
+  });
+
+  it('asks again for a case of 450 buses opened anew under the name of one whose diagram was asked for', async () => {
+    const path = parseWorkspacePath('asked-for-once.raw');
+    const open = () =>
+      act(() => {
+        useCaseStore.setState({ selection: { primaryPath: path, addfiles: [] } });
+      });
+    mockTopology = makeTopology(Array.from({ length: 450 }, (_, i) => bus(i + 1)));
+    open();
+    render(withQueryClient(<SldCanvas />));
+    await userEvent.setup().click(await screen.findByTestId('sld-draw-anyway'));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    open();
+    await screen.findByTestId('sld-too-large');
+    expect(screen.getByTestId('sld-draw-anyway')).toBeInTheDocument();
+  });
+
+  it('does not keep a drawn diagram on screen when an edit takes the case past 500 buses', async () => {
+    const buses = Array.from({ length: 500 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('grown-past-500.raw'), addfiles: [] },
+      });
+    });
+    const { rerender } = render(withQueryClient(<SldCanvas />));
+    await userEvent.setup().click(await screen.findByTestId('sld-draw-anyway'));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    mockTopology = makeTopology([...buses, bus(501)]);
+    rerender(withQueryClient(<SldCanvas />));
+    const card = await screen.findByTestId('sld-too-large');
+    expect(card).toHaveTextContent('The diagram of 501 buses is not drawn');
+    expect(screen.queryByTestId('sld-draw-anyway')).not.toBeInTheDocument();
+  });
+
   it('does not offer the diagram of a case of over 500 buses at all', async () => {
     const buses = Array.from({ length: 501 }, (_, i) => bus(i + 1));
     mockTopology = makeTopology(buses);
