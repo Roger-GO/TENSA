@@ -106,6 +106,11 @@ describe('controller classification', () => {
     expect(subKindForControllerClass('IEEEX1')).toBe('exciter');
     expect(subKindForControllerClass('IEEEG1')).toBe('governor');
     expect(subKindForControllerClass('GAST')).toBe('governor');
+    // The governors and exciters the example cases use (IEEE 39 and PJM 5-bus; Kundur and IEEE 14).
+    expect(subKindForControllerClass('TGOV1N')).toBe('governor');
+    expect(subKindForControllerClass('TG2')).toBe('governor');
+    expect(subKindForControllerClass('EXDC2')).toBe('exciter');
+    expect(subKindForControllerClass('ESST3A')).toBe('exciter');
     expect(subKindForControllerClass('IEEEST')).toBe('pss');
     expect(subKindForControllerClass('ST2CUT')).toBe('pss');
     expect(subKindForControllerClass('REGCP1')).toBe('renewable');

@@ -1,8 +1,8 @@
 """Unit 15 — the R15 dynamic-model whitelist expansion.
 
 Nine controller classes were added to ``_PARAMS_BY_MODEL`` /
-``_CONTROLLER_MODEL_NAMES``, and three more later for the example cases that use them (EXDC2,
-ESST3A, TGOV1N). Their param metadata is
+``_CONTROLLER_MODEL_NAMES``, and four more later for the example cases that use them (EXDC2,
+ESST3A, TGOV1N, TG2). Their param metadata is
 introspected from the real ANDES 2.0 model classes, so these tests assert the
 static whitelist matches live andes (catching drift or transcription errors).
 
@@ -33,10 +33,12 @@ NEW_MODELS = [
     "REGCP1",
     "REECA1",
     "REPCA1",
-    # Held by the example cases: Kundur (EXDC2), IEEE 14 and WECC 179 (ESST3A), IEEE 39 (TGOV1N).
+    # Held by the example cases: Kundur (EXDC2), IEEE 14 and WECC 179 (ESST3A), IEEE 39 (TGOV1N),
+    # PJM 5-bus (TG2).
     "EXDC2",
     "ESST3A",
     "TGOV1N",
+    "TG2",
 ]
 
 

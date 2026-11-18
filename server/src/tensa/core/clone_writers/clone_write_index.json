@@ -3616,6 +3616,75 @@
         }
       }
     },
+    "TG2": {
+      "xlsx": {
+        "sheet": "TG2",
+        "idx_column": "idx"
+      },
+      "dyr": null,
+      "params": {
+        "Tn": {
+          "xlsx": {
+            "column": "Tn"
+          },
+          "dyr": null
+        },
+        "wref0": {
+          "xlsx": {
+            "column": "wref0"
+          },
+          "dyr": null
+        },
+        "R": {
+          "xlsx": {
+            "column": "R"
+          },
+          "dyr": null
+        },
+        "pmax": {
+          "xlsx": {
+            "column": "pmax"
+          },
+          "dyr": null
+        },
+        "pmin": {
+          "xlsx": {
+            "column": "pmin"
+          },
+          "dyr": null
+        },
+        "dbl": {
+          "xlsx": {
+            "column": "dbl"
+          },
+          "dyr": null
+        },
+        "dbu": {
+          "xlsx": {
+            "column": "dbu"
+          },
+          "dyr": null
+        },
+        "dbc": {
+          "xlsx": {
+            "column": "dbc"
+          },
+          "dyr": null
+        },
+        "T1": {
+          "xlsx": {
+            "column": "T1"
+          },
+          "dyr": null
+        },
+        "T2": {
+          "xlsx": {
+            "column": "T2"
+          },
+          "dyr": null
+        }
+      }
+    },
     "TGOV1": {
       "xlsx": {
         "sheet": "TGOV1",

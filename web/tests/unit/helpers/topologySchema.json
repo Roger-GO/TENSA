@@ -358,6 +358,21 @@
       { "name": "VMMAX", "kind": "number", "required": false, "unit": "pu" },
       { "name": "VMMIN", "kind": "number", "required": false, "unit": "pu" }
     ],
+    "TG2": [
+      { "name": "idx", "kind": "string", "required": true, "unit": null },
+      { "name": "name", "kind": "string", "required": true, "unit": null },
+      { "name": "syn", "kind": "syn_idx", "required": true, "unit": null },
+      { "name": "Tn", "kind": "number", "required": false, "unit": "MVA" },
+      { "name": "wref0", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "R", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "pmax", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "pmin", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "dbl", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "dbu", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "dbc", "kind": "number", "required": false, "unit": "pu" },
+      { "name": "T1", "kind": "number", "required": false, "unit": "s" },
+      { "name": "T2", "kind": "number", "required": false, "unit": "s" }
+    ],
     "GAST": [
       { "name": "idx", "kind": "string", "required": true, "unit": null },
       { "name": "name", "kind": "string", "required": true, "unit": null },

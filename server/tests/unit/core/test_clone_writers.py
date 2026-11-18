@@ -43,10 +43,10 @@ def _bundled_cases_dir() -> Path:
 # ---- index loader -----------------------------------------------------------
 
 
-def test_index_loads_22_models() -> None:
+def test_index_loads_23_models() -> None:
     index = load_clone_write_index()
     assert index["schema_version"] == 1
-    assert len(index["models"]) == 22
+    assert len(index["models"]) == 23
 
 
 def test_index_entry_for_known_param() -> None:

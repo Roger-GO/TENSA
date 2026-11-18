@@ -49,6 +49,9 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     # control that its Governors and Exciters tabs and its badges leave out.
     "EXDC2",
     "ESST3A",
+    # TG2, the type 2 governor of Milano's book, which the four machines of the PJM
+    # 5-bus case have.
+    "TG2",
     "GAST",
     "HYGOV",
     "IEESGO",
@@ -556,6 +559,25 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("TM", "number", unit="s"),
         ParamMeta("VMMAX", "number", unit="pu"),
         ParamMeta("VMMIN", "number", unit="pu"),
+    ),
+    "TG2": (
+        # idx + name from ModelData; syn + Tn + wref0 from TGBaseData
+        # (tgbase.py:17-32). NumParams from TG2Data (tg2.py). The dead band that
+        # the governor reads its speed through is a config option of the model
+        # (TG2.config.deadband, off), not a parameter.
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
+        ParamMeta("Tn", "number", unit="MVA"),
+        ParamMeta("wref0", "number", unit="pu"),
+        ParamMeta("R", "number", unit="pu"),
+        ParamMeta("pmax", "number", unit="pu"),
+        ParamMeta("pmin", "number", unit="pu"),
+        ParamMeta("dbl", "number", unit="pu"),
+        ParamMeta("dbu", "number", unit="pu"),
+        ParamMeta("dbc", "number", unit="pu"),
+        ParamMeta("T1", "number", unit="s"),
+        ParamMeta("T2", "number", unit="s"),
     ),
     "GAST": (
         ParamMeta("idx", "string", required=True),

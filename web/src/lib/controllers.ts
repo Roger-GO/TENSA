@@ -58,6 +58,7 @@ const GOVERNOR_CLASSES: ReadonlySet<string> = new Set([
   'TGOV1',
   'TGOV1N',
   'TGOV1DB',
+  'TG2',
   'IEEEG1',
   'IEEEG1DB',
   'IEESGO',
