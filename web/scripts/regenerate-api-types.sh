@@ -44,6 +44,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Something that already answers on the port would be read below as the server started here,
+# and the script would call generated.ts up to date from its schema.
+if curl -sf -o /dev/null "http://127.0.0.1:$PORT/openapi.json"; then
+  echo "[regen] port $PORT is in use; free it or choose another, e.g. PORT=8801" >&2
+  exit 1
+fi
+
 echo "[regen] starting $TENSA_BIN serve on port $PORT..."
 "$TENSA_BIN" serve \
   --port "$PORT" \
@@ -54,6 +61,11 @@ SERVE_PID=$!
 # Wait for the server to be ready (up to 10 seconds) by polling
 # openapi.json directly.
 for _ in $(seq 1 20); do
+  # A server that cannot bind its port (taken since the check above) stops with status 3.
+  if ! kill -0 "$SERVE_PID" 2>/dev/null; then
+    echo "[regen] $TENSA_BIN serve stopped before it was ready; is port $PORT free?" >&2
+    exit 1
+  fi
   if curl -sf -o /dev/null "http://127.0.0.1:$PORT/openapi.json"; then
     break
   fi

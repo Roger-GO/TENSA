@@ -614,7 +614,11 @@ def test_a_refused_request_raises_the_client_error_that_both_names_catch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    problem = {"title": "Conflict", "detail": "a System is loaded", "recovery": {"kind": "reload-case"}}
+    problem = {
+        "title": "Conflict",
+        "detail": "a System is loaded",
+        "recovery": {"kind": "reload-case"},
+    }
 
     def refuse(request: Any, timeout: float | None = None) -> Any:
         body = io.BytesIO(json.dumps(problem).encode())
@@ -734,11 +738,17 @@ def test_the_curl_walkthrough_loads_the_case_named_by_either_name_of_the_variabl
     assert json.loads(case["body"]) == {"primary_path": loaded}
 
 
-def _closed_port() -> int:
-    """A loopback port nothing listens on."""
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+def _closed_ports(count: int) -> list[int]:
+    """Loopback ports nothing listens on, all different: every probe is bound before any is
+    let go, so the system cannot hand one port out twice."""
+    probes = [socket.socket() for _ in range(count)]
+    try:
+        for probe in probes:
+            probe.bind(("127.0.0.1", 0))
+        return [int(probe.getsockname()[1]) for probe in probes]
+    finally:
+        for probe in probes:
+            probe.close()
 
 
 @_NEEDS_A_SHELL
@@ -746,7 +756,7 @@ def test_the_acceptance_walkthrough_takes_the_port_by_either_name() -> None:
     script = Path(__file__).resolve().parents[1] / "acceptance" / "walkthrough.sh"
     if not script.is_file():
         pytest.skip("server/tests/acceptance/walkthrough.sh is not next to the tests")
-    ports = (_closed_port(), _closed_port())
+    ports = _closed_ports(2)
 
     def run(**variables: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -796,6 +806,61 @@ def test_the_api_type_script_starts_the_tensa_it_is_given_by_either_name() -> No
     assert resolved(TENSA_BIN="/new/tensa") == "/new/tensa"
     assert resolved(ANDES_APP="/old/tensa") == "/old/tensa"
     assert resolved(TENSA_BIN="/new/tensa", ANDES_APP="/old/tensa") == "/new/tensa"
+
+
+def _regen_script(tmp_path: Path, tensa: str) -> tuple[Path, dict[str, str]]:
+    """A copy of ``regenerate-api-types.sh`` in a folder of its own, so that the real
+    ``generated.ts`` cannot be touched, and a ``TENSA_BIN`` that is the script ``tensa``."""
+    script = REPO_ROOT / "web" / "scripts" / "regenerate-api-types.sh"
+    if not script.is_file():
+        pytest.skip("web/scripts/regenerate-api-types.sh is not next to the tests")
+    copy = tmp_path / "web" / "scripts" / script.name
+    copy.parent.mkdir(parents=True)
+    shutil.copy(script, copy)
+    fake = tmp_path / "tensa"
+    fake.write_text(tensa, encoding="utf-8")
+    fake.chmod(0o755)
+    return copy, {**_clean_environment(), "TENSA_BIN": str(fake)}
+
+
+@_NEEDS_A_SHELL
+def test_the_api_type_script_stops_when_something_else_answers_on_its_port(
+    tmp_path: Path,
+) -> None:
+    """When the port was taken, ``tensa serve`` stopped with status 3 and the script read the
+    schema of whatever listened there and reported ``generated.ts`` up to date."""
+    with _stand_in_server(lambda _method, _path: b"{}") as (base, _seen):
+        copy, env = _regen_script(tmp_path, "#!/bin/sh\nexit 3\n")
+        done = subprocess.run(
+            ["bash", str(copy)],
+            env={**env, "PORT": base.rsplit(":", 1)[1]},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+    assert done.returncode == 1, done.stderr + done.stdout
+    assert "is in use" in done.stderr
+    assert "up to date" not in done.stdout
+
+
+@_NEEDS_A_SHELL
+def test_the_api_type_script_stops_when_the_server_it_started_stops(tmp_path: Path) -> None:
+    """A server that cannot start is no reason to wait out the ten seconds the script gives it."""
+    copy, env = _regen_script(tmp_path, "#!/bin/sh\nexit 3\n")
+    (port,) = _closed_ports(1)
+    done = subprocess.run(
+        ["bash", str(copy)],
+        env={**env, "PORT": str(port)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 1, done.stderr + done.stdout
+    assert "stopped before it was ready" in done.stderr
 
 
 def test_the_mcp_server_reports_the_version_of_tensa_and_not_the_one_of_the_mcp_library() -> None:
