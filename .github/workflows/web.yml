@@ -76,7 +76,9 @@ jobs:
   e2e:
     name: e2e (Playwright, real substrate)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # This job took 17.4 minutes on a recent push, and each case of the example gallery adds
+    # a few tens of seconds of specs, so 20 left no room.
+    timeout-minutes: 25
     env:
       E2E_PORT: "8765"
     steps:
