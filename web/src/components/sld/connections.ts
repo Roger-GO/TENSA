@@ -2468,6 +2468,37 @@ export function grown(rect: Rect, across: number, down: number = across): Rect {
 /** The side of the squares `runsIn` sorts the runs into, to find the ones near a box. */
 const ROUTE_CELL = 64;
 
+/** How much room past the line of a run is allowed for in the squares it is listed in, for rounding. */
+const ROUTE_CELL_SLACK = 1e-6;
+
+/**
+ * The keys of the squares (of side `ROUTE_CELL`, as `runsIn` keys them) that
+ * the run from `a` to `b` passes through or touches, each once: for each
+ * column of squares the run crosses, the squares from where it enters the
+ * column to where it leaves it.
+ */
+export function squaresAlong(a: Point, b: Point): number[] {
+  const [left, right] = a[0] <= b[0] ? [a, b] : [b, a];
+  const key = (column: number, row: number): number => column * 65_536 + row;
+  const keys: number[] = [];
+  const first = Math.floor(left[0] / ROUTE_CELL);
+  const last = Math.floor(right[0] / ROUTE_CELL);
+  const slope = right[0] > left[0] ? (right[1] - left[1]) / (right[0] - left[0]) : 0;
+  for (let column = first; column <= last; column += 1) {
+    // Where the run is on the two sides of this column (the whole run, when it is upright).
+    const enters = Math.max(left[0], column * ROUTE_CELL);
+    const leaves = Math.min(right[0], (column + 1) * ROUTE_CELL);
+    const [y0, y1] =
+      right[0] > left[0]
+        ? [left[1] + slope * (enters - left[0]), left[1] + slope * (leaves - left[0])]
+        : [left[1], right[1]];
+    const top = Math.floor((Math.min(y0, y1) - ROUTE_CELL_SLACK) / ROUTE_CELL);
+    const bottom = Math.floor((Math.max(y0, y1) + ROUTE_CELL_SLACK) / ROUTE_CELL);
+    for (let row = top; row <= bottom; row += 1) keys.push(key(column, row));
+  }
+  return keys;
+}
+
 /**
  * How many of `routes` pass through a box, for a label that is to stand
  * where no connector runs through it. The answer is a lookup by the box,
@@ -2501,8 +2532,11 @@ export interface RouteRun {
 export function runsIn(
   routes: ReadonlyMap<string, { points: readonly Point[] }>,
 ): (box: Rect) => RouteRun[] {
-  // The runs by the squares they reach into: a run at an angle by every
-  // square its box covers.
+  // The runs by the squares they pass through. A run at an angle is listed in
+  // the squares along it and not in every square of its box: the box of a
+  // long diagonal run covers a great many squares that it never reaches, and
+  // on a diagram of a thousand buses those squares hold thousands of runs
+  // each, every one of which a lookup would have to test.
   const cells = new Map<number, RouteRun[]>();
   const cell = (x: number, y: number): number =>
     Math.floor(x / ROUTE_CELL) * 65_536 + Math.floor(y / ROUTE_CELL);
@@ -2520,13 +2554,7 @@ export function runsIn(
   for (const [id, { points }] of routes) {
     for (let i = 1; i < points.length; i += 1) {
       const run = { id, a: points[i - 1]!, b: points[i]! };
-      const keys = squares(
-        Math.min(run.a[0], run.b[0]),
-        Math.max(run.a[0], run.b[0]),
-        Math.min(run.a[1], run.b[1]),
-        Math.max(run.a[1], run.b[1]),
-      );
-      for (const key of new Set(keys)) {
+      for (const key of squaresAlong(run.a, run.b)) {
         const list = cells.get(key);
         if (list) list.push(run);
         else cells.set(key, [run]);

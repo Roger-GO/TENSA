@@ -34,12 +34,14 @@ import {
   routePath,
   routesThrough,
   runsIn,
+  squaresAlong,
   simplifyRoute,
   spreadTaps,
   stepRoute,
   type ConnectionEdge,
   type ConnectionNode,
   type Point,
+  type Rect,
 } from '@/components/sld/connections';
 
 function bus(id: string, x: number, y: number): ConnectionNode {
@@ -2572,6 +2574,109 @@ describe('runsIn', () => {
     const through = routesThrough(routes);
     expect(through({ left: 40, right: 120, top: 80, bottom: 120 })).toBe(2);
     expect(through({ left: 40, right: 120, top: 80, bottom: 120 }, 'a')).toBe(1);
+  });
+
+  it('finds the runs a box holds, as a test of every run against every box does', () => {
+    // Runs at every angle, long and short, upright and level, with negative
+    // coordinates, and boxes of the sizes of a label, a symbol and a unit.
+    let seed = 7;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const at = (): Point => [Math.round(random() * 3000 - 500), Math.round(random() * 2000 - 400)];
+    const many = new Map<string, { points: Point[] }>();
+    for (let i = 0; i < 120; i += 1) {
+      const from = at();
+      const to: Point = i % 7 === 0 ? [from[0], at()[1]] : i % 5 === 0 ? [at()[0], from[1]] : at();
+      many.set(`r${i}`, { points: [from, to, at()] });
+    }
+    const lookup = runsIn(many);
+    // Whether a run passes through the inside of a box, by clipping it to the
+    // box: not one that grazes it, which the lookup leaves out (half a pixel in).
+    const passes = (a: Point, b: Point, box: Rect): boolean => {
+      let from = 0;
+      let to = 1;
+      const clip = (delta: number, near: number, far: number): boolean => {
+        if (delta === 0) return near < 0 && far > 0;
+        from = Math.max(from, Math.min(near / delta, far / delta));
+        to = Math.min(to, Math.max(near / delta, far / delta));
+        return from < to;
+      };
+      return (
+        clip(b[0] - a[0], box.left + 0.5 - a[0], box.right - 0.5 - a[0]) &&
+        clip(b[1] - a[1], box.top + 0.5 - a[1], box.bottom - 0.5 - a[1])
+      );
+    };
+    let found = 0;
+    for (let i = 0; i < 400; i += 1) {
+      const [x, y] = at();
+      const width = [20, 60, 140, 400][i % 4]!;
+      const height = [14, 40, 90, 300][(i >> 2) % 4]!;
+      const box = { left: x, right: x + width, top: y, bottom: y + height };
+      const expected: string[] = [];
+      for (const [id, { points }] of many) {
+        for (let k = 1; k < points.length; k += 1) {
+          if (passes(points[k - 1]!, points[k]!, box)) expected.push(`${id}:${k}`);
+        }
+      }
+      const got = lookup(box).map((run) => {
+        const points = many.get(run.id)!.points;
+        return `${run.id}:${points.findIndex((p) => p === run.b)}`;
+      });
+      expect(got.sort()).toEqual(expected.sort());
+      found += expected.length;
+    }
+    // The boxes were not all empty, or the comparison would say nothing.
+    expect(found).toBeGreaterThan(200);
+  });
+});
+
+describe('squaresAlong', () => {
+  /** The square (column, row) that holds a point, as the key `runsIn` gives it. */
+  const keyOf = (x: number, y: number): number => Math.floor(x / 64) * 65_536 + Math.floor(y / 64);
+
+  it('lists the squares a diagonal run passes through, not the squares of its box', () => {
+    // 1000 by 800 px: the box covers 16 by 13 squares (208), and the run
+    // crosses 16 + 13 - 1 of them, with a square more at each end that it
+    // starts on the edge of.
+    const keys = squaresAlong([0, 0], [1000, 800]);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.length).toBeLessThanOrEqual(16 + 13 + 4);
+    expect(keys).toContain(keyOf(0, 0));
+    expect(keys).toContain(keyOf(1000, 800));
+    // Every point along the run is in a square that is listed.
+    for (let t = 0; t <= 1; t += 0.001) {
+      expect(keys).toContain(keyOf(1000 * t, 800 * t));
+    }
+    // The corners of the box the run leaves alone are not.
+    expect(keys).not.toContain(keyOf(950, 20));
+    expect(keys).not.toContain(keyOf(20, 780));
+  });
+
+  it('lists the same squares whichever end the run is given from', () => {
+    expect([...squaresAlong([-300, 500], [420, -90])].sort()).toEqual(
+      [...squaresAlong([420, -90], [-300, 500])].sort(),
+    );
+    for (let t = 0; t <= 1; t += 0.001) {
+      expect(squaresAlong([-300, 500], [420, -90])).toContain(keyOf(-300 + 720 * t, 500 - 590 * t));
+    }
+  });
+
+  it('lists one row for a level run, one column for an upright one, and one square for a point', () => {
+    expect(squaresAlong([10, 100], [400, 100])).toEqual(
+      [0, 1, 2, 3, 4, 5, 6].map((c) => keyOf(c * 64, 100)),
+    );
+    expect(squaresAlong([100, 10], [100, 200])).toEqual(
+      [0, 1, 2, 3].map((r) => keyOf(100, r * 64)),
+    );
+    expect(squaresAlong([70, 70], [70, 70])).toEqual([keyOf(70, 70)]);
+  });
+
+  it('keeps a run that ends on the edge of a square in the square it touches', () => {
+    expect(squaresAlong([0, 0], [128, 128])).toEqual(
+      expect.arrayContaining([keyOf(0, 0), keyOf(64, 64), keyOf(128, 128)]),
+    );
   });
 });
 
