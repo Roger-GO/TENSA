@@ -63,14 +63,17 @@ as BibTeX with those marks, and the links to its source and licence open in a ne
 to data TENSA does not hold has an **Open source page** link instead. From the command line:
 
 ```bash
-tensa examples list
-tensa examples add ieee14
+tensa examples list --workspace ~/tensa-cases
+tensa examples add ieee14 --workspace ~/tensa-cases
 tensa examples cite ieee14
 ```
 
-`tensa examples add` leaves a file that is already in the workspace alone, and `--force`
-replaces it. `tensa examples cite` prints the plain-text citations of a case and `--bibtex`
-prints them as BibTeX. The same is available from the API (`GET /api/examples` and
+`list` and `add` work on a workspace: name the folder your server was started with, as
+`--workspace` does for `tensa serve`. Left out, it is `~/.tensa/cases`, which is where
+`tensa serve` looks too when it is not told another folder, so a server started with a
+different one does not see the file. `tensa examples add` leaves a file that is already in the
+workspace alone, and `--force` replaces it. `tensa examples cite` prints the plain-text
+citations of a case and `--bibtex` prints them as BibTeX. The same is available from the API (`GET /api/examples` and
 `POST /api/examples/{id}/add`) and to an assistant as the MCP tools `list_examples` and
 `add_example`.
 

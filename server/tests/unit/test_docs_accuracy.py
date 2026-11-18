@@ -24,7 +24,8 @@ from tensa import cli, desktop
 from tensa.api.app import make_app
 from tensa.api.routes.reports import ReportRoutineEnum
 from tensa.api.schemas import TdsTraces, TdsTraceSeries
-from tensa.core.example_catalog import load_catalog
+from tensa.api.schemas.examples import ExampleListEntry
+from tensa.core.example_catalog import Citation, load_catalog
 from tests._cli import cli_runner
 from tests._repo import REPO_ROOT, pyproject
 
@@ -545,7 +546,9 @@ def test_the_api_guides_snippet_sends_a_batch_runs_traces_the_way_the_routes_tak
     answered 422. The snippet that replaced it is run here, with the batch run answered by a
     stand-in and the two routes by the app itself."""
     (block,) = [b for b in _python_blocks(_read("docs/api.md")) if "/response-metrics" in b]
-    assert block.startswith("import httpx\n")
+    # The guide's first line says where ``httpx`` comes from, as its WebSocket snippet does for
+    # ``websockets``: ``pip install tensa`` does not bring it.
+    assert block.startswith("import httpx  # pip install httpx\n")
     answers: dict[str, Any] = {}
     client = _client(tmp_path)
 
@@ -559,7 +562,7 @@ def test_the_api_guides_snippet_sends_a_batch_runs_traces_the_way_the_routes_tak
 
     monkeypatch.chdir(tmp_path)
     exec(
-        compile(block.removeprefix("import httpx\n"), "docs/api.md", "exec"),
+        compile(block.split("\n", 1)[1], "docs/api.md", "exec"),
         {"httpx": SimpleNamespace(post=post)},
     )
 
@@ -582,6 +585,49 @@ def test_a_batch_runs_traces_as_they_stand_are_refused_by_both_routes(
     """The guide says so, so a change that makes the routes take ``traces`` has to change it."""
     assert _client(tmp_path).post(route, json=_TRACES).status_code == 422
     assert "A request that sends `traces` itself answers 422." in _read("docs/api.md")
+
+
+def test_a_request_that_fails_validation_answers_in_the_words_the_guide_quotes(
+    tmp_path: Path,
+) -> None:
+    """The guide quotes the ``detail`` of a validation 422, and a change to the handler has to
+    change it."""
+    answer = _client(tmp_path).post("/api/sessions/abc/case", json={})
+    assert answer.status_code == 422
+    body = answer.json()
+    assert {"type", "title", "status", "detail"} <= set(body)
+    quoted = "request body failed validation: [{'type': 'missing', 'loc': ('body', 'primary_path'),"
+    assert body["detail"].startswith(quoted)
+    assert quoted in _read("docs/api.md")
+
+
+def test_llms_txt_names_the_cases_a_new_workspace_holds_and_every_field_of_an_example() -> None:
+    """The map for agents listed three cases when a new workspace is given five, and left two
+    fields of the example catalog and the role of a citation out."""
+    llms = _read("llms.txt")
+    seeded = [f.name for e in load_catalog().defaults() for f in e.files() if f.primary]
+    assert len(seeded) == 5
+    (step,) = [line for line in llms.splitlines() if line.startswith("2. POST /sessions/{id}/case")]
+    for name in seeded:
+        assert name in step, name
+    block = llms[llms.index("Examples:") : llms.index("Version:")]
+    missing = [
+        field
+        for field in (*ExampleListEntry.model_fields, *Citation.model_fields)
+        if f'"{field}"' not in block and field not in block
+    ]
+    assert missing == []
+
+
+def test_the_pages_that_count_the_cases_of_a_new_workspace_count_the_catalogs() -> None:
+    """README, the quick start and the troubleshooting page say how many example cases an empty
+    workspace is filled with."""
+    seeded = len(load_catalog().defaults())
+    words = {3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
+    assert seeded in words
+    for page in ("README.md", "docs/quickstart.md", "docs/troubleshooting.md"):
+        text = _read(page)
+        assert f"{words[seeded]} example cases" in text, page
 
 
 def test_the_report_route_is_documented_with_its_required_routine(

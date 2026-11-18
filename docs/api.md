@@ -48,7 +48,7 @@ The body of `POST .../pflow` is optional, and each setting in it applies to that
 Two routes work on what a run produced and hold no session. `POST /api/response-metrics` answers with each signal's nadir, rate of change, settling time, overshoot and damping, and `POST /api/comtrade` writes signals as an IEEE C37.111 COMTRADE record in a `.zip`. Neither takes the `traces` object as it stands, because their fields have other names. `traces` holds one `t` shared by all the variables and a `variables` list of `name` and `values`. `/response-metrics` wants a `series` list in which each item has its own `t` and its values as `y`, and `/comtrade` wants the shared `t` and the signals as `channels` (an optional `unit` can go on each). A request that sends `traces` itself answers 422.
 
 ```python
-import httpx
+import httpx  # pip install httpx
 
 base = "http://127.0.0.1:8000/api"
 session_id = "..."  # the id that POST /api/sessions answered with, after a case is loaded

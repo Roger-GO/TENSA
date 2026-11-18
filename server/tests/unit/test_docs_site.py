@@ -26,6 +26,7 @@ import pytest
 import typer
 
 from tensa import cli, desktop
+from tensa.core.example_catalog import load_catalog
 from tests._repo import REPO_ROOT, SCRIPTS_DIR, SERVER_DIR, WEB_DIR, load_module, pyproject
 
 pytestmark = pytest.mark.unit
@@ -470,8 +471,10 @@ def test_pages_name_only_commands_and_options_that_tensa_has(mkdocs: dict[str, A
 def test_the_quick_start_runs_the_server_the_way_the_readme_does(mkdocs: dict[str, Any]) -> None:
     text = _hand_written(mkdocs)["quickstart.md"]
     assert "tensa serve --workspace ~/tensa-cases --port 8000 --open" in text
-    # The three example cases a new workspace is seeded with.
-    for case in ("ieee14_full.xlsx", "kundur_full.xlsx", "wscc9.xlsx"):
+    # The example cases a new workspace is seeded with are the catalog's first-run ones.
+    seeded = [f.name for e in load_catalog().defaults() for f in e.files() if f.primary]
+    assert len(seeded) >= 5
+    for case in seeded:
         assert case in text
 
 

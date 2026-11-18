@@ -15,7 +15,7 @@ GET /api/version and tensa --version say which version is running.
 ## Golden workflow (order matters)
 
 1. POST /sessions                          → {"session_id": "..."}  (one ANDES System per session, isolated subprocess)
-2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx and wscc9.xlsx); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
+2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx, wscc9.xlsx, ieee39_full.xlsx and npcc.xlsx; GET /examples lists more); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
 3. (pre-setup only) POST /sessions/{id}/disturbances  (add faults/toggles/alters BEFORE running anything)
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
@@ -156,10 +156,13 @@ Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<re
                  as in curl --data-binary @ieee14.raw ..., not multipart, which answers 415; 32 MiB; xlsx raw dyr json m;
                  409 if the name exists and overwrite is not true; a <case>.layout.json name is refused, PUT /workspace/layout writes those)
 Examples:        GET /examples  → {"examples": [...]}: the catalog of example cases, each with "id", "title", "summary",
-                 "category" (dynamic | steady-state), "size", "analyses" (pf, tds, eig), "default", "provenance" (kind andes |
-                 bundled | external, file path, sha256, source URL), "citations" ({text, bibtex, doi, url}), "licence",
-                 "modifications", "caveats", "verification", "links" (for an external entry, which has no file), and
-                 "in_workspace" / "available" for this server
+                 "category" (dynamic | steady-state), "tags", "size", "analyses" (pf, tds, eig), "default", "provenance" (kind
+                 andes | bundled | external, file path, sha256, source URL), "extra_files", "citations" ({role, text, bibtex,
+                 doi, url}; role is system, data, software or model: the publication of the system, where the data comes
+                 from, the program, or a dynamic model), "licence", "modifications", "caveats", "verification", "links" (for
+                 an external entry, which has no file), and for this server "in_workspace", "differs" (the file in the
+                 workspace under a bundled case's name is not the one TENSA ships; add with overwrite=true replaces it) and
+                 "available"
                  POST /examples/{id}/add[?overwrite=true]  → 201 {"id", "primary", "files": [{name, size_bytes, replaced}],
                  "warnings", "sources_file"}: copies the case into the workspace root (an ANDES case from the ANDES installed
                  on the server), then load "primary" with POST /sessions/{id}/case. 404 for an unknown id or a file the
