@@ -1749,8 +1749,13 @@ function layoutPass(
       )
       .map((wish) => wish.desired);
     for (const x of held) besides.push(x - TAP_SPACING, x + TAP_SPACING);
-    const lowest = bar.start + TAP_INSET - DETOUR_REACH;
-    const highest = bar.end - TAP_INSET + DETOUR_REACH;
+    // Not further out than the bar may be drawn out to (`growLimit`): the bar beside it keeps
+    // its room.
+    const lowest = Math.max(
+      bar.start + TAP_INSET - DETOUR_REACH,
+      growLimit(bar, false) + TAP_INSET,
+    );
+    const highest = Math.min(bar.end - TAP_INSET + DETOUR_REACH, growLimit(bar, true) - TAP_INSET);
     // Half way to the first thing it faces, or past one of the things in
     // reach, short of the bar: the nearest to the device first.
     const far = Math.abs(bar.cy - facing[1]) - RUN_CLEARANCE;
@@ -1786,13 +1791,13 @@ function layoutPass(
   const limits = new Map<string, number>();
   /** How far the routes that hold their ends take each bar, by bar id (read once the bars are sized). */
   const heldOut = new Map<string, { start: number; end: number }>();
-  const growLimit = (bar: Bar, east: boolean): number => {
+  const growLimit = (bar: Bar, east: boolean, half: number = bar.half): number => {
     const key = `${bar.id}|${east ? 'east' : 'west'}`;
     const known = limits.get(key);
     if (known !== undefined) return known;
     let limit = east ? Infinity : -Infinity;
-    // Never short of where the bar ends as it is.
-    const tip = east ? bar.cx + bar.half : bar.cx - bar.half;
+    // Never short of where the bar ends as it is (`half`: as it was laid out, once it is drawn out).
+    const tip = east ? bar.cx + half : bar.cx - half;
     const meet = (start: number, end: number, room: number): void => {
       if (east && start >= bar.cx) limit = Math.max(tip, Math.min(limit, start - room));
       if (!east && end <= bar.cx) limit = Math.min(tip, Math.max(limit, end + room));
@@ -2001,10 +2006,12 @@ function layoutPass(
     growLimit(bar, true);
     growLimit(bar, false);
   }
+  const laidOut = new Map<Bar, number>();
   for (const [bar, list] of onFaces) {
     // Room for the taps. Where an end is taken as well they do not all fit
     // between the two, run over both alike, and the bar is brought out to
     // them below.
+    laidOut.set(bar, bar.half);
     bar.half = Math.max(bar.half, barLengthFor(list.length) / 2);
   }
   for (const bar of bars.values()) {
@@ -2013,9 +2020,16 @@ function layoutPass(
   }
   // A bar that is drawn out about its middle for its taps does not go into
   // the room the bar beside it keeps (`BAR_GAP`): where it would, it is drawn
-  // out further on the other side.
-  for (const bar of onFaces.keys()) {
-    const [west, east] = [growLimit(bar, false), growLimit(bar, true)];
+  // out further on the other side. Taken from the west, each against the bars
+  // beside it as they are drawn out by now: two that are both drawn out
+  // towards each other would otherwise each keep clear of the other as it was
+  // laid out, and meet.
+  const fromWest = [...onFaces.keys()].sort((a, b) => a.cx - b.cx || (a.id < b.id ? -1 : 1));
+  for (const bar of fromWest) {
+    limits.delete(`${bar.id}|west`);
+    limits.delete(`${bar.id}|east`);
+    const half = laidOut.get(bar) ?? bar.half;
+    const [west, east] = [growLimit(bar, false, half), growLimit(bar, true, half)];
     if (bar.start < west) [bar.start, bar.end] = [west, bar.end + west - bar.start];
     if (bar.end > east) [bar.start, bar.end] = [bar.start - (bar.end - east), east];
   }
@@ -2053,8 +2067,27 @@ function layoutPass(
       else m += 1;
       merged.push(northFirst ? above! : below!);
     }
-    const wishes = merged.map((r) => wishOf.get(r)!);
-    const positions = spreadTaps(wishes, lo(bar), hi(bar));
+    let wishes = merged.map((r) => wishOf.get(r)!);
+    let positions = spreadTaps(wishes, lo(bar), hi(bar));
+    // Devices that each hold a place against the bar (square onto it, or rounding something to
+    // it), spread a spacing apart, can run past where the bar may be drawn out to
+    // (`growLimit`): the bar would then reach into the room the bar beside it keeps. They hold
+    // their places no longer, and stand inside it; a connector that rounded something is made
+    // again for where its tap is.
+    const [reachWest, reachEast] = [
+      growLimit(bar, false) + TAP_INSET,
+      growLimit(bar, true) - TAP_INSET,
+    ];
+    const giving = (hold: number | undefined): boolean =>
+      hold === TAP_HOLD.square || hold === TAP_HOLD.round;
+    if (
+      positions.some(
+        (x, i) => giving(wishes[i]!.hold) && (x < reachWest - EPS || x > reachEast + EPS),
+      )
+    ) {
+      wishes = wishes.map((wish) => (giving(wish.hold) ? { ...wish, hold: TAP_HOLD.free } : wish));
+      positions = spreadTaps(wishes, lo(bar), hi(bar));
+    }
     merged.forEach((r, i) => {
       r.hold = wishes[i]!.hold ?? TAP_HOLD.free;
       r.tap = [positions[i]!, bar.cy];

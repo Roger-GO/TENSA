@@ -234,11 +234,11 @@ describe('a plan for a diagram that is on screen, held to the picture it gives',
   });
 
   it('does not draw a bar out under a device that stood past its tip, where that puts its connector beside a line', async () => {
-    // The load of bus 12, set down east of bus 13 and below it. A line
+    // The load of bus 12, set down east of bus 14 and level with it. A line
     // routed afresh to a place past the tip of bar 12 draws the bar out to
-    // under the load, whose connector then drops square, 11 from a line.
+    // under the load, whose connector then drops square, turning 2 from a line.
     const first = await opened(IEEE14);
-    const dropped = dragged(first, 'load-PQ_9', 200, 70);
+    const dropped = dragged(first, 'load-PQ_9', 100, 200);
     expect(overlapsOf(dropped)).toEqual([]);
     expect(overlapsOf(withRoutes(dropped, planOf(dropped)))).not.toEqual([]);
     const plan = planOf(dropped, { values: false });
