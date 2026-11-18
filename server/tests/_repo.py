@@ -10,6 +10,7 @@ a checkout only.)
 from __future__ import annotations
 
 import importlib.util
+import re
 import tomllib
 from pathlib import Path
 from types import ModuleType
@@ -44,3 +45,16 @@ def load_module(name: str, path: Path) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def matpower_rows(text: str, field: str) -> list[list[float]]:
+    """The numbers of one block of a MATPOWER case file (``bus``, ``gen`` or ``branch``), a row
+    to a list (``Inf`` reads as infinity)."""
+    block = re.search(rf"mpc\.{field} = \[(.*?)\];", text, re.S)
+    assert block is not None, field
+    rows = []
+    for line in block.group(1).splitlines():
+        line = line.split("%")[0].strip().rstrip(";")
+        if line:
+            rows.append([float(value) for value in line.split()])
+    return rows

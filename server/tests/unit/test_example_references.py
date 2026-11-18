@@ -26,7 +26,7 @@ from tensa.core.example_references import (
     parse_reference,
     references_dir,
 )
-from tests._repo import SCRIPTS_DIR, load_module
+from tests._repo import SCRIPTS_DIR, load_module, matpower_rows
 
 pytestmark = pytest.mark.unit
 
@@ -814,24 +814,10 @@ def test_the_activsg_200_stored_state_is_a_solution_with_the_reactive_limits_enf
     assert "0.027 MW" in text and "buses 67, 94, 114 and 167" in text
 
 
-def _matpower_block(text: str, field: str) -> list[list[float]]:
-    """The numbers of one block of a MATPOWER case file; ``Inf`` is read as infinity."""
-    import re
-
-    block = re.search(rf"mpc\.{field} = \[(.*?)\];", text, re.S)
-    assert block is not None, field
-    rows = []
-    for line in block.group(1).splitlines():
-        line = line.split("%")[0].strip().rstrip(";")
-        if line:
-            rows.append([float(v.replace("Inf", "inf")) for v in line.split()])
-    return rows
-
-
 def _stored_bus_state(name: str) -> dict[str, tuple[float, float]]:
     """The voltage (pu) and angle (degrees) a MATPOWER file stores for each bus, by its number."""
     text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8")
-    return {str(int(row[0])): (row[7], row[8]) for row in _matpower_block(text, "bus")}
+    return {str(int(row[0])): (row[7], row[8]) for row in matpower_rows(text, "bus")}
 
 
 
@@ -908,7 +894,7 @@ def test_the_pegase_1354_stored_state_is_not_a_solution_and_no_check_rests_on_it
     assert max(dv.values()) == pytest.approx(0.004, abs=5e-4)
     assert max(da.values()) == pytest.approx(5.5, abs=0.05)
     text = (example_catalog.bundled_cases_dir() / "case1354pegase.m").read_text(encoding="utf-8")
-    gens = _matpower_block(text, "gen")
+    gens = matpower_rows(text, "gen")
     slack_stored = next(row[1] for row in gens if row[0] == 4231.0)
     slack_solved = by[("independent-solver", "pf.slack_p_mw", False)].expected
     assert slack_stored == pytest.approx(2641.24)

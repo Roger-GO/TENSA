@@ -91,6 +91,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - The WSCC 9-bus fixture of the web tests carries the names the shipped file gives its devices (`Gen 2`, `GENCLS 1`, `Line 4-5`, `Transformer 1-4`, `Load 5`), so the no-overlap, tidy and drawing tests lay out boxes as wide as the shipped diagram's, not the narrower ones the bare indices (`2`, `Line_0`, `PQ_0`) gave.
 - `scripts/build_wscc9.py --check` fails when the file holds other data, and says so and exits 0 when only the bytes differ and every sheet is the same. It failed on any difference of bytes, which another zlib, pandas or xlsxwriter than the one that wrote the shipped file gives for the same data, though the catalog's checksum is the shipped file's and the test compares sheet by sheet.
 - The tests that quote how far the IEEE 300 and IEEE 118 stored states lie from the solver's solution tie the rounded-up tolerance to the gaps the test computes (they compared two literals with each other), and name the solver, not TENSA, as the one whose solution it is.
+- The MATPOWER block reader of the example tests is one function, `matpower_rows` in `server/tests/_repo.py`. The catalog, reference and cross-check tests each had their own (one with a replacement of `Inf` that Python's `float` does not need) and one test module imported a private helper of another.
 
 ## [0.5.0] - 2026-10-09
 

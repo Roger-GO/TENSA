@@ -28,7 +28,7 @@ from tensa.core.example_catalog import (
     parse_catalog,
 )
 from tensa.core.example_references import load_reference
-from tests._repo import REPO_ROOT
+from tests._repo import REPO_ROOT, matpower_rows
 
 pytestmark = pytest.mark.unit
 
@@ -466,18 +466,6 @@ def test_a_bundled_pglib_file_is_the_librarys_own_with_its_header(name: str) -> 
     assert "http://creativecommons.org/licenses/by/4.0/" in header
 
 
-def _matpower_rows(text: str, field: str) -> list[list[float]]:
-    """The numbers of one block of a MATPOWER case file (``bus``, ``gen`` or ``branch``)."""
-    block = re.search(rf"mpc\.{field} = \[(.*?)\];", text, re.S)
-    assert block is not None, field
-    rows = []
-    for line in block.group(1).splitlines():
-        line = line.split("%")[0].strip().rstrip(";")
-        if line:
-            rows.append([float(value) for value in line.split()])
-    return rows
-
-
 @pytest.mark.parametrize(
     ("example_id", "name", "counts", "load", "scheduled", "slack_pmax", "ratings"),
     [
@@ -500,7 +488,7 @@ def test_the_numbers_the_pglib_entries_quote_are_the_files(
     file holds, and the slack of the reference solution is where they say it is against its
     limit."""
     text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="ascii")
-    bus, gen, branch = (_matpower_rows(text, field) for field in ("bus", "gen", "branch"))
+    bus, gen, branch = (matpower_rows(text, field) for field in ("bus", "gen", "branch"))
     assert (len(bus), len(gen), len(branch)) == counts
     assert sum(row[2] for row in bus) == pytest.approx(load)
     # Columns: Vm and Va of a bus, Vg and Pmax of a generator, rate A and the angle limits of a
@@ -679,7 +667,7 @@ def test_the_activsg_200_entry_credits_the_authors_and_says_what_the_page_it_com
 
 def test_the_activsg_200_numbers_the_entry_quotes_are_the_file() -> None:
     text = (example_catalog.bundled_cases_dir() / "case_ACTIVSg200.m").read_text(encoding="ascii")
-    bus, gen, branch = (_matpower_rows(text, field) for field in ("bus", "gen", "branch"))
+    bus, gen, branch = (matpower_rows(text, field) for field in ("bus", "gen", "branch"))
     assert (len(bus), len(gen), len(branch)) == (200, 49, 245)
     # Columns: base kV of a bus; status, Vg and the limits of a generator; rate A of a branch.
     assert {row[9] for row in bus} == {13.8, 115.0, 230.0}
@@ -795,7 +783,7 @@ def test_the_numbers_the_new_entries_quote_are_the_files() -> None:
     }
     for name, (buses, gens, branches, mw, mvar, in_service, transformers, shunts) in quoted.items():
         text = (example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8")
-        bus, gen, branch = (_matpower_rows(text.replace("Inf", "1e999"), f) for f in ("bus", "gen", "branch"))
+        bus, gen, branch = (matpower_rows(text, f) for f in ("bus", "gen", "branch"))
         assert (len(bus), len(gen), len(branch)) == (buses, gens, branches), name
         assert sum(row[2] for row in bus) == pytest.approx(mw, abs=0.05), name
         assert sum(row[3] for row in bus) == pytest.approx(mvar, abs=0.05), name
@@ -811,7 +799,7 @@ def test_the_numbers_the_new_entries_quote_are_the_files() -> None:
         assert sum(1 for row in bus if row[1] == 3) == 1, name
     # The buses that carry a negative load: six, 2430.8 MW in all, in the 89-bus file; 52 and 1086.3 MW in the other.
     for name, count, total in (("case89pegase.m", 6, -2430.8), ("case1354pegase.m", 52, -1086.3)):
-        rows = _matpower_rows((example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8"), "bus")
+        rows = matpower_rows((example_catalog.bundled_cases_dir() / name).read_text(encoding="utf-8"), "bus")
         negative = [row[2] for row in rows if row[2] < 0]
         assert len(negative) == count and sum(negative) == pytest.approx(total, abs=0.05), name
     # The two PEGASE files give a generator reactive limits of plus and minus infinity: 1354 two, 89 none.

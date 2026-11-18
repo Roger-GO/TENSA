@@ -27,7 +27,7 @@ import pytest
 
 from tensa.core import examples
 from tensa.core.example_references import load_reference, references_dir
-from tests._repo import SCRIPTS_DIR, load_module
+from tests._repo import SCRIPTS_DIR, load_module, matpower_rows
 
 pytestmark = pytest.mark.integration
 
@@ -1214,10 +1214,8 @@ def test_the_effect_of_the_dropped_shifts_names_the_worst_bus_of_each_kind(
 
 
 def _branch_rows(name: str) -> list[list[float]]:
-    from tests.unit.test_example_catalog import _matpower_rows
-
     text = _bundled(name).read_text(encoding="utf-8")
-    return _matpower_rows(text, "branch")
+    return matpower_rows(text, "branch")
 
 
 @pytest.mark.parametrize(
