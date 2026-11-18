@@ -946,6 +946,12 @@ export function placeReadouts(
     // A unit whose chain is drawn out keeps to the side of its bus: the
     // chain stands beyond a readout on its own side (`GeneratorNode`).
     const chain = surroundings.chains?.has(n.id) === true;
+    // One that stands beside the symbol is taller than it where the unit has
+    // four models or more, and reaches over the strip the readout hangs in:
+    // the readout stands clear of it like of any other box.
+    const own = surroundings.chains?.get(n.id);
+    const ownBox = boxOnDiagram(n, sizes, connections.bars);
+    const besideIt = own !== undefined && (own.left >= ownBox.right || own.right <= ownBox.left);
     const wanted: Exclude<ReadoutSpot, 'none'>[] = chain
       ? first
       : [
@@ -963,7 +969,8 @@ export function placeReadouts(
       const ok =
         through(room === 0 ? place : grown(place, room)) === 0 &&
         inTheWay(place).every(
-          ({ id, box }) => id === n.id || id === `chain:${n.id}` || !overlaps(box, place),
+          ({ id, box }) =>
+            id === n.id || (id === `chain:${n.id}` && !besideIt) || !overlaps(box, place),
         );
       return ok ? place : null;
     };

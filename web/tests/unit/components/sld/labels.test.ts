@@ -554,6 +554,27 @@ describe('placeReadouts', () => {
     expect(placeReadouts(nodes, drawn, NO_SIZES, { chains }).get('load-PQ')!.spot).toBe('none');
   });
 
+  it('stands the readout clear of the chain of its own unit that stands beside the symbol and reaches past it', () => {
+    // The chain of a unit with four models is taller than its symbol (13 px a row), and drawn
+    // out beside it, against the middle of the side, it reaches over the strip between the
+    // symbol and the bus where the readout hangs: the place right of the connector is under it.
+    const drawn = layout({ '1': bar([{ x: 20, side: 'south' }]) }, { 'stub-load-PQ': stub });
+    const beside = new Map([['load-PQ', { left: 44, right: 150, top: 165, bottom: 223 }]]);
+    expect(placeReadouts(nodes, drawn, NO_SIZES).get('load-PQ')).toEqual({
+      spot: 'right',
+      box: right,
+    });
+    expect(placeReadouts(nodes, drawn, NO_SIZES, { chains: beside }).get('load-PQ')!.spot).toBe(
+      'left',
+    );
+    // On its own side of the symbol, which is where the readout hangs, the chain stands beyond
+    // the readout (`beyondReadout`), and the readout keeps its place.
+    const above = new Map([['load-PQ', { left: -20, right: 60, top: 100, bottom: 160 }]]);
+    expect(placeReadouts(nodes, drawn, NO_SIZES, { chains: above }).get('load-PQ')!.spot).toBe(
+      'right',
+    );
+  });
+
   it('places the readouts of generators and loads only', () => {
     const shunt = device('shunt-S', 200, 173);
     const drawn = layout({ '1': bar([{ x: 20, side: 'south' }]) }, { 'stub-load-PQ': stub });
