@@ -64,6 +64,7 @@ import datetime
 import importlib.util
 import json
 import math
+import os
 import platform
 import queue
 import re
@@ -132,6 +133,11 @@ REQUEST_TIMEOUT = 900.0
 _SERVING = re.compile(r"(?:serving|running on) http://127\.0\.0\.1:(\d+)")
 
 Log = Callable[[str], None]
+
+
+def fixed(value: float, digits: int) -> str:
+    """``value`` to ``digits`` places, with no sign on a zero (``-0.000`` is a rounding, not a number)."""
+    return f"{round(value, digits) + 0.0:.{digits}f}"
 
 # ----------------------------------------------------------------------------------------
 # What a run reports
@@ -395,6 +401,22 @@ def match_poles(
     return out
 
 
+def distinct_eigenvalues(matches: Sequence[dict[str, Any]]) -> int:
+    """How many different eigenvalues the poles of ``match_poles`` were matched to.
+
+    Each pole goes to its nearest eigenvalue, and two poles may go to the same one (the
+    matrix pencil method can split one mode in two), so this is the number of modes a
+    passing check has compared with an eigenvalue, which may be less than the number of poles.
+    """
+    return len(
+        {
+            (m["eigenvalue_hz"], m["eigenvalue_damping"])
+            for m in matches
+            if m["matched"] and not math.isnan(m["eigenvalue_hz"])
+        }
+    )
+
+
 # ----------------------------------------------------------------------------------------
 # Comparing with a reference file
 # ----------------------------------------------------------------------------------------
@@ -418,7 +440,9 @@ class Measured:
 
 def pflow_key(check: ReferenceCheck) -> str | None:
     """The settings a check's power flow is run with, as a key; ``None`` for the defaults."""
-    if check.pflow is None:
+    if check.pflow is None or not check.pflow.enforce_q_limits:
+        # Settings that say what the defaults say are the defaults: no second run of the same
+        # power flow (the reactive limits are not enforced unless a check asks).
         return None
     return json.dumps(check.pflow.model_dump(), sort_keys=True)
 
@@ -570,12 +594,31 @@ class Api:
         return self.call("DELETE", path)
 
 
+def server_environment() -> dict[str, str]:
+    """The environment of the server this script starts.
+
+    It writes UTF-8 (so what the script reads of it is text, whatever the code page of the
+    machine), and it finds TENSA where this script found it: a checkout that has not installed
+    the package is on ``sys.path`` of this process only, which the child does not inherit.
+    """
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    if str(SERVER_SRC) in sys.path:
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(SERVER_SRC), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+        )
+    return env
+
+
 @contextlib.contextmanager
 def running_server(workspace: Path) -> Iterator[str]:
     """Start ``tensa serve`` on a port the OS chooses, yield its URL, and stop it again.
 
     Only the process started here is stopped, by its pid: ``terminate`` first, which has the
-    server end its sessions and their workers, and ``kill`` if that takes over 30 s.
+    server end its sessions and their workers (on Windows ``terminate`` stops the process at
+    once and nothing of the server runs: its workers are ended by the job object they are in),
+    and ``kill`` if that takes over 30 s.
     """
     command = [
         sys.executable,
@@ -596,6 +639,10 @@ def running_server(workspace: Path) -> Iterator[str]:
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        # A path with an accent in it comes back in whatever code page the child writes: the
+        # reader must not stop at a byte it cannot read, or the port is never found.
+        errors="replace",
+        env=server_environment(),
     )
     lines: queue.Queue[str] = queue.Queue()
     log: list[str] = []
@@ -654,10 +701,16 @@ class Session:
         self.primary = primary
         self.addfiles = addfiles
         self.id = api.post("/sessions")["session_id"]
-        self.topology = api.post(
-            f"/sessions/{self.id}/case",
-            {"primary_path": primary, "addfiles": addfiles or None},
-        )
+        try:
+            self.topology = api.post(
+                f"/sessions/{self.id}/case",
+                {"primary_path": primary, "addfiles": addfiles or None},
+            )
+        except BaseException:
+            # The caller never gets the object, so nothing else would end this session: a server
+            # started with a small session cap would refuse every later case as full.
+            self.close()
+            raise
 
     def close(self) -> None:
         with contextlib.suppress(ApiError, OSError):
@@ -978,14 +1031,16 @@ def _dynamic(
         modes = oscillatory_modes(eig)
         measured.modes = modes
         real = [e["real"] for e in eig["eigenvalues"]]
+        # An analysis that returns no eigenvalue is a failed check, not a failed script.
+        largest = f"{max(real):.3g}" if real else "none (no eigenvalue was returned)"
         result.sanity(
             "Eigenvalue analysis returns the modes",
             "eig",
             "TENSA's eigenvalue analysis (ANDES)",
             "at least one mode",
-            f"{eig['mode_count']} modes, {len(modes) // 2 or len(modes)} oscillatory pairs, "
-            f"largest real part {max(real):.3g}",
-            eig["mode_count"] > 0,
+            f"{eig['mode_count']} modes, {len(modes)} of them oscillatory, "
+            f"largest real part {largest}",
+            eig["mode_count"] > 0 and bool(real),
         )
         _ring_down(session, ring, remove, names, modes, result, log, replace_file)
 
@@ -1166,11 +1221,20 @@ def _ring_down(
         return
     matches = match_poles(poles, modes, plan.tolerance_hz, plan.tolerance_damping)
     detail = "; ".join(
-        f"{m['ring_down_hz']:.3f} Hz, damping {m['ring_down_damping']:.3f} is eigenvalue "
-        f"{m['eigenvalue_hz']:.3f} Hz, {m['eigenvalue_damping']:.3f} "
-        f"({m['gap_hz']:.3f} Hz and {m['gap_damping']:.3f} apart)"
+        f"{fixed(m['ring_down_hz'], 3)} Hz, damping {fixed(m['ring_down_damping'], 3)} is "
+        f"eigenvalue {fixed(m['eigenvalue_hz'], 3)} Hz, {fixed(m['eigenvalue_damping'], 3)} "
+        f"({fixed(m['gap_hz'], 3)} Hz and {fixed(m['gap_damping'], 3)} apart)"
         for m in matches
     )
+    # Poles that the matrix pencil method splits out of one mode (two poles a few mHz apart) are
+    # matched to the same eigenvalue, so the check has verified fewer modes than it has poles.
+    # Say how many.
+    distinct = distinct_eigenvalues(matches)
+    if distinct < len(matches):
+        detail += (
+            f"; {len(matches)} poles matched {distinct} distinct eigenvalue"
+            f"{'' if distinct == 1 else 's'}, so {distinct} of the modes are what was verified"
+        )
     result.add(
         Check(
             name,
@@ -1243,7 +1307,12 @@ def _compare_ring_down(
         return
     remove = other_reference.remove_events
     api = session.api
-    primary, extra, _ = add_example(api, other, replace_file, result)
+    primary, extra, what = add_example(api, other, replace_file, result)
+    if what.startswith("added"):
+        # Against a server of the user's (``--url``) this writes a file into their workspace.
+        result.notes.append(
+            f"{compare.case} was added to the workspace as {primary}, for the comparison with it."
+        )
     sibling = Session(api, primary, extra)
     try:
         names = choose_variables(list_variables(api, sibling.id))
@@ -1444,9 +1513,10 @@ def catalog_checks(result: CaseResult) -> list[dict[str, Any]]:
 def update_catalog(results: Sequence[CaseResult], path: Path) -> list[str]:
     """Put each passing case's checks into ``verification.checks`` of its catalog entry.
 
-    Returns the ids written. An entry with no ``verification.summary`` yet is refused, and so is
-    a case that did not pass: the catalog states what was found, and a failed run is no such
-    statement. The file is written the way it is kept (two-space JSON).
+    Returns the ids written. A case that did not pass is left as it is (the catalog states what
+    was found, and a failed run is no such statement), and an entry with no
+    ``verification.summary`` yet is refused: only a person can say what the checks add up to.
+    The file is written the way it is kept (two-space JSON).
     """
     document = json.loads(path.read_text(encoding="utf-8"))
     entries = {entry["id"]: entry for entry in document["examples"]}
@@ -1456,7 +1526,7 @@ def update_catalog(results: Sequence[CaseResult], path: Path) -> list[str]:
         if entry is None:
             continue
         if not result.passed:
-            raise ValueError(f"{result.id} did not pass, so its catalog entry is not updated")
+            continue
         summary = (entry.get("verification") or {}).get("summary")
         if not summary:
             raise ValueError(
@@ -1552,8 +1622,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.url:
                 url, own = args.url, False
             else:
+                # A file the server still holds open (Windows) must not turn the end of the run
+                # into an error before the reports are written.
                 workspace = Path(
-                    stack.enter_context(tempfile.TemporaryDirectory(prefix="tensa-verify-"))
+                    stack.enter_context(
+                        tempfile.TemporaryDirectory(prefix="tensa-verify-", ignore_cleanup_errors=True)
+                    )
                 )
                 url, own = stack.enter_context(running_server(workspace)), True
             health = Api(url).get("/health")
@@ -1590,8 +1664,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"recorded baselines in {name}", file=sys.stderr)
     if args.write_catalog:
         try:
-            for name in update_catalog(results, examples_dir() / "catalog.json"):
+            written = update_catalog(results, examples_dir() / "catalog.json")
+            for name in written:
                 print(f"wrote the checks of {name} into the catalog", file=sys.stderr)
+            for result in results:
+                if result.id not in written and not result.passed:
+                    print(
+                        f"did not write {result.id} into the catalog: it did not pass",
+                        file=sys.stderr,
+                    )
         except ValueError as exc:
             print(f"verify_example_cases: {exc}", file=sys.stderr)
             return 2

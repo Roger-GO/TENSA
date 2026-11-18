@@ -862,6 +862,24 @@ def test_a_command_that_holds_commands_gets_a_section_for_each_of_them(
     assert page.index("## `tensa examples`") < page.index("## `tensa examples list`")
 
 
+def test_a_positional_argument_is_named_as_help_names_it(reference: ModuleType) -> None:
+    """A command that takes ``ids`` and says its metavar is ``ID`` has ``ID`` in `--help`, so the
+    page that is written from the command says ``ID`` too and not the name of the parameter."""
+    import click
+
+    adding = click.Command(
+        "add", params=[click.Argument(["ids"], nargs=-1, metavar="ID", help="Ids of the cases.")]
+    )
+    citing = click.Command("cite", params=[click.Argument(["example_id"], metavar="ID")])
+    page = reference.render_cli(
+        click.Group("tensa", commands=[click.Group("examples", commands=[adding, citing])])
+    )
+    assert "Usage: `tensa examples add ID...`" in page
+    assert "Usage: `tensa examples cite ID`" in page
+    assert "| `ID` | Ids of the cases. |" in page
+    assert "IDS" not in page and "EXAMPLE_ID" not in page
+
+
 def test_the_command_line_reference_does_not_print_the_home_directory(
     generated: dict[str, str], reference: ModuleType
 ) -> None:

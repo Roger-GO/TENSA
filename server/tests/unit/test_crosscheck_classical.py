@@ -274,3 +274,34 @@ def test_a_reference_with_no_specs_is_a_plan_whose_events_are_in_the_file(
     plan = {"description": "a trip in the file", "specs": [], "tf": 10.0}
     path.write_text(json.dumps({"version": 1, "id": "demo", "disturbance": plan}), encoding="utf-8")
     assert script.load_plan(path) == ([], 10.0, pytest.approx(1 / 30))
+
+
+def test_two_faults_that_overlap_are_refused_and_not_integrated_as_one(script: ModuleType) -> None:
+    """The check keeps one fault at a time: a second one that began before the first cleared would
+    replace it, and the run would be a disturbance nobody asked for."""
+    model = script.ClassicalModel(_network(), VOLTAGES)
+    with pytest.raises(script.CrosscheckError, match="two faults act at the same time"):
+        model.simulate([_fault(1, 0.1, 0.3), _fault(2, 0.2, 0.4)], tf=0.5, step=0.01)
+
+
+def test_a_fault_that_clears_as_another_begins_clears_first_whatever_order_they_are_given_in(
+    script: ModuleType,
+) -> None:
+    model = script.ClassicalModel(_network(), VOLTAGES)
+    first, second = _fault(1, 0.1, 0.2), _fault(2, 0.2, 0.3)
+    runs = [
+        model.simulate(order, tf=0.5, step=0.01) for order in ([first, second], [second, first])
+    ]
+    assert runs[0] == runs[1]
+    # The second fault acts (a run with only the first is another run).
+    only_first = model.simulate([first], tf=0.5, step=0.01)
+    assert runs[0]["final_angle_spread_deg"] != only_first["final_angle_spread_deg"]
+
+
+def test_an_event_in_the_file_that_the_check_cannot_integrate_is_refused(
+    script: ModuleType,
+) -> None:
+    with pytest.raises(script.CrosscheckError, match="Alter"):
+        script.ClassicalModel(_network(events=["Fault", "Alter"]), VOLTAGES)
+    # Faults and line trips are what it holds.
+    script.ClassicalModel(_network(events=["Fault", "Toggle"]), VOLTAGES)

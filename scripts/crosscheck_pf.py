@@ -326,8 +326,9 @@ def _file_events(system: Any) -> list[dict[str, Any]]:
 
     They are written the way ``POST /sessions/{id}/disturbances`` takes them, so that the
     classical check integrates what the file says without a second copy of it in the reference.
-    A ``Toggle`` of another model is left out: the classical check refuses a disturbance it
-    does not know when it reads one, and says so.
+    Every ``Toggle`` that is on is written, whatever model it switches: the classical check
+    refuses one that is not of a ``Line``, and an event of another kind (``events`` of the
+    dump names the models of the file's events), when it reads them, and says so.
     """
     events: list[dict[str, Any]] = []
     toggles = system.Toggle
@@ -940,6 +941,16 @@ def _raw_number(fields: list[str], i: int, default: float = 0.0) -> float:
     return float(fields[i])
 
 
+def _raw_or_default(fields: list[str], i: int, default: float) -> float:
+    """Field ``i`` of a RAW record, or ``default`` when the record leaves it empty or holds 0.
+
+    A zero is PSS/E's way of saying "the default" for the nominal voltage of a winding (the bus
+    base voltage) and for the base of an impedance (the system base), where a zero would be
+    nothing a network can have. ``_raw_number`` takes a zero as it is.
+    """
+    return _raw_number(fields, i, default) or default
+
+
 # The sections of a version 33 RAW file in the order the file gives them, and what this reader
 # does with a record of each: ``read`` (it is part of the network), ``skip`` (it changes no power
 # flow) or ``refuse`` (a power flow of the file needs a model that this reader does not have, so
@@ -1162,10 +1173,10 @@ def _ppc_from_raw_file(path: Path) -> dict[str, Any]:
         elif cw == 2:
             ratio = (tap1 / kv_i) / (tap2 / kv_j)
         else:
-            ratio = (tap1 * _raw_number(winding1, 1, kv_i) / kv_i) / (
-                tap2 * _raw_number(winding2, 1, kv_j) / kv_j
+            ratio = (tap1 * _raw_or_default(winding1, 1, kv_i) / kv_i) / (
+                tap2 * _raw_or_default(winding2, 1, kv_j) / kv_j
             )
-        scale = base / _raw_number(impedance, 2, base) if cz == 2 else 1.0
+        scale = base / _raw_or_default(impedance, 2, base) if cz == 2 else 1.0
         status = int(_raw_number(first, 11, 1.0))
         if status > 0:
             # The magnetising admittance (per unit of the system base) is at the winding 1 bus.
@@ -1541,13 +1552,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     script = str(Path(__file__).resolve())
     with tempfile.TemporaryDirectory(prefix="tensa-crosscheck-") as tmp:
         network = str(Path(tmp) / "network.json")
-        subprocess.run([tensa_python, script, "dump", args.id, "-o", network], check=True)
         command = [verify_python, script, "solve", network, "--example", args.id]
         if args.write:
             command.append("--write")
         if args.reference:
             command += ["--reference", args.reference]
-        subprocess.run(command, check=True)
+        # Each step prints what went wrong itself: a step that fails ends this one with a line,
+        # and not with the traceback of a ``CalledProcessError`` that hides it.
+        for step in ([tensa_python, script, "dump", args.id, "-o", network], command):
+            done = subprocess.run(step)
+            if done.returncode != 0:
+                raise CrosscheckError(f"`{Path(step[1]).name} {step[2]}` failed (exit {done.returncode})")
     return 0
 
 

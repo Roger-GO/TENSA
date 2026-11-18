@@ -625,6 +625,26 @@ def test_the_raw_reader_turns_the_windings_and_codes_of_a_transformer_into_a_rat
     assert row[3] == pytest.approx(0.08 * scale)
 
 
+def test_the_raw_reader_takes_a_zero_nominal_voltage_and_a_zero_base_as_the_defaults_they_are(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    """In a PSS/E file a nominal voltage of 0 means the voltage of the bus and a winding base of
+    0 MVA the system base: a reader that took them as numbers would divide by zero, or build a
+    ratio of 0."""
+    transformer = [
+        "2,3,0,'1',3,2,1,0.0,0.0,2,'T1',1,1,1.0",
+        "0.002,0.08,0.0",
+        "1.0,0.0,0.0,100.0,100.0,100.0,0,0,1.1,0.9,1.1,0.9,33,0,0.0,0.0",
+        "1.0,0.0",
+    ]
+    ppc = _read_raw(script, tmp_path, _raw_text({"transformer": transformer}))
+    row = ppc["branch"][-1]
+    # CW 3 with NOMV 0 on both windings: the ratio of the taps, as with the bus voltages.
+    assert row[8] == pytest.approx(1.0)
+    # CZ 2 with a winding base of 0: the impedance is per unit of the system base already.
+    assert row[2] == pytest.approx(0.002) and row[3] == pytest.approx(0.08)
+
+
 def test_the_raw_reader_leaves_out_what_is_out_of_service_and_what_a_power_flow_does_not_use(
     script: ModuleType, tmp_path: Path
 ) -> None:

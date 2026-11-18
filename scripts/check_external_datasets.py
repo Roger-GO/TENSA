@@ -93,8 +93,9 @@ from tensa.core.dae_vars import MAX_DAE_VARS  # noqa: E402
 
 # The most one download may be, in bytes: the biggest file here is 2.1 MB.
 MAX_DOWNLOAD = 8_000_000
-# A browser's name: some of the hosts answer a script with a 403.
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+# Says what this is. The default name of urllib gets a 403 from one of the hosts (nlr.gov) and
+# an honest name of the script's own does not, so there is no need to pass for a browser.
+USER_AGENT = "tensa-check-external-datasets (+https://github.com/Roger-GO/TENSA)"
 DOWNLOAD_TIMEOUT = 120.0
 # What a power flow must agree with pandapower's to, as for every case of the catalog.
 VOLTAGE_TOLERANCE = 1e-4  # per unit
@@ -1163,7 +1164,12 @@ def run_trials(
     verify_python: str | None,
     log: Log = lambda text: None,
 ) -> list[TrialResult]:
-    """Download and run each trial in one temporary workspace and one server."""
+    """Download and run each trial in one temporary workspace and one server.
+
+    A download is kept by its checksum for the whole run (in ``cache`` when one is given, and
+    else in the temporary folder), so an archive that several trials use is fetched once, and
+    the hosts are not asked for it again.
+    """
     results: list[TrialResult] = []
     with tempfile.TemporaryDirectory(prefix="tensa-external-") as tmp:
         root = Path(tmp)
@@ -1171,6 +1177,7 @@ def run_trials(
         scratch = root / "scratch"
         workspace.mkdir()
         scratch.mkdir()
+        downloads = cache if cache is not None else root / "downloads"
         with running_server(workspace) as url:
             api = Api(url)
             for trial in trials:
@@ -1178,7 +1185,7 @@ def run_trials(
                 data: dict[str, bytes] = {}
                 try:
                     for part in trial.parts:
-                        data[part.name] = fetch(part, cache)
+                        data[part.name] = fetch(part, downloads)
                 except FetchError as exc:
                     results.append(TrialResult(trial.key, trial.entry, trial.title, error=str(exc)))
                     continue

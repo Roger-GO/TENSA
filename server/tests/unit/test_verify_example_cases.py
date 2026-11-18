@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import os
 import re
 import sys
 import threading
@@ -470,6 +471,7 @@ class FakeApi:
         self.listing_calls: list[dict[str, int]] = []
         self.open_sessions: list[str] = []
         self.damping_shift: dict[str, float] = {}  # added to the mode's damping, by session
+        self.eig_empty = False  # the eigenvalue analysis answers with no eigenvalue at all
         self.reload_world()
 
     def reload_world(self) -> None:
@@ -560,6 +562,8 @@ class FakeApi:
             self.listing_calls.append({"limit": limit, "offset": offset})
             items = self.variables()
             return {"total": len(items) + self.overstates, "items": items[offset : offset + limit]}
+        if path.endswith("/eig") and self.eig_empty:
+            return {"eigenvalues": [], "frequencies_hz": [], "damping_ratios": [], "mode_count": 0}
         if path.endswith("/eig"):
             f, z = self.MODE
             return {
@@ -1052,6 +1056,10 @@ def test_the_settings_of_a_power_flow_are_a_key_and_words(harness: ModuleType) -
     )
     assert harness.pflow_words(limited) == "reactive limits enforced"
     assert harness.pflow_words(plain) == "its defaults"
+    # Settings that say what the defaults say are the defaults: no second run of one power flow.
+    explicit = _static_reference(_limited_check(pflow={"enforce_q_limits": False})).checks[0]
+    assert harness.pflow_key(explicit) is None
+    assert harness.pflow_words(explicit) == "its defaults"
     measured = harness.Measured(pf={"a": 1}, pf_runs={'{"enforce_q_limits": true}': {"b": 2}})
     assert measured.pf_for(plain) == {"a": 1} and measured.pf_for(limited) == {"b": 2}
     assert harness.Measured().pf_for(limited) is None
@@ -1118,13 +1126,27 @@ def test_the_catalog_is_not_written_for_a_case_without_a_summary_or_that_did_not
         harness.update_catalog([result], without)
     assert without.read_text(encoding="utf-8") == before
 
+
+
+def test_the_catalog_takes_the_cases_that_passed_and_leaves_one_that_did_not(
+    harness: ModuleType, fake: FakeApi, tmp_path: Path
+) -> None:
+    """``--write-catalog`` writes the checks of the cases that passed, as its help says: one
+    case that failed leaves its own entry as it is and does not stop the others."""
     failing = FakeApi(harness)
     failing.tds_converged = False
     bad, _ = _run(harness, failing)
-    assert not bad.passed
-    with_summary = _catalog_file(tmp_path, summary="x", checks=[])
-    with pytest.raises(ValueError, match="did not pass"):
-        harness.update_catalog([bad], with_summary)
+    good, _ = _run(harness, fake)
+    assert not bad.passed and good.passed
+    entry = _example().model_dump(mode="json", exclude_none=True)
+    entry["verification"] = {"summary": "x", "checks": []}
+    other = {**entry, "id": "other", "provenance": {**entry["provenance"], "path": "o/o.xlsx"}}
+    path = tmp_path / "catalog.json"
+    path.write_text(json.dumps({"version": 1, "examples": [entry, other]}), encoding="utf-8")
+    bad.id = "other"
+    assert harness.update_catalog([bad, good], path) == ["demo"]
+    demo, untouched = json.loads(path.read_text(encoding="utf-8"))["examples"]
+    assert demo["verification"]["checks"] and untouched["verification"]["checks"] == []
 
 
 # ---- a mode's damping held to the case it is a variant of ---------------------------------
@@ -1148,6 +1170,8 @@ def test_a_mode_held_to_another_case_passes_when_the_two_runs_have_the_same_damp
     # The other case is added from the catalog and run in a session of its own beside the first,
     # which closes before this one, and no other check was disturbed by it.
     assert "POST /examples/kundur/add" in fake.log
+    # Against a server of the user's this writes a file into their workspace, and the report says so.
+    assert any("kundur was added to the workspace as demo.xlsx" in n for n in result.notes)
     assert fake.log.count("POST /sessions") == 2
     assert fake.log.index("DELETE /sessions/s2") < fake.log.index("DELETE /sessions/s1")
     assert not any(c.name == COMPARE_NAME for c in _run(harness, fake)[0].checks)
@@ -1214,3 +1238,85 @@ def test_a_mode_with_no_oscillation_in_the_window_of_either_run_fails_and_says_w
     result, _ = _run(harness, fake, _reference(ring_down={"compare": far}))
     check = next(c for c in result.checks if c.name.endswith("against kundur"))
     assert not check.passed and "no oscillation between 1.5 and 2.5 Hz" in check.result
+
+
+# ---- what the script does when something about the server or the run goes wrong -------------
+
+
+def test_a_session_whose_case_will_not_open_is_not_left_on_the_server(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    """The script's server holds two sessions: one that was made and never closed, because the
+    case it was made for would not open, would make every later case fail as 'full'."""
+    original = fake.call
+
+    def refuse(method: str, path: str, body: Any = None, **query: Any) -> Any:
+        if method == "POST" and path.endswith("/case"):
+            fake.log.append(f"{method} {path}")
+            raise harness.ApiError(method, path, 400, "the file cannot be loaded")
+        return original(method, path, body, **query)
+
+    fake.call = refuse  # type: ignore[method-assign]
+    with pytest.raises(harness.ApiError):
+        harness.Session(fake, "demo.xlsx", [])
+    assert fake.open_sessions == []
+    assert fake.log[-1] == "DELETE /sessions/s1"
+    # In a case's run the failure is the case's error, and no session is left either.
+    result, _ = _run(harness, fake)
+    assert "400" in (result.error or "") and fake.open_sessions == []
+
+
+def test_an_eigenvalue_analysis_with_no_eigenvalue_fails_its_check_and_not_the_script(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    fake.eig_empty = True
+    result, _ = _run(harness, fake)
+    assert result.error is None
+    check = next(c for c in result.checks if c.name == "Eigenvalue analysis returns the modes")
+    assert not check.passed and "no eigenvalue was returned" in check.result
+
+
+def test_two_poles_that_go_to_one_eigenvalue_are_one_mode_verified_and_the_check_says_so(
+    harness: ModuleType,
+) -> None:
+    modes = [(1.295, 0.050), (0.6, 0.02)]
+    poles = [
+        harness.Pole(1.284, 0.045, 1.0),
+        harness.Pole(1.283, 0.044, 0.5),
+        harness.Pole(0.601, 0.021, 0.2),
+    ]
+    matches = harness.match_poles(poles, modes, 0.05, 0.05)
+    assert all(m["matched"] for m in matches)
+    assert harness.distinct_eigenvalues(matches) == 2
+    # A pole that matched nothing is not a mode verified, and an empty list of modes has none.
+    assert harness.distinct_eigenvalues(harness.match_poles(poles[:1], [(9.0, 0.5)], 0.05, 0.05)) == 0
+    assert harness.distinct_eigenvalues(harness.match_poles(poles, [], 0.05, 0.05)) == 0
+
+
+def test_a_ring_down_check_names_how_many_modes_its_poles_came_to(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    result, _ = _run(harness, fake)
+    check = next(c for c in result.checks if c.kind == "ring-down")
+    # The fake's one mode is matched by its one pole: nothing to add.
+    assert "distinct eigenvalue" not in check.result
+
+
+def test_a_rounding_to_zero_has_no_sign(harness: ModuleType) -> None:
+    assert harness.fixed(-0.0004, 3) == "0.000"
+    assert harness.fixed(-0.0, 3) == "0.000"
+    assert harness.fixed(-0.0006, 3) == "-0.001"
+    assert harness.fixed(1.5, 3) == "1.500"
+
+
+def test_the_server_the_script_starts_writes_utf8_and_finds_tensa_where_the_script_did(
+    harness: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "path", [str(harness.SERVER_SRC), *sys.path])
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    env = harness.server_environment()
+    assert env["PYTHONUTF8"] == "1" and env["PYTHONIOENCODING"] == "utf-8"
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(harness.SERVER_SRC), "/somewhere/else"]
+    # A TENSA that is installed needs no help, and a path of the user's is kept as it is.
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != str(harness.SERVER_SRC)])
+    assert harness.server_environment()["PYTHONPATH"] == "/somewhere/else"

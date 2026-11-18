@@ -330,6 +330,47 @@ def test_the_cache_keeps_a_download_by_its_checksum_and_only_when_it_is_the_reco
     assert not list(other.glob("*")) if other.exists() else True
 
 
+def test_the_script_says_what_it_is_and_does_not_pass_for_a_browser(script: ModuleType) -> None:
+    # The default name of urllib gets a 403 from nlr.gov and an honest one of the script's own does
+    # not, so there is no reason to say it is Chrome.
+    assert "Mozilla" not in script.USER_AGENT and "Chrome" not in script.USER_AGENT
+    assert "TENSA" in script.USER_AGENT
+
+
+def test_an_archive_that_several_trials_use_is_downloaded_once_in_a_run_with_no_cache_given(
+    script: ModuleType, monkeypatch: Any
+) -> None:
+    """Each part of a trial used to be downloaded again for every trial that names it (the WECC
+    archive three times): the run keeps what it has fetched, by checksum, until it ends."""
+    import contextlib
+
+    data = b"0, 100.0, 33\n"
+    part = _part(script, data)
+    trials = [
+        script.Trial(key, "e", "A trial", (part,), "x.raw", (), script.Expect(opens=True))
+        for key in ("one", "two", "three")
+    ]
+    fetched: list[str] = []
+    monkeypatch.setattr(script, "_download", lambda url: fetched.append(url) or data)
+
+    @contextlib.contextmanager
+    def server(workspace: Path) -> Iterator[str]:
+        yield "http://127.0.0.1:1"
+
+    monkeypatch.setattr(script, "running_server", server)
+    monkeypatch.setattr(script, "Api", lambda url: None)
+    monkeypatch.setattr(
+        script,
+        "run_trial",
+        lambda api, workspace, trial, data, python, scratch: script.TrialResult(
+            trial.key, trial.entry, trial.title
+        ),
+    )
+    results = script.run_trials(trials, None, None)
+    assert [r.key for r in results] == ["one", "two", "three"] and not any(r.error for r in results)
+    assert fetched == ["https://example.org/x"]
+
+
 def test_a_cached_file_that_was_changed_on_disk_is_refused(
     script: ModuleType, tmp_path: Path
 ) -> None:

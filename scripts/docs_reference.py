@@ -457,6 +457,12 @@ def _option_default(param: Any) -> str:
     return _code(text.replace("\\", "/"))
 
 
+def _argument_name(arg: Any) -> str:
+    """What `--help` calls a positional argument: the ``metavar`` the command declares, else the
+    name of its parameter in capitals (a command that takes ``ids`` and says ``ID`` is ``ID``)."""
+    return str(getattr(arg, "metavar", None) or arg.name.upper())
+
+
 def _render_command(name: str, command: Any) -> list[str]:
     out = [f"## {_code(name)}", ""]
     if command.help:
@@ -473,7 +479,7 @@ def _render_command(name: str, command: Any) -> list[str]:
     ]
     usage = name + (" [OPTIONS]" if options else "")
     usage += "".join(
-        f" {arg.name.upper()}" + ("..." if getattr(arg, "nargs", 1) == -1 else "")
+        f" {_argument_name(arg)}" + ("..." if getattr(arg, "nargs", 1) == -1 else "")
         for arg in arguments
     )
     if getattr(command, "commands", None):
@@ -481,7 +487,10 @@ def _render_command(name: str, command: Any) -> list[str]:
     out += [f"Usage: {_code(usage)}", ""]
     if arguments:
         out += ["| Argument | Description |", "| --- | --- |"]
-        out += [f"| {_code(arg.name.upper())} | {_cell(getattr(arg, 'help', None) or '')} |" for arg in arguments]
+        out += [
+            f"| {_code(_argument_name(arg))} | {_cell(getattr(arg, 'help', None) or '')} |"
+            for arg in arguments
+        ]
         out.append("")
     if options:
         out += ["| Option | Value | Default | Description |", "| --- | --- | --- | --- |"]

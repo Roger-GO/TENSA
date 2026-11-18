@@ -41,9 +41,10 @@ this model is no longer the case.
 The disturbance is what the case's file holds (its line trips and faults, which the dump
 carries as ``file_events``) together with the ``specs`` of the reference's disturbance, as a
 run of the harness has both. A load is a constant impedance at the voltage of
-the power flow solution, as ANDES's default configuration treats it in a time-domain run
-(a bus voltage outside 0.8 to 1.2 pu turns it back into constant power there; no case of
-this check has one).
+the power flow solution, which is how ANDES runs the loads of the cases this check holds: the
+fault of the WSCC 9-bus case takes the faulted bus to 0.001 pu, and this model of the loads
+agrees with ANDES's run to 3.5e-6 pu there, so no range of voltage is left in which a load
+would be a constant power or a constant current.
 """
 
 from __future__ import annotations
@@ -118,6 +119,15 @@ class ClassicalModel:
         if other:
             raise CrosscheckError(
                 "the case has devices the classical model does not represent: " + ", ".join(other)
+            )
+        # The harness runs every event its file holds, so an event this check cannot integrate
+        # (an ``Alter`` of a parameter, say) would make it compare TENSA's run with another
+        # disturbance's, and it says so and stops.
+        unknown = [e for e in machines.get("events") or [] if e not in ("Fault", "Toggle")]
+        if unknown:
+            raise CrosscheckError(
+                "the case file holds events the classical model does not integrate: "
+                + ", ".join(unknown)
             )
         self.machines = [m for m in machines.get("classical", []) if m.get("in_service", True)]
         if not self.machines:
@@ -261,8 +271,13 @@ class ClassicalModel:
     # -- the disturbance -----------------------------------------------------------
 
     def schedule(self, specs: list[dict[str, Any]]) -> list[tuple[float, str, Any]]:
-        """The switching of a disturbance as ``(time, what, detail)``, in time order."""
+        """The switching of a disturbance as ``(time, what, detail)``, in time order.
+
+        The check keeps one fault at a time: two faults that overlap are refused, and where one
+        clears at the instant another begins the clearing comes first.
+        """
         events: list[tuple[float, str, Any]] = []
+        windows: list[tuple[float, float]] = []
         for spec in specs:
             kind = spec.get("kind")
             if kind == "fault":
@@ -274,6 +289,7 @@ class ClassicalModel:
                 where = self.position[self.bus_numbers[self.bus_idx.index(bus)]]
                 events.append((float(spec["tf"]), "fault on", (where, admittance)))
                 events.append((float(spec["tc"]), "fault off", None))
+                windows.append((float(spec["tf"]), float(spec["tc"])))
             elif kind == "toggle":
                 if spec.get("model") != "Line":
                     raise CrosscheckError("only a Line can be toggled in this check")
@@ -283,7 +299,13 @@ class ClassicalModel:
                 events.append((float(spec["t"]), "toggle", self.branch_idx.index(dev)))
             else:
                 raise CrosscheckError(f"the disturbance {kind!r} is not handled")
-        return sorted(events, key=lambda event: event[0])
+        windows.sort()
+        for (_, cleared), (applied, _) in zip(windows, windows[1:], strict=False):
+            if applied < cleared - 1e-12:
+                raise CrosscheckError(
+                    "two faults act at the same time, and this check holds one fault at a time"
+                )
+        return sorted(events, key=lambda event: (event[0], event[1] != "fault off"))
 
     def simulate(
         self,
