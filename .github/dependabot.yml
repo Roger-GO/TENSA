@@ -1,26 +1,32 @@
-# Weekly dependency updates for the three things that carry dependencies: the
+# Monthly dependency updates for the three things that carry dependencies: the
 # Python package (server/pyproject.toml), the web UI (web/pnpm-lock.yaml), and
-# the workflows themselves. CI runs on every one of these pull requests, so a
-# bump that breaks the tests never lands unnoticed. The security audit is a
-# separate workflow (audit.yml) because advisories appear without any commit.
+# the workflows themselves. Each ecosystem gets one grouped pull request a
+# month, with every kind of update in it, so there are three to read and not a
+# dozen. CI runs on every one of these pull requests, so a bump that breaks the
+# tests never lands unnoticed. The security audit is a separate workflow
+# (audit.yml) because advisories appear without any commit.
 version: 2
 
 updates:
   - package-ecosystem: pip
     directory: /server
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: "chore(deps)"
+    # The package is a library, so its ranges stay wide: a requirement is raised
+    # only when the newest release is outside it. The default raises the lower
+    # bound to whatever is newest (uvicorn >=0.54, hatchling >=1.32.4) and makes
+    # every user of the library take it, for no reason the code has.
+    versioning-strategy: increase-if-necessary
     # FastAPI documents that a minor release can break callers, which is why
     # pyproject.toml caps it at the next minor after the newest one the suite
-    # ran against. FastAPI and Starlette move together, so one pull request
-    # raises both.
+    # ran against. A pull request that raises the cap is read and run against
+    # the whole suite by a person, and not merged because it is green.
     groups:
-      web-framework:
+      python:
         patterns:
-          - fastapi
-          - starlette
+          - "*"
     ignore:
       # ANDES upgrades are deliberate (AGENTS.md): a new minor or major needs
       # the curl walkthrough re-run by hand, so only patch releases are proposed.
@@ -32,18 +38,21 @@ updates:
   - package-ecosystem: npm
     directory: /web
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: "chore(deps)"
     groups:
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
+      web:
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     commit-message:
       prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns:
+          - "*"

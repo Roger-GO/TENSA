@@ -18,7 +18,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 
 ANDES upgrades are deliberate — never accept an automatic minor bump without re-running the curl walkthrough in CI.
 
-Other updates arrive as weekly Dependabot pull requests (`.github/dependabot.yml`, which proposes only patch releases of ANDES). `.github/workflows/audit.yml` runs `pip-audit` on a fresh install of the server with its `mcp` extra and `pnpm audit --prod` on the web lockfile every week and whenever a dependency file changes; both only report for now.
+Other updates arrive as monthly Dependabot pull requests, one grouped pull request each for the Python package, the web UI and the workflows (`.github/dependabot.yml`, which proposes only patch releases of ANDES and raises a Python requirement only when the newest release is outside its range). `.github/workflows/audit.yml` runs `pip-audit` on a fresh install of the server with its `mcp` extra and `pnpm audit --prod` on the web lockfile every week and whenever a dependency file changes; both only report for now.
 
 ## Architectural decisions (do not relitigate without a plan revision)
 

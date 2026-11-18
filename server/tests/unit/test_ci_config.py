@@ -451,7 +451,7 @@ def _load_required(path: Path) -> dict[str, Any]:
     return _load(path)
 
 
-def test_dependabot_watches_every_manifest_weekly() -> None:
+def test_dependabot_watches_every_manifest_monthly() -> None:
     """Python, web, and workflow dependencies each have an update entry that points at real files."""
     updates = _load_required(_DEPENDABOT)["updates"]
     manifests = {
@@ -464,7 +464,27 @@ def test_dependabot_watches_every_manifest_weekly() -> None:
         directory, manifest = manifests[update["package-ecosystem"]]
         assert update["directory"] == directory
         assert (REPO_ROOT / directory.lstrip("/") / manifest).is_file(), update
-        assert update["schedule"]["interval"] == "weekly"
+        assert update["schedule"]["interval"] == "monthly"
+
+
+def test_dependabot_sends_one_pull_request_per_ecosystem_with_every_kind_of_update() -> None:
+    """Three pull requests a month and not a dozen: each ecosystem has one group that takes
+    every dependency (``*``) and every update type (no ``update-types`` filter)."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    for update in updates:
+        groups = update["groups"]
+        assert len(groups) == 1, update["package-ecosystem"]
+        (group,) = groups.values()
+        assert group["patterns"] == ["*"], update["package-ecosystem"]
+        assert "update-types" not in group, update["package-ecosystem"]
+
+
+def test_dependabot_does_not_raise_a_lower_bound_a_library_does_not_need_raised() -> None:
+    """The server is a library: a requirement changes only when the newest release is outside
+    it, so a pull request does not raise ``uvicorn>=0.30`` to the newest for no reason."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    (pip,) = [u for u in updates if u["package-ecosystem"] == "pip"]
+    assert pip["versioning-strategy"] == "increase-if-necessary"
 
 
 def test_dependabot_leaves_andes_minor_and_major_upgrades_to_a_person() -> None:
