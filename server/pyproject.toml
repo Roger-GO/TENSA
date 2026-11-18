@@ -38,7 +38,7 @@ dependencies = [
     # oldest that allows Starlette 1.x. Starlette is declared here because
     # FastAPI no longer caps it and every release below 1.3.1 has a published
     # advisory (the UI is served through StaticFiles).
-    "fastapi>=0.133,<0.143",
+    "fastapi>=0.133,<0.164",
     "starlette>=1.3.1,<2",
     "uvicorn[standard]>=0.30",
     "pyarrow>=17",
@@ -68,7 +68,7 @@ dependencies = [
 # mcp 2.x renamed FastMCP, which tensa.mcp_server imports, and releases before
 # 1.28.1 have published advisories.
 mcp = [
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
 ]
 # A native window for the UI: `tensa desktop`. pywebview 5 is the first release with
 # ``webview.settings``, which the window uses to allow file downloads; the cap is the
@@ -87,12 +87,12 @@ dev = [
     "httpx>=0.27",
     # Capped at the next minor: [tool.ruff.lint] runs in preview mode, whose
     # behavior may change between ruff releases.
-    "ruff>=0.6,<0.17",
+    "ruff>=0.6,<0.18",
     "mypy>=1.11",
     "websockets>=13",
     # The MCP tests (tests/unit/test_client_examples.py, tests/integration/test_examples_api.py)
     # skip without it, and a skip is easy to read as a pass. The range is the ``mcp`` extra's.
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
     # tests/unit/test_packaging.py and tests/integration/test_packaging.py drive
     # the build hook and the build backend directly (``editables`` is what the
     # backend needs to build an editable wheel).
