@@ -1,6 +1,6 @@
 /**
  * Nothing on the diagram is drawn over anything else: the rule, held on the
- * whole drawing of the three example cases and of the IEEE 118-bus case, in
+ * whole drawing of the example cases (the three smallest and IEEE 39) and of the IEEE 118-bus case, in
  * every state the app puts a diagram in.
  *
  * - as the case opens with no saved layout (the automatic arrangement);
@@ -58,7 +58,7 @@ import {
   whileDragged,
   type Diagram,
 } from '../../helpers/diagramStates';
-import { IEEE14, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
+import { IEEE14, IEEE39, KUNDUR, WSCC9 } from '../../helpers/exampleCases';
 
 vi.mock('@/components/sld/elkClient', async () => {
   const { default: ELK } = await import('elkjs/lib/elk.bundled.js');
@@ -66,10 +66,20 @@ vi.mock('@/components/sld/elkClient', async () => {
   return { elkLayout: vi.fn((graph: ElkNode) => elk.layout(graph)) };
 });
 
+/**
+ * The devices whose values a power flow gives no place clear of everything else on a case, so
+ * that the diagram leaves them off and says so (the count over its corner): the loads of buses
+ * 15 and 23 of IEEE 39, each hemmed in by the lines that run past it. None on the others.
+ */
+const VALUES_LEFT_OFF: Readonly<Record<string, readonly string[]>> = {
+  'IEEE 39': ['load-PQ_6', 'load-PQ_11'],
+};
+
 const EXAMPLES: readonly [string, TopologySummary][] = [
   ['IEEE 14', IEEE14],
   ['Kundur', KUNDUR],
   ['WSCC 9', WSCC9],
+  ['IEEE 39', IEEE39],
 ];
 
 describe('nothing overlaps on the example cases', () => {
@@ -81,7 +91,7 @@ describe('nothing overlaps on the example cases', () => {
       expect(bothWays(tidied(first, true))).toEqual([]);
     });
 
-    it(`${name}: every line has a route, and every value a place, as it opens`, async () => {
+    it(`${name}: every line has a route, and every value a place or a word, as it opens`, async () => {
       const first = await opened(topology);
       const picture = drawn(first, { values: true, labelWidths: typicalWidths(first) });
       expect(picture.unrouted).toEqual([]);
@@ -93,7 +103,7 @@ describe('nothing overlaps on the example cases', () => {
       const hidden = [...picture.labelPlaces].filter(([, place]) => place.hidden).map(([id]) => id);
       expect(hidden.length).toBeLessThanOrEqual(1);
       const dropped = [...picture.readouts].filter(([, { spot }]) => spot === 'none');
-      expect(dropped.map(([id]) => id)).toEqual([]);
+      expect(dropped.map(([id]) => id)).toEqual(VALUES_LEFT_OFF[name] ?? []);
     });
 
     it(`${name}: a tidy of the diagram as it opens changes nothing`, async () => {

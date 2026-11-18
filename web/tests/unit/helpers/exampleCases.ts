@@ -1,6 +1,6 @@
 /**
- * The three example cases the server seeds a workspace with, as the diagram
- * reads them: the buses, the branches between them, and the devices on them.
+ * The example cases the server seeds a workspace with (all but NPCC 140, whose
+ * drawing the browser tests hold), as the diagram reads them: the buses, the branches between them, and the devices on them.
  * Each is the topology the server gives for the file of that name, cut down to
  * what places and routes a diagram (no electrical parameters).
  */
@@ -198,4 +198,95 @@ export const KUNDUR: TopologySummary = {
   loads: loads([7, 8], 0),
   shunts: [],
   controllers: [1, 2, 3, 4].map((n) => entry(n, 'TGOV1', { syn: n })),
+};
+
+/**
+ * `ieee39_full.xlsx` of ANDES: the New England system, 39 buses and 46 branches, 12 of them
+ * transformers (the ten generator step-up units and two more, which the server lists for
+ * their tap or their two rated voltages). Each of the ten generators has a round-rotor
+ * machine, an IEEEX1 exciter and an IEEEST stabiliser; the governors are not listed by the
+ * server. It has 19 loads and two capacitors.
+ */
+export const IEEE39: TopologySummary = {
+  state: 'pre-setup',
+  buses: [
+    ...['BUS1', 'BUS2', 'LOAD3', 'LOAD4', 'BUS5', 'BUS6', 'LOAD7', 'LOAD8', 'BUS9', 'BUS10'],
+    ...['BUS11', 'LOAD12', 'BUS13', 'BUS14', 'LOAD15', 'LOAD16', 'BUS17', 'LOAD18', 'BUS19'],
+    ...['LOAD20', 'LOAD21', 'BUS22', 'LOAD23', 'LOAD24', 'LOAD25', 'LOAD26', 'LOAD27', 'LOAD28'],
+    ...['LOAD29', 'GEN30', 'GEN31', 'GEN32', 'GEN33', 'GEN34', 'GEN35', 'GEN36', 'GEN37'],
+    ...['GEN38', 'GEN39'],
+  ].map((name, i) => entry(i + 1, 'Bus', {}, name)),
+  lines: branches(
+    [
+      [1, 2],
+      [1, 39],
+      [2, 3],
+      [2, 25],
+      [3, 4],
+      [3, 18],
+      [4, 5],
+      [4, 14],
+      [5, 6],
+      [5, 8],
+      [6, 7],
+      [6, 11],
+      [7, 8],
+      [8, 9],
+      [9, 39],
+      [10, 11],
+      [10, 13],
+      [13, 14],
+      [14, 15],
+      [15, 16],
+      [16, 17],
+      [16, 19],
+      [16, 21],
+      [16, 24],
+      [17, 18],
+      [17, 27],
+      [21, 22],
+      [22, 23],
+      [23, 24],
+      [25, 26],
+      [26, 27],
+      [26, 28],
+      [26, 29],
+      [28, 29],
+    ],
+    1,
+  ),
+  transformers: branches(
+    [
+      [2, 30],
+      [31, 6],
+      [10, 32],
+      [12, 11],
+      [12, 13],
+      [19, 20],
+      [19, 33],
+      [20, 34],
+      [22, 35],
+      [23, 36],
+      [25, 37],
+      [29, 38],
+    ],
+    35,
+  ),
+  generators: [
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => entry(n, 'PV', { bus: 29 + n })),
+    entry(10, 'Slack', { bus: 39 }),
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+      entry(`GENROU_${n}`, 'GENROU', { bus: 29 + n, gen: n }),
+    ),
+  ],
+  loads: loads([3, 4, 7, 8, 12, 15, 16, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29, 31, 39], 1),
+  shunts: [entry('Shunt_1', 'Shunt', { bus: 4 }), entry('Shunt_2', 'Shunt', { bus: 5 })],
+  controllers: [
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+      entry(`IEEEX1_${n}`, 'IEEEX1', { syn: `GENROU_${n}` }),
+    ),
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+      entry(`IEEEST_${n}`, 'IEEEST', { avr: `IEEEX1_${n}` }),
+    ),
+  ],
 };

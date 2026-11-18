@@ -82,14 +82,24 @@ const FAR_DEVICE_MOVES: readonly (readonly [number, number])[] = [
   [200, 70],
 ];
 
-/** The sweeps, for the example case `name` whose topology is `topology`. */
-export function holdMoves(name: string, topology: TopologySummary): void {
+/**
+ * The sweeps, for the example case `name` whose topology is `topology`. On a case large enough
+ * that every bus and device would take minutes, `every` takes one bus in that many and one
+ * device in that many (the first, then each step on), which still holds a spread of places on
+ * the diagram to every move.
+ */
+export function holdMoves(
+  name: string,
+  topology: TopologySummary,
+  { every = 1 }: { every?: number } = {},
+): void {
+  const some = <T>(nodes: readonly T[]): T[] => nodes.filter((_, i) => i % every === 0);
   describe(`nothing overlaps on ${name} after a bus or a device is moved`, () => {
     it(`after any bus is dragged and dropped, after a tidy of that, and while it is dragged`, async () => {
       const first = await opened(topology);
       const found: string[] = [];
       let clear = 0;
-      for (const bus of first.nodes.filter((n) => n.type === 'bus')) {
+      for (const bus of some(first.nodes.filter((n) => n.type === 'bus'))) {
         for (const [dx, dy] of BUS_MOVES) {
           const what = `bus ${bus.id} by ${dx}, ${dy}`;
           const ids = draggedWith(first, bus.id);
@@ -118,8 +128,10 @@ export function holdMoves(name: string, topology: TopologySummary): void {
     it(`after any device is dragged and dropped, after a tidy of that, and while it is dragged`, async () => {
       const first = await opened(topology);
       const found: string[] = [];
-      const devices = first.nodes.filter(
-        (n) => n.type === 'generator' || n.type === 'load' || n.type === 'shunt',
+      const devices = some(
+        first.nodes.filter(
+          (n) => n.type === 'generator' || n.type === 'load' || n.type === 'shunt',
+        ),
       );
       for (const device of devices) {
         for (const [dx, dy] of DEVICE_MOVES) {
@@ -144,8 +156,10 @@ export function holdMoves(name: string, topology: TopologySummary): void {
     it(`after any device is dropped far from its bus, and after a tidy of that`, async () => {
       const first = await opened(topology);
       const found: string[] = [];
-      const devices = first.nodes.filter(
-        (n) => n.type === 'generator' || n.type === 'load' || n.type === 'shunt',
+      const devices = some(
+        first.nodes.filter(
+          (n) => n.type === 'generator' || n.type === 'load' || n.type === 'shunt',
+        ),
       );
       for (const device of devices) {
         for (const [dx, dy] of FAR_DEVICE_MOVES) {

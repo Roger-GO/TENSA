@@ -29,6 +29,11 @@
  *   bar in line with one on its other face, and nothing is drawn over
  *   anything else; the placement is what it was after the reload
  *
+ *   in a copy of IEEE 39 and of NPCC, the two larger cases a first run seeds: a
+ *   generator put level with the bar of its bus and a load far above its
+ *   own, Tidy diagram, and the page reloaded -> nothing is drawn over
+ *   anything else and the placement is what it was after the reload
+ *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
  *   bar of bus 12 that is drawn out to its tap keeps its gap to bar 13
@@ -41,8 +46,8 @@
  * `sldDrawing.ts`) and handed to the checker the diagram itself routes by
  * (`findOverlaps` in `overlapCheck.ts`), so the boxes are the ones the
  * browser laid out: the unit tests hold the same rule on the sizes the
- * diagram works its places out with, and on a case of over a hundred buses,
- * which no example case seeded into a workspace is (`noOverlap.test.ts`).
+ * diagram works its places out with, and on the 118-bus case
+ * (`noOverlap.test.ts`).
  *
  * The drags are done in a copy saved under a name of this run's own, so the
  * example cases the other specs open keep their automatic layout.
@@ -50,6 +55,7 @@
 import { test, expect } from './fixtures';
 import {
   NEAR,
+  type Drawing,
   branchesIntoDevices,
   dragInDiagram,
   drawing,
@@ -93,6 +99,19 @@ test.beforeEach(async ({ page }) => {
 const EXAMPLES: {
   file: string;
   moves: [id: string, dx: number, dy: number][];
+  /**
+   * The connectors that do not drop square onto their bar, where a bus is so
+   * crowded that its device has no place in line with its tap: one leaves the
+   * middle of its face for the end of the bar. None on the small cases.
+   */
+  slanted?: string[];
+  /**
+   * Whether a re-layout of the case as it opens finds nothing to move. It does
+   * on the small cases. On the 140-bus case it puts buses on the grid that the
+   * automatic layout left off it, and writes the layout, which the later check
+   * that looking at a case writes nothing would then catch.
+   */
+  arranged?: boolean;
 }[] = [
   {
     file: 'ieee14_full.xlsx',
@@ -118,9 +137,39 @@ const EXAMPLES: {
       ['load-PQ_2', -113, 66],
     ],
   },
+  {
+    file: 'ieee39_full.xlsx',
+    moves: [
+      ['10', -100, 48],
+      ['load-PQ_8', 70, -64],
+      ['load-PQ_10', 14, -191],
+    ],
+  },
+  {
+    file: 'npcc.xlsx',
+    moves: [
+      ['24', -80, 64],
+      ['load-PQ_13', 60, -70],
+      ['load-PQ_12', 14, 120],
+    ],
+    slanted: ['stub-generator-25', 'stub-load-PQ_67'],
+    arranged: false,
+  },
 ];
 
-for (const { file, moves } of EXAMPLES) {
+/** The device connectors of a drawing that do not drop square onto their bar. */
+function slantedConnectors(edges: Drawing['edges']): string[] {
+  const slanted: string[] = [];
+  for (const [id, edge] of Object.entries(edges)) {
+    if (!id.startsWith('stub-')) continue;
+    // A connector is a straight run from the face of its device to its tap.
+    expect(edge.points, id).toHaveLength(2);
+    if (Math.abs(edge.points[0]![0] - edge.points[1]![0]) >= NEAR) slanted.push(id);
+  }
+  return slanted.sort();
+}
+
+for (const { file, moves, slanted = [], arranged = true } of EXAMPLES) {
   test(`${file}: nothing is drawn over anything else as it opens, with values, moved by hand, and laid out again`, async ({
     page,
   }) => {
@@ -140,22 +189,20 @@ for (const { file, moves } of EXAMPLES) {
     expect(problems(opened)).toEqual([]);
     expect(branchesIntoDevices(opened)).toEqual([]);
     // Every device stands over or under its bar: each connector drops square.
-    for (const [id, edge] of Object.entries(opened.edges)) {
-      if (!id.startsWith('stub-')) continue;
-      expect(edge.points, id).toHaveLength(2);
-      expect(Math.abs(edge.points[0]![0] - edge.points[1]![0]), id).toBeLessThan(NEAR);
-    }
+    expect(slantedConnectors(opened.edges)).toEqual(slanted);
     // It is arranged already: neither tidy finds anything to change, and
     // the button keeps saying so after the notice has gone.
     await page.getByTestId('sld-tidy').click();
     await expect(page.getByText('The diagram is already tidy.').last()).toBeVisible();
     await expect(page.getByTestId('sld-tidy-note')).toHaveText('Already tidy: nothing was changed');
-    await page.getByTestId('sld-arrange-trigger').click();
-    await page.getByTestId('sld-arrange-tidy-relayout').click();
-    await expect(
-      page.getByText(/Every bus is on the grid, every device beside its bus/),
-    ).toBeVisible();
-    await expect(page.getByTestId('sld-tidy-count')).toHaveCount(0);
+    if (arranged) {
+      await page.getByTestId('sld-arrange-trigger').click();
+      await page.getByTestId('sld-arrange-tidy-relayout').click();
+      await expect(
+        page.getByText(/Every bus is on the grid, every device beside its bus/),
+      ).toBeVisible();
+      await expect(page.getByTestId('sld-tidy-count')).toHaveCount(0);
+    }
 
     // ---- With the values of a power flow --------------------------------------
     await runPowerFlow(page);
@@ -218,11 +265,7 @@ for (const { file, moves } of EXAMPLES) {
       expect(Math.abs(node.x % GRID_STEP), `bus ${id}`).toBe(0);
       expect(Math.abs(node.y % GRID_STEP), `bus ${id}`).toBe(0);
     }
-    for (const [id, edge] of Object.entries(laidOut.edges)) {
-      if (!id.startsWith('stub-')) continue;
-      expect(edge.points, id).toHaveLength(2);
-      expect(Math.abs(edge.points[0]![0] - edge.points[1]![0]), id).toBeLessThan(NEAR);
-    }
+    expect(slantedConnectors(laidOut.edges)).toEqual(slanted);
     expect(problems(laidOut)).toEqual([]);
     expect(branchesIntoDevices(laidOut)).toEqual([]);
     expect(await overlapsOnScreen(page)).toEqual([]);
@@ -330,6 +373,75 @@ test('kundur_full.xlsx: bars keep their gap and no line reads as going through a
     expect(again.edges[id]?.points, id).toEqual(edge.points);
   }
 });
+
+for (const { file, generator, load } of [
+  { file: 'ieee39_full.xlsx', generator: 'generator-4', load: 'load-PQ_8' },
+  { file: 'npcc.xlsx', generator: 'generator-13', load: 'load-PQ_19' },
+]) {
+  test(`${file}: a generator put beside its bus, a load far above its own, a tidy and a reload keep the rule and the placement`, async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+    await page.goto('/');
+    await openCase(page, file);
+    await settled(page);
+    await openCopy(page, `no-overlap-${file.replace(/[_.].*$/, '')}-clearance-${Date.now()}`);
+    await settled(page);
+    await runPowerFlow(page);
+    const opened = await settled(page);
+    expect(problems(opened)).toEqual([]);
+
+    // The bus the generator hangs from is the one whose bar its connector ends on.
+    const tap = opened.edges[`stub-${generator}`]!.points[1]!;
+    const bus = Object.values(opened.nodes).find(
+      (node) =>
+        node.type === 'bus' &&
+        Math.abs(node.y - tap[1]) < 12 &&
+        tap[0] >= node.x + (node.barLeft ?? 0) - 1 &&
+        tap[0] <= node.x + (node.barLeft ?? 0) + (node.barLength ?? node.width) + 1,
+    )!;
+    expect(bus, `the bus of ${generator}`).toBeDefined();
+    const unit = opened.nodes[generator]!;
+
+    // Level with the bar of its bus, past the east tip.
+    await dragInDiagram(
+      page,
+      generator,
+      bus.x + (bus.barLeft ?? 0) + (bus.barLength ?? bus.width) + 50 - unit.x,
+      bus.y + 3 - unit.height / 2 - unit.y,
+    );
+    const aside = await settled(page);
+    expect(problems(aside)).toEqual([]);
+    expect(await overlapsOnScreen(page), 'with the generator beside its bus').toEqual([]);
+
+    // A load far above its bar, so that its connector comes a long way down.
+    await dragInDiagram(page, load, 0, -150);
+    const moved = await settled(page);
+    expect(problems(moved)).toEqual([]);
+    expect(await overlapsOnScreen(page), 'with the load far above its bar').toEqual([]);
+
+    await page.getByTestId('sld-tidy').click();
+    const tidy = await settled(page);
+    expect(problems(tidy)).toEqual([]);
+    expect(await overlapsOnScreen(page), 'after the tidy').toEqual([]);
+
+    // Reloaded, it is drawn as it was left.
+    await page.reload();
+    await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 90_000 });
+    const again = await settled(page);
+    expect(problems(again)).toEqual([]);
+    expect(await overlapsOnScreen(page), 'after the reload').toEqual([]);
+    for (const [id, node] of Object.entries(tidy.nodes)) {
+      expect({ x: again.nodes[id]?.x, y: again.nodes[id]?.y }, id).toEqual({
+        x: node.x,
+        y: node.y,
+      });
+    }
+    for (const [id, edge] of Object.entries(tidy.edges)) {
+      expect(again.edges[id]?.points, id).toEqual(edge.points);
+    }
+  });
+}
 
 test('kundur_full.xlsx: a load pulled down beside bars 12 and 13 stays where it is dropped, and the bars keep their gap', async ({
   page,
