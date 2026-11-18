@@ -402,8 +402,15 @@ def test_the_cases_are_chosen_by_id_by_default_flag_or_all_with_a_file(
 
 @pytest.mark.integration  # it listens on a loopback socket
 def test_an_error_status_becomes_an_api_error_with_the_servers_detail(harness: ModuleType) -> None:
+    received: list[bytes] = []
+
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            # Read the request before answering it. A server that closes a connection with part
+            # of the request unread resets it, and on Windows the reset discards the answer the
+            # client has not read yet: the client raised ConnectionAbortedError (WinError 10053)
+            # in one run in a few, with nothing wrong in the code under test.
+            received.append(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
             body = json.dumps({"detail": "already there; send overwrite=true"}).encode()
             self.send_response(409)
             self.send_header("Content-Length", str(len(body)))
@@ -428,6 +435,8 @@ def test_an_error_status_becomes_an_api_error_with_the_servers_detail(harness: M
         with pytest.raises(harness.ApiError) as raised:
             api.post("/examples/x/add", overwrite=True)
         assert raised.value.status == 409 and "send overwrite=true" in raised.value.detail
+        # The call sends a body, an empty object, and the stand-in took all of it.
+        assert received == [b"{}"]
         # Booleans go out as the words the API reads, and the base gets the /api prefix.
         assert api.get("/health", full=True) == {"seen": "/api/health?full=true"}
     finally:

@@ -568,7 +568,10 @@ def test_serve_reload_clears_the_old_variable_names_it_would_otherwise_let_throu
     stand in for an option this ``serve`` did not pass."""
     monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
     stale = _reload_environment(
-        "ANDES_APP_RELOAD_", tmp_path / "elsewhere", SWEEP_WORKERS="9", LOG_FILE=str(tmp_path / "x.log")
+        "ANDES_APP_RELOAD_",
+        tmp_path / "elsewhere",
+        SWEEP_WORKERS="9",
+        LOG_FILE=str(tmp_path / "x.log"),
     )
     with mock.patch.dict(os.environ, stale):
         result = runner.invoke(

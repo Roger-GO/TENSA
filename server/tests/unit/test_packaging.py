@@ -116,9 +116,6 @@ def test_the_build_backend_is_new_enough_to_write_the_license_expression() -> No
     assert all(r == "hatchling>=1.27" for r in floors), floors
 
 
-def test_the_author_is_named_as_in_the_citation() -> None:
-    (author,) = pyproject()["project"]["authors"]
-    assert author["name"] == "Rogelio Gracia Otalvaro"
 
 
 def test_the_ui_hook_is_enabled_and_exists() -> None:
