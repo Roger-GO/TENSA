@@ -38,7 +38,8 @@ def _run(deadband: int) -> tuple[Any, np.ndarray, np.ndarray]:
     cases = _andes_cases_dir()
     if cases is None:
         pytest.skip("ANDES's cases are not installed")
-    andes.config_logger(stream_level=50)
+    # No ``andes.config_logger`` here: it puts the ``andes`` logger at DEBUG with two handlers for
+    # every test that runs after this one, and ``tests/unit/test_messages.py`` reads that logger.
     ss = andes.load(
         str(cases / "5bus" / "pjm5bus.xlsx"),
         setup=False,
