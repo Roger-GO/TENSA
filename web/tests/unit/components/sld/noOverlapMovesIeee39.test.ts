@@ -18,6 +18,7 @@ vi.mock('@/components/sld/elkClient', async () => {
 });
 
 // Every bus and every device would take a quarter of an hour on a case of this size (each move
-// costs about a second, against a tenth on Kundur): one in twenty of each, with every move of
-// the spread. The whole sweep was run once, with every bus and device, when the case was added.
+// costs about a second, against a tenth on Kundur): every twentieth, which is two of its 39 buses
+// and two of its 31 devices, with every move of the spread. The whole sweep was run once, with
+// every bus and device, when the case was added.
 holdMoves('IEEE 39', IEEE39, { every: 20 });
