@@ -747,6 +747,36 @@ def test_citations_come_as_text_or_as_bibtex(catalog: Catalog) -> None:
     assert format_citations(_catalog(_entry("x", "one/one.xlsx", citations=[])).examples[0]) == ""
 
 
+def test_a_modification_that_ends_in_a_full_stop_does_not_get_a_second_one(
+    fake_cases_dir: Path, workspace: Path
+) -> None:
+    catalog = _catalog(
+        _entry(
+            "one",
+            "one/one.xlsx",
+            modifications=["A unit was changed.", "A table was dropped"],
+        )
+    )
+    add_example("one", workspace, catalog=catalog)
+    text = (workspace / SOURCES_FILE).read_text(encoding="utf-8")
+    assert "- Modifications: A unit was changed; A table was dropped." in text
+    assert ".." not in text
+
+
+def test_bytes_of_the_users_that_are_not_utf8_survive_the_next_add(
+    fake_cases_dir: Path, workspace: Path, catalog: Catalog
+) -> None:
+    """The sources file is read, edited and written back: a byte of the user's own that is not
+    text (a note in Latin-1) is kept as it was, and not replaced by U+FFFD for good."""
+    add_example("one", workspace, catalog=catalog)
+    path = workspace / SOURCES_FILE
+    path.write_bytes(path.read_bytes() + b"\nA note by the user: caf\xe9.\n")
+    add_example("two", workspace, catalog=catalog)
+    assert b"caf\xe9." in path.read_bytes()
+    assert "\ufffd".encode() not in path.read_bytes()
+    assert "<!-- tensa-example:two -->" in path.read_text(encoding="utf-8", errors="replace")
+
+
 def test_the_source_line_of_a_file_tensa_builds_says_so_instead_of_a_retrieval() -> None:
     sha = _sha(_FILES["one/one.xlsx"])
     bundled = {

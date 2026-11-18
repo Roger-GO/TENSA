@@ -343,6 +343,38 @@ async def test_a_workspace_the_server_cannot_write_is_a_server_error_not_a_crash
     assert _names(ws) == []
 
 
+async def test_a_path_the_workspace_refuses_is_a_400_and_a_damaged_installation_a_500(
+    client_workspace: tuple[httpx.AsyncClient, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The two mappings that had a test of the core and none of the route: a wrong order of the
+    ``except`` clauses, or a wrong status, would not be caught anywhere else."""
+    from tensa.security.paths import WorkspacePathError
+
+    client, ws = client_workspace
+
+    def refuse(example_id: str, workspace: Path, overwrite: bool = False) -> None:
+        raise WorkspacePathError("'wscc9.xlsx' is a symlink in the workspace")
+
+    monkeypatch.setattr("tensa.api.routes.examples.add_example", refuse)
+    resp = await client.post("/api/examples/wscc9/add")
+    assert resp.status_code == 400, resp.text
+    assert "symlink" in resp.json()["detail"]
+    monkeypatch.undo()
+
+    # A bundled file that is not the one the catalog recorded: the installation is damaged.
+    damaged = tmp_path / "cases"
+    damaged.mkdir()
+    shipped = examples.bundled_cases_dir() / "wscc9.xlsx"
+    (damaged / "wscc9.xlsx").write_bytes(shipped.read_bytes() + b"x")
+    monkeypatch.setattr(examples, "bundled_cases_dir", lambda: damaged)
+    resp = await client.post("/api/examples/wscc9/add")
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"]
+    assert _names(ws) == []
+
+
 # ---- the schema --------------------------------------------------------------------------
 
 

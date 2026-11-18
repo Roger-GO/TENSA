@@ -48,8 +48,6 @@ _LAYOUT_SUFFIX = ".layout.json"
 # The longest file name the common file systems accept, in UTF-8 bytes.
 _MAX_NAME_BYTES = 255
 
-CATALOG_VERSION = 1
-
 Analysis = Literal["pf", "tds", "eig"]
 CheckKind = Literal[
     "independent-solver", "published", "stored-solution", "ring-down", "regression-baseline"

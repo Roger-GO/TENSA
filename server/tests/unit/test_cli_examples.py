@@ -210,6 +210,17 @@ def test_an_andes_file_that_is_not_the_recorded_one_is_a_warning_on_stderr(
     assert "a: added a.xlsx" in result.stdout
 
 
+def test_an_id_given_twice_is_added_once_and_is_not_an_error(
+    catalog: Catalog, tmp_path: Path
+) -> None:
+    result = runner.invoke(
+        cli.app, ["examples", "add", "a", "a", "--workspace", str(tmp_path / "ws")]
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count("a: added a.xlsx") == 1
+    assert "error" not in result.stderr
+
+
 def test_cite_prints_the_citations_and_bibtex_with_the_flag(catalog: Catalog) -> None:
     text = runner.invoke(cli.app, ["examples", "cite", "a"])
     assert text.exit_code == 0, text.output

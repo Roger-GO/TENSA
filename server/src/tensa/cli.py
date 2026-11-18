@@ -1114,6 +1114,9 @@ def examples_add(
     workspace. A running server lists the new files at once.
     """
     catalog = load_catalog()
+    # An id given twice is added once: the second would be reported as an error for a case that
+    # is in place.
+    ids = list(dict.fromkeys(ids))
     for example_id in ids:
         if not _known_example(catalog, example_id).has_file:
             raise typer.BadParameter(

@@ -442,7 +442,10 @@ def _sources_section(example: Example, names: list[str], warnings: list[str]) ->
         f"- Files: {', '.join(f'`{name}`' for name in names)}",
         f"- Source: {_source_line(example)}",
         f"- Licence: {licence_text}",
-        "- Modifications: " + ("; ".join(example.modifications) or "none") + ".",
+        # A modification written as a sentence ends in a full stop already.
+        "- Modifications: "
+        + ("; ".join(m.rstrip(".") for m in example.modifications) or "none")
+        + ".",
     ]
     lines += [f"- Caveat: {caveat}" for caveat in example.caveats]
     lines += [f"- Warning: {warning}" for warning in warnings]
@@ -481,12 +484,14 @@ def _record_sources(
             elif info.st_size > _SOURCES_MAX_BYTES:
                 raise ExampleWriteError(f"{SOURCES_FILE} is over {_SOURCES_MAX_BYTES} bytes")
             else:
-                current = target.read_text(encoding="utf-8", errors="replace")
+                # Bytes of the user's own that are not UTF-8 are kept as they are, and not
+                # replaced by U+FFFD in the file this writes back.
+                current = target.read_text(encoding="utf-8", errors="surrogateescape")
             if marker.search(current):
                 text = marker.sub(lambda _: section, current, count=1)
             else:
                 text = current.rstrip("\n") + "\n\n" + section
-            _claim(target, text.encode("utf-8"), overwrite=True)
+            _claim(target, text.encode("utf-8", errors="surrogateescape"), overwrite=True)
     except (OSError, WorkspacePathError, ExampleError) as exc:
         log.warning("could not update %s: %s", SOURCES_FILE, exc)
         return f"could not update {SOURCES_FILE}: {exc}"
