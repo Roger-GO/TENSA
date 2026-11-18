@@ -302,6 +302,91 @@ def test_post_tds_reports_a_run_that_cannot_solve_its_fault(client: TestClient) 
 # ---- every run goes through the one hook ---------------------------------------------
 
 
+def _is_tds_routine(node: ast.expr) -> bool:
+    """``<x>.TDS`` or ``getattr(<x>, "TDS")``: the routine of a system."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "TDS"
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value == "TDS"
+    )
+
+
+def _runs_and_hooks(source: str) -> tuple[bool, bool]:
+    """Whether a module runs the time-domain routine, and whether it sets a
+    ``callpert`` hook, in any of the forms that do it: ``<x>.TDS.run()``, a name
+    bound to the routine (``tds = ss.TDS; tds.run()``), ``getattr(ss, "TDS")``,
+    ``andes.run(...)`` (which takes the routine by name), and a hook set by an
+    assignment, an annotated or augmented one, or ``setattr``."""
+    tree = ast.parse(source)
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _is_tds_routine(node.value):
+            aliases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        if (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and isinstance(node.target, ast.Name)
+            and _is_tds_routine(node.value)
+        ):
+            aliases.add(node.target.id)
+    runs = hooks = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+        ):
+            holder = node.func.value
+            if (
+                _is_tds_routine(holder)
+                or (isinstance(holder, ast.Name) and holder.id in aliases)
+                or (isinstance(holder, ast.Name) and holder.id == "andes")
+            ):
+                runs = True
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign | ast.AugAssign):
+            targets = [node.target]
+        if any(isinstance(t, ast.Attribute) and t.attr == "callpert" for t in targets):
+            hooks = True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == "callpert"
+        ):
+            hooks = True
+    return runs, hooks
+
+
+@pytest.mark.parametrize(
+    "source, runs, hooks",
+    [
+        ("ss.TDS.run()", True, False),
+        ("tds = ss.TDS\ntds.run()", True, False),
+        ("tds: Any = getattr(ss, 'TDS')\ntds.run()", True, False),
+        ("getattr(ss, 'TDS').run()", True, False),
+        ("andes.run('case.xlsx', routine='tds')", True, False),
+        ("ss.TDS.callpert = f", False, True),
+        ("ss.TDS.callpert: Any = f", False, True),
+        ("setattr(ss.TDS, 'callpert', f)", False, True),
+        ("h = ss.TDS.h\nss.EIG.run()", False, False),
+    ],
+)
+def test_the_guard_below_sees_every_form_of_running_or_hooking_the_routine(
+    source: str, runs: bool, hooks: bool
+) -> None:
+    assert _runs_and_hooks(source) == (runs, hooks)
+
+
 def test_the_only_place_the_server_runs_a_system_is_the_wrapper() -> None:
     """The landing is installed by ``Wrapper.run_tds``. A second call of
     ``TDS.run`` or a second ``callpert`` of the server's own (a route, a worker
@@ -313,20 +398,11 @@ def test_the_only_place_the_server_runs_a_system_is_the_wrapper() -> None:
     hooks: set[str] = set()
     for path in root.rglob("*.py"):
         name = path.relative_to(root).as_posix()
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "run"
-                and isinstance(node.func.value, ast.Attribute)
-                and node.func.value.attr == "TDS"
-            ):
-                runs.add(name)
-            if isinstance(node, ast.Assign) and any(
-                isinstance(target, ast.Attribute) and target.attr == "callpert"
-                for target in node.targets
-            ):
-                hooks.add(name)
+        runs_here, hooks_here = _runs_and_hooks(path.read_text(encoding="utf-8"))
+        if runs_here:
+            runs.add(name)
+        if hooks_here:
+            hooks.add(name)
 
     assert runs == {"core/wrapper/tds.py"}
     assert hooks == {"core/wrapper/tds.py"}
