@@ -316,37 +316,6 @@ describe('buildGraph — controller badges', () => {
     expect((ree?.data as Record<string, unknown>).parentNodeId).toBe('controller-REGCA1-REGCA1_1');
   });
 
-  it('docks the controls of a wind turbine whose generator is missing under the one each names (rego, rea, rep)', () => {
-    // The drive train names the electrical control in `ree`, the aerodynamics the drive train in
-    // `rego`, the pitch control the aerodynamics in `rea` and the torque control the pitch control
-    // in `rep`. The converter's generator is not in the case, so there is no unit to draw them
-    // on: they are badges, and each docks beside the badge it names, down to the torque control.
-    const topology = makeTopology({
-      buses: [bus(1)],
-      controllers: [
-        ctrl('R1', 'REGCA1', { bus: 1, gen: 'GONE' }),
-        ctrl('E1', 'REECA1', { reg: 'R1' }),
-        ctrl('D1', 'WTDTA1', { ree: 'E1' }),
-        ctrl('A1', 'WTARA1', { rego: 'D1' }),
-        ctrl('P1', 'WTPTA1', { rea: 'A1' }),
-        ctrl('T1', 'WTTQA1', { rep: 'P1' }),
-      ],
-    });
-    const { nodes } = buildGraph(topology, COORDS);
-    const parentOf = (id: string) =>
-      (nodeById(nodes, id)?.data as Record<string, unknown>).parentNodeId;
-    expect(parentOf('controller-REGCA1-R1')).toBe('1');
-    expect(parentOf('controller-REECA1-E1')).toBe('controller-REGCA1-R1');
-    expect(parentOf('controller-WTDTA1-D1')).toBe('controller-REECA1-E1');
-    expect(parentOf('controller-WTARA1-A1')).toBe('controller-WTDTA1-D1');
-    expect(parentOf('controller-WTPTA1-P1')).toBe('controller-WTARA1-A1');
-    expect(parentOf('controller-WTTQA1-T1')).toBe('controller-WTPTA1-P1');
-    // None of them is left in the gutter.
-    expect(badgesOf(nodes).filter((n) => (n.data as { orphan?: boolean }).orphan === true)).toEqual(
-      [],
-    );
-  });
-
   it('renders an orphan badge when the referenced device is missing', () => {
     const topology = makeTopology({
       buses: [bus(1)],

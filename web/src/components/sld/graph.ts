@@ -1684,9 +1684,8 @@ export function buildGraph(
   // on a bus (a PMU) is docked beside the bus, one the layout places on its
   // own stands where the layout has it, tethered to its unit, and one whose
   // reference cannot be resolved (or whose unit is not drawn) is an orphan
-  // badge in the gutter. A controller can name another one (`avr`, `reg`, `ree`,
-  // and down a wind turbine's chain `rego`, `rea`, `rep`) and is then docked beside that one's
-  // badge, so the badges are
+  // badge in the gutter. A controller can name another one (`avr`, `reg`,
+  // `ree`) and is then docked beside that one's badge, so the badges are
   // resolved in passes. Runs after collision push-out so anchors use each
   // parent's final position.
   const drawnNodes = new Set(nodes.map((n) => n.id));
@@ -1773,8 +1772,7 @@ export const ORPHAN_STACK_DY = CONTROLLER_GLYPH_FOOTPRINT + 4;
  * A controller of a drawn generating unit goes to the node of that unit
  * (`unitNodeOf`). Generator/bus references resolve directly (those nodes are
  * placed before any controller). Upstream-controller references
- * (`avr`→Exciter, `reg`→RenGen, `ree`→RenExciter, and down a wind turbine's
- * chain `rego`, `rea` and `rep`) name another controller by
+ * (`avr`→Exciter, `reg`→RenGen, `ree`→RenExciter) name another controller by
  * its model-local idx, so they resolve through `controllerNodeIdByIdx`
  * (idx → kind-namespaced node id), which is why a chain of badges needs
  * iterative passes.
@@ -1809,15 +1807,11 @@ function resolveControllerParent(
   }
   // Upstream-controller ref: resolve the referenced controller's idx to its
   // placed (kind-namespaced) node id; wait if it hasn't been placed yet.
-  // The params of `CHAIN_REFS` (`generatingUnits.ts`): an exciter, a converter's electrical
-  // control, and down a wind turbine's chain its drive train, aerodynamics and pitch control.
-  const ctrlRef =
-    refVal('avr') ??
-    refVal('reg') ??
-    refVal('ree') ??
-    refVal('rego') ??
-    refVal('rea') ??
-    refVal('rep');
+  // The aerodynamics, pitch control and torque control of a wind turbine (`rego`, `rea`, `rep`)
+  // are not followed: a docked badge stands at a fixed offset with no look at what is there, so
+  // a chain of them walks into the lines and symbols. Where the unit is not drawn they stay
+  // orphan badges in the gutter, where nothing else is.
+  const ctrlRef = refVal('avr') ?? refVal('reg') ?? refVal('ree');
   if (ctrlRef !== null) {
     const cid = controllerNodeIdByIdx.get(ctrlRef);
     if (cid !== undefined && nodeById.has(cid)) return { id: cid };
