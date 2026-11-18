@@ -10,7 +10,7 @@ source, the citations and the licence of that case.
 ## ANDES example cases
 
 IEEE 14-bus with machines and controls, Kundur two-area system, IEEE 39-bus New England
-system, NPCC 140-bus system, WECC 179-bus system, and the smaller cases of the gallery:
+system, NPCC 140-bus system, WECC 179-bus system, and the other cases of the gallery:
 the Kundur system with a stabiliser on one generator, the IEEE 14-bus system with a fault
 built in, the PJM 5-bus system with classical machines and a line trip, the IEEE 14-bus
 system with a solar plant, the IEEE 14-bus system with a type-3 wind turbine, and the IEEE
