@@ -39,7 +39,7 @@ TENSA runs on Linux, macOS (Apple silicon) and Windows, with Python 3.12 and 3.1
 
 ## Example cases
 
-Beyond the five that start in an empty workspace, TENSA has a catalog of example cases to add from the app (**Example cases** in the Project tab) or with `tensa examples add <id>`: dynamic cases with machines, exciters and governors (IEEE 14 with a fault, with solar and with wind, Kundur with a stabiliser, WECC 179-bus, the PJM 5-bus system) and steady-state cases for power flow, from 5 buses to the 2,000-bus Texas synthetic grid. Each says where its data comes from, how to cite it, what licence it is under and how its results were checked, and a few entries are links to data TENSA cannot redistribute. See [Example cases](https://roger-go.github.io/TENSA/examples/) in the documentation.
+Beyond the five that start in an empty workspace, TENSA has a catalog of example cases to add from the app (**Example cases** in the Project tab) or with `tensa examples add <id>`: dynamic cases with machines, exciters and governors (IEEE 14 with a fault, with solar and with wind, Kundur with a stabiliser, WECC 179-bus, the PJM 5-bus system) and steady-state cases for power flow, from the 24-bus IEEE RTS to the 2,000-bus Texas synthetic grid. Each says where its data comes from, how to cite it, what licence it is under and how its results were checked, and some entries are only links, to data TENSA does not hold or cannot redistribute. See [Example cases](https://roger-go.github.io/TENSA/examples/) in the documentation.
 
 ## See it in action
 
