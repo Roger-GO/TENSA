@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 
 from tensa.core import examples
-from tensa.core.example_references import load_reference
+from tensa.core.example_references import load_reference, references_dir
 from tests._repo import SCRIPTS_DIR, load_module
 
 pytestmark = pytest.mark.integration
@@ -1305,6 +1305,36 @@ def _stored_mismatch(script: ModuleType, name: str) -> tuple[np.ndarray, dict[st
         system.Bus.a.v[i] = math.radians(stored["bus_angle"][str(idx)])
     mismatch = _unaccounted_power(network, system, eps=0.0) * network["baseMVA"]
     return mismatch, network, system
+
+
+def test_the_stored_checks_that_ship_say_what_the_script_says_of_their_basis(
+    script: ModuleType,
+) -> None:
+    """A reference file holds the text and the tolerance of the basis the script writes it with,
+    so the script cannot change (the count of buses at a limit, say) while the file keeps the
+    old words, which the catalog and the docs page then copy."""
+    mapping = {
+        "pf.bus_voltage_pu": "voltage",
+        "pf.bus_angle_deg": "angle",
+        "pf.slack_p_mw": "slack_p",
+    }
+    seen = 0
+    for path in sorted(references_dir().glob("*.json")):
+        shipped = load_reference(path.stem)
+        assert shipped is not None
+        for check in shipped.checks:
+            if check.kind != "stored-solution":
+                continue
+            enforced = check.pflow is not None
+            assert check.generated_by == script.STORED_BY + (script.LIMITS_FLAG if enforced else "")
+            bases = script.STORED_BASES_ENFORCED if enforced else script.STORED_BASES
+            basis = bases.get(shipped.id, script.RAW_BASIS)
+            assert basis.origin in check.reference, f"{path.name}: {check.name}"
+            assert check.tolerance.abs == getattr(basis, mapping[check.quantity]), (
+                f"{path.name}: {check.name}"
+            )
+            seen += 1
+    assert seen >= 20
 
 
 def test_the_stored_state_of_activsg_2000_is_a_solution_of_the_file_s_equations(
