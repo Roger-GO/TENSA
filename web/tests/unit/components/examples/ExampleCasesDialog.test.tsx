@@ -878,6 +878,31 @@ describe('the filter and the states of the list', () => {
     expect(screen.getAllByRole('article')).toHaveLength(1);
   });
 
+  it('shows the list from the top when the filter changes, and when it is cleared', async () => {
+    const user = await openDialog();
+    const scroller = screen.getByTestId('example-cases-scroll');
+    // jsdom does not scroll: the offset is held where the test can set and read it.
+    let offset = 0;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get: () => offset,
+      set: (value: number) => {
+        offset = value;
+      },
+    });
+    const filter = screen.getByRole('searchbox', { name: 'Filter the example cases' });
+    offset = 400;
+    await user.type(filter, 'w');
+    expect(offset).toBe(0);
+    offset = 400;
+    await user.clear(filter);
+    expect(offset).toBe(0);
+    await user.type(filter, 'zzzz');
+    offset = 400;
+    await user.click(screen.getByRole('button', { name: 'Clear the filter' }));
+    expect(offset).toBe(0);
+  });
+
   it('keeps what was opened in a card while the filter hides it, for when it is cleared', async () => {
     const user = await openDialog();
     await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));

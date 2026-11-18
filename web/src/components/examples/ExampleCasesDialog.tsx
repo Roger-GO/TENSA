@@ -125,6 +125,14 @@ function Body() {
   const { openCase, isPending: loadPending } = useOpenCase();
   const reloadCase = useReloadCase();
   const [filter, setFilter] = useState('');
+  const scroller = useRef<HTMLDivElement | null>(null);
+  // A new filter shows its list from the top: the list under it was scrolled for the old one,
+  // and a short one the browser keeps scrolled part way down (the cards the filter matches
+  // would begin above what is on screen).
+  const changeFilter = (value: string) => {
+    setFilter(value);
+    if (scroller.current !== null) scroller.current.scrollTop = 0;
+  };
 
   const openBlocked =
     sessionId === null
@@ -169,7 +177,7 @@ function Body() {
         <Input
           type="search"
           value={filter}
-          onChange={setFilter}
+          onChange={changeFilter}
           aria-label="Filter the example cases"
           placeholder="Filter by name, size or analysis"
           data-testid="example-cases-filter"
@@ -195,7 +203,11 @@ function Body() {
         </p>
       ) : null}
 
-      <div data-testid="example-cases-scroll" className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div
+        ref={scroller}
+        data-testid="example-cases-scroll"
+        className="min-h-0 flex-1 overflow-y-auto pr-1"
+      >
         {list.isPending ? (
           <p
             role="status"
@@ -230,7 +242,12 @@ function Body() {
                     : `No example case matches “${filter.trim()}”.`}
                 </p>
                 {examples.length > 0 ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => setFilter('')}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => changeFilter('')}
+                  >
                     Clear the filter
                   </Button>
                 ) : null}
