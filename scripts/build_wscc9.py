@@ -20,11 +20,14 @@ The workbook holds what ANDES's own writer (``andes.io.xlsx.write``) holds, one 
 model, but not its ``_config`` sheet: ANDES applies that sheet when it loads a file, so it
 would pin every ANDES setting for whoever opens the case. The file stores the power flow
 solution (rounded to six places) as the initial state, as the ANDES cases do, and carries a
-fixed timestamp in the workbook's properties and in its archive, so that the same data always
-gives the same bytes and the catalog can hold the file's SHA-256.
+fixed timestamp in the workbook's properties and in its archive, so that the same data gives the
+same bytes on a machine with the same zlib, pandas and xlsxwriter, and the catalog can hold the
+file's SHA-256.
 
-``--check`` builds the file into a temporary place and exits 1 when it is not the one at the
-output path (the checksum the catalog holds is that file's).
+``--check`` builds the file into a temporary place and exits 1 when the one at the output path
+holds other data (the checksum the catalog holds is that file's). Bytes that differ with the
+same data in every sheet, as another zlib or another release of the writer gives, exit 0 and
+say so.
 """
 
 from __future__ import annotations
@@ -288,6 +291,22 @@ def build_file(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _same_data(left: Path, right: Path) -> bool:
+    """Whether two workbooks hold the same sheets with the same values."""
+    import pandas as pd
+
+    a = pd.read_excel(left, sheet_name=None)
+    b = pd.read_excel(right, sheet_name=None)
+    if list(a) != list(b):
+        return False
+    try:
+        for name, frame in a.items():
+            pd.testing.assert_frame_equal(frame, b[name])
+    except AssertionError:
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
@@ -304,13 +323,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.check:
         with tempfile.TemporaryDirectory(prefix="tensa-wscc9-check-") as tmp:
-            built = build_file(Path(tmp) / "wscc9.xlsx")
-        have = hashlib.sha256(args.output.read_bytes()).hexdigest() if args.output.exists() else ""
-        if built != have:
-            print(f"build_wscc9: {args.output} is not what this script builds ({built})")
-            return 1
-        print(f"{args.output} is what this script builds ({built})")
-        return 0
+            built_path = Path(tmp) / "wscc9.xlsx"
+            built = build_file(built_path)
+            have = (
+                hashlib.sha256(args.output.read_bytes()).hexdigest() if args.output.exists() else ""
+            )
+            if built == have:
+                print(f"{args.output} is what this script builds ({built})")
+                return 0
+            if have and _same_data(args.output, built_path):
+                print(
+                    f"{args.output} holds the data this script builds, in other bytes "
+                    f"({have}, not {built}): the zlib, pandas or xlsxwriter here is not the "
+                    "one that wrote it"
+                )
+                return 0
+        print(f"build_wscc9: {args.output} is not what this script builds ({built})")
+        return 1
     digest = build_file(args.output)
     print(f"wrote {args.output} (sha256 {digest})")
     return 0

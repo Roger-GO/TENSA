@@ -14,6 +14,7 @@ precision. The tests need ANDES and skip when run away from a checkout.
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 from types import ModuleType
 
@@ -73,10 +74,40 @@ def rebuilt(script: ModuleType, tmp_path_factory: pytest.TempPathFactory) -> Pat
 
 
 def test_the_build_is_reproducible(script: ModuleType, rebuilt: Path, tmp_path: Path) -> None:
-    """The same data gives the same bytes, a moment later as well as on another machine."""
+    """The same data gives the same bytes, a moment later (on a machine with the same zlib,
+    pandas and xlsxwriter: ``--check`` is what compares across machines)."""
     again = tmp_path / "again.xlsx"
     script.build_file(again)
     assert again.read_bytes() == rebuilt.read_bytes()
+
+
+def test_check_passes_on_the_file_it_built_and_on_the_same_data_in_other_bytes(
+    script: ModuleType, rebuilt: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert script.main(["--check", "-o", str(rebuilt)]) == 0
+    assert "is what this script builds" in capsys.readouterr().out
+    # The archive stored and not deflated: other bytes, every sheet the same.
+    restored = tmp_path / "stored.xlsx"
+    with zipfile.ZipFile(rebuilt) as src, zipfile.ZipFile(restored, "w", zipfile.ZIP_STORED) as dst:
+        for info in src.infolist():
+            dst.writestr(info.filename, src.read(info.filename))
+    assert restored.read_bytes() != rebuilt.read_bytes()
+    assert script.main(["--check", "-o", str(restored)]) == 0
+    assert "in other bytes" in capsys.readouterr().out
+
+
+def test_check_fails_on_a_file_that_holds_other_data_or_none(
+    script: ModuleType, rebuilt: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sheets = pd.read_excel(rebuilt, sheet_name=None)
+    sheets["Bus"].loc[0, "name"] = "Edited"
+    edited = tmp_path / "edited.xlsx"
+    with pd.ExcelWriter(edited, engine="xlsxwriter") as writer:
+        for name, frame in sheets.items():
+            frame.to_excel(writer, sheet_name=name, index=False)
+    assert script.main(["--check", "-o", str(edited)]) == 1
+    assert script.main(["--check", "-o", str(tmp_path / "missing.xlsx")]) == 1
+    assert "is not what this script builds" in capsys.readouterr().out
 
 
 def test_the_file_that_ships_is_what_the_script_builds(shipped: Path, rebuilt: Path) -> None:
