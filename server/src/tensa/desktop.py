@@ -499,6 +499,11 @@ def run_window(
             # exports, Save system as, reports); pywebview refuses downloads unless
             # told otherwise.
             webview.settings["ALLOW_DOWNLOADS"] = True
+            # The links out of the UI (the sources and licences of an example case, the
+            # Help menu) open a new tab, which pywebview sends to the system browser. That is
+            # its default; it is set here so that a release that changed the default does
+            # not open them inside the app's own window, with no way back.
+            webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
             webview.create_window(
                 title,
                 url,

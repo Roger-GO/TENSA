@@ -105,11 +105,15 @@ class _FakeWebview(types.ModuleType):
 
     def __init__(self) -> None:
         super().__init__("webview")
-        self.settings: dict[str, Any] = {"ALLOW_DOWNLOADS": False}
+        self.settings: dict[str, Any] = {
+            "ALLOW_DOWNLOADS": False,
+            "OPEN_EXTERNAL_LINKS_IN_BROWSER": False,
+        }
         self.windows: list[dict[str, Any]] = []
         self.starts: list[dict[str, Any]] = []
         self.server_state_while_open: tuple[bool, bool] | None = None
         self.downloads_while_open: bool | None = None
+        self.external_links_while_open: bool | None = None
         self.on_start: Callable[[], None] | None = None
         self.start_error: Exception | None = None
 
@@ -121,6 +125,7 @@ class _FakeWebview(types.ModuleType):
         server = _FakeServer.instances[-1]
         self.server_state_while_open = (server.started, server.should_exit)
         self.downloads_while_open = self.settings["ALLOW_DOWNLOADS"]
+        self.external_links_while_open = self.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"]
         if self.on_start is not None:
             self.on_start()
         if self.start_error is not None:
@@ -232,6 +237,16 @@ def test_desktop_allows_downloads_so_the_exports_work(
     # pywebview refuses a download unless told otherwise, and the UI saves its
     # CSV, COMTRADE and HTML exports by downloading them.
     assert webview.downloads_while_open is True
+
+
+def test_desktop_sends_the_links_out_of_the_ui_to_the_system_browser(
+    tmp_path: Path, fake_server: type[_FakeServer], webview: _FakeWebview
+) -> None:
+    assert webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
+    assert _desktop(tmp_path).exit_code == 0
+    # The sources and licences of an example case open a new tab: in the window they would
+    # replace the app, which has no address bar to come back from.
+    assert webview.external_links_while_open is True
 
 
 def test_the_server_listens_before_the_window_opens_and_stops_after_it_closes(
