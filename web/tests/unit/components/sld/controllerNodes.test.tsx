@@ -10,7 +10,12 @@
  * the gutter. The reference structure mirrors real ANDES wiring.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildGraph, CONTROLLER_DOCK, type UnitNodeData } from '@/components/sld/graph';
+import {
+  buildGraph,
+  CONTROLLER_DOCK,
+  CONTROLLER_GLYPH_FOOTPRINT,
+  type UnitNodeData,
+} from '@/components/sld/graph';
 import type { TopologySummary, TopologyEntry } from '@/api/types';
 
 function bus(idx: number | string): TopologyEntry {
@@ -329,10 +334,28 @@ describe('buildGraph — controller badges', () => {
     expect(membersOf(nodes, 'generator-GENROU_1')).toEqual([]);
   });
 
+  it('stands the orphan badges of the gutter a footprint apart, one under the next', () => {
+    const topology = makeTopology({
+      buses: [bus(1)],
+      generators: [gen('GENROU_1', 1)],
+      controllers: [1, 2, 3].map((n) => ctrl(`EXST1_${n}`, 'EXST1', { syn: `GHOST_${n}` })),
+    });
+    const { nodes } = buildGraph(topology, COORDS);
+    const ys = badgesOf(nodes)
+      .filter((n) => (n.data as Record<string, unknown>).orphan === true)
+      .map((n) => n.position.y)
+      .sort((a, b) => a - b);
+    expect(ys).toHaveLength(3);
+    expect(ys[1]! - ys[0]!).toBeGreaterThanOrEqual(CONTROLLER_GLYPH_FOOTPRINT);
+    expect(ys[2]! - ys[1]!).toBeGreaterThanOrEqual(CONTROLLER_GLYPH_FOOTPRINT);
+  });
+
   it('renders a stabiliser whose exciter the case does not list as an orphan, not beside a governor of that idx', () => {
-    // kundur_ieeest's shape: IEEEST 1 names exciter 1, an EXDC2 the topology
-    // does not list, and governor 1 is on the machine. The governor is no
-    // exciter: the stabiliser is not drawn as its, on the symbol or beside it.
+    // The shape of a case whose exciter the topology does not list (the
+    // stabiliser of kundur_ieeest named an EXDC2 before that was listed):
+    // IEEEST 1 names exciter 1, and governor 1 is on the machine. The
+    // governor is no exciter: the stabiliser is not drawn as its, on the
+    // symbol or beside it.
     const topology = makeTopology({
       buses: [bus(1)],
       generators: [gen('1', 1, 'Slack'), { ...gen('1', 1), params: { bus: 1, gen: 1 } }],

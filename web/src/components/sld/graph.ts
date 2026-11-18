@@ -1756,6 +1756,14 @@ export function readoutPlaces(
 export const CONTROLLER_DOCK = { x: 64, y: -18, stackDy: 22 } as const;
 
 /**
+ * How far apart the orphan badges stand in the gutter, one under the next:
+ * the box a badge is taken to fill where the diagram is checked
+ * (`CONTROLLER_GLYPH_FOOTPRINT`) and a little more, so that no two of them
+ * overlap. (The docked ones stack by `CONTROLLER_DOCK.stackDy`.)
+ */
+export const ORPHAN_STACK_DY = CONTROLLER_GLYPH_FOOTPRINT + 4;
+
+/**
  * Resolve the React Flow node id a controller should dock to, given the
  * nodes placed so far. Returns the target node id, `'orphan'` (no resolvable
  * ref param), or `'wait'` (a ref exists but its target node hasn't been placed
@@ -1859,7 +1867,7 @@ function appendControllerNodes(
         y: parent.position.y + CONTROLLER_DOCK.y + stackIndex * CONTROLLER_DOCK.stackDy,
       };
     } else {
-      position = { x: 24, y: 24 + stackIndex * CONTROLLER_DOCK.stackDy };
+      position = { x: 24, y: 24 + stackIndex * ORPHAN_STACK_DY };
     }
     // Vector (controller origin → parent origin) so ControllerNode can
     // draw an exact tether back to the device, wherever the badge sits.
