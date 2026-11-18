@@ -528,9 +528,10 @@ def test_the_ieee_118_stored_state_is_not_a_solution_and_its_tolerance_is_what_i
         assert dv[bus] == pytest.approx(gap, abs=6e-4), bus
     # The tolerances are the largest gaps rounded up (0.0173 to 0.02, 0.303 to 0.35, 2.54 to 3),
     # so no stored value is held to less than the stored state itself keeps.
-    assert stored_v.tolerance.abs == 0.02 and 0.0173 < 0.02 < 2 * 0.0173
-    assert stored_a.tolerance.abs == 0.35 and 0.303 < 0.35 < 2 * 0.303
-    assert stored_p.tolerance.abs == 3.0 and 2.54 < 3.0 < 2 * 2.54
+    gap_p = abs(stored_p.expected - solved_p.expected)
+    assert stored_v.tolerance.abs == 0.02 and dv[worst_v] < 0.02 < 2 * dv[worst_v]
+    assert stored_a.tolerance.abs == 0.35 and da[worst_a] < 0.35 < 2 * da[worst_a]
+    assert stored_p.tolerance.abs == 3.0 and gap_p < 3.0 < 2 * gap_p
     # And the solver's checks keep the tight tolerance the other cases have.
     assert solved_v.tolerance.abs == 1e-4 and solved_a.tolerance.abs == 0.01
     entry = load_catalog().get("ieee118")
@@ -592,7 +593,7 @@ def test_the_ieee_30_57_and_300_cases_are_power_flow_cases_checked_against_a_sol
 
 def test_the_ieee_300_stored_state_is_not_a_solution_and_its_tolerance_is_what_it_allows() -> None:
     """The file's voltages and angles are the archive's, saved with data that has a phase
-    shifter the file lacks. TENSA's solution of the file (the solver's checks of the same file)
+    shifter the file lacks. The solution of an independent solver (the solver's checks hold it)
     differs from them by up to 0.0085 pu at bus 193 and 9.76 degrees at bus 2040, with 18 buses
     more than 1e-3 pu off and a median angle gap of 0.026 degrees. The entry quotes these, the
     tolerances of the stored checks are those numbers rounded up, and the file stores no power
@@ -623,8 +624,8 @@ def test_the_ieee_300_stored_state_is_not_a_solution_and_its_tolerance_is_what_i
     # shifter feeds, and hardly at bus 196, which it leaves.
     assert da["2040"] > 9 and da["196"] < 1.5
     # The tolerances are the largest gaps rounded up, and the solver's checks keep the tight ones.
-    assert stored_v.tolerance.abs == 0.01 and 0.0085 < 0.01 < 2 * 0.0085
-    assert stored_a.tolerance.abs == 10.0 and 9.76 < 10.0 < 2 * 9.76
+    assert stored_v.tolerance.abs == 0.01 and dv[worst_v] < 0.01 < 2 * dv[worst_v]
+    assert stored_a.tolerance.abs == 10.0 and da[worst_a] < 10.0 < 2 * da[worst_a]
     assert solved_v.tolerance.abs == 1e-4 and solved_a.tolerance.abs == 0.01
     entry = load_catalog().get("ieee300")
     assert entry is not None
