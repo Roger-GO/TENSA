@@ -37,6 +37,10 @@ On Linux the window also needs a GUI toolkit, which the extra does not bring: us
 
 TENSA runs on Linux, macOS (Apple silicon) and Windows, with Python 3.12 and 3.13. Windows on ARM is not supported, because two of the packages it needs publish no wheels for it. To build from source, follow [Install from source](https://roger-go.github.io/TENSA/install/#install-from-source).
 
+## Example cases
+
+Beyond the five that start in an empty workspace, TENSA has a catalog of example cases to add from the app (**Example cases** in the Project tab) or with `tensa examples add <id>`: dynamic cases with machines, exciters and governors (IEEE 14 with a fault, with solar and with wind, Kundur with a stabiliser, WECC 179-bus, the PJM 5-bus system) and steady-state cases for power flow, from 5 buses to the 2,000-bus Texas synthetic grid. Each says where its data comes from, how to cite it, what licence it is under and how its results were checked, and a few entries are links to data TENSA cannot redistribute. See [Example cases](https://roger-go.github.io/TENSA/examples/) in the documentation.
+
 ## See it in action
 
 An AI agent builds the WSCC 9-bus system from scratch through the real UI. It places every bus, line, transformer, machine, exciter, and governor on the one-line, saves the case to a file and reloads it, then runs power flow, a three-phase fault with a streaming time-domain simulation, continuation power flow, and eigenvalue analysis.

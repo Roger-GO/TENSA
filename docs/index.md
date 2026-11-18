@@ -8,7 +8,7 @@ TENSA is built on [ANDES](https://github.com/CURENT/andes), the power system sim
 
 ## What you can do
 
-- **Build or open a system.** Open one of the example cases (IEEE 14, Kundur and WSCC 9-bus), drop in your own `.xlsx`, `.raw`, `.dyr`, `.m` or `.json` files, or start blank and add buses, lines, transformers, generators, exciters, governors, a battery, loads and shunts from the UI.
+- **Build or open a system.** Open one of the [example cases](examples.md) (IEEE 14, Kundur, WSCC 9-bus, IEEE 39 and NPCC 140-bus are there in an empty workspace, and more are one click away), drop in your own `.xlsx`, `.raw`, `.dyr`, `.m` or `.json` files, or start blank and add buses, lines, transformers, generators, exciters, governors, a battery, loads and shunts from the UI.
 - **Run five analyses.** Power flow, time-domain simulation, eigenvalue (small-signal) analysis, continuation power flow with PV and QV curves, and state estimation. Each runs as a job you can watch and cancel.
 - **Disturb the system.** Bus faults, line or device trips, and scheduled parameter changes, applied in a time-domain run.
 - **Read the results.** Voltage, flow and loading on the diagram, tables of every device, plots with cursors and response metrics, a list of the limits a power flow breaks, and a comparison of two power flows.
