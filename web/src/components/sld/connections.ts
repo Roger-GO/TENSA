@@ -924,7 +924,13 @@ interface Bar {
   cy: number;
   /** Half the bar's length. */
   half: number;
-  /** Its two tips: `half` either side of the centre, or further out to hold a tap. */
+  /**
+   * Its two tips: `half` either side of the centre, or further out to hold a tap. A bar drawn
+   * out about its middle that would go into the room the bar beside it keeps is then moved
+   * sideways as a whole, and `cx ± half` stops being the extent drawn: `start` and `end` are.
+   * `deviceSide`, `growLimit` and the wish of a device still read `cx ± half`, the extent the
+   * bar was laid out with, which is what they were written against.
+   */
   start: number;
   end: number;
   /** Whether a connection runs into the west end, and into the east end. */
