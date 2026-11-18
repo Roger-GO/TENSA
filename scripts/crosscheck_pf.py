@@ -540,7 +540,7 @@ STORED_BASES: dict[str, StoredBasis] = {
             "ieee300cdf.txt, which this file was converted from; a state saved with the "
             "archive's data and not a solution of the file's, which lacks the archive's "
             "-11.4 degree phase shifter on branch 196-2040, so it differs from the solution "
-            "of the file by up to 0.0085 pu and 9.8 degrees"
+            "of the file by up to 0.0085 pu and 9.76 degrees"
         ),
         voltage=0.01,
         angle=10.0,

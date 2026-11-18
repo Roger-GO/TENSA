@@ -309,7 +309,7 @@
       },
       "tolerance": {"abs": 0.01},
       "kind": "stored-solution",
-      "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+      "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.76 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
       "generated_by": "scripts/crosscheck_pf.py stored"
     },
     {
@@ -619,7 +619,7 @@
       },
       "tolerance": {"abs": 10.0},
       "kind": "stored-solution",
-      "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+      "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.76 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
       "generated_by": "scripts/crosscheck_pf.py stored"
     },
     {

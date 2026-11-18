@@ -399,7 +399,7 @@
             "kind": "ring-down",
             "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_0, run to 20 s",
             "tolerance": "0.05 Hz and 0.05 in damping ratio",
-            "result": "1.374 Hz, damping 0.000 is eigenvalue 1.383 Hz, 0.000 (0.009 Hz and 0.000 apart); 2.093 Hz, damping -0.000 is eigenvalue 2.126 Hz, 0.000 (0.034 Hz and 0.000 apart)",
+            "result": "1.374 Hz, damping 0.000 is eigenvalue 1.383 Hz, 0.000 (0.009 Hz and 0.000 apart); 2.093 Hz, damping 0.000 is eigenvalue 2.126 Hz, 0.000 (0.034 Hz and 0.000 apart)",
             "passed": true
           },
           {
@@ -1559,7 +1559,7 @@
             "kind": "ring-down",
             "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load 2, run to 20 s",
             "tolerance": "0.05 Hz and 0.05 in damping ratio",
-            "result": "1.096 Hz, damping 0.000 is eigenvalue 1.079 Hz, 0.000 (0.017 Hz and 0.000 apart); 1.714 Hz, damping 0.000 is eigenvalue 1.725 Hz, 0.000 (0.011 Hz and 0.000 apart); 1.454 Hz, damping -0.000 is eigenvalue 1.458 Hz, 0.000 (0.004 Hz and 0.000 apart)",
+            "result": "1.096 Hz, damping 0.000 is eigenvalue 1.079 Hz, 0.000 (0.017 Hz and 0.000 apart); 1.714 Hz, damping 0.000 is eigenvalue 1.725 Hz, 0.000 (0.011 Hz and 0.000 apart); 1.454 Hz, damping 0.000 is eigenvalue 1.458 Hz, 0.000 (0.004 Hz and 0.000 apart)",
             "passed": true
           },
           {
@@ -2869,7 +2869,7 @@
     {
       "id": "activsg200",
       "title": "ACTIVSg200 synthetic 200-bus test case (Illinois)",
-      "summary": "A synthetic 200-bus power system built to look like a transmission system of central Illinois, from the ARPA-E GRID DATA project of Texas A&M University, as MATPOWER 8.1 holds it (case_ACTIVSg200): 200 buses at 115 and 230 kV, 49 generators and 245 branches, with a load of 1,476 MW. A medium-size case for the power flow, and for how the diagram and the tables handle two hundred buses. It has no machine models, so there is no time-domain run; a version with dynamic models is Texas A&M's, and is not bundled.",
+      "summary": "A synthetic 200-bus power system built to look like a transmission system of central Illinois, from the ARPA-E GRID DATA project of Texas A&M University, as MATPOWER 8.1 holds it (case_ACTIVSg200): 200 buses (134 at 115 kV, 17 at 230 kV and 49 generator terminals at 13.8 kV), 49 generators and 245 branches, with a load of 1,476 MW. A medium-size case for the power flow, and for how the diagram and the tables handle two hundred buses. It has no machine models, so there is no time-domain run; a version with dynamic models is Texas A&M's, and is not bundled.",
       "category": "steady-state",
       "tags": [
         "synthetic",
@@ -3112,7 +3112,7 @@
           {
             "name": "Bus voltage magnitudes against the solution stored in the case file",
             "kind": "stored-solution",
-            "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.76 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
             "tolerance": "0.01 pu",
             "result": "largest difference 0.00854 pu (bus 193) over 300 buses",
             "passed": true
@@ -3120,7 +3120,7 @@
           {
             "name": "Bus voltage angles against the solution stored in the case file",
             "kind": "stored-solution",
-            "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.8 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "reference": "the solved state stored in case300.m (the final voltages and angles of the University of Washington archive's ieee300cdf.txt, which this file was converted from; a state saved with the archive's data and not a solution of the file's, which lacks the archive's -11.4 degree phase shifter on branch 196-2040, so it differs from the solution of the file by up to 0.0085 pu and 9.76 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
             "tolerance": "10 deg",
             "result": "largest difference 9.76 deg (bus 2040) over 300 buses",
             "passed": true
@@ -3163,7 +3163,7 @@
     {
       "id": "pegase1354",
       "title": "PEGASE 1354-bus test case (part of the European transmission system)",
-      "summary": "A medium part of the European high-voltage transmission system as the PEGASE project of the French operator RTE made it, in MATPOWER 8.1's case1354pegase: 1,354 buses at 380 and 220 kV, 260 generators and 1,991 branches (234 of them transformers), with a load of 73,060 MW. The data is fictitious: it is made to look like part of the European system and does not describe it. A large case for the power flow and for how the tables, exports and diagram work at over a thousand buses. It has no machine models, so there is no time-domain run.",
+      "summary": "A medium part of the European high-voltage transmission system as the PEGASE project of the French operator RTE made it, in MATPOWER 8.1's case1354pegase: 1,354 buses at 380 and 220 kV, 260 generators and 1,991 branches (234 of them transformers), with a load of 73,060 MW. The data is fictitious: it is made to look like part of the European system and does not describe it. A large case for the power flow and for how the tables and exports work at over a thousand buses; its diagram is not drawn, which the caveats say why. It has no machine models, so there is no time-domain run.",
       "category": "steady-state",
       "tags": [
         "pegase",
@@ -3284,7 +3284,7 @@
     {
       "id": "activsg2000",
       "title": "ACTIVSg2000 synthetic 2000-bus test case (Texas)",
-      "summary": "A synthetic 2,000-bus power system built to look like a transmission system on the footprint of Texas, from the ARPA-E GRID DATA project of Texas A&M University, as MATPOWER 8.1 holds it (case_ACTIVSg2000): 2,000 buses at 500, 230, 161 and 115 kV and at generator voltages, 544 generators and 3,206 branches, with a load of 67,109 MW. The largest case of the gallery: a case for the power flow, and for how the diagram and the tables handle two thousand buses. It has no machine models, so there is no time-domain run; a version with dynamic models is Texas A&M's, and is not bundled.",
+      "summary": "A synthetic 2,000-bus power system built to look like a transmission system on the footprint of Texas, from the ARPA-E GRID DATA project of Texas A&M University, as MATPOWER 8.1 holds it (case_ACTIVSg2000): 2,000 buses at 500, 230, 161 and 115 kV and at generator voltages, 544 generators and 3,206 branches, with a load of 67,109 MW. The largest case of the gallery: a case for the power flow, and for how the tables and exports handle two thousand buses; its diagram is not drawn, which the caveats say why. It has no machine models, so there is no time-domain run; a version with dynamic models is Texas A&M's, and is not bundled.",
       "category": "steady-state",
       "tags": [
         "synthetic",
@@ -3856,7 +3856,7 @@
         },
         {
           "role": "data",
-          "text": "PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence.",
+          "text": "PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of data files for these and other systems, among them the NETS-NYPS 68-bus dynamic data (a .dyr file) that this entry's trial used; its README names no source for them and the repository states no licence.",
           "bibtex": "@misc{sienna_powersystemstestdata,\n  title        = {{PowerSystemsTestData}},\n  author       = {{Sienna platform}},\n  howpublished = {GitHub repository},\n  url          = {https://github.com/Sienna-Platform/PowerSystemsTestData},\n  note         = {commit a2ecae9ff3cf},\n  urldate      = {2026-11-18}\n}",
           "url": "https://github.com/Sienna-Platform/PowerSystemsTestData"
         }
@@ -4282,7 +4282,7 @@
         "The archive was last updated in August 1999, and says it makes no guarantee of the correctness of its material."
       ],
       "verification": {
-        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.",
+        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. TENSA bundles no file from this archive: the IEEE cases of the catalog come to TENSA through ANDES (the user's own copy of the files), MATPOWER or PGLib-OPF, and each has an entry of its own with its checks.",
         "checks": []
       },
       "links": [
@@ -4350,7 +4350,7 @@
         "The synthetic cases bear no relation to the actual grid in their location. The MATPOWER copies of ACTIVSg200 and ACTIVSg2000 in this catalog carry a CC BY 4.0 licence in their headers, which the repository's own pages do not state."
       ],
       "verification": {
-        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.",
+        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. TENSA bundles no file from this repository: the ACTIVSg cases of the catalog come to TENSA through MATPOWER, and each has an entry of its own with its checks.",
         "checks": []
       },
       "links": [
@@ -4409,7 +4409,7 @@
         "The files are MATPOWER cases: only a power flow is possible, and ANDES 2.0.0's MATPOWER reader drops the phase shift of a branch whose tap ratio is 0 (see the MATPOWER library entry). TENSA has not been run on the GB network."
       ],
       "verification": {
-        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.",
+        "summary": "Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. TENSA bundles no file from this archive.",
         "checks": []
       },
       "links": [

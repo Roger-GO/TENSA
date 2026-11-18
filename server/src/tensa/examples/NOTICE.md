@@ -204,9 +204,11 @@ No warranty: the data is provided as is, as section 5 of the licence says.
 The catalog's entries of kind `external` hold no file: TENSA ships nothing of them and copies
 nothing into a workspace. Each links to where its data is and records the terms the source
 states, which are repeated here so that this file names every licence the catalog uses. Only
-two of the sources, PGLib-OPF (CC BY 4.0) and the SPS-L repository (Apache License 2.0), say
-their files may be passed on, and the only files TENSA bundles from them are the three
-PGLib-OPF ones described above.
+three of the sources say their files may be passed on: PGLib-OPF (CC BY 4.0), the MATPOWER
+library (CC BY 4.0 for the ACTIVSg and PEGASE data files, BSD 3-clause for its software) and
+the SPS-L repository (Apache License 2.0). TENSA bundles the three PGLib-OPF files and the
+four MATPOWER ones (ACTIVSg200, ACTIVSg2000, PEGASE 89 and PEGASE 1354), which are described
+above, and nothing from SPS-L.
 
 Texas A&M University, for ACTIVSg200 and ACTIVSg2000 with dynamic data and for the Electric Grid Test Case Repository.
 
