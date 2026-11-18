@@ -81,6 +81,14 @@ def test_mcp_extra_excludes_the_incompatible_major_and_the_advisories() -> None:
     assert _floor(requirement) >= Version("1.28.1")
 
 
+def test_dev_extra_installs_mcp_in_the_range_of_the_mcp_extra() -> None:
+    """The MCP tests skip when ``mcp`` is missing, and ``[dev]`` did not bring it, so a checkout
+    set up the way the contributor pages say, and CI, ran those tests as skips and never failed."""
+    dev = _requirements("dev")
+    assert "mcp" in dev
+    assert dev["mcp"].specifier == _requirements("mcp")["mcp"].specifier
+
+
 def test_desktop_extra_is_pywebview_from_the_release_with_settings_below_the_next_major() -> None:
     """``tensa desktop`` sets ``webview.settings["ALLOW_DOWNLOADS"]``, which pywebview 5 added
     (4.x has no ``settings``), and the app's own window code is checked against 5 and 6 only."""
