@@ -1,0 +1,13 @@
+# What the "New issue" page offers besides the two templates in this folder. Questions go to
+# Discussions so that an issue stays a bug or a request; a vulnerability goes to the private
+# form and never to a public issue.
+contact_links:
+  - name: Ask a question
+    url: https://github.com/Roger-GO/TENSA/discussions/categories/q-a
+    about: How do I, why does it do this, is this intended? Ask in the Q&A category of Discussions.
+  - name: Read the documentation
+    url: https://roger-go.github.io/TENSA/
+    about: Install, quick start, UI tour, API guide, troubleshooting and the example cases.
+  - name: Report a security vulnerability
+    url: https://github.com/Roger-GO/TENSA/security/advisories/new
+    about: Report it privately, so that only the maintainer sees it. Do not open a public issue for it.

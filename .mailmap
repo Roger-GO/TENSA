@@ -1,0 +1,4 @@
+# Display only: `git shortlog` and `git log --use-mailmap` read this to show one name for the
+# commits that were made under two older ones. History is not rewritten.
+Rogelio Gracia Otalvaro <rollerg97@gmail.com> Roger Gracia <rollerg97@gmail.com>
+Rogelio Gracia Otalvaro <rollerg97@gmail.com> RGO <114153840+Roger-GO@users.noreply.github.com>
