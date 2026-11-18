@@ -628,6 +628,11 @@ def test_the_pages_that_count_the_cases_of_a_new_workspace_count_the_catalogs() 
     for page in ("README.md", "docs/quickstart.md", "docs/troubleshooting.md"):
         text = _read(page)
         assert f"{words[seeded]} example cases" in text, page
+    # The first page of the documentation lists them by name and counts none.
+    index = _read("docs/index.md")
+    for title in ("IEEE 14", "Kundur", "WSCC 9-bus", "IEEE 39", "NPCC 140-bus"):
+        assert title in index, title
+    assert "three example" not in index.lower()
 
 
 def test_the_report_route_is_documented_with_its_required_routine(
