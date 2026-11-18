@@ -3,13 +3,28 @@
 **T**ransients, **E**igenvalues & **N**etwork **S**imulation **A**pplication: an interactive, web-based workbench for power system modeling, simulation, and analysis. You build a system visually, run power flow and dynamic studies with one click, watch the results stream in live, and drive the whole thing from a scriptable API. It runs locally in your browser. TENSA is built on the [ANDES](https://github.com/CURENT/andes) power system simulator. (This project was briefly shared as "ANDES App" during its beta; same tool, new name.)
 
 [![PyPI](https://img.shields.io/pypi/v/tensa)](https://pypi.org/project/tensa/)
+[![server tests](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml)
+[![web tests](https://github.com/Roger-GO/TENSA/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/web.yml)
+[![docs build](https://github.com/Roger-GO/TENSA/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/docs.yml)
 [![Documentation](https://img.shields.io/badge/docs-roger--go.github.io%2FTENSA-0f766e)](https://roger-go.github.io/TENSA/)
-[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](./LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://www.python.org/)
 [![Built on ANDES](https://img.shields.io/badge/built%20on-CURENT%2FANDES-2563eb)](https://github.com/CURENT/andes)
 [![Agent-ready](https://img.shields.io/badge/agent--ready-llms.txt%20%2B%20MCP-8b5cf6)](./llms.txt)
 
 ![TENSA showing an interactive single-line diagram with a solved power flow](docs/img/hero.jpeg)
+
+## Why TENSA, and who it is for
+
+TENSA is for people who want to see what a power system does without writing a program first. Students and instructors get a workbench that runs on a laptop, needs no account, and shows a system's behavior on its one-line diagram. Researchers doing exploratory dynamic studies can build or edit a case, apply a fault or a line trip, and read the result in plots, tables and the diagram, then repeat the study from a script, because everything the interface does goes through a documented API. Developers of agent-driven workflows get that same API, and an MCP server, over a real simulator. Script-first tools, ANDES itself among them, are the better choice for large batches and for writing new models; TENSA is the interactive layer around ANDES and does not replace it.
+
+It runs five analyses, each with one click:
+
+- **Power flow** finds the steady-state voltages, angles and line flows for the generation and load you set, and lists the limits the solution breaks.
+- **Time-domain simulation** follows the system through a disturbance such as a fault or a line trip, and plots the result while it is computed.
+- **Eigenvalue analysis** linearizes the system at its operating point and reports its small-signal modes, with their frequency and damping.
+- **Continuation power flow** traces PV and QV curves to find how far the load can grow before the power flow has no solution.
+- **State estimation** estimates the bus voltages from a set of measurements, which TENSA can generate from a solved power flow, and plots the residuals.
 
 ## Quick start
 
@@ -43,11 +58,11 @@ Beyond the five that start in an empty workspace, TENSA has a catalog of example
 
 ## See it in action
 
-An AI agent builds the WSCC 9-bus system from scratch through the real UI. It places every bus, line, transformer, machine, exciter, and governor on the one-line, saves the case to a file and reloads it, then runs power flow, a three-phase fault with a streaming time-domain simulation, continuation power flow, and eigenvalue analysis.
+A scripted walkthrough of the real UI builds the WSCC 9-bus system from scratch. It places every bus, line, transformer, machine, exciter, and governor on the one-line, saves the case to a file and reloads it, then runs power flow, a three-phase fault with a streaming time-domain simulation, continuation power flow, and eigenvalue analysis.
 
-[![Demo: an agent builds WSCC 9-bus and runs every analysis](docs/img/demo.gif)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4)
+[![Demo: a scripted walkthrough builds WSCC 9-bus and runs every analysis](docs/img/demo.gif)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4)
 
-The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4). Every step uses the same HTTP API any script or agent can call, and you can [record it yourself](#run-the-demo-yourself).
+The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4). The script that drives it, [`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs), calls no model: it clicks and drags through the UI with Playwright, at positions written in the script. Each step is a request that a script or an agent can send to the same HTTP API, and you can [record it yourself](#run-the-demo-yourself).
 
 ## What you can do
 
@@ -60,7 +75,7 @@ The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://g
 
 **Analyze**
 
-- **Five analyses, one click each.** Power flow, time-domain simulation, eigenvalue (small-signal) analysis, continuation power flow with PV and QV curves, and state estimation. Each runs as a job with live progress and a cancel button.
+- **One click each.** The five analyses above each run as a job with live progress and a cancel button.
 - **A power flow you can tune and check.** Set the tolerance, the iteration limit, a flat start and reactive limits, read the system summary, and get a Violations table of every limit the solution breaks.
 - **Watch a simulation while it runs.** Results stream into the plots as the run goes. Add faults, line trips and parameter changes, record any ANDES variable by name, and read nadir, rate of change, settling time, overshoot and damping off the plot.
 - **Find the loading margin.** Continuation power flow with generator reactive limits, a choice of what grows, and every generator's reactive power along the curve.
@@ -95,6 +110,15 @@ The documentation site is at **<https://roger-go.github.io/TENSA/>**.
 | Look up a `tensa` command or option | [Command line reference](https://roger-go.github.io/TENSA/reference/cli/) |
 | Fix something that does not work | [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/) |
 
+## Getting help
+
+TENSA has one maintainer, so replies are best effort. [SUPPORT.md](./SUPPORT.md) has the details, including which versions are supported and what TENSA promises about ANDES versions.
+
+- **A question:** ask in the Q&A category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a).
+- **A bug or a feature request:** open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) with the template that fits.
+- **A security problem:** report it privately through [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new), not in a public issue. [SECURITY.md](./SECURITY.md) explains what counts.
+- **Something that does not work:** [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/) covers the usual causes, and the [documentation](https://roger-go.github.io/TENSA/) the rest.
+
 ## For agents and scripts
 
 The whole app is driven by a documented HTTP and WebSocket API. Anything the UI can do, a script or an LLM agent can do.
@@ -124,7 +148,7 @@ A request with a JSON body needs the `Content-Type: application/json` header.
 
 ## Run the demo yourself
 
-[`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs) records the demo above. It drives the real UI with Playwright: it builds WSCC 9-bus from scratch, then runs every analysis. It needs a source checkout with the UI built ([CONTRIBUTING.md](./CONTRIBUTING.md) has the setup).
+[`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs) records the demo above. It is a fixed script that drives the real UI with Playwright: it builds WSCC 9-bus from scratch, then runs every analysis. It needs a source checkout with the UI built ([CONTRIBUTING.md](./CONTRIBUTING.md) has the setup).
 
 ```bash
 # Terminal 1: serve on a fixed port
@@ -164,7 +188,7 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 
 ## Citation
 
-If you use TENSA in your work, please cite it. GitHub's "Cite this repository" button builds a citation from [CITATION.cff](./CITATION.cff). The short form:
+If you use TENSA in your work, please cite it. GitHub's "Cite this repository" button builds a citation from [CITATION.cff](./CITATION.cff), and [Citing TENSA](https://roger-go.github.io/TENSA/citing/) has the details. The short form:
 
 > Gracia Otalvaro, R. (2026). TENSA: an interactive web workbench for power system simulation. https://github.com/Roger-GO/TENSA
 
@@ -172,8 +196,8 @@ TENSA runs on ANDES, which does the underlying power system computation. If you 
 
 ## Contributing
 
-PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for a source checkout, the UI with hot reload, the test commands, and the conventions. Notes for AI coding agents live in [AGENTS.md](./AGENTS.md), and notable changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
+PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for a source checkout, the UI with hot reload, the test commands, and the conventions, and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for what is expected of everyone who takes part. For anything bigger than a small fix, open an issue or a discussion first, so that the work is not lost on a change that cannot be merged. Notes for AI coding agents live in [AGENTS.md](./AGENTS.md), and notable changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
-TENSA is licensed under the [GNU General Public License v3.0](./LICENSE), the same license as ANDES.
+TENSA is licensed under the [GNU General Public License v3.0 or later](./LICENSE) (SPDX identifier `GPL-3.0-or-later`), the same license as ANDES.

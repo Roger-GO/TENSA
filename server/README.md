@@ -170,6 +170,10 @@ pytest                   # all of the above
 
 `ANDES_VERSIONS.md` lists the fourteen API contracts the server depends on and the verification matrix per ANDES version.
 
+## Getting help
+
+TENSA has one maintainer, so replies are best effort. Ask a question in the Q&A category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a), report a bug or ask for a feature in an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose), and report a security problem privately through [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new). [SUPPORT.md](https://github.com/Roger-GO/TENSA/blob/main/SUPPORT.md) says which versions are supported.
+
 ## License
 
-[GNU GPL v3.0](https://github.com/Roger-GO/TENSA/blob/main/LICENSE)
+[GNU GPL v3.0 or later](https://github.com/Roger-GO/TENSA/blob/main/LICENSE) (`GPL-3.0-or-later`)

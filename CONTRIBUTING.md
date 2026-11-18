@@ -1,6 +1,6 @@
 # Contributing to TENSA
 
-Thanks for your interest in improving TENSA! This guide covers everything you need to get a development environment running and land a PR.
+Thanks for your interest in improving TENSA! This guide covers everything you need to get a development environment running and land a PR. Everyone who takes part follows the [Code of Conduct](./CODE_OF_CONDUCT.md), and [Getting help and maintenance](#getting-help-and-maintenance) says what to expect from the project in return.
 
 ## Development setup
 
@@ -40,12 +40,14 @@ Windows on ARM is not supported: `kvxopt` and `pyarrow` publish no wheels for it
 
 ## Tests and quality gates
 
+While you work, a quick check is `cd server && pytest -q -m "not acceptance" tests/unit` for the server and `cd web && pnpm test` for the UI. They are the fast ones: the server's unit tests leave out the integration suite, which starts real servers and workers, and the acceptance suite, and the UI's leave out the end-to-end tests, which drive a browser.
+
 All of these must pass before a PR is merged (CI enforces them):
 
 | Area | Command |
 |---|---|
 | Server lint | `ruff check server/src server/tests` |
-| Server types | `mypy --strict server/src` |
+| Server types | `cd server && mypy --strict src` (run it in `server/`: from the repository root, `mypy` does not read the server's configuration and reports the missing stubs of ANDES and of the optional packages, which that configuration tells it to ignore) |
 | Server tests | `cd server && PYTHONPATH=src pytest tests/unit tests/integration` |
 | Server smoke test | `cd server && pytest -m smoke tests/integration` (starts a real server and worker; macOS and Windows CI run it alongside the unit tests) |
 | Server coverage | `cd server && pytest -m "not acceptance" --cov --cov-report=html` (report in `server/htmlcov`) |
@@ -105,8 +107,12 @@ What is committed stays in every clone for good, and the project does not rewrit
 
 ## Reporting bugs / requesting features
 
-Use the GitHub issue templates. For bugs, include the case file (or a minimal reproduction), the exact request/UI action, and the response/`ProblemDetails` payload if there is one.
+Use the GitHub issue templates. For bugs, include the case file (or a minimal reproduction), the exact request/UI action, and the response/`ProblemDetails` payload if there is one. A question is not an issue: ask it in the Q&A category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a). A vulnerability goes through [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new), never an issue ([SECURITY.md](./SECURITY.md)).
+
+## Getting help and maintenance
+
+TENSA has one maintainer, who looks after it alongside other work, so replies and reviews are best effort and no turnaround is promised. For anything bigger than a small fix, open an issue or a discussion before you write the code, so that the work is not lost on a change that cannot be merged. Only the latest release is supported, and TENSA declares the ANDES versions it works with. [SUPPORT.md](./SUPPORT.md) has the details, and the documentation site has them as [Support](https://roger-go.github.io/TENSA/support/).
 
 ## Code of conduct
 
-Be kind, be constructive, assume good intent.
+TENSA follows the Contributor Covenant, version 2.1: see [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md), which also says how to report a concern. Be kind, be constructive, assume good intent.

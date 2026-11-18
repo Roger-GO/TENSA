@@ -62,7 +62,11 @@ nav:
       - API routes: reference/api.md
       - API models: reference/models.md
   - Troubleshooting: troubleshooting.md
-  - Contributing to the docs: contributing.md
+  - Project:
+      - Support: support.md
+      - Citing TENSA: citing.md
+      - Contributing code: contributing-code.md
+      - Contributing to the docs: contributing.md
 
 # Files in docs/ that are not part of the site: the tooling's requirements, the GUI parity
 # ledger the CI check writes (a review table for contributors), and the media only the
