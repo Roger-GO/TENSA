@@ -82,7 +82,10 @@ const EXAMPLES: readonly [string, TopologySummary][] = [
   ['IEEE 39', IEEE39],
 ];
 
-describe('nothing overlaps on the example cases', () => {
+// A test of IEEE 39 takes about 2 s here and four or five times that on a CI runner of two cores
+// with coverage on, over the quarter of the default timeout that a test may need, so the group
+// has a timeout of its own (it guards against a test that never ends, and says nothing of speed).
+describe('nothing overlaps on the example cases', { timeout: 60_000 }, () => {
   for (const [name, topology] of EXAMPLES) {
     it(`${name}: as it opens, tidied, and laid out again, with and without values`, async () => {
       const first = await opened(topology);
