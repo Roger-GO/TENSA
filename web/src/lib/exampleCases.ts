@@ -145,11 +145,57 @@ export function workspaceNote(examples: readonly ExampleListEntry[]): string | n
     : `All ${total} cases are already in your workspace and say Added ${starts}, so there is nothing to add: choose Open to load one. A case whose file is deleted from the workspace folder offers Add to workspace again.`;
 }
 
-/** The citations of a case as text to copy: plain, or BibTeX, one block after the other. */
+type CitationRole = NonNullable<ExampleListEntry['citations']>[number]['role'];
+
+/**
+ * What each role of a reference is called, and what it is. The words are the server's
+ * (`CITATION_ROLE_LABELS` in `example_catalog.py`, which `tensa examples cite` and
+ * `EXAMPLE-SOURCES.md` use), so a reference reads the same wherever it is copied from.
+ */
+export const CITATION_ROLES: Record<CitationRole, { label: string; what: string }> = {
+  system: { label: 'System', what: 'the publication that defines the test system' },
+  data: { label: 'Data source', what: 'where the file comes from, or what it was checked against' },
+  software: { label: 'Software', what: 'the program the case runs on or was made for' },
+  model: { label: 'Dynamic model', what: 'the documentation of a model the case uses' },
+};
+
+/** The roles the references of a case have, in the order of `CITATION_ROLES`. */
+export function citationRolesOf(example: ExampleListEntry): CitationRole[] {
+  const present = new Set((example.citations ?? []).map((c) => c.role));
+  return (Object.keys(CITATION_ROLES) as CitationRole[]).filter((role) => present.has(role));
+}
+
+/**
+ * The citations of a case as text to copy: plain, or BibTeX, one block after the other. Each is
+ * marked with what it is, so a paste of several does not leave the reader to guess which is
+ * the system's paper, which the source of the data and which the software: a plain reference
+ * is led by its label (`System: ...`) and an entry by a BibTeX comment (`% System`).
+ */
 export function citationsText(example: ExampleListEntry, format: 'text' | 'bibtex'): string {
   return (example.citations ?? [])
-    .map((c) => (format === 'bibtex' ? c.bibtex : c.text).trim())
+    .map((c) => {
+      const label = CITATION_ROLES[c.role].label;
+      return format === 'bibtex' ? `% ${label}\n${c.bibtex.trim()}` : `${label}: ${c.text.trim()}`;
+    })
     .join('\n\n');
+}
+
+/**
+ * The words of the disclosure on a card, which name only the sections it holds: caveats,
+ * the changes made to the data, and how the case was checked (for an entry that is only
+ * links, what was tried with TENSA). `null` when it holds none, and the card has no disclosure.
+ */
+export function detailsLabel(example: ExampleListEntry): string | null {
+  const parts: string[] = [];
+  if ((example.caveats ?? []).length > 0) parts.push('caveats');
+  if ((example.modifications ?? []).length > 0) parts.push('changes');
+  if (example.verification) parts.push(isLinkOnly(example) ? 'what was tried' : 'checks');
+  if (parts.length === 0) return null;
+  const joined =
+    parts.length === 1
+      ? (parts[0] ?? '')
+      : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1] ?? ''}`;
+  return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
 /**

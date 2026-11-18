@@ -10,7 +10,7 @@
  * it closes. `useOpenCase` is replaced by a stand-in that records what it was asked to open.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -206,7 +206,7 @@ describe('the Example cases dialog', () => {
     server.examples = [
       makeExample({
         id: 'texas-dynamic',
-        provenance: { kind: 'external' },
+        provenance: { kind: 'external', built: false },
         size: null,
         analyses: [],
         default: false,
@@ -235,6 +235,7 @@ describe('the Example cases dialog', () => {
           kind: 'bundled',
           path: 'pegase/case89.raw',
           source_url: 'https://example.org/p',
+          built: false,
         },
         extra_files: [{ path: 'pegase/case89.dyr', sha256: 'a'.repeat(64), role: 'dynamic data' }],
       }),
@@ -255,6 +256,7 @@ describe('the Example cases dialog', () => {
           path: 'ieee14/ieee14_full.xlsx',
           release: 'ANDES 2.0.0',
           source_url: 'javascript:alert(1)',
+          built: false,
         },
         licence: { name: 'GPL', url: 'data:text/html,x' },
       }),
@@ -269,10 +271,63 @@ describe('the Example cases dialog', () => {
     await openDialog();
     const details = screen.getByTestId('example-details-ieee14');
     expect(details).not.toHaveAttribute('open');
-    expect(within(details).getByText('Caveats, changes and checks')).toBeInTheDocument();
+    // The summary names only what the case holds: this one has caveats, and nothing else.
+    expect(within(details).getByText('Caveats')).toBeInTheDocument();
     expect(details).toHaveTextContent('has not been compared with the UW archive');
+    expect(details).not.toHaveTextContent('How it was checked');
     // A case with nothing to say has no disclosure.
     expect(screen.queryByTestId('example-details-wscc9')).not.toBeInTheDocument();
+  });
+
+  it('names in the disclosure only the sections the case holds', async () => {
+    server.examples = [
+      makeExample({
+        modifications: [],
+        verification: { summary: 'Compared with pandapower.', checks: [] },
+      }),
+      makeExample({
+        id: 'wscc9',
+        title: 'WSCC 9-bus',
+        modifications: ['A change.'],
+        verification: { summary: 'Compared with a book.', checks: [] },
+      }),
+      makeExample({ id: 'pjm5bus', title: 'PJM 5-bus', caveats: [], verification: null }),
+    ];
+    await openDialog();
+    // No changes were made to the first case's data, so the label does not promise them.
+    const first = within(screen.getByTestId('example-details-ieee14'));
+    expect(first.getByText('Caveats and checks')).toBeInTheDocument();
+    expect(first.queryByText('Changes made to the data')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('example-details-wscc9')).getByText('Caveats, changes and checks'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('example-details-pjm5bus')).not.toBeInTheDocument();
+  });
+
+  it('does not repeat the name of the only section a disclosure holds', async () => {
+    await openDialog();
+    const details = within(screen.getByTestId('example-details-ieee14'));
+    // The summary says Caveats, and a heading of the same word under it would say nothing new.
+    expect(details.getAllByText('Caveats')).toHaveLength(1);
+  });
+
+  it('says a file TENSA builds is built by TENSA, with a link to the script', async () => {
+    const script = 'https://github.com/Roger-GO/TENSA/blob/main/scripts/build_wscc9.py';
+    server.examples = [
+      makeExample({
+        provenance: {
+          kind: 'bundled',
+          path: 'wscc9.xlsx',
+          source_url: script,
+          retrieved: '2026-11-17',
+          built: true,
+        },
+      }),
+    ];
+    await openDialog();
+    const source = screen.getByTestId('example-source-ieee14');
+    expect(source).toHaveTextContent('built by TENSA (script)');
+    expect(source).toHaveAttribute('href', script);
   });
 });
 
@@ -396,6 +451,40 @@ describe('adding a case', () => {
     expect(screen.queryByTestId('example-added-wscc9')).not.toBeInTheDocument();
   });
 
+  it('tells a user who has closed the dialog that the add was refused, in a notice', async () => {
+    // The answer of the server comes after the dialog has gone, and the card with it: a note in
+    // the card reaches nobody then, so the refusal is a notice too.
+    const error = vi.spyOn(toast, 'error');
+    let answer: (r: Response) => void = () => undefined;
+    vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch').mockImplementation(
+      (input, init) =>
+        /\/add/.test(String(input))
+          ? new Promise<Response>((resolve) => (answer = resolve))
+          : fakeFetch(input, init),
+    );
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Add to workspace/ }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByTestId('example-cases-dialog')).toBeNull());
+    answer(problem(500, 'No space left on device'));
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        'Could not add WSCC 9-bus, network only',
+        expect.objectContaining({ description: expect.stringContaining('No space left') }),
+      ),
+    );
+  });
+
+  it('keeps the keyboard in the card when Open cannot take it after an add', async () => {
+    // No session yet: Open is greyed out, so the focus the Add button had cannot go to it.
+    useSessionStore.setState({ sessionId: null });
+    const user = await openDialog();
+    await user.click(card('wscc9').getByRole('button', { name: /^Add to workspace/ }));
+    await screen.findByTestId('example-added-wscc9');
+    expect(card('wscc9').getByRole('button', { name: /^Open/ })).toBeDisabled();
+    await waitFor(() => expect(screen.getByTestId('example-card-wscc9')).toHaveFocus());
+  });
+
   it('greys Add out with the reason when the installed ANDES lacks the case', async () => {
     server.examples = server.examples.map((e) =>
       e.id === 'wscc9' ? { ...e, available: false } : e,
@@ -411,7 +500,7 @@ describe('adding a case', () => {
     server.examples = [
       makeExample({
         id: 'rts24',
-        provenance: { kind: 'bundled', path: 'rts/rts24.m' },
+        provenance: { kind: 'bundled', path: 'rts/rts24.m', built: false },
         available: false,
       }),
     ];
@@ -583,7 +672,7 @@ describe('opening a case', () => {
     server.examples = [
       makeExample({
         id: 'pegase89',
-        provenance: { kind: 'bundled', path: 'pegase/case89.raw' },
+        provenance: { kind: 'bundled', path: 'pegase/case89.raw', built: false },
         extra_files: [{ path: 'pegase/case89.dyr', sha256: 'a'.repeat(64), role: 'dynamic data' }],
         in_workspace: true,
       }),
@@ -645,6 +734,14 @@ describe('citing a case', () => {
     const panel = within(screen.getByTestId('example-cite-panel-ieee14'));
     expect(panel.getByText(/IEEE 14 Bus Test Case, University of Washington/)).toBeVisible();
     expect(panel.getByText(/H. Cui, F. Li and K. Tomsovic/)).toBeVisible();
+    // Each reference is marked with what it is, and the panel says what each mark means.
+    expect(screen.getByTestId('example-cite-role-ieee14-0')).toHaveTextContent('Data source');
+    expect(screen.getByTestId('example-cite-role-ieee14-1')).toHaveTextContent('Software');
+    const legend = screen.getByTestId('example-cite-legend-ieee14');
+    expect(legend).toHaveTextContent('Data source, where the file comes from');
+    expect(legend).toHaveTextContent('Software, the program the case runs on');
+    // Only the marks the case uses are explained.
+    expect(legend).not.toHaveTextContent('Dynamic model');
     // The licence's credit sits with the references.
     expect(panel.getByText(/ANDES asks that research that uses it cite its paper/)).toBeVisible();
     // A reference with an address links to it in a new tab.
@@ -661,9 +758,10 @@ describe('citing a case', () => {
     stubClipboard({ writeText });
     await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));
     await user.click(card('ieee14').getByRole('button', { name: /^Copy as text/ }));
+    // Each reference says what it is: the data source and the software, not one run of text.
     expect(writeText).toHaveBeenCalledWith(
-      'IEEE 14 Bus Test Case, University of Washington.\n\n' +
-        'H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
+      'Data source: IEEE 14 Bus Test Case, University of Washington.\n\n' +
+        'Software: H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
     );
     expect(success).toHaveBeenCalledWith(
       'Copied the citation of IEEE 14-bus, with machines and controls',
@@ -704,7 +802,8 @@ describe('citing a case', () => {
     await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));
     await user.click(card('ieee14').getByRole('button', { name: /^Copy as BibTeX/ }));
     expect(writeText).toHaveBeenCalledWith(
-      '@misc{uw_ieee14,\n  title = {{IEEE} 14 Bus Test Case}\n}\n\n@article{cui2021andes,\n  title = {ANDES}\n}',
+      '% Data source\n@misc{uw_ieee14,\n  title = {{IEEE} 14 Bus Test Case}\n}\n\n' +
+        '% Software\n@article{cui2021andes,\n  title = {ANDES}\n}',
     );
     expect(success).toHaveBeenCalledWith(
       'Copied the BibTeX of IEEE 14-bus, with machines and controls',
@@ -723,8 +822,31 @@ describe('citing a case', () => {
       'The browser did not let the citation be copied',
       expect.objectContaining({ description: expect.stringContaining('copy it by hand') }),
     );
-    // The text is on screen to select.
-    expect(screen.getByText(/H. Cui, F. Li and K. Tomsovic/)).toBeVisible();
+    // The text is on screen, selected, to copy by hand.
+    const byHand = screen.getByTestId('example-copy-by-hand-ieee14');
+    expect(byHand).toHaveValue(
+      'Data source: IEEE 14 Bus Test Case, University of Washington.\n\n' +
+        'Software: H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
+    );
+    expect(byHand).toHaveFocus();
+    expect(byHand).toHaveAttribute('readonly');
+  });
+
+  it('gives the BibTeX to copy by hand when the clipboard refuses it, which the list does not show', async () => {
+    writeText.mockRejectedValue(new Error('denied'));
+    const user = await openDialog();
+    stubClipboard({ writeText });
+    await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as BibTeX/ }));
+    const byHand = screen.getByTestId('example-copy-by-hand-ieee14');
+    expect((byHand as HTMLTextAreaElement).value).toContain('@article{cui2021andes');
+    expect(byHand).toHaveAccessibleName(
+      'The BibTeX to copy by hand: IEEE 14-bus, with machines and controls',
+    );
+    // A copy that goes through takes the box away again.
+    writeText.mockResolvedValue(undefined);
+    await user.click(card('ieee14').getByRole('button', { name: /^Copy as text/ }));
+    expect(screen.queryByTestId('example-copy-by-hand-ieee14')).not.toBeInTheDocument();
   });
 
   it('says so when there is no clipboard at all', async () => {
@@ -759,7 +881,7 @@ describe('the filter and the states of the list', () => {
   it('keeps what was opened in a card while the filter hides it, for when it is cleared', async () => {
     const user = await openDialog();
     await user.click(card('ieee14').getByRole('button', { name: /^Cite/ }));
-    await user.click(card('ieee14').getByText('Caveats, changes and checks'));
+    await user.click(card('ieee14').getByText('Caveats'));
     expect(screen.getByTestId('example-cite-panel-ieee14')).toBeVisible();
     // A filter that leaves nothing to show, which is also what typing the text of a
     // reference into it does, and one that leaves another case.
@@ -905,6 +1027,24 @@ describe('the dialog as a whole', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByTestId('example-cases-dialog')).toBeNull());
     expect(screen.getByTestId('example-cases-open')).toHaveFocus();
+  });
+
+  it('hands the focus back to what opened it when it is opened again before its close was handled', async () => {
+    const user = await openDialog();
+    const opener = screen.getByTestId('example-cases-open');
+    // A close is handled a tick after its dialog left the page. A command run twice quickly
+    // closes and opens it within that tick; the first close must not take the opener the second
+    // opening is to give the focus back to, nor take the focus out of the dialog it opened.
+    act(() => useExampleCasesStore.getState().closeDialog());
+    act(() => useExampleCasesStore.getState().openDialog());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.getByTestId('example-cases-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('example-cases-dialog')).toContainElement(
+      document.activeElement as HTMLElement,
+    );
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('example-cases-dialog')).toBeNull());
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 
   it('names every button by its action and its case, so a list of them reads clearly', async () => {

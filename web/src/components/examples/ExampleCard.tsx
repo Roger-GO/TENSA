@@ -6,8 +6,11 @@ import type { ExampleListEntry } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import {
   ANALYSIS_LABELS,
+  CITATION_ROLES,
+  citationRolesOf,
   citationsText,
   companionFileNames,
+  detailsLabel,
   differsFromShipped,
   differsNote,
   hostOf,
@@ -58,10 +61,15 @@ interface Note {
   text: string;
 }
 
-/** What the last press of a Copy button did, said beside the buttons until the next press. */
+/**
+ * What the last press of a Copy button did, said beside the buttons until the next press. A
+ * copy the browser refused carries the text that was to be copied, which the panel then shows
+ * to select, in whichever form (plain or BibTeX) was asked for.
+ */
 interface CopyResult {
   ok: boolean;
   text: string;
+  byHand?: { what: string; text: string };
 }
 
 /** An address that opens in a new tab, the way the Help menu's links do. */
@@ -126,6 +134,8 @@ export function ExampleCard({
   const keepButton = useRef<HTMLButtonElement>(null);
   const reloadButton = useRef<HTMLButtonElement>(null);
   const noteBox = useRef<HTMLParagraphElement>(null);
+  const byHandBox = useRef<HTMLTextAreaElement>(null);
+  const cardBox = useRef<HTMLElement>(null);
 
   const linkOnly = isLinkOnly(example);
   const primary = primaryFileName(example);
@@ -138,9 +148,20 @@ export function ExampleCard({
   const prov = example.provenance;
   const caveats = example.caveats ?? [];
   const modifications = example.modifications ?? [];
+  const details = detailsLabel(example);
+  // The disclosure names its sections, so a heading inside it says nothing new when it holds one.
+  const headed =
+    [caveats.length > 0, modifications.length > 0, example.verification != null].filter(Boolean)
+      .length > 1;
+  const citationRoles = citationRolesOf(example);
 
   useEffect(() => {
-    if (addedNow) openButton.current?.focus();
+    if (!addedNow) return;
+    // Open takes the focus the Add button had. When Open is greyed out (no session yet, another
+    // case loading) or is "Open now", the card does, so the keyboard does not fall to the page.
+    const open = openButton.current;
+    if (open !== null && !open.disabled) open.focus();
+    else cardBox.current?.focus();
   }, [addedNow]);
   // The Replace button is gone once the file is replaced: the keyboard focus goes to what the
   // card offers next (the reload of the case that holds the old file, else Open).
@@ -155,6 +176,13 @@ export function ExampleCard({
     else if (wasConfirming.current) replaceButton.current?.focus();
     wasConfirming.current = confirming;
   }, [confirming]);
+  // The text of a refused copy is selected, so the user's next key is the copy.
+  useEffect(() => {
+    if (copyResult?.byHand !== undefined) {
+      byHandBox.current?.focus();
+      byHandBox.current?.select();
+    }
+  }, [copyResult]);
   // A note is under the buttons, which may be below the fold of a long list.
   useEffect(() => {
     if (note !== null) noteBox.current?.scrollIntoView?.({ block: 'nearest' });
@@ -195,7 +223,14 @@ export function ExampleCard({
           setAddedNow(true);
           return;
         }
-        setNote({ kind: 'error', text: `Could not add this case: ${describeError(err)}` });
+        // The card says it, and a notice too: the dialog may be closed by now, and the card
+        // with it, when the answer comes.
+        const reason = describeError(err);
+        setNote({ kind: 'error', text: `Could not add this case: ${reason}` });
+        toast.error(`Could not add ${example.title}`, {
+          id: `example-added-${example.id}`,
+          description: reason,
+        });
       },
     );
   };
@@ -223,7 +258,12 @@ export function ExampleCard({
         });
       },
       (err: unknown) => {
-        setNote({ kind: 'error', text: `Could not replace this file: ${describeError(err)}` });
+        const reason = describeError(err);
+        setNote({ kind: 'error', text: `Could not replace this file: ${reason}` });
+        toast.error(`Could not replace ${primary ?? 'the file'}`, {
+          id: `example-added-${example.id}`,
+          description: reason,
+        });
       },
     );
   };
@@ -244,11 +284,12 @@ export function ExampleCard({
     } catch {
       setCopyResult({
         ok: false,
-        text: `The browser did not let the ${what} be copied. Select it below and copy it by hand.`,
+        text: `The browser did not let the ${what} be copied. It is selected below: copy it by hand.`,
+        byHand: { what, text: citationsText(example, format) },
       });
       toast.error(`The browser did not let the ${what} be copied`, {
         id: 'example-cite-copied',
-        description: 'Select the text in the Cite panel and copy it by hand.',
+        description: 'The text is selected in the Cite panel: copy it by hand.',
       });
     }
   };
@@ -263,11 +304,13 @@ export function ExampleCard({
 
   return (
     <article
+      ref={cardBox}
+      tabIndex={-1}
       aria-labelledby={titleId}
       data-testid={`example-card-${example.id}`}
       data-added={added ? 'true' : undefined}
       data-differs={differs ? 'true' : undefined}
-      className="border-border bg-background flex flex-col gap-2 rounded-[var(--radius-md)] border p-3"
+      className="border-border bg-background flex flex-col gap-2 rounded-[var(--radius-md)] border p-3 outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
     >
       <h4 id={titleId} className="text-foreground text-sm leading-snug font-semibold">
         {example.title}
@@ -313,7 +356,7 @@ export function ExampleCard({
           <span>
             Source:{' '}
             <ExternalLink href={prov.source_url} testId={`example-source-${example.id}`}>
-              {prov.release ?? hostOf(prov.source_url)}
+              {prov.built ? 'built by TENSA (script)' : (prov.release ?? hostOf(prov.source_url))}
             </ExternalLink>
           </span>
         ) : null}
@@ -334,7 +377,7 @@ export function ExampleCard({
       {linkOnly ? (
         <ul className="flex flex-col gap-1 text-xs" aria-label="Where to get the data">
           {(example.links ?? []).map((link, index, all) => (
-            <li key={link.url} className="flex flex-col gap-0.5">
+            <li key={`${index}-${link.url}`} className="flex flex-col gap-0.5">
               <span>
                 <ExternalLink href={link.url} testId={`example-link-${example.id}-${index}`}>
                   {all.length === 1 ? 'Open source page' : link.title}
@@ -349,7 +392,7 @@ export function ExampleCard({
         </ul>
       ) : null}
 
-      {caveats.length > 0 || modifications.length > 0 || example.verification ? (
+      {details !== null ? (
         <details data-testid={`example-details-${example.id}`} className="text-xs">
           <summary
             className={cn(
@@ -357,34 +400,38 @@ export function ExampleCard({
               'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
             )}
           >
-            Caveats, changes and checks
+            {details}
           </summary>
           <div className="text-muted-foreground mt-1.5 flex flex-col gap-2">
             {caveats.length > 0 ? (
               <div>
-                <p className="text-foreground font-medium">Caveats</p>
+                {headed ? <p className="text-foreground font-medium">Caveats</p> : null}
                 <ul className="list-disc pl-4">
-                  {caveats.map((c) => (
-                    <li key={c}>{c}</li>
+                  {caveats.map((c, index) => (
+                    <li key={`${index}-${c}`}>{c}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
             {modifications.length > 0 ? (
               <div>
-                <p className="text-foreground font-medium">Changes made to the data</p>
+                {headed ? (
+                  <p className="text-foreground font-medium">Changes made to the data</p>
+                ) : null}
                 <ul className="list-disc pl-4">
-                  {modifications.map((m) => (
-                    <li key={m}>{m}</li>
+                  {modifications.map((m, index) => (
+                    <li key={`${index}-${m}`}>{m}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
             {example.verification ? (
               <div>
-                <p className="text-foreground font-medium">
-                  {linkOnly ? 'What was tried with TENSA' : 'How it was checked'}
-                </p>
+                {headed ? (
+                  <p className="text-foreground font-medium">
+                    {linkOnly ? 'What was tried with TENSA' : 'How it was checked'}
+                  </p>
+                ) : null}
                 <p>{example.verification.summary}</p>
               </div>
             ) : null}
@@ -650,9 +697,36 @@ export function ExampleCard({
                 {copyResult?.text}
               </span>
             </div>
+            {copyResult?.byHand !== undefined ? (
+              <textarea
+                ref={byHandBox}
+                readOnly
+                rows={Math.min(8, copyResult.byHand.text.split('\n').length)}
+                value={copyResult.byHand.text}
+                aria-label={`The ${copyResult.byHand.what} to copy by hand: ${example.title}`}
+                data-testid={`example-copy-by-hand-${example.id}`}
+                className="border-border bg-background text-foreground w-full resize-y rounded-[var(--radius-sm)] border p-1.5 font-mono text-[11px] leading-snug"
+              />
+            ) : null}
+            <p
+              data-testid={`example-cite-legend-${example.id}`}
+              className="text-muted-foreground text-[11px] leading-snug"
+            >
+              Each reference says what it is:{' '}
+              {citationRoles
+                .map((role) => `${CITATION_ROLES[role].label}, ${CITATION_ROLES[role].what}`)
+                .join('; ')}
+              .
+            </p>
             <ol className="text-foreground flex list-decimal flex-col gap-1.5 pl-4 text-xs">
-              {citations.map((c) => (
-                <li key={c.text} className="break-words">
+              {citations.map((c, index) => (
+                <li key={`${index}-${c.text}`} className="break-words">
+                  <span
+                    data-testid={`example-cite-role-${example.id}-${index}`}
+                    className="border-border bg-background text-foreground mr-1.5 inline-block rounded-[var(--radius-sm)] border px-1.5 py-px align-baseline text-[10px] font-medium"
+                  >
+                    {CITATION_ROLES[c.role].label}
+                  </span>
                   {c.text}
                   {c.url !== null && c.url !== undefined ? (
                     <>

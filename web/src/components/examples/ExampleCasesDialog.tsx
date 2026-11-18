@@ -69,13 +69,18 @@ export function ExampleCasesDialog() {
         widthClassName="max-w-[min(48rem,calc(100vw-2rem))]"
         className="flex h-[min(48rem,calc(100vh-2rem))] flex-col"
         onOpenAutoFocus={() => {
-          // Before the focus moves into the dialog: what has it now.
+          // Before the focus moves into the dialog: what has it now. When nothing has it, an
+          // opener that is still waiting is one a quick reopen overtook (its close has not run),
+          // and it stays the one the focus goes back to.
           const active = document.activeElement;
-          opener.current =
-            active instanceof HTMLElement && active !== document.body ? active : null;
+          if (active instanceof HTMLElement && active !== document.body) opener.current = active;
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
+          // A close is handled a tick after its dialog left the page, and by then the dialog may
+          // be open again (a command run twice quickly): the new opening owns the focus and the
+          // opener it recorded, and this close leaves both alone.
+          if (useExampleCasesStore.getState().dialogOpen) return;
           const back = opener.current;
           opener.current = null;
           const target =

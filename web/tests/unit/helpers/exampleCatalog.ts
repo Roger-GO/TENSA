@@ -22,15 +22,18 @@ export function makeExample(overrides: Partial<ExampleListEntry> = {}): ExampleL
       release: 'ANDES 2.0.0',
       source_url: 'https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/ieee14_full.xlsx',
       retrieved: '2026-11-17',
+      built: false,
     },
     extra_files: [],
     citations: [
       {
+        role: 'data',
         text: 'IEEE 14 Bus Test Case, University of Washington.',
         bibtex: '@misc{uw_ieee14,\n  title = {{IEEE} 14 Bus Test Case}\n}',
         url: 'https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm',
       },
       {
+        role: 'software',
         text: 'H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
         bibtex: '@article{cui2021andes,\n  title = {ANDES}\n}',
         doi: '10.1109/TPWRS.2020.3017019',
@@ -71,10 +74,12 @@ export function makeCatalog(): ExampleListEntry[] {
         sha256: '1e994b2b4c67bdcccf52b9007cf03c5c010f6ff72bcfe055c4c3b776baf51de8',
         release: 'ANDES 2.0.0',
         source_url: 'https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/wscc9/wscc9.xlsx',
+        built: false,
       },
       caveats: [],
       citations: [
         {
+          role: 'system',
           text: 'P. M. Anderson and A. A. Fouad, Power System Control and Stability.',
           bibtex: '@book{af}',
         },
@@ -90,7 +95,7 @@ export function makeCatalog(): ExampleListEntry[] {
       size: null,
       analyses: [],
       default: false,
-      provenance: { kind: 'external' },
+      provenance: { kind: 'external', built: false },
       citations: [],
       licence: { name: 'Terms of the Texas A&M archive' },
       caveats: [],

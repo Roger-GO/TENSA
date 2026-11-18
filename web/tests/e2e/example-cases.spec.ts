@@ -186,10 +186,14 @@ test('the Project tab opens the example cases, with their sources, licences and 
   const bibtex = await page.evaluate(() => navigator.clipboard.readText());
   expect(bibtex).toContain('@article{cui2021andes');
   expect(bibtex).toContain('10.1109/TPWRS.2020.3017019');
+  // Each reference says what it is: the archive the data comes from, the software it runs on.
+  expect(bibtex).toMatch(/^% Data source\n@misc\{/);
+  expect(bibtex).toContain('% Software\n@article{cui2021andes');
+  await expect(dialog.getByTestId('example-cite-role-ieee14-0')).toHaveText('Data source');
   await dialog.getByRole('button', { name: /^Copy as text: IEEE 14-bus, with machines/ }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toContain('Hybrid Symbolic-Numeric Framework');
+    .toContain('Software: H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework');
 
   // The filter narrows the list to what is typed.
   await page.getByRole('searchbox', { name: 'Filter the example cases' }).fill('kundur');
@@ -526,11 +530,10 @@ test('the command palette finds the dialog, and Escape closes it and gives the k
 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
-  // The dialog hands the keyboard back a tick after it has left the page, from the one place
-  // where it keeps what had the focus when it opened, which the next opening writes too. Press
-  // Enter before that tick and the first close takes the button's place there, so the second
-  // close finds nothing and sends the keyboard to the Project tab. Wait until it is back.
-  await page.waitForFunction(() => document.activeElement !== document.body);
+  // The dialog hands the keyboard back a tick after it has left the page, and from the palette it
+  // goes to the More button of the top bar, which is the control the palette gave it back to
+  // before the dialog took it. The test says where, so a keyboard sent to the page fails it.
+  await expect(page.getByTestId('topbar-menu-more-trigger')).toBeFocused();
 
   // The same dialog from the keyboard on the Project tab: the key that opened it opens it
   // again, and the focus comes back to the button.

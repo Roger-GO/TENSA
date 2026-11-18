@@ -6,10 +6,13 @@ import { describe, expect, it } from 'vitest';
 import {
   ANALYSIS_LABELS,
   CASE_CATEGORIES,
+  CITATION_ROLES,
   LINK_ONLY_GROUP,
   casesOfCategory,
+  citationRolesOf,
   citationsText,
   countText,
+  detailsLabel,
   differsFromShipped,
   differsNote,
   companionFileNames,
@@ -44,7 +47,7 @@ describe('the file a case opens as', () => {
   it('lists the files it is opened together with, by name', () => {
     expect(companionFileNames(ieee14)).toEqual([]);
     const raw = makeExample({
-      provenance: { kind: 'bundled', path: 'pegase/case89.raw' },
+      provenance: { kind: 'bundled', path: 'pegase/case89.raw', built: false },
       extra_files: [{ path: 'pegase/case89.dyr', sha256: 'a'.repeat(64), role: 'dynamic data' }],
     });
     expect(primaryFileName(raw)).toBe('case89.raw');
@@ -87,7 +90,10 @@ describe('how a case is described', () => {
     expect(countText(catalog, 3, false)).toBe('2 cases, 1 link');
     expect(countText(catalog.slice(0, 2), 2, false)).toBe('2 cases');
     expect(countText(catalog.slice(0, 1), 1, false)).toBe('1 case');
-    const many = [...catalog, makeExample({ id: 'b', provenance: { kind: 'external' } })];
+    const many = [
+      ...catalog,
+      makeExample({ id: 'b', provenance: { kind: 'external', built: false } }),
+    ];
     expect(countText(many, 4, false)).toBe('2 cases, 2 links');
     expect(countText(catalog, 1, true)).toBe('1 of 3');
   });
@@ -113,18 +119,72 @@ describe('how a case is described', () => {
 });
 
 describe('the citations of a case as text to copy', () => {
-  it('joins them with a blank line, as `tensa examples cite` prints them', () => {
+  it('joins them with a blank line, each led by what it is, as `tensa examples cite` prints them', () => {
     expect(citationsText(ieee14, 'text')).toBe(
-      'IEEE 14 Bus Test Case, University of Washington.\n\n' +
-        'H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
+      'Data source: IEEE 14 Bus Test Case, University of Washington.\n\n' +
+        'Software: H. Cui, F. Li and K. Tomsovic, ANDES, doi:10.1109/TPWRS.2020.3017019.',
     );
+    // A BibTeX comment says it, which a reader of BibTeX ignores.
     expect(citationsText(ieee14, 'bibtex')).toBe(
-      '@misc{uw_ieee14,\n  title = {{IEEE} 14 Bus Test Case}\n}\n\n@article{cui2021andes,\n  title = {ANDES}\n}',
+      '% Data source\n@misc{uw_ieee14,\n  title = {{IEEE} 14 Bus Test Case}\n}\n\n' +
+        '% Software\n@article{cui2021andes,\n  title = {ANDES}\n}',
     );
+  });
+
+  it('names every role the server knows, in the words the server uses', () => {
+    expect(Object.entries(CITATION_ROLES).map(([role, { label }]) => [role, label])).toEqual([
+      ['system', 'System'],
+      ['data', 'Data source'],
+      ['software', 'Software'],
+      ['model', 'Dynamic model'],
+    ]);
+  });
+
+  it('lists the roles a case has, once each, in a fixed order', () => {
+    const cited = makeExample({
+      citations: [
+        { role: 'software', text: 'a', bibtex: '@misc{a}' },
+        { role: 'system', text: 'b', bibtex: '@misc{b}' },
+        { role: 'software', text: 'c', bibtex: '@misc{c}' },
+      ],
+    });
+    expect(citationRolesOf(cited)).toEqual(['system', 'software']);
+    expect(citationRolesOf(makeExample({ citations: [] }))).toEqual([]);
   });
 
   it('is empty for a case with none', () => {
     expect(citationsText(texas, 'text')).toBe('');
+  });
+});
+
+describe('the words of the disclosure of a card', () => {
+  const checked = { summary: 'Compared with pandapower.', checks: [] };
+
+  it('names only the sections the case has', () => {
+    const base = { caveats: [], modifications: [], verification: null };
+    expect(detailsLabel(makeExample({ ...base }))).toBeNull();
+    expect(detailsLabel(makeExample({ ...base, caveats: ['c'] }))).toBe('Caveats');
+    expect(detailsLabel(makeExample({ ...base, modifications: ['m'] }))).toBe('Changes');
+    expect(detailsLabel(makeExample({ ...base, verification: checked }))).toBe('Checks');
+    expect(detailsLabel(makeExample({ ...base, caveats: ['c'], verification: checked }))).toBe(
+      'Caveats and checks',
+    );
+    expect(
+      detailsLabel(makeExample({ ...base, modifications: ['m'], verification: checked })),
+    ).toBe('Changes and checks');
+    expect(
+      detailsLabel(makeExample({ caveats: ['c'], modifications: ['m'], verification: checked })),
+    ).toBe('Caveats, changes and checks');
+  });
+
+  it('says what was tried, and not checks, for an entry that is only links', () => {
+    const link = makeExample({
+      provenance: { kind: 'external', built: false },
+      caveats: ['c'],
+      modifications: [],
+      verification: checked,
+    });
+    expect(detailsLabel(link)).toBe('Caveats and what was tried');
   });
 });
 
