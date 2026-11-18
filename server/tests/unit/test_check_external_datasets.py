@@ -121,16 +121,26 @@ def test_the_checksums_the_entries_quote_are_those_the_script_holds_the_download
     assert quoted >= 8
 
 
-def test_a_trial_that_expects_the_run_to_fail_belongs_to_an_entry_that_says_it_does_not_start(
+def test_a_trial_whose_run_is_expected_not_to_complete_belongs_to_an_entry_that_says_how_it_ends(
     script: ModuleType,
 ) -> None:
+    """The entry says what the run did, in words that differ with what it did: a run the server
+    refuses does not start, and one that reaches its end time and is reported failed does not
+    (the two are different findings about ANDES, and the table tells them apart)."""
     catalog = load_catalog()
+    said = {"refused": "does not start", "fails": "is reported failed"}
+    seen: set[str] = set()
     for trial in script.TRIALS:
-        if trial.expect.tds != "fails":
+        if trial.expect.tds is None or trial.expect.tds == "completes":
             continue
         entry = catalog.get(trial.entry)
         assert entry is not None and "tds" not in entry.analyses, trial.key
-        assert any("does not start" in caveat for caveat in entry.caveats), trial.key
+        assert trial.expect.tds in said, trial.key
+        assert any(said[trial.expect.tds] in caveat for caveat in entry.caveats), trial.key
+        other = said["fails" if trial.expect.tds == "refused" else "refused"]
+        assert not any(other in caveat for caveat in entry.caveats), trial.key
+        seen.add(trial.expect.tds)
+    assert seen == {"refused", "fails"}
 
 
 def test_the_expected_outcomes_hang_together(script: ModuleType) -> None:
@@ -143,6 +153,71 @@ def test_the_expected_outcomes_hang_together(script: ModuleType) -> None:
             assert expect.opens or expect.static_opens, trial.key
         if expect.tds is not None:
             assert expect.opens and expect.pf, trial.key
+        # A power flow that did not converge has no state to hold to a reference's.
+        if expect.stored is not None or expect.solver in {"inside", "outside"}:
+            assert expect.pf, trial.key
+        # The models are those of a dynamic data file the trial has.
+        if expect.approximated is not None or expect.unsupported is not None:
+            assert any(part.name.endswith(".dyr") for part in trial.parts), trial.key
+        for models in (expect.approximated, expect.unsupported):
+            assert all(n > 0 for n in (models or {}).values()), trial.key
+        assert not set(expect.approximated or {}) & set(expect.unsupported or {}), trial.key
+
+
+def test_what_a_trial_expects_of_the_comparisons_is_what_its_entry_records_as_checks(
+    script: ModuleType,
+) -> None:
+    """Each check an entry records, passed or failed, is held by a trial of the entry: a
+    comparison that flips (the stored state of ACTIVSg2000 now reproduced, pandapower's
+    solution now off) is a MISMATCH and not a quiet change of the result."""
+    catalog = load_catalog()
+    held = {"stored-solution": "stored", "independent-solver": "solver"}
+    for entry_id in {trial.entry for trial in script.TRIALS}:
+        entry = catalog.get(entry_id)
+        assert entry is not None and entry.verification is not None
+        trials = [t for t in script.TRIALS if t.entry == entry_id]
+        for check in entry.verification.checks:
+            field = held[check.kind]
+            wanted = "inside" if check.passed else "outside"
+            assert any(getattr(t.expect, field) == wanted for t in trials), (entry_id, check.name)
+    # No entry says its own check outcome other than as the trials expect it.
+    for trial in script.TRIALS:
+        entry = catalog.get(trial.entry)
+        assert entry is not None and entry.verification is not None
+        kinds = {c.kind: c.passed for c in entry.verification.checks}
+        if trial.expect.stored == "outside":
+            assert kinds.get("stored-solution") is False, trial.key
+
+
+def test_a_reference_that_gives_no_solution_is_said_so_in_the_entry(script: ModuleType) -> None:
+    catalog = load_catalog()
+    for trial in script.TRIALS:
+        if trial.expect.solver != "none":
+            continue
+        entry = catalog.get(trial.entry)
+        assert entry is not None
+        text = " ".join(entry.caveats).lower()
+        assert "no independent solver" in text or "pandapower does not solve" in text, trial.key
+
+
+def test_the_models_a_trial_expects_are_named_in_its_entry(script: ModuleType) -> None:
+    catalog = load_catalog()
+    for trial in script.TRIALS:
+        entry = catalog.get(trial.entry)
+        assert entry is not None
+        text = " ".join(entry.caveats)
+        for models in (trial.expect.approximated, trial.expect.unsupported):
+            for model, records in (models or {}).items():
+                assert model in text, (trial.key, model)
+                assert records > 0
+    # ACTIVSg2000: the entry's total of the records read as another model is the table's.
+    activsg = next(t for t in script.TRIALS if t.key == "activsg2000-dyn")
+    entry = catalog.get("activsg2000_dyn")
+    assert entry is not None and activsg.expect.approximated is not None
+    assert f"{sum(activsg.expect.approximated.values())} as another model" in " ".join(
+        entry.caveats
+    )
+    assert activsg.expect.unsupported == {} and "Nothing is dropped" in " ".join(entry.caveats)
 
 
 def test_the_keys_are_chosen_or_all_run_and_an_unknown_one_is_an_error(script: ModuleType) -> None:
@@ -404,14 +479,108 @@ def test_what_a_trial_saw_is_held_to_what_its_entry_says(script: ModuleType) -> 
     seen = {"opens": True, "static_opens": None, "pf_converged": True, "tds": "fails"}
     assert script.mismatches(expect, seen) == []
     # A newer ANDES that runs the case is a difference to notice.
-    assert (
-        "expected it to fail, saw completes"
-        in script.mismatches(expect, seen | {"tds": "completes"})[0]
-    )
+    assert script.mismatches(expect, seen | {"tds": "completes"}) == [
+        "10 s run: expected a run that reaches its end time and is reported failed, "
+        "saw a run that completes"
+    ]
     assert any("power flow" in m for m in script.mismatches(expect, seen | {"pf_converged": False}))
     assert any(
         "with its dynamic data" in m for m in script.mismatches(expect, seen | {"opens": False})
     )
+
+
+@pytest.mark.parametrize("expected", ["completes", "fails", "stops", "refused"])
+def test_the_four_ways_a_run_can_end_are_told_apart(script: ModuleType, expected: str) -> None:
+    """A run the server refuses and one that reaches its end time and is reported failed (ANDES
+    fails its initialisation test and goes on) are different findings, and so is one that
+    stops short: a change from any of the four to another is a MISMATCH."""
+    expect = script.Expect(opens=True, pf=True, tds=expected)
+    seen = {"opens": True, "pf_converged": True}
+    assert script.mismatches(expect, seen | {"tds": expected}) == []
+    for other in {"completes", "fails", "stops", "refused"} - {expected}:
+        problems = script.mismatches(expect, seen | {"tds": other})
+        assert len(problems) == 1 and problems[0].startswith("10 s run: expected"), (
+            expected,
+            other,
+        )
+    assert "saw no run" in script.mismatches(expect, seen | {"tds": None})[0]
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ({"converged": True, "final_t": 10.0}, "completes"),
+        ({"converged": False, "final_t": 10.0}, "fails"),
+        ({"converged": False, "final_t": 10.0 - 4e-7}, "fails"),
+        ({"converged": False, "final_t": 3.53}, "stops"),
+        ({"converged": True, "final_t": 9.9667}, "stops"),
+        ({"converged": False}, "stops"),
+    ],
+)
+def test_an_answered_run_completes_fails_after_its_end_time_or_stops_short(
+    script: ModuleType, answer: dict[str, Any], outcome: str
+) -> None:
+    assert script.tds_outcome(answer, 10.0) == outcome
+
+
+def test_a_comparison_that_flips_is_a_mismatch_and_one_not_asked_for_is_not_held(
+    script: ModuleType,
+) -> None:
+    expect = script.Expect(
+        opens=False, static_opens=True, pf=True, stored="inside", solver="inside"
+    )
+    seen = {
+        "opens": False,
+        "static_opens": True,
+        "pf_converged": True,
+        "stored": "inside",
+        "solver": "inside",
+    }
+    assert script.mismatches(expect, seen) == []
+    assert script.mismatches(expect, seen | {"stored": "outside"}) == [
+        "power flow against the solution the file stores: expected inside the bounds, "
+        "saw outside the bounds"
+    ]
+    assert script.mismatches(expect, seen | {"solver": "none"}) == [
+        "power flow against pandapower's solution: expected inside the bounds, "
+        "saw no solution to compare with"
+    ]
+    # No interpreter with pandapower: the comparison is not in what was seen, and not held.
+    without = {k: v for k, v in seen.items() if k != "solver"}
+    assert script.mismatches(expect, without) == []
+    # What an entry does not say is not held, whatever was seen.
+    silent = script.Expect(opens=False, static_opens=True, pf=True)
+    assert script.mismatches(silent, seen | {"stored": "outside", "solver": "outside"}) == []
+    # A reference that gave no solution is held too: pandapower now solving it is a difference.
+    nothing = script.Expect(opens=True, pf=True, solver="none")
+    assert script.mismatches(nothing, {"opens": True, "pf_converged": True, "solver": "none"}) == []
+    assert script.mismatches(nothing, {"opens": True, "pf_converged": True, "solver": "inside"})
+
+
+def test_the_models_read_as_another_model_and_those_left_out_are_held_to_their_counts(
+    script: ModuleType,
+) -> None:
+    expect = script.Expect(
+        opens=True,
+        approximated={"GGOV1": 367, "GENSAL": 25},
+        unsupported={},
+    )
+    seen = {
+        "opens": True,
+        "approximated": {"GENSAL": 25, "GGOV1": 367},
+        "unsupported": {},
+    }
+    assert script.mismatches(expect, seen) == []
+    # A model that is now read as itself, one that is now left out, a different count.
+    gained = seen | {"approximated": {"GGOV1": 367}}
+    assert script.mismatches(expect, gained) == [
+        "models read as another model: expected GGOV1 367, GENSAL 25, saw GGOV1 367"
+    ]
+    lost = seen | {"unsupported": {"DC4B": 11}}
+    assert script.mismatches(expect, lost) == ["models left out: expected none, saw DC4B 11"]
+    assert script.mismatches(expect, seen | {"approximated": {"GENSAL": 25, "GGOV1": 366}})
+    # An entry that says nothing of the models holds none.
+    assert script.mismatches(script.Expect(opens=True), seen | {"unsupported": {"X": 1}}) == []
 
 
 def test_the_network_alone_is_only_asked_for_when_the_entry_says_something_about_it(
@@ -429,9 +598,11 @@ def test_the_network_alone_is_only_asked_for_when_the_entry_says_something_about
 class FakeApi:
     """Answers like a server that refuses the case with its dynamic data and takes it without."""
 
-    def __init__(self, *, dynamic_opens: bool, converges: bool = True) -> None:
+    def __init__(self, *, dynamic_opens: bool, converges: bool = True, run: Any = None) -> None:
         self.dynamic_opens = dynamic_opens
         self.converges = converges
+        self.run = run  # the answer of ``/tds``, or an exception it raises
+        self.variables: list[dict[str, Any]] = []
         self.calls: list[tuple[str, str]] = []
         self.closed: list[str] = []
         self._n = 0
@@ -455,6 +626,11 @@ class FakeApi:
                 "bus_angles": {"1": 0.0, "2": -0.05},
                 "summary": {"loss_p": 1.0, "slack_p": 50.0},
             }
+        if path.endswith("/tds"):
+            assert self.run is not None, "the trial did not expect a run"
+            if isinstance(self.run, Exception):
+                raise self.run
+            return self.run
         raise AssertionError(path)
 
     def get(self, path: str, **query: Any) -> Any:
@@ -462,7 +638,7 @@ class FakeApi:
         if path.endswith("/messages"):
             return {"messages": [{"text": "Models not yet supported: GENROE"}]}
         if path.endswith("/dae-variables"):
-            return {"items": [], "total": 0}
+            return {"items": self.variables, "total": len(self.variables)}
         raise AssertionError(path)
 
     def delete(self, path: str) -> Any:
@@ -551,6 +727,157 @@ def test_a_trial_that_breaks_is_a_result_and_not_a_crash(
         FakeApi(dynamic_opens=True), tmp_path, _trial(script, opens=True), data, None, tmp_path
     )
     assert result.error == "OSError: disk gone" and not result.passed
+
+
+def _write(tmp_path: Path) -> dict[str, bytes]:
+    data = {"c.raw": b"r", "c.dyr": b"d"}
+    for name, content in data.items():
+        (tmp_path / name).write_bytes(content)
+    return data
+
+
+def test_a_power_flow_far_from_both_references_fails_a_trial_that_says_it_is_inside_them(
+    script: ModuleType, quiet: None, harness_loaded: None, monkeypatch: Any, tmp_path: Path
+) -> None:
+    """The comparisons are held to the entry, not only reported: a reference far off made the
+    run pass when only whether the case opens, the power flow converges and the 10 s run were
+    held."""
+    far_stored = {"bus_voltage": {"1": 1.5, "2": 1.5}, "bus_angle": {"1": 40.0, "2": 40.0}}
+    far_solver = far_stored | {"loss_mw": 999.0, "slack_p_mw": 999.0, "pandapower": "9.9"}
+    monkeypatch.setattr(script, "stored_state", lambda path: far_stored)
+    monkeypatch.setattr(script, "pandapower_state", lambda *args: (far_solver, ""))
+    data = _write(tmp_path)
+    inside = _trial(
+        script, opens=False, static_opens=True, pf=True, stored="inside", solver="inside"
+    )
+    result = script.run_trial(FakeApi(dynamic_opens=False), tmp_path, inside, data, "py", tmp_path)
+    assert [c.passed for c in result.comparisons] == [False, False]
+    assert not result.passed
+    assert [p.split(":")[0] for p in result.problems] == [
+        "power flow against the solution the file stores",
+        "power flow against pandapower's solution",
+    ]
+    # The entry that says they are outside (the stored state of ACTIVSg2000) is held to that.
+    outside = _trial(
+        script, opens=False, static_opens=True, pf=True, stored="outside", solver="outside"
+    )
+    again = script.run_trial(FakeApi(dynamic_opens=False), tmp_path, outside, data, "py", tmp_path)
+    assert again.problems == [] and again.passed
+
+
+def test_a_comparison_with_pandapower_that_was_not_asked_for_is_not_held(
+    script: ModuleType, quiet: None, harness_loaded: None, tmp_path: Path
+) -> None:
+    data = _write(tmp_path)
+    trial = _trial(script, opens=False, static_opens=True, pf=True, solver="inside")
+    result = script.run_trial(FakeApi(dynamic_opens=False), tmp_path, trial, data, None, tmp_path)
+    assert [c.asked for c in result.comparisons if c.kind == "solver"] == [False]
+    assert result.problems == [] and result.passed
+    page = script.render_markdown([result], "2026-01-01")
+    assert "No interpreter with pandapower was given" in page
+    # With an interpreter that gives no solution, the same entry is not as it says.
+    asked = script.run_trial(FakeApi(dynamic_opens=False), tmp_path, trial, data, "py", tmp_path)
+    assert any("pandapower" in p for p in asked.problems)
+
+
+def test_a_power_flow_that_does_not_converge_is_outside_a_solution_pandapower_gives(
+    script: ModuleType, quiet: None, harness_loaded: None, monkeypatch: Any, tmp_path: Path
+) -> None:
+    data = _write(tmp_path)
+    trial = _trial(script, opens=False, static_opens=True, pf=False, solver="none")
+    args = (tmp_path, trial, data, "py", tmp_path)
+    nowhere = script.run_trial(FakeApi(dynamic_opens=False, converges=False), *args)
+    assert nowhere.problems == []  # pandapower does not solve it either ("no pandapower here")
+    solved = {"bus_voltage": {}, "bus_angle": {}, "pandapower": "9.9"}
+    monkeypatch.setattr(script, "pandapower_state", lambda *a: (solved, ""))
+    found = script.run_trial(FakeApi(dynamic_opens=False, converges=False), *args)
+    assert any("pandapower's solution" in p for p in found.problems)
+
+
+_TRACES = {
+    "flat": {"t": [0.0, 5.0, 10.0], "variables": [{"name": "x A 1", "values": [1.0, 1.0, 1.0]}]},
+    "drift": {
+        "t": [0.0, 5.0, 10.0],
+        "variables": [
+            {"name": "x A 1", "values": [1.0, 1.0, 1.0]},
+            {"name": "PIQ_xi B 1", "values": [0.0, 0.1, 0.163]},
+        ],
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("kind", "outcome", "change", "flat"),
+    [
+        ("completes", "completes", 0.0, True),
+        ("fails", "fails", 0.163, None),
+        ("stops", "stops", None, None),
+        ("refused", "refused", None, None),
+    ],
+)
+def test_the_run_of_a_trial_ends_in_one_of_four_ways_and_a_failed_one_is_measured_not_judged(
+    script: ModuleType,
+    quiet: None,
+    harness_loaded: None,
+    tmp_path: Path,
+    kind: str,
+    outcome: str,
+    change: float | None,
+    flat: bool | None,
+) -> None:
+    api_error = sys.modules["verify_example_cases"].ApiError
+    runs: dict[str, Any] = {
+        "completes": {"converged": True, "final_t": 10.0, "traces": _TRACES["flat"]},
+        "fails": {"converged": False, "final_t": 10.0, "traces": _TRACES["drift"]},
+        "stops": {"converged": False, "final_t": 3.53, "traces": _TRACES["drift"]},
+        "refused": api_error("POST", "/sessions/s1/tds", 422, "TDS.run raised: boom"),
+    }
+    api = FakeApi(dynamic_opens=True, run=runs[kind])
+    api.variables = [
+        {"name": "x A 1", "kind": "x", "model": "A", "var": "x"},
+        {"name": "PIQ_xi B 1", "kind": "x", "model": "B", "var": "PIQ_xi"},
+    ]
+    data = _write(tmp_path)
+    result = script.run_trial(
+        api, tmp_path, _trial(script, opens=True, pf=True, tds=outcome), data, None, tmp_path
+    )
+    assert result.tds == outcome and result.problems == [], result.problems
+    assert result.tds_change == change and result.tds_flat is flat
+    if kind == "refused":
+        assert "boom" in (result.tds_error or "")
+    wrong = "completes" if outcome != "completes" else "fails"
+    again = script.run_trial(
+        FakeApi(dynamic_opens=True, run=runs[kind]),
+        tmp_path,
+        _trial(script, opens=True, pf=True, tds=wrong),
+        data,
+        None,
+        tmp_path,
+    )
+    assert any(p.startswith("10 s run: expected") for p in again.problems)
+    page = script.render_markdown([result], "2026-01-01")
+    if kind == "fails":
+        assert "reaches its end time" in page and "not judged: the run is reported failed" in page
+        assert "0.163 (PIQ_xi B 1" in page
+
+
+def test_the_states_to_record_are_an_equal_share_of_each_model_when_there_are_too_many(
+    script: ModuleType,
+) -> None:
+    def state(model: str, n: int) -> dict[str, Any]:
+        return {"name": f"s {model} {n}", "kind": "x", "model": model, "var": "s"}
+
+    bus = [{"name": f"v Bus {n}", "kind": "y", "model": "Bus", "var": "v"} for n in (1, 2)]
+    listing = [*bus, *(state("A", n) for n in range(5)), *(state("B", n) for n in range(2))]
+    # Room for everything: every state, then the buses.
+    names, left_out = script.spread_variables(listing, limit=20)
+    assert left_out == 0 and len(names) == 9 and names[-2:] == ["v Bus 1", "v Bus 2"]
+    # Too many: the models take turns, so the last model is recorded too, and no bus is.
+    names, left_out = script.spread_variables(listing, limit=4)
+    assert names == ["s A 0", "s B 0", "s A 1", "s B 1"] and left_out == 3
+    # The states fill the room, so the buses are not recorded; one place left is a bus's.
+    assert script.spread_variables(listing, limit=7)[0][-1] != "v Bus 1"
+    assert script.spread_variables(listing, limit=8)[0][-1] == "v Bus 1"
 
 
 # ---- the reports ------------------------------------------------------------------------------

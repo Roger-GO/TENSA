@@ -1062,15 +1062,22 @@ def test_a_link_only_entry_claims_only_checks_against_a_reference_that_is_not_te
 
 def test_what_a_link_only_entry_could_not_run_is_not_listed_among_its_analyses() -> None:
     """The cards show the analyses as badges: only what ran counts. The two dynamic datasets
-    whose 10 s run does not start offer a power flow and no time-domain run."""
+    whose 10 s run gave no result offer a power flow and no time-domain run, and each says how
+    its run ended: the ACTIVSg2000 data is refused at initialisation, so its run does not
+    start, and the WECC data reaches 10 s after a failed initialisation test and is reported
+    failed."""
     catalog = load_catalog()
-    for example_id in ("wecc240", "activsg2000_dyn"):
+    for example_id, how in (("wecc240", "is reported failed"), ("activsg2000_dyn", "does not start")):
         entry = catalog.get(example_id)
         assert entry is not None
         assert entry.analyses == ["pf"], example_id
-        assert any("does not start" in c for c in entry.caveats), example_id
+        assert any(c.startswith(f"The 10 s run {how}.") for c in entry.caveats), example_id
         assert entry.verification is not None
         assert "time-domain" in entry.verification.summary
+    wecc = catalog.get("wecc240")
+    assert wecc is not None
+    assert "does not start" not in " ".join([wecc.summary, *wecc.caveats])
+    assert "cannot initialise" not in wecc.summary.lower()
     for example_id in LINK_ONLY:
         entry = catalog.get(example_id)
         assert entry is not None and "tds" not in entry.analyses and "eig" not in entry.analyses

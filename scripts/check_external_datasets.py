@@ -20,22 +20,29 @@ port and, through the HTTP API,
    and angles PSS/E saved, read the way ``scripts/crosscheck_pf.py stored`` reads them) and,
    where pandapower is at hand and its dump can hold the network, with pandapower's;
 4. for a case with dynamic data, runs 10 s of time domain with nothing acting on it and says
-   whether it completes and whether the states stay where the power flow put them.
+   whether it completes, is reported failed after reaching its end time (ANDES counts a failed
+   initialisation test as a failed run and integrates all the same), stops short of it or is
+   refused by the server, and how far the states move.
 
 A file that cannot be opened at all (a PSS/E binary case, an IEEE Common Data Format text) is
 offered to TENSA as it is, so that the refusal is TENSA's own. Nothing here downloads from
 a page that asks for a name or an address before it gives the file: those datasets have no
 trial, and their catalog entries say so.
 
-Every trial states what it expects (``Expect``, which is what its catalog entry says). A
-result that differs is a ``MISMATCH`` and the exit status is 1, so a newer ANDES that reads
-more of a file, or a source that changed, is noticed. The exit status is also 1 when a trial
-could not be run (a download failed or a file is not the one recorded), and 2 for bad usage.
+Every trial states what it expects (``Expect``, which is what its catalog entry says): whether
+the case opens, whether its power flow converges and stands inside the bounds of each
+reference (the stored solution, pandapower), which models of the dynamic data ANDES reads as
+another model or leaves out, and what the 10 s run does. A result that differs is a
+``MISMATCH`` and the exit status is 1, so a newer ANDES that reads more of a file, or a source
+that changed, is noticed. The exit status is also 1 when a trial could not be run (a download
+failed or a file is not the one recorded), and 2 for bad usage. The numbers an entry quotes
+(a gap of 3.5e-7 pu, a count of records) are in the report and not held: a comparison is held
+to its bound, a model to its count.
 
 pandapower is not a dependency of TENSA: ``--verify-python`` (or ``TENSA_VERIFY_PYTHON``) names
 an interpreter that has it, as for ``scripts/crosscheck_pf.py``. Without one that comparison is
-left out and the report says so. Downloads go to a temporary folder (or ``--cache``) and are
-deleted with it.
+left out, and so is what the entries say of it; the report says so. Downloads go to a
+temporary folder (or ``--cache``) and are deleted with it.
 """
 
 from __future__ import annotations
@@ -75,13 +82,14 @@ from verify_example_cases import (  # noqa: E402
     UNDISTURBED_TF,
     Api,
     ApiError,
-    choose_variables,
     completes,
     largest_change,
     list_variables,
     running_server,
     trace_arrays,
 )
+
+from tensa.core.dae_vars import MAX_DAE_VARS  # noqa: E402
 
 # The most one download may be, in bytes: the biggest file here is 2.1 MB.
 MAX_DOWNLOAD = 8_000_000
@@ -131,14 +139,33 @@ class Part:
     member_sha256: str | None = None
 
 
+# What the 10 s run did: it ran to its end time and ANDES calls it a success ("completes"), it
+# ran to its end time and ANDES calls it a failure ("fails": its initialisation test did not
+# pass, and TENSA reports the run as failed), it ended before its end time ("stops") or the
+# server answered with an error and nothing ran ("refused").
+TdsOutcome = Literal["completes", "fails", "stops", "refused"]
+# How the power flow stands to a reference: every bus inside the bounds, some bus outside them,
+# or no comparison to make because the reference gives no solution.
+Agreement = Literal["inside", "outside", "none"]
+
+
 @dataclass(frozen=True)
 class Expect:
-    """What a trial's catalog entry says happens, so that a different outcome is noticed."""
+    """What a trial's catalog entry says happens, so that a different outcome is noticed.
+
+    A field left at ``None`` is something the entry does not say, and is not held.
+    """
 
     opens: bool  # the case opens with its dynamic data (alone, when it has none)
     static_opens: bool | None = None  # when it does not: the network alone opens
     pf: bool | None = None  # the power flow of what opened converges
-    tds: Literal["completes", "fails"] | None = None  # the 10 s run, for a case with dynamics
+    tds: TdsOutcome | None = None  # the 10 s run, for a case with dynamics
+    stored: Agreement | None = None  # the power flow against the solution the file stores
+    solver: Agreement | None = None  # the power flow against pandapower's
+    # The models of the dynamic data ANDES reads as another model, and those it leaves out,
+    # each with its number of records. An empty mapping says there are none.
+    approximated: dict[str, int] | None = None
+    unsupported: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -191,7 +218,15 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="wecc240.raw",
         companions=("wecc240.dyr",),
-        expect=Expect(opens=True, pf=True, tds="fails"),
+        expect=Expect(
+            opens=True,
+            pf=True,
+            tds="fails",
+            stored="inside",
+            solver="none",
+            approximated={},
+            unsupported={},
+        ),
     ),
     Trial(
         key="wecc240-mirror",
@@ -213,7 +248,15 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="wecc240m.raw",
         companions=("wecc240m.dyr",),
-        expect=Expect(opens=True, pf=True, tds="fails"),
+        expect=Expect(
+            opens=True,
+            pf=True,
+            tds="fails",
+            stored="inside",
+            solver="none",
+            approximated={},
+            unsupported={},
+        ),
     ),
     Trial(
         key="activsg2000-dyn",
@@ -235,7 +278,15 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="activsg2000.raw",
         companions=("activsg2000.dyr",),
-        expect=Expect(opens=True, pf=True, tds="fails"),
+        expect=Expect(
+            opens=True,
+            pf=True,
+            tds="refused",
+            stored="outside",
+            solver="inside",
+            approximated={"GGOV1": 367, "EXPIC1": 61, "ESAC6A": 7, "SCRX": 5, "GENSAL": 25},
+            unsupported={},
+        ),
     ),
     Trial(
         key="wecc240-dera",
@@ -257,7 +308,9 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="wecc240d.raw",
         companions=("wecc240d.dyr",),
-        expect=Expect(opens=False, static_opens=True, pf=True),
+        expect=Expect(
+            opens=False, static_opens=True, pf=True, solver="inside", unsupported={"DERA1": 3}
+        ),
     ),
     Trial(
         key="pes-twoarea",
@@ -283,7 +336,14 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="twoarea.raw",
         companions=("twoarea.dyr",),
-        expect=Expect(opens=False, static_opens=True, pf=True),
+        expect=Expect(
+            opens=False,
+            static_opens=True,
+            pf=True,
+            stored="inside",
+            solver="inside",
+            unsupported={"GENROE": 4},
+        ),
     ),
     Trial(
         key="pes-brazil7",
@@ -309,7 +369,9 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="brazil7.raw",
         companions=("brazil7.dyr",),
-        expect=Expect(opens=False, static_opens=True, pf=False),
+        expect=Expect(
+            opens=False, static_opens=True, pf=False, solver="none", unsupported={"GENSAE": 5}
+        ),
     ),
     Trial(
         key="pes-au14",
@@ -335,7 +397,12 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="au14.raw",
         companions=("au14.dyr",),
-        expect=Expect(opens=False, static_opens=False),
+        expect=Expect(
+            opens=False,
+            static_opens=False,
+            approximated={"GENSAL": 2},
+            unsupported={"GENROE": 12, "CSVGN1": 5, "IEELAL": 1},
+        ),
     ),
     Trial(
         key="pes-nyps68",
@@ -351,7 +418,7 @@ TRIALS: tuple[Trial, ...] = (
         ),
         primary="nyps68.dyr",
         companions=(),
-        expect=Expect(opens=False),
+        expect=Expect(opens=False, unsupported={"DC4B": 11}),
     ),
     Trial(
         key="pes-3machine",
@@ -552,8 +619,32 @@ def largest_gap(got: Mapping[str, float], want: Mapping[str, float]) -> Gap:
     return Gap(abs(got[worst_bus] - want[worst_bus]), worst_bus, len(shared), missing)
 
 
+_TDS_SAYS: dict[str, str] = {
+    "completes": "a run that completes",
+    "fails": "a run that reaches its end time and is reported failed",
+    "stops": "a run that stops before its end time",
+    "refused": "a run the server refuses",
+}
+_AGREEMENT_SAYS: dict[str, str] = {
+    "inside": "inside the bounds",
+    "outside": "outside the bounds",
+    "none": "no solution to compare with",
+}
+
+
+def _records(counts: Mapping[str, int]) -> str:
+    """``GGOV1 367, EXPIC1 61``: the models of a count, the most records first."""
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{model} {n}" for model, n in ranked) or "none"
+
+
 def mismatches(expect: Expect, seen: Mapping[str, Any]) -> list[str]:
-    """Where what a trial saw differs from what its catalog entry says."""
+    """Where what a trial saw differs from what its catalog entry says.
+
+    ``seen`` holds what ``trial_seen`` reports. A key it does not hold (the comparison with
+    pandapower when no interpreter was given) is something that could not be seen, and is
+    not held.
+    """
     out: list[str] = []
     if seen.get("opens") is not expect.opens:
         out.append(f"opens with its dynamic data: expected {expect.opens}, saw {seen.get('opens')}")
@@ -565,7 +656,27 @@ def mismatches(expect: Expect, seen: Mapping[str, Any]) -> list[str]:
     if expect.pf is not None and seen.get("pf_converged") is not expect.pf:
         out.append(f"power flow converges: expected {expect.pf}, saw {seen.get('pf_converged')}")
     if expect.tds is not None and seen.get("tds") != expect.tds:
-        out.append(f"10 s run: expected it to {expect.tds[:-1]}, saw {seen.get('tds')}")
+        out.append(
+            f"10 s run: expected {_TDS_SAYS[expect.tds]}, "
+            f"saw {_TDS_SAYS.get(str(seen.get('tds')), 'no run')}"
+        )
+    for key, want, what in (
+        ("stored", expect.stored, "the solution the file stores"),
+        ("solver", expect.solver, "pandapower's solution"),
+    ):
+        if want is not None and key in seen and seen[key] != want:
+            out.append(
+                f"power flow against {what}: expected {_AGREEMENT_SAYS[want]}, "
+                f"saw {_AGREEMENT_SAYS.get(str(seen[key]), 'no comparison made')}"
+            )
+    for key, want, what in (
+        ("approximated", expect.approximated, "read as another model"),
+        ("unsupported", expect.unsupported, "left out"),
+    ):
+        if want is not None and dict(seen.get(key) or {}) != want:
+            out.append(
+                f"models {what}: expected {_records(want)}, saw {_records(seen.get(key) or {})}"
+            )
     return out
 
 
@@ -654,9 +765,16 @@ def pandapower_state(
 
 @dataclass
 class Compare:
-    """A comparison of the power flow with a reference that is not TENSA's."""
+    """A comparison of the power flow with a reference that is not TENSA's.
+
+    ``kind`` says which reference it is (the state the file stores, or a solver), ``asked``
+    whether the reference was asked for at all (no interpreter with pandapower was given),
+    and ``passed`` stays ``None`` when the reference gave nothing to compare with.
+    """
 
     reference: str
+    kind: Literal["stored", "solver"] = "solver"
+    asked: bool = True
     voltage_gap: float | None = None
     voltage_bus: str = ""
     angle_gap: float | None = None
@@ -692,8 +810,10 @@ class TrialResult:
     pf_messages: list[str] = field(default_factory=list)
     comparisons: list[Compare] = field(default_factory=list)
     case_events: int = 0
-    tds: str | None = None
+    tds: TdsOutcome | None = None
     tds_text: str = ""
+    tds_recorded: int = 0
+    tds_left_out: int = 0
     tds_change: float | None = None
     tds_change_name: str | None = None
     tds_flat: bool | None = None
@@ -756,6 +876,7 @@ def compare_power_flow(
     agap = largest_gap(angles, reference["bus_angle"])
     out = Compare(
         reference=label,
+        kind="stored" if stored else "solver",
         voltage_gap=vgap.worst,
         voltage_bus=vgap.bus,
         angle_gap=agap.worst,
@@ -846,14 +967,44 @@ def run_trial(
     return result
 
 
+def agreement(result: TrialResult, kind: Literal["stored", "solver"]) -> Agreement | None:
+    """How the power flow stands to one reference, or ``None`` when it was not asked for."""
+    for compare in result.comparisons:
+        if compare.kind != kind:
+            continue
+        if not compare.asked:
+            return None
+        if compare.passed is None:
+            return "none"
+        return "inside" if compare.passed else "outside"
+    return "none"
+
+
+def models_with(result: TrialResult, status: str) -> dict[str, int]:
+    """The models of the dynamic data ANDES reads in the way ``status`` says, with their records."""
+    return {row.psse_model: row.records for row in result.models if row.status == status}
+
+
 def trial_seen(result: TrialResult) -> dict[str, Any]:
-    """What a trial saw, in the terms ``Expect`` states."""
-    return {
+    """What a trial saw, in the terms ``Expect`` states.
+
+    The comparison with a reference that was not asked for is left out, so it is not held.
+    """
+    seen: dict[str, Any] = {
         "opens": result.opens,
         "static_opens": result.static_opens,
         "pf_converged": result.pf_converged,
         "tds": result.tds,
+        "approximated": models_with(result, "approximated"),
+        "unsupported": models_with(result, "not supported"),
     }
+    for kind, found in (
+        ("stored", agreement(result, "stored")),
+        ("solver", agreement(result, "solver")),
+    ):
+        if found is not None:
+            seen[kind] = found
+    return seen
 
 
 def _power_flow_and_run(
@@ -876,22 +1027,61 @@ def _power_flow_and_run(
     return pf
 
 
+def spread_variables(
+    listing: Sequence[Mapping[str, Any]], limit: int = MAX_DAE_VARS
+) -> tuple[list[str], int]:
+    """The variables the undisturbed run records, and how many of the states are left out.
+
+    A run records at most ``limit`` variables. A case with more states than that has each
+    model keep an equal share of its own, in the order ANDES lists them: the first ``limit``
+    would be all of the first models' and none of the last ones', and a state that moves in
+    one of those would go unseen. The buses' voltages and angles come after, as far as there
+    is room.
+    """
+    by_model: dict[str, list[str]] = {}
+    for var in listing:
+        if var["kind"] == "x":
+            by_model.setdefault(str(var["model"]), []).append(str(var["name"]))
+    states: list[str] = []
+    depth = 0
+    while len(states) < limit and any(len(names) > depth for names in by_model.values()):
+        for names in by_model.values():
+            if depth < len(names) and len(states) < limit:
+                states.append(names[depth])
+        depth += 1
+    left_out = sum(len(names) for names in by_model.values()) - len(states)
+    buses = [
+        str(var["name"]) for var in listing if var["model"] == "Bus" and var["var"] in ("v", "a")
+    ]
+    return states + buses[: max(0, limit - len(states))], left_out
+
+
+def tds_outcome(run: Mapping[str, Any], tf: float) -> TdsOutcome:
+    """What an answered run did: ``completes``, ``fails`` (it reached ``tf`` and is reported
+    failed) or ``stops`` (it ended short of ``tf``)."""
+    if not abs(float(run.get("final_t", math.nan)) - tf) <= 1e-6:
+        return "stops"
+    return "completes" if run.get("converged") else "fails"
+
+
 def _undisturbed_run(api: Api, session_id: str, result: TrialResult) -> None:
-    names = choose_variables(list_variables(api, session_id))
+    recorded, result.tds_left_out = spread_variables(list_variables(api, session_id))
+    result.tds_recorded = len(recorded)
     try:
-        run = api.post(
-            f"/sessions/{session_id}/tds", {"tf": UNDISTURBED_TF, "dae_vars": names.flat}
-        )
+        run = api.post(f"/sessions/{session_id}/tds", {"tf": UNDISTURBED_TF, "dae_vars": recorded})
     except ApiError as exc:
-        result.tds, result.tds_error = "fails", exc.detail
+        result.tds, result.tds_error = "refused", exc.detail
     else:
-        ok, text = completes(run, UNDISTURBED_TF)
-        result.tds, result.tds_text = ("completes" if ok else "fails"), text
-        # What an undisturbed run that did not complete moved is no measure of anything.
-        if ok and run.get("traces"):
+        result.tds = tds_outcome(run, UNDISTURBED_TF)
+        result.tds_text = completes(run, UNDISTURBED_TF)[1]
+        # A run that stopped short is no measure of how far the states move, and one that
+        # reached its end time and is reported failed is measured but not judged flat: the
+        # states it integrates start from where ANDES says the initialisation went wrong.
+        if result.tds in ("completes", "fails") and run.get("traces"):
             change, name = largest_change(trace_arrays(run["traces"])[1])
             result.tds_change, result.tds_change_name = change, name
-            result.tds_flat = change <= FLAT_TOLERANCE
+            if result.tds == "completes":
+                result.tds_flat = change <= FLAT_TOLERANCE
     if result.tds != "completes":
         result.tds_messages = [
             m
@@ -913,6 +1103,7 @@ def _compare_reference(
     all the same: a network that it solves and ANDES does not is a finding about ANDES, one
     that neither solves is a finding about the data.
     """
+    asked = verify_python is not None
     if not result.pf_converged:
         solved, why = pandapower_state(primary, verify_python, scratch)
         note = (
@@ -920,17 +1111,28 @@ def _compare_reference(
             if solved is not None
             else f"pandapower does not solve it either ({why})"
         )
-        result.comparisons.append(Compare(reference="pandapower", note=note))
+        # A solution of pandapower's that TENSA's power flow has no counterpart for is outside
+        # the bounds; one pandapower does not give either leaves nothing to compare.
+        result.comparisons.append(
+            Compare(
+                reference="pandapower",
+                asked=asked,
+                passed=False if solved is not None else None,
+                note=note,
+            )
+        )
         return
     stored = stored_state(primary)
     label = "the solution stored in the file"
     if stored is None:
-        result.comparisons.append(Compare(reference=label, note="ANDES cannot read the file"))
+        result.comparisons.append(
+            Compare(reference=label, kind="stored", note="ANDES cannot read the file")
+        )
     else:
         result.comparisons.append(compare_power_flow(pf, stored, label, stored=True))
     reference, why = pandapower_state(primary, verify_python, scratch)
     if reference is None:
-        result.comparisons.append(Compare(reference="pandapower", note=why))
+        result.comparisons.append(Compare(reference="pandapower", asked=asked, note=why))
     else:
         result.comparisons.append(
             compare_power_flow(
@@ -997,6 +1199,15 @@ def _fmt(value: float | None, unit: str = "") -> str:
     return f"{value:.3g}{unit}"
 
 
+_TDS_REPORT: dict[str, str] = {
+    "completes": "completes",
+    "fails": "fails: it reaches its end time, but ANDES's exit code is not 0 (a failed "
+    "initialisation test sets it), so the run is reported failed",
+    "stops": "stops before its end time",
+    "refused": "refused: the server answered with an error and nothing ran",
+}
+
+
 def render_markdown(results: Sequence[TrialResult], generated: str) -> str:
     """The report as a Markdown page."""
     out = [
@@ -1004,6 +1215,14 @@ def render_markdown(results: Sequence[TrialResult], generated: str) -> str:
         "",
         f"Generated {generated} by `scripts/check_external_datasets.py`.",
         "",
+    ]
+    if any(not c.asked for r in results for c in r.comparisons):
+        out += [
+            "No interpreter with pandapower was given (`--verify-python`): the comparisons with "
+            "it are not in this report, and what the entries say of them is not held.",
+            "",
+        ]
+    out += [
         "| Trial | Entry | Opens (with dynamics) | Power flow | 10 s run | As expected |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
@@ -1063,13 +1282,20 @@ def render_markdown(results: Sequence[TrialResult], generated: str) -> str:
                 f"over {c.buses} buses{extra}: {'inside' if c.passed else 'OUTSIDE'} the bounds"
             )
         if r.tds is not None:
-            out.append(f"- 10 s run with nothing acting on it: {r.tds}")
+            out.append(f"- 10 s run with nothing acting on it: {_TDS_REPORT[r.tds]}")
             if r.tds_text:
                 out.append(f"  - {r.tds_text}")
             if r.tds_change is not None:
+                judged = (
+                    f"flat: {r.tds_flat}"
+                    if r.tds_flat is not None
+                    else "not judged: the run is reported failed"
+                )
+                left = f", {r.tds_left_out} states not recorded" if r.tds_left_out else ""
                 out.append(
-                    f"  - largest change of a recorded state {_fmt(r.tds_change)} "
-                    f"({r.tds_change_name}); flat: {r.tds_flat}"
+                    f"  - largest change of a recorded variable {_fmt(r.tds_change)} "
+                    f"({r.tds_change_name or 'none moved'}; {r.tds_recorded} variables recorded"
+                    f"{left}); {judged}"
                 )
             if r.tds_error:
                 out.append(f"  - refused: {_shorten(r.tds_error, 2, 300)}")
