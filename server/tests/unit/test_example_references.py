@@ -102,7 +102,13 @@ def test_the_baselines_are_labelled_so_and_the_independent_values_are_not() -> N
             if check.kind == "regression-baseline":
                 assert "own earlier output" in check.reference, (stem, check.name)
             if check.generated_by is not None:
-                assert check.kind == "independent-solver", (stem, check.name)
+                # The two kinds a script can write: what a solver computed, or what the case
+                # file itself stores (the script reads it, it does not compute it).
+                assert check.kind in ("independent-solver", "stored-solution"), (stem, check.name)
+                assert (check.kind == "stored-solution") == check.generated_by.endswith("stored"), (
+                    stem,
+                    check.name,
+                )
 
 
 def test_a_reference_that_is_not_there_is_none_and_one_of_another_case_is_refused(
@@ -205,6 +211,77 @@ def test_the_wscc_9_disturbance_is_the_fault_of_the_books_example() -> None:
     assert reference.disturbance.h is not None and reference.disturbance.h <= 1 / 100
     # Nothing in the file acts by itself, so nothing is taken out for the other runs.
     assert reference.remove_events == []
+
+
+def test_the_ieee_39_disturbance_is_a_fault_and_the_switched_off_trip_is_taken_out() -> None:
+    """The file's Toggler_1 is switched off (it would trip a generator at 12 s), so the case
+    is shown with a fault that the reference adds, and the undisturbed runs name the trip."""
+    reference = load_reference("ieee39")
+    assert reference is not None and reference.disturbance is not None
+    (fault,) = reference.disturbance.specs
+    assert (fault.kind, fault.bus_idx) == ("fault", 16)
+    assert fault.tc - fault.tf == pytest.approx(0.1)
+    assert [(e.model, e.idx) for e in reference.remove_events] == [("Toggle", "Toggler_1")]
+    assert reference.disturbance.settles_within_deg is not None
+
+
+def test_the_npcc_disturbance_is_the_line_trip_of_the_file_and_both_events_are_taken_out() -> None:
+    """Line_2 trips at 1.0 s and recloses at 1.1 s by two Toggle events of the file, so the
+    reference adds nothing and names both for the runs that must not have them."""
+    reference = load_reference("npcc")
+    assert reference is not None and reference.disturbance is not None
+    assert reference.disturbance.specs == []
+    assert sorted(e.idx for e in reference.remove_events) == [1, 2]
+    assert {e.model for e in reference.remove_events} == {"Toggle"}
+
+
+def test_the_wecc_disturbance_is_the_line_trip_of_the_second_scenario_of_andes_docs() -> None:
+    """Line_2 (bus 4 to bus 16) trips at 1.0 s and recloses at 1.1 s, as in ANDES's comparison."""
+    reference = load_reference("wecc")
+    assert reference is not None and reference.disturbance is not None
+    trip, reclose = reference.disturbance.specs
+    assert (trip.kind, trip.model, trip.dev_idx, trip.t) == ("toggle", "Line", "Line_2", 1.0)
+    assert (reclose.kind, reclose.dev_idx, reclose.t) == ("toggle", "Line_2", 1.1)
+    assert reference.remove_events == []
+
+
+def test_a_case_whose_stored_state_is_a_solution_has_it_as_a_reference_and_ieee_39_has_none() -> (
+    None
+):
+    """NPCC and WECC hold the state PSS/E solved, to the digits their RAW file keeps; IEEE 39
+    holds a state 0.2 pu from its solution, which would make a failing check."""
+    for case in ("npcc", "wecc"):
+        reference = load_reference(case)
+        assert reference is not None
+        stored = [c for c in reference.checks if c.kind == "stored-solution"]
+        assert {c.quantity for c in stored} == {
+            "pf.bus_voltage_pu",
+            "pf.bus_angle_deg",
+            "pf.slack_p_mw",
+        }, case
+        assert all(c.generated_by == "scripts/crosscheck_pf.py stored" for c in stored)
+    ieee39 = load_reference("ieee39")
+    assert ieee39 is not None
+    assert not [c for c in ieee39.checks if c.kind == "stored-solution"]
+
+
+def test_a_pole_cap_and_a_settle_bound_are_optional_and_must_be_positive() -> None:
+    default = parse_reference(json.dumps(_document(disturbance={"description": "a fault"})))
+    assert default.ring_down.max_damping_ratio is None
+    assert default.disturbance is not None and default.disturbance.settles_within_deg is None
+    good = _document(
+        disturbance={"description": "a fault", "settles_within_deg": 1.5},
+        ring_down={"max_damping_ratio": 0.2},
+    )
+    parsed = parse_reference(json.dumps(good))
+    assert parsed.ring_down.max_damping_ratio == 0.2
+    assert parsed.disturbance is not None and parsed.disturbance.settles_within_deg == 1.5
+    for bad in (
+        _document(ring_down={"max_damping_ratio": 0}),
+        _document(disturbance={"description": "a fault", "settles_within_deg": -1}),
+    ):
+        with pytest.raises(ReferenceFileError):
+            parse_reference(json.dumps(bad))
 
 
 def test_an_unknown_field_is_refused() -> None:

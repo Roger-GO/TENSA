@@ -5,6 +5,7 @@ Usage:
     python scripts/crosscheck_pf.py dump  ID_OR_FILE -o NETWORK.json
     python scripts/crosscheck_pf.py solve NETWORK.json|CASE.m [--example ID] [--write]
     python scripts/crosscheck_pf.py run   ID [--write]
+    python scripts/crosscheck_pf.py stored ID [--write]
 
 TENSA solves a power flow with ANDES. To check it against a solver that shares none of its
 code, this script solves the same data with pandapower and writes the bus voltages and angles
@@ -32,6 +33,13 @@ work is in two steps that meet at a file:
 ``run``    does both, each with the Python that has what it needs: the one running the script
            when that has it, otherwise ``--tensa-python`` or ``--verify-python`` (or the
            environment variables ``TENSA_PYTHON`` and ``TENSA_VERIFY_PYTHON``).
+``stored`` (TENSA's environment, needs ANDES) reads the solved state a case file carries (the
+           bus voltages and angles and the slack's power, as the file holds them before any
+           power flow of ANDES's) and writes them as ``stored-solution`` checks. They are
+           worth writing only where the file's state is a solution: a RAW file written by
+           PSS/E after it solved the case holds one, a file that was saved before the case was
+           solved holds a state the power flow then moves (IEEE 39 holds one that is 0.2 pu
+           from its solution), and the harness fails the check for such a file.
 
 What the network holds, and where it differs from what ANDES solves, is listed in
 ``MODELLING`` below. The bus numbers are the ANDES ``idx`` of the buses, which is what
@@ -57,8 +65,10 @@ SERVER_SRC = REPO_ROOT / "server" / "src"
 REFERENCES = SERVER_SRC / "tensa" / "examples" / "references"
 
 # What marks a check as one this script wrote, so that running it again replaces that check
-# and leaves the ones written by hand.
+# and leaves the ones written by hand. The stored solution has a mark of its own, since the
+# power flow of ``solve`` and the state of ``stored`` are written at different times.
 GENERATED_BY = "scripts/crosscheck_pf.py"
+STORED_BY = "scripts/crosscheck_pf.py stored"
 
 # The columns of the arrays in a network file, as MATPOWER numbers them (case format v2).
 MATPOWER_BUS = (
@@ -362,6 +372,83 @@ def cmd_dump(args: argparse.Namespace) -> int:
         f"wrote {args.output}: {len(network['bus'])} buses, {len(network['gen'])} generators, "
         f"{len(network['branch'])} branches"
     )
+    return 0
+
+
+# ----------------------------------------------------------------------------------------
+# stored: the solved state a case file carries (needs ANDES)
+# ----------------------------------------------------------------------------------------
+
+
+def stored_solution(system: Any) -> dict[str, Any]:
+    """The state a case file stores, from a ``System`` read with ``setup=False``.
+
+    The bus voltages (per unit) and angles (degrees) are the ``v0`` and ``a0`` the file gives,
+    by the buses' idx, and the slack's power (MW) is the sum of the ``p0`` of its slack
+    generators on the system base, all as the file holds them: no power flow has moved them.
+    """
+    bus = system.Bus
+    if not bus.n or not system.Slack.n:
+        raise CrosscheckError("the case has no buses or no slack generator")
+    base = float(system.config.mva)
+    return {
+        "bus_voltage": {str(idx): float(v) for idx, v in zip(bus.idx.v, bus.v0.v, strict=True)},
+        "bus_angle": {
+            str(idx): math.degrees(float(a)) for idx, a in zip(bus.idx.v, bus.a0.v, strict=True)
+        },
+        "slack_p_mw": sum(float(p) for p in system.Slack.p0.v) * base,
+    }
+
+
+def _stored_checks(state: dict[str, Any], file_name: str) -> list[dict[str, Any]]:
+    """The ``stored-solution`` checks of a reference file that a case file's state gives."""
+    why = (
+        f"the solved state stored in {file_name} (taken from the RAW file it was converted from, "
+        "to the digits the file keeps; TENSA did not compute it); written by "
+        "scripts/crosscheck_pf.py stored"
+    )
+    common = {"kind": "stored-solution", "reference": why, "generated_by": STORED_BY}
+    return [
+        {
+            "name": "Bus voltage magnitudes against the solution stored in the case file",
+            "quantity": "pf.bus_voltage_pu",
+            "expected": {k: round(v, 9) for k, v in state["bus_voltage"].items()},
+            # The file keeps five decimals of a per unit voltage.
+            "tolerance": {"abs": 5e-5},
+            **common,
+        },
+        {
+            "name": "Bus voltage angles against the solution stored in the case file",
+            "quantity": "pf.bus_angle_deg",
+            "expected": {k: round(v, 7) for k, v in state["bus_angle"].items()},
+            # Four decimals of a degree in the RAW file the angles come from.
+            "tolerance": {"abs": 0.005},
+            **common,
+        },
+        {
+            "name": "Slack active power against the solution stored in the case file",
+            "quantity": "pf.slack_p_mw",
+            "expected": round(state["slack_p_mw"], 6),
+            "tolerance": {"abs": 0.1},
+            **common,
+        },
+    ]
+
+
+def cmd_stored(args: argparse.Namespace) -> int:
+    import andes
+
+    path, example_id = _find_case(args.id)
+    system = andes.load(str(path), setup=False, no_output=True, default_config=True)
+    checks = _stored_checks(stored_solution(system), path.name)
+    if not args.write:
+        print(json.dumps(checks, indent=1))
+        return 0
+    if example_id is None:
+        raise CrosscheckError("--write needs an example id, not a file")
+    target = Path(args.reference) if args.reference else REFERENCES / f"{example_id}.json"
+    write_reference(example_id, checks, target, generated_by=STORED_BY)
+    print(f"wrote {len(checks)} checks to {target}")
     return 0
 
 
@@ -748,6 +835,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="a Python with pandapower (default: this one, or TENSA_VERIFY_PYTHON)",
     )
     run.set_defaults(func=cmd_run)
+    stored = sub.add_parser(
+        "stored", help="write the solved state a case file carries as a reference (needs ANDES)"
+    )
+    stored.add_argument("id", help="an example id")
+    stored.add_argument("--write", action="store_true", help="write the reference file")
+    stored.add_argument("--reference", help="the reference file to write (default: the case's own)")
+    stored.set_defaults(func=cmd_stored)
     return parser
 
 

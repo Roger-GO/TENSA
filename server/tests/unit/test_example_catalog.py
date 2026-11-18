@@ -263,14 +263,19 @@ def test_an_unreadable_catalog_file_is_a_catalog_error(
 # ---- the catalog that ships ---------------------------------------------------------------
 
 
-def test_the_shipped_catalog_loads_and_seeds_the_three_first_run_cases() -> None:
+def test_the_shipped_catalog_loads_and_seeds_the_five_first_run_cases() -> None:
     catalog = load_catalog()
-    assert [e.id for e in catalog.defaults()] == ["ieee14", "kundur", "wscc9"]
+    assert [e.id for e in catalog.defaults()] == ["ieee14", "kundur", "wscc9", "ieee39", "npcc"]
     assert [f.name for e in catalog.defaults() for f in e.files()] == [
         "ieee14_full.xlsx",
         "kundur_full.xlsx",
         "wscc9.xlsx",
+        "ieee39_full.xlsx",
+        "npcc.xlsx",
     ]
+    # The WECC case is in the gallery only: 179 buses is too many to open a first run on.
+    wecc = catalog.get("wecc")
+    assert wecc is not None and not wecc.default and wecc.category == "dynamic"
 
 
 def test_the_shipped_catalog_is_the_json_a_reader_of_the_file_sees() -> None:

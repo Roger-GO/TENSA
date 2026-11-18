@@ -158,6 +158,101 @@ def test_json_is_written_with_a_map_of_numbers_on_one_line_and_reads_back_the_sa
     assert '"tolerance": {"abs": 0.01}' in text
 
 
+def _stored(script: ModuleType, relative: str) -> dict[str, Any]:
+    import andes
+
+    system = andes.load(str(_case_path(relative)), setup=False, no_output=True, default_config=True)
+    return script.stored_solution(system)  # type: ignore[no-any-return]
+
+
+def test_the_stored_state_of_a_case_file_is_read_as_the_file_gives_it(script: ModuleType) -> None:
+    """The NPCC file holds the voltage and angle of bus 1 as its RAW source prints them
+    (1.01517 pu, 4.8434 degrees, which the xlsx keeps in radians) and a slack of 466.019 MW."""
+    state = _stored(script, "npcc/npcc.xlsx")
+    assert len(state["bus_voltage"]) == len(state["bus_angle"]) == 140
+    assert state["bus_voltage"]["1"] == 1.01517
+    assert state["bus_angle"]["1"] == pytest.approx(4.8434, abs=5e-5)
+    assert state["slack_p_mw"] == pytest.approx(466.019, abs=1e-3)
+
+
+def test_a_stored_state_is_a_reference_where_it_is_a_solution_and_not_for_ieee_39(
+    script: ModuleType,
+) -> None:
+    """ANDES's own power flow lands on the state NPCC and WECC store, to the digits of their
+    RAW files, and 0.2 pu from the one IEEE 39 stores. That is why only the first two have a
+    stored-solution reference, and what the harness would report for the third."""
+    import andes
+
+    gap: dict[str, float] = {}
+    for case, relative in (
+        ("npcc", "npcc/npcc.xlsx"),
+        ("wecc", "wecc/wecc_full.xlsx"),
+        ("ieee39", "ieee39/ieee39_full.xlsx"),
+    ):
+        state = _stored(script, relative)
+        system = andes.load(
+            str(_case_path(relative)), setup=True, no_output=True, default_config=True
+        )
+        system.PFlow.run()
+        assert system.PFlow.converged
+        solved = dict(zip((str(i) for i in system.Bus.idx.v), system.Bus.v.v, strict=True))
+        gap[case] = max(abs(solved[k] - v) for k, v in state["bus_voltage"].items())
+    assert gap["npcc"] < 5e-5 and gap["wecc"] < 5e-5
+    assert gap["ieee39"] > 0.1
+
+
+def test_the_stored_checks_are_stored_solutions_with_their_own_mark(script: ModuleType) -> None:
+    checks = script._stored_checks(  # noqa: SLF001
+        {"bus_voltage": {"1": 1.01}, "bus_angle": {"1": 0.5}, "slack_p_mw": 12.5}, "case.xlsx"
+    )
+    assert [c["quantity"] for c in checks] == [
+        "pf.bus_voltage_pu",
+        "pf.bus_angle_deg",
+        "pf.slack_p_mw",
+    ]
+    assert {c["kind"] for c in checks} == {"stored-solution"}
+    assert {c["generated_by"] for c in checks} == {script.STORED_BY}
+    assert script.STORED_BY != script.GENERATED_BY
+    assert all(
+        "case.xlsx" in c["reference"] and "TENSA did not compute" in c["reference"] for c in checks
+    )
+
+
+def test_writing_the_stored_state_keeps_the_solvers_checks_and_replaces_its_own(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    _case_path("npcc/npcc.xlsx")
+    target = tmp_path / "npcc.json"
+    solver = {"name": "pandapower", "generated_by": script.GENERATED_BY, "expected": 1.0}
+    script.write_reference("npcc", [solver], target)
+    args = SimpleNamespace(id="npcc", write=True, reference=str(target))
+    assert script.cmd_stored(args) == 0
+    first = json.loads(target.read_text(encoding="utf-8"))["checks"]
+    assert [c["generated_by"] for c in first] == [script.STORED_BY] * 3 + [script.GENERATED_BY]
+    assert script.cmd_stored(args) == 0
+    again = json.loads(target.read_text(encoding="utf-8"))["checks"]
+    assert again == first  # written again, not added to
+    # A file is no example id: a reference needs the case it belongs to.
+    with pytest.raises(script.CrosscheckError, match="example id"):
+        script.cmd_stored(
+            SimpleNamespace(id=str(_case_path("npcc/npcc.xlsx")), write=True, reference=None)
+        )
+
+
+@pytest.mark.parametrize("example_id", ["npcc", "wecc"])
+def test_the_stored_checks_that_ship_are_what_the_script_reads_from_the_file(
+    script: ModuleType, example_id: str
+) -> None:
+    relative = {"npcc": "npcc/npcc.xlsx", "wecc": "wecc/wecc_full.xlsx"}[example_id]
+    state = _stored(script, relative)
+    shipped = load_reference(example_id)
+    assert shipped is not None
+    mine = {c.quantity: c.expected for c in shipped.checks if c.generated_by == script.STORED_BY}
+    assert mine["pf.slack_p_mw"] == pytest.approx(state["slack_p_mw"], abs=1e-5)
+    assert mine["pf.bus_voltage_pu"] == pytest.approx(state["bus_voltage"], abs=1e-8)
+    assert mine["pf.bus_angle_deg"] == pytest.approx(state["bus_angle"], abs=1e-6)
+
+
 def test_writing_a_reference_replaces_its_own_checks_and_keeps_the_others(
     script: ModuleType, tmp_path: Path
 ) -> None:
@@ -196,7 +291,7 @@ def test_the_interpreter_for_each_half_is_found_or_the_error_says_what_to_set(
     not os.environ.get("TENSA_VERIFY_PYTHON"),
     reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
 )
-@pytest.mark.parametrize("example_id", ["ieee14", "kundur", "wscc9"])
+@pytest.mark.parametrize("example_id", ["ieee14", "kundur", "wscc9", "ieee39", "npcc", "wecc"])
 def test_pandapower_gives_the_values_that_ship_in_the_reference_files(
     example_id: str, tmp_path: Path
 ) -> None:

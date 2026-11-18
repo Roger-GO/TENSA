@@ -20,7 +20,7 @@ pip install tensa
 tensa serve --open
 ```
 
-`tensa serve` starts the server on a free port, and `--open` opens your browser there. The first time, it fills its workspace (`~/.tensa/cases`, or the directory you give with `--workspace`) with three example cases, IEEE 14, Kundur and WSCC 9-bus, so there is something to open right away. Load one, run a power flow, add a fault, and stream a time-domain simulation. The [quick start](https://roger-go.github.io/TENSA/quickstart/) in the documentation walks through exactly that.
+`tensa serve` starts the server on a free port, and `--open` opens your browser there. The first time, it fills its workspace (`~/.tensa/cases`, or the directory you give with `--workspace`) with five example cases, IEEE 14, Kundur, WSCC 9-bus, IEEE 39 and NPCC 140-bus, so there is something to open right away. Load one, run a power flow, add a fault, and stream a time-domain simulation. The [quick start](https://roger-go.github.io/TENSA/quickstart/) in the documentation walks through exactly that.
 
 The browser keeps your finished runs and recent cases for the address it loaded the page from. Add `--port 8000` to get the same address every time.
 

@@ -91,6 +91,38 @@ def test_a_run_too_short_or_without_oscillation_has_no_poles(harness: ModuleType
     assert harness.ring_down_poles(flat_t, [np.zeros_like(flat_t)], 0.5, (0.1, 3.0), 3) == []
 
 
+def test_a_pole_damped_more_than_the_cap_is_left_out_and_the_rest_keep_their_rank(
+    harness: ModuleType,
+) -> None:
+    t = np.arange(0, 20, 1 / 30)
+    light = _oscillation(t, 0.65, 0.03, 0.5)
+    heavy = _oscillation(t, 0.9, 0.4, 0.5, amplitude=10.0)
+    signal = light + heavy
+    everything = harness.ring_down_poles(t, [signal], 0.5, (0.1, 3.0), 3)
+    # With no cap the stronger, heavily damped oscillation comes first.
+    assert everything[0].damping == pytest.approx(0.4, abs=0.05)
+    capped = harness.ring_down_poles(t, [signal], 0.5, (0.1, 3.0), 3, max_damping=0.2)
+    assert [round(p.frequency_hz, 2) for p in capped] == [0.65]
+    # Strength is relative to the strongest pole that was kept.
+    assert capped[0].relative_energy == 1.0
+    assert harness.ring_down_poles(t, [heavy], 0.5, (0.1, 3.0), 3, max_damping=0.2) == []
+
+
+def test_the_swing_peaks_are_the_largest_change_from_the_start_early_and_late(
+    harness: ModuleType,
+) -> None:
+    t = np.arange(0, 20, 1 / 30)
+    decaying = _oscillation(t, 0.65, 0.05, 0.5, amplitude=1e-3)
+    growing = _oscillation(t, 0.65, -0.05, 0.5, amplitude=1e-3)
+    early, late = harness.swing_peaks(t, [decaying], 0.5, 2.0)
+    assert 5e-4 < early <= 1e-3 and late < early / 10
+    early, late = harness.swing_peaks(t, [growing], 0.5, 2.0)
+    assert late > 2 * early
+    # The signal with the larger swing decides, and an offset from the start is the change.
+    early, late = harness.swing_peaks(t, [decaying, 5 + 2 * decaying], 0.5, 2.0)
+    assert early == pytest.approx(2e-3, rel=0.2)
+
+
 def test_poles_are_matched_to_the_nearest_eigenvalue_in_both_frequency_and_damping(
     harness: ModuleType,
 ) -> None:
@@ -160,6 +192,7 @@ def test_the_disturbance_metrics_are_the_angle_spread_the_lowest_voltage_and_the
         ["v Bus 1", "v Bus 2"],
         60.0,
     )
+    assert metrics["initial_angle_spread_deg"] == 0.0
     assert metrics["max_angle_spread_deg"] == pytest.approx(math.degrees(1.5))
     assert metrics["final_angle_spread_deg"] == pytest.approx(math.degrees(0.4))
     assert metrics["min_voltage_pu"] == 0.2
@@ -425,6 +458,7 @@ class FakeApi:
         self.tds_requests: list[list[str]] = []
         self.tds_steps: list[float | None] = []
         self.drift = 0.0
+        self.grow = 0.0  # growth rate (per second) of the swing after the load step
         self.pf_converged = True
         self.tds_converged = True
         self.fail_add: int | None = None
@@ -547,7 +581,8 @@ class FakeApi:
         t = np.arange(0, tf + 1e-9, 1 / 30)
         stepped = any(s.get("src") == "Req" for s in self.specs)
         f, z = self.MODE
-        swing = _oscillation(t, f, z, 0.5, amplitude=1e-3) if stepped else np.zeros_like(t)
+        swing = _oscillation(t, f, z - self.grow / (2 * math.pi * f), 0.5, amplitude=1e-3)
+        swing = swing if stepped else np.zeros_like(t)
         tripped = np.where(t >= 2.0, 1.0, 0.0) if self.events else np.zeros_like(t)
         values: list[dict[str, Any]] = []
         for name in body["dae_vars"]:
@@ -684,6 +719,52 @@ def test_the_step_a_reference_asks_for_goes_to_the_disturbance_run_and_to_no_oth
     # With none given, no run is asked for a step.
     _run(harness, fake)
     assert fake.tds_steps[3:] == [None, None, None]
+
+
+def test_a_disturbance_that_must_end_where_it_began_is_held_to_its_initial_spread(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    # The event of the fake moves one rotor by 0.3 rad, so the spread goes from 28.6 to 11.5
+    # degrees: a run that is stable by the absolute bound and has not come back.
+    name = "Disturbance run ends where it began"
+    none, _ = _run(harness, fake)
+    assert name not in [c.name for c in none.checks]
+    strict = _reference(disturbance={"description": "a trip", "settles_within_deg": 5.0})
+    result, _ = _run(harness, fake, strict)
+    check = next(c for c in result.checks if c.name == name)
+    assert not check.passed and not result.passed
+    assert "initial spread 28.65 deg, final 11.46 deg" in check.result
+    stable = next(c for c in result.checks if c.name == "Disturbance run stays stable")
+    assert stable.passed
+    loose = _reference(disturbance={"description": "a trip", "settles_within_deg": 20.0})
+    result, _ = _run(harness, fake, loose)
+    assert next(c for c in result.checks if c.name == name).passed
+
+
+def test_a_ring_down_that_grows_fails_and_one_that_dies_out_passes(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    name = "The small disturbance does not grow"
+    result, _ = _run(harness, fake)
+    assert next(c for c in result.checks if c.name == name).passed
+    fake.grow = 0.3  # a mode at +0.3 per second: 0.5 s to 20 s is a factor of 300
+    result, _ = _run(harness, fake)
+    check = next(c for c in result.checks if c.name == name)
+    assert not check.passed and not result.passed
+    assert check.kind == "sanity" and "the last swing at most 2 times the first" in check.tolerance
+
+
+def test_a_cap_on_the_pole_damping_is_applied_and_said(harness: ModuleType, fake: FakeApi) -> None:
+    name = "Ring-down of a small disturbance has the frequency and damping of eigenvalues"
+    capped = _reference(ring_down={"max_damping_ratio": 0.01})
+    result, _ = _run(harness, fake, capped)
+    check = next(c for c in result.checks if c.name == name)
+    # The fake's oscillation is damped 0.034, which the cap leaves out.
+    assert not check.passed and "no oscillation between" in check.result
+    assert "poles damped over 0.01 are not compared" in check.reference
+    roomy = _reference(ring_down={"max_damping_ratio": 0.2})
+    result, _ = _run(harness, fake, roomy)
+    assert next(c for c in result.checks if c.name == name).passed
 
 
 def test_an_event_id_with_odd_characters_goes_into_the_path_quoted(

@@ -765,9 +765,17 @@ def test_the_shipped_defaults_seed_an_empty_workspace_from_the_installed_andes(
         "ieee14_full.xlsx",
         "kundur_full.xlsx",
         "wscc9.xlsx",
+        "ieee39_full.xlsx",
+        "npcc.xlsx",
     ]
     listed = [p.name for p in list_workspace_files(workspace, SUPPORTED_CASE_EXTENSIONS)]
-    assert listed == ["ieee14_full.xlsx", "kundur_full.xlsx", "wscc9.xlsx"]
+    assert listed == [
+        "ieee14_full.xlsx",
+        "ieee39_full.xlsx",
+        "kundur_full.xlsx",
+        "npcc.xlsx",
+        "wscc9.xlsx",
+    ]
     assert "(`ieee14`)" in (workspace / SOURCES_FILE).read_text(encoding="utf-8")
 
 

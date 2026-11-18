@@ -162,6 +162,17 @@ class DisturbancePlan(_Model):
         gt=0,
         description="The run counts as stable when its rotor angles end closer together than this.",
     )
+    settles_within_deg: float | None = Field(
+        None,
+        gt=0,
+        description=(
+            "For a disturbance that is cleared and leaves the network as it was: the run must "
+            "also end with the spread of its rotor angles within this many degrees of what it "
+            "was before the disturbance. A loaded network starts with machines tens of degrees "
+            "apart, so ``stable_below_deg`` alone cannot tell a swing that dies out from one "
+            "that has drifted. ``null`` makes no such check."
+        ),
+    )
 
 
 class RingDownPlan(_Model):
@@ -188,6 +199,16 @@ class RingDownPlan(_Model):
     )
     tolerance_damping: float = Field(
         0.05, gt=0, description="How far a ring-down damping ratio may be from its eigenvalue's."
+    )
+    max_damping_ratio: float | None = Field(
+        None,
+        gt=0,
+        description=(
+            "Poles damped more than this are not compared. In a network with many modes a run "
+            "of a few tens of seconds cannot tell a pole that dies within a second or two from "
+            "its neighbours, so what the fit finds there is not a fair test of an eigenvalue. "
+            "``null`` compares every pole."
+        ),
     )
 
 

@@ -30,7 +30,7 @@ The page or a request answers 400 with `bad-host` or `bad-origin` when you reach
 
 ### The workspace has no cases
 
-An empty workspace is filled with three example cases the first time the server starts. A workspace that already holds a case file, even an unrelated one, is not filled. The list shows files with the extensions `.xlsx`, `.raw`, `.dyr`, `.m` and `.json`. Add the examples by copying cases in, dropping files on the window, or pointing `--workspace` at an empty directory.
+An empty workspace is filled with five example cases the first time the server starts. A workspace that already holds a case file, even an unrelated one, is not filled. The list shows files with the extensions `.xlsx`, `.raw`, `.dyr`, `.m` and `.json`. Add the examples by copying cases in, dropping files on the window, or pointing `--workspace` at an empty directory.
 
 ### `tensa desktop` does not open a window
 

@@ -35,9 +35,11 @@ Checks no reference file is needed for:
 - the ring-down of a 2% load step has its strongest oscillations at the frequency and with
   the damping of eigenvalues (within the reference's ``ring_down.tolerance_hz`` and
   ``tolerance_damping``, 0.05 each unless it says otherwise): this compares the linearisation
-  with the simulation;
+  with the simulation. Poles damped more than ``ring_down.max_damping_ratio`` are left out, and
+  the run must not grow (``GROWTH_WINDOW``, ``GROWTH_LIMIT``);
 - the case's disturbance run completes and its rotor angles end within
-  ``disturbance.stable_below_deg`` of each other.
+  ``disturbance.stable_below_deg`` of each other, and, where the reference says
+  ``disturbance.settles_within_deg``, within that many degrees of the spread they began with.
 
 The reports are a JSON document and a Markdown page; the exit status is 1 when any check
 failed or any case could not be run, and 2 when the arguments or a reference file are wrong
@@ -111,6 +113,12 @@ SYNCHRONOUS_MODELS = frozenset({"GENROU", "GENCLS", "PLBVFU1"})
 # The most variables one page of ``GET /dae-variables`` gives: the route's ``limit`` maximum
 # (asked for no more, it gives 100).
 LISTING_PAGE = 1000
+# The ring-down run must not grow: the speeds' largest swing in its last ``GROWTH_WINDOW``
+# seconds may be at most ``GROWTH_LIMIT`` times their largest swing in the first ones after the
+# disturbance. A mode that grows by 0.04 per second or more would break it (one of +1 per
+# second turns 1e-3 into 1e5 within the run); the undamped modes of a classical model do not.
+GROWTH_WINDOW = 2.0
+GROWTH_LIMIT = 2.0
 # A tight bound on how long a server takes to bind, and on one request.
 SERVER_START_TIMEOUT = 180.0
 REQUEST_TIMEOUT = 900.0
@@ -205,16 +213,19 @@ def disturbance_metrics(
 ) -> dict[str, float]:
     """The key numbers of a disturbance run.
 
-    ``max_angle_spread_deg`` and ``final_angle_spread_deg`` are the largest and the final
-    difference between the highest and the lowest rotor angle; ``min_voltage_pu`` the lowest
-    bus voltage at any time; ``frequency_nadir_hz`` the lowest machine speed at any time, as
-    a frequency (``freq_hz`` times the speed in per unit).
+    ``initial_angle_spread_deg``, ``max_angle_spread_deg`` and ``final_angle_spread_deg`` are
+    the first, the largest and the final difference between the highest and the lowest rotor
+    angle (a loaded network starts with machines tens of degrees apart, so the first and the
+    last tell a run that ends where it began from one that drifted); ``min_voltage_pu`` the
+    lowest bus voltage at any time; ``frequency_nadir_hz`` the lowest machine speed at any
+    time, as a frequency (``freq_hz`` times the speed in per unit).
     """
     _, series = trace_arrays(traces)
     out: dict[str, float] = {}
     if delta_names:
         deltas = np.vstack([series[n] for n in delta_names])
         spread = np.nanmax(deltas, axis=0) - np.nanmin(deltas, axis=0)
+        out["initial_angle_spread_deg"] = float(np.degrees(spread[0]))
         out["max_angle_spread_deg"] = float(np.degrees(np.nanmax(spread)))
         out["final_angle_spread_deg"] = float(np.degrees(spread[-1]))
     if voltage_names:
@@ -244,6 +255,7 @@ def ring_down_poles(
     order_tol: float = 1e-4,
     max_order: int = 40,
     min_fraction: float = 0.01,
+    max_damping: float | None = None,
 ) -> list[Pole]:
     """The strongest oscillations of some signals after ``start``, by the matrix pencil method.
 
@@ -255,7 +267,10 @@ def ring_down_poles(
     squares fit to the signals, so a pole that the signals hardly show is ranked last. The
     ``count`` strongest oscillatory poles inside ``band_hz`` that hold at least
     ``min_fraction`` of the strongest one's energy come back, strongest first, as a frequency
-    and a damping ratio, which is what an eigenvalue has too.
+    and a damping ratio, which is what an eigenvalue has too. A pole damped more than
+    ``max_damping`` is not taken: in a network with many modes a run of 20 s cannot tell a
+    pole that dies within a second or two from its neighbours, so what it finds there is not
+    a fair test of an eigenvalue.
     """
     keep = t >= start - 1e-9
     tt = t[keep]
@@ -285,7 +300,9 @@ def ring_down_poles(
     candidates = [
         i
         for i in range(order)
-        if s[i].imag > 0 and band_hz[0] <= abs(s[i].imag) / (2 * math.pi) <= band_hz[1]
+        if s[i].imag > 0
+        and band_hz[0] <= abs(s[i].imag) / (2 * math.pi) <= band_hz[1]
+        and (max_damping is None or -s[i].real / abs(s[i]) <= max_damping)
     ]
     if not candidates:
         return []
@@ -296,6 +313,24 @@ def ring_down_poles(
             f = abs(s[i].imag) / (2 * math.pi)
             poles.append(Pole(float(f), float(-s[i].real / abs(s[i])), float(energy[i] / top)))
     return poles[:count]
+
+
+def swing_peaks(
+    t: np.ndarray, signals: Sequence[np.ndarray], start: float, window: float
+) -> tuple[float, float]:
+    """The largest ``|x(t) - x(0)|`` of any signal in the ``window`` seconds after ``start``,
+    and in the last ``window`` seconds of the run."""
+    first = [np.asarray(s, dtype=float) for s in signals]
+    moved = [np.abs(s - s[0]) for s in first]
+
+    def peak(mask: np.ndarray) -> float:
+        values = [m[mask] for m in moved if mask.any()]
+        return float(np.nanmax([v.max() for v in values])) if values else 0.0
+
+    return (
+        peak((t >= start) & (t <= start + window)),
+        peak(t >= t[-1] - window),
+    )
 
 
 def oscillatory_modes(eig: dict[str, Any]) -> list[tuple[float, float]]:
@@ -917,6 +952,7 @@ def _dynamic(
         measured.tds = metrics
         final = metrics.get("final_angle_spread_deg")
         if final is not None:
+            initial = metrics["initial_angle_spread_deg"]
             result.sanity(
                 "Disturbance run stays stable",
                 "tds",
@@ -927,6 +963,17 @@ def _dynamic(
                 f"lowest machine frequency {metrics.get('frequency_nadir_hz', math.nan):.4g} Hz",
                 final < plan.stable_below_deg,
             )
+            if plan.settles_within_deg is not None:
+                result.sanity(
+                    "Disturbance run ends where it began",
+                    "tds",
+                    "a disturbance that is cleared and leaves the network as it was: the rotor "
+                    "angles come back to the spread they had before it",
+                    f"final angle spread within {plan.settles_within_deg:g} deg of the initial one",
+                    f"initial spread {initial:.4g} deg, final {final:.4g} deg "
+                    f"(difference {abs(final - initial):.3g} deg)",
+                    abs(final - initial) <= plan.settles_within_deg,
+                )
 
 
 def _ring_down(
@@ -990,10 +1037,26 @@ def _ring_down(
     if len(speeds) > 1:  # speeds relative to their mean leave the swings between machines
         mean = np.mean(np.vstack(speeds), axis=0)
         speeds = [s - mean for s in speeds]
-    poles = ring_down_poles(t, speeds, plan.start_t, plan.band_hz, plan.modes)
+    early, late = swing_peaks(t, speeds, plan.start_t, GROWTH_WINDOW)
+    result.sanity(
+        "The small disturbance does not grow",
+        "eig",
+        f"the largest swing of the machines' speeds relative to their mean (a case with no "
+        f"governor drifts together, which is no mode) in the first {GROWTH_WINDOW:g} s after the "
+        f"disturbance and in the last {GROWTH_WINDOW:g} s of the {plan.tf:g} s run: a growing "
+        "mode makes the second larger",
+        f"the last swing at most {GROWTH_LIMIT:g} times the first",
+        f"first {early:.3g} pu, last {late:.3g} pu",
+        late <= GROWTH_LIMIT * early,
+    )
+    poles = ring_down_poles(
+        t, speeds, plan.start_t, plan.band_hz, plan.modes, max_damping=plan.max_damping_ratio
+    )
     tolerance = f"{plan.tolerance_hz:g} Hz and {plan.tolerance_damping:g} in damping ratio"
     cause = f"step of load {stepped}" if stepped is not None else "the disturbance of the reference"
     source = f"{how}; {cause}, run to {plan.tf:g} s"
+    if plan.max_damping_ratio is not None:
+        source += f"; poles damped over {plan.max_damping_ratio:g} are not compared"
     if not poles:
         result.sanity(
             name,

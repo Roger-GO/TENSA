@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "id": "ieee39",
+  "remove_events": [
+    {"model": "Toggle", "idx": "Toggler_1"}
+  ],
+  "disturbance": {
+    "description": "Three-phase fault at bus 16 from 1.0 s to 1.1 s",
+    "specs": [
+      {"kind": "fault", "bus_idx": 16, "tf": 1.0, "tc": 1.1, "xf": 0.0001, "rf": 0.0}
+    ],
+    "tf": 10.0,
+    "settles_within_deg": 2.0
+  },
+  "checks": [
+    {
+      "name": "Bus voltage magnitudes against pandapower",
+      "quantity": "pf.bus_voltage_pu",
+      "expected": {
+        "1": 1.048687634,
+        "2": 1.047732175,
+        "3": 1.030276811,
+        "4": 1.052802239,
+        "5": 1.071519573,
+        "6": 1.072989926,
+        "7": 1.059683772,
+        "8": 1.056990305,
+        "9": 1.053004653,
+        "10": 1.071542714,
+        "11": 1.071432813,
+        "12": 1.068284382,
+        "13": 1.067044958,
+        "14": 1.057479648,
+        "15": 1.040238847,
+        "16": 1.046966328,
+        "17": 1.043232265,
+        "18": 1.036950156,
+        "19": 1.064464058,
+        "20": 1.00185712,
+        "21": 1.044210402,
+        "22": 1.059581615,
+        "23": 1.052224061,
+        "24": 1.051240864,
+        "25": 1.046604364,
+        "26": 1.056305622,
+        "27": 1.044708155,
+        "28": 1.059814302,
+        "29": 1.060716961,
+        "30": 1.035534,
+        "31": 1.013246,
+        "32": 1.020528,
+        "33": 1.01343,
+        "34": 1.019109,
+        "35": 1.06,
+        "36": 1.06,
+        "37": 1.013996,
+        "38": 1.052803,
+        "39": 1.03
+      },
+      "tolerance": {"abs": 0.0001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee39_full.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Bus voltage angles against pandapower",
+      "quantity": "pf.bus_angle_deg",
+      "expected": {
+        "1": -11.4583352,
+        "2": -12.195711,
+        "3": -15.9997433,
+        "4": -15.5702828,
+        "5": -14.0912625,
+        "6": -13.464538,
+        "7": -15.1411559,
+        "8": -15.450546,
+        "9": -12.843343,
+        "10": -11.5005571,
+        "11": -12.261724,
+        "12": -13.5798967,
+        "13": -12.2880359,
+        "14": -13.8593381,
+        "15": -14.3849023,
+        "16": -13.086018,
+        "17": -14.4918887,
+        "18": -15.4861163,
+        "19": -8.3875878,
+        "20": -9.7560305,
+        "21": -10.4881435,
+        "22": -5.872217,
+        "23": -6.0699228,
+        "24": -12.8992676,
+        "25": -12.0552835,
+        "26": -13.5394471,
+        "27": -15.1213039,
+        "28": -10.8753873,
+        "29": -8.4228576,
+        "30": -7.9192327,
+        "31": -6.7377273,
+        "32": -3.3439808,
+        "33": -3.1705176,
+        "34": -4.6457181,
+        "35": -0.7284352,
+        "36": 2.0457067,
+        "37": -7.9146454,
+        "38": -2.1881592,
+        "39": -10.96
+      },
+      "tolerance": {"abs": 0.01},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee39_full.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Network losses against pandapower",
+      "quantity": "pf.loss_mw",
+      "expected": 37.100948,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee39_full.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Slack active power against pandapower",
+      "quantity": "pf.slack_p_mw",
+      "expected": 573.109856,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee39_full.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Largest rotor angle spread in the disturbance run (fault at bus 16)",
+      "quantity": "tds.max_angle_spread_deg",
+      "expected": 100.90698,
+      "tolerance": {"abs": 0.05},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Lowest bus voltage in the disturbance run (fault at bus 16)",
+      "quantity": "tds.min_voltage_pu",
+      "expected": 0.0077799316,
+      "tolerance": {"abs": 0.0001},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Lowest machine frequency in the disturbance run (fault at bus 16)",
+      "quantity": "tds.frequency_nadir_hz",
+      "expected": 59.848061,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Least damped mode between 0.4 and 0.8 Hz: frequency",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 0.63882147,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.4, 0.8]
+    },
+    {
+      "name": "Least damped mode between 0.4 and 0.8 Hz: damping ratio",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.18831303,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.4, 0.8]
+    },
+    {
+      "name": "Least damped mode between 0.8 and 1.2 Hz: frequency",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 0.96241784,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.8, 1.2]
+    },
+    {
+      "name": "Least damped mode between 0.8 and 1.2 Hz: damping ratio",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.18290446,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.8, 1.2]
+    }
+  ]
+}

@@ -9,7 +9,8 @@ source, the citations and the licence of that case.
 
 ## ANDES example cases
 
-IEEE 14-bus with machines and controls, and Kundur two-area system.
+IEEE 14-bus with machines and controls, Kundur two-area system, IEEE 39-bus New England
+system, NPCC 140-bus system and WECC 179-bus system.
 
 These files are part of ANDES, not of TENSA. TENSA does not redistribute them: it copies
 them from the ANDES installed on the user's machine when a case is added. ANDES is
@@ -25,8 +26,16 @@ doi:10.1109/TPWRS.2020.3017019.
 
 The systems themselves have their own sources, which the catalog names for each case: the
 IEEE 14-bus test case of the Power Systems Test Case Archive of the University of
-Washington, and the two-area system of P. Kundur, "Power System Stability and Control"
-(McGraw-Hill, 1994).
+Washington; the two-area system of P. Kundur, "Power System Stability and Control"
+(McGraw-Hill, 1994); the 39-bus New England system, from T. Athay, R. Podmore and S. Virmani,
+"A practical method for the direct analysis of transient stability" (IEEE Transactions on
+Power Apparatus and Systems, 1979); the NPCC 48-machine, 140-bus system, a test bed of CURENT
+that is described as converted from the Power System Toolbox (J. H. Chow and K. W. Cheung,
+IEEE Transactions on Power Systems, 1992); and the WECC 179-bus, 29-machine system, which the
+test cases library of S. Maslennikov et al. (IEEE PES General Meeting, 2016) is built on.
+That library's page asks that a publication using its material cite that paper. The NPCC
+and WECC files are ANDES's own versions of those systems, and the catalog says what was and
+was not compared with the publications.
 
 ## Cases written by TENSA
 

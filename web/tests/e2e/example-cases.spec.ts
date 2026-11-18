@@ -4,12 +4,14 @@
  *   Project tab -> Example cases: the cases, their sources and licences, Cite copies the references
  *   Open on a card -> the dialog closes and the case is on the diagram
  *   the command palette finds it; Escape closes it and the keyboard focus goes back
+ *   a gallery case (WECC 179-bus, not seeded): Add copies it into the workspace, the card turns to Added, and
+ *   Open puts its 179 buses on the diagram
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
  *   a bundled case whose file in the workspace is another one: the card says so, and Replace puts the shipped one there
  *
  * It drives the real UI against a real `tensa serve` (nothing but the one list in the last test is
- * answered by the test), on a workspace the server seeded with the three first-run cases, all of
- * which have machines. The catalog is the server's own, so what is held of the three cases is what
+ * answered by the test), on a workspace the server seeded with the five first-run cases, all of
+ * which have machines. The catalog is the server's own, so what is held of the cases is what
  * the dialog shows of any case: the size, the analyses, the links that open in a new tab, the
  * references and the buttons.
  */
@@ -55,14 +57,18 @@ test('the Project tab opens the example cases, with their sources, licences and 
   // The cursor is in the filter, ready to type.
   await expect(page.getByRole('searchbox', { name: 'Filter the example cases' })).toBeFocused();
 
-  // The three cases of a first run are in the workspace, so each says so. All three have
-  // machines, so the list has the one group of dynamic cases and none of steady-state ones.
+  // The five cases of a first run are in the workspace, so each says so. All of them, and the
+  // WECC case of the gallery, have machines, so the list has the one group of dynamic cases and
+  // none of steady-state ones.
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
   await expect(dialog.getByTestId('example-group-steady-state')).toHaveCount(0);
-  for (const id of ['ieee14', 'kundur', 'wscc9']) {
+  for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
   }
+  // The gallery case is listed with its size, and is not one of them.
+  await expect(dialog.getByTestId('example-card-wecc')).toBeVisible();
+  await expect(dialog.getByTestId('example-size-wecc')).toHaveText('179 buses, 29 generators');
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
     'already in your workspace and say Added',
@@ -70,6 +76,8 @@ test('the Project tab opens the example cases, with their sources, licences and 
   await expect(dialog.getByTestId('example-size-ieee14')).toHaveText('14 buses, 5 generators');
   await expect(dialog.getByTestId('example-analysis-ieee14-eig')).toHaveText('Eigenvalues');
   await expect(dialog.getByTestId('example-size-wscc9')).toHaveText('9 buses, 3 generators');
+  await expect(dialog.getByTestId('example-size-ieee39')).toHaveText('39 buses, 10 generators');
+  await expect(dialog.getByTestId('example-size-npcc')).toHaveText('140 buses, 48 generators');
   await expect(dialog.getByTestId('example-analysis-wscc9-tds')).toHaveText('Time domain');
   await expect(dialog.getByTestId('example-analysis-wscc9-eig')).toHaveText('Eigenvalues');
 
@@ -128,6 +136,38 @@ test('Open on a card closes the dialog and puts the case on the diagram', async 
   await expect(page.getByTestId('example-open-now-ieee14')).toHaveText('Open now');
   await expect(page.getByRole('button', { name: /^Open: IEEE 14-bus/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Open: Kundur/ })).toBeEnabled();
+});
+
+test('a gallery case is added to the workspace from its card, and opened on the diagram', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  // The WECC case is not seeded, so its card offers Add. (Another run on the same workspace may
+  // have added it: the card then says Added at once, and the add is skipped.)
+  await expect(dialog.getByTestId('example-card-wecc')).toBeVisible();
+  const add = dialog.getByTestId('example-add-wecc');
+  if ((await add.count()) > 0) {
+    await expect(add).toHaveText('Add to workspace');
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-wecc')).toHaveText('Added');
+  // What the server keeps of the case it was asked for: the file, and where it came from.
+  const listed = (await (await page.request.get('/api/examples')).json()) as {
+    examples: { id: string; in_workspace: boolean; differs: boolean }[];
+  };
+  expect(listed.examples.find((example) => example.id === 'wecc')).toMatchObject({
+    in_workspace: true,
+    differs: false,
+  });
+  await expect(page.getByTestId('saved-cases-row-wecc_full.xlsx')).toBeVisible();
+
+  await dialog.getByTestId('example-open-wecc').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(179, { timeout: 90_000 });
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('wecc_full.xlsx');
+  await expect(page.getByTestId('case-nav-loaded-size')).toHaveText('179 buses');
 });
 
 test('the command palette finds the dialog, and Escape closes it and gives the keyboard back', async ({

@@ -86,6 +86,29 @@ def test_the_default_cases_pass_their_verification(tmp_path: Path) -> None:
 
 
 @pytest.mark.acceptance
+def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
+    """The cases that are not seeded (the WECC 179-bus case for now) are run the same way."""
+    if not SCRIPT.is_file():
+        pytest.skip("scripts/verify_example_cases.py is not next to the tests")
+    if examples._andes_cases_dir() is None:  # noqa: SLF001
+        pytest.skip("ANDES is not installed")
+    gallery = [e.id for e in load_catalog().examples if e.has_file and not e.default]
+    assert "wecc" in gallery
+    report_json = tmp_path / "report.json"
+    done = _run([*gallery, "--json", str(report_json), "--markdown", str(tmp_path / "r.md")], 900)
+    assert done.returncode == 0, done.stderr[-3000:] + _failed_checks(report_json)
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert [c["id"] for c in report["cases"]] == gallery
+    wecc = next(c for c in report["cases"] if c["id"] == "wecc")
+    kinds = {c["kind"] for c in wecc["checks"]}
+    # The power flow is checked against a solver and against the state the file stores.
+    assert {"independent-solver", "stored-solution", "ring-down"} <= kinds
+    names = [c["name"] for c in wecc["checks"]]
+    assert "Disturbance run ends where it began" in names
+    assert "The small disturbance does not grow" in names
+
+
+@pytest.mark.acceptance
 def test_a_case_the_catalog_does_not_have_is_refused_before_anything_starts() -> None:
     if not SCRIPT.is_file():
         pytest.skip("scripts/verify_example_cases.py is not next to the tests")
