@@ -4811,6 +4811,10 @@ export function SldCanvas() {
   // The case whose diagram was asked for although it has more buses than are
   // drawn at once (`SldTooLarge`).
   const [askedFor, setAskedFor] = useState<string | null>(null);
+  // The case whose diagram is on screen. A diagram that is drawn stays drawn when an edit takes
+  // the case past the size it is held back at: an add of the 401st bus must not put up the note
+  // in place of the diagram being edited.
+  const [drawnFor, setDrawnFor] = useState<string | null>(null);
   // The case whose diagram was just asked for. The note stays up, saying the
   // page will not answer, until after the next paint; only then is the
   // diagram mounted, since mounting it is what stops the page answering.
@@ -4843,6 +4847,25 @@ export function SldCanvas() {
     [primaryPath, putSidecarMutate],
   );
 
+  // The diagram is held back (the note below stands in its place): the commands that arrange
+  // it have no canvas to run on, so they say they are not available instead of doing nothing.
+  const diagramHeld =
+    selection !== null &&
+    topology !== null &&
+    tooLargeToDraw(topology.buses.length) &&
+    askedFor !== primaryPath &&
+    drawnFor !== primaryPath;
+  const diagramOnScreen =
+    selection !== null && topology !== null && topology.buses.length > 0 && !diagramHeld;
+  useEffect(() => {
+    if (diagramOnScreen) setDrawnFor(primaryPath);
+  }, [diagramOnScreen, primaryPath]);
+  const setDiagramHeld = useSldStore((s) => s.setDiagramHeld);
+  useEffect(() => {
+    setDiagramHeld(diagramHeld);
+    return () => setDiagramHeld(false);
+  }, [diagramHeld, setDiagramHeld]);
+
   if (selection === null) return null;
   // Topology fetch in flight or sidecar GET in flight → skeleton.
   if (topology === null || sidecarQuery.isLoading) {
@@ -4860,7 +4883,11 @@ export function SldCanvas() {
   // with more than `DRAW_ON_REQUEST_BUSES` not at all: its picture takes
   // minutes, and the page does not answer while it is made. The tables, the
   // power flow and the exports do not wait for it.
-  if (tooLargeToDraw(topology.buses.length) && askedFor !== primaryPath) {
+  if (
+    tooLargeToDraw(topology.buses.length) &&
+    askedFor !== primaryPath &&
+    drawnFor !== primaryPath
+  ) {
     return (
       <SldTooLarge
         buses={topology.buses.length}

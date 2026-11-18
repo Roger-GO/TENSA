@@ -324,7 +324,11 @@ function useCommandSets(): CommandSets {
         : caseSelection === null
           ? EIG_NEEDS_A_CASE
           : EIG_NEEDS_A_POWER_FLOW;
-  const diagramVisible = topology !== null && topology.buses.length > 0 && !resultsViewActive;
+  // A case that is too large to draw has its diagram held back until it is asked for (and, above
+  // a size, never): there is no canvas for the commands of the diagram to run on.
+  const diagramHeld = useSldStore((s) => s.diagramHeld);
+  const diagramVisible =
+    topology !== null && topology.buses.length > 0 && !resultsViewActive && !diagramHeld;
 
   // ---- the arrangement of the diagram -----------------------------------
   // Moves, Tidy diagram and alignments have a history of their own, kept by

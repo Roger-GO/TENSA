@@ -1002,6 +1002,78 @@ describe('SldCanvas', () => {
     expect(elkLayout).toHaveBeenCalled();
   });
 
+  it('tells the commands of the diagram that it is held back, until it is drawn', async () => {
+    const buses = Array.from({ length: 401 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('huge-synthetic-4.raw'), addfiles: [] },
+      });
+    });
+    const { unmount } = render(withQueryClient(<SldCanvas />));
+    await screen.findByTestId('sld-too-large');
+    // Tidy, Fit view and the rest have no canvas to run on: they are not on offer.
+    expect(useSldStore.getState().diagramHeld).toBe(true);
+    await userEvent.setup().click(screen.getByTestId('sld-draw-anyway'));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    expect(useSldStore.getState().diagramHeld).toBe(false);
+    unmount();
+    expect(useSldStore.getState().diagramHeld).toBe(false);
+  });
+
+  it('holds back the next large case again after the diagram of the first was asked for', async () => {
+    const buses = Array.from({ length: 401 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    const select = (name: string) =>
+      act(() => {
+        useCaseStore.setState({
+          selection: { primaryPath: parseWorkspacePath(name), addfiles: [] },
+        });
+      });
+    select('first-huge.raw');
+    render(withQueryClient(<SldCanvas />));
+    await userEvent.setup().click(await screen.findByTestId('sld-draw-anyway'));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    // Another case of the same size is opened in its place: what was asked for was the first.
+    select('second-huge.raw');
+    await screen.findByTestId('sld-too-large');
+    expect(useSldStore.getState().diagramHeld).toBe(true);
+  });
+
+  it('leaves the flag clear when the note goes away with the diagram that was held', async () => {
+    const buses = Array.from({ length: 401 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('huge-synthetic-5.raw'), addfiles: [] },
+      });
+    });
+    const { unmount } = render(withQueryClient(<SldCanvas />));
+    await screen.findByTestId('sld-too-large');
+    expect(useSldStore.getState().diagramHeld).toBe(true);
+    unmount();
+    expect(useSldStore.getState().diagramHeld).toBe(false);
+  });
+
+  it('keeps a diagram that is drawn when an edit takes the case past 400 buses', async () => {
+    const buses = Array.from({ length: 400 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('large-edited.raw'), addfiles: [] },
+      });
+    });
+    const { rerender } = render(withQueryClient(<SldCanvas />));
+    await waitFor(() => expect(screen.getByTestId('rf-root')).toBeInTheDocument());
+    // A bus is added to it: the 401st does not put up the note in place of the diagram being edited.
+    mockTopology = makeTopology([...buses, bus(401)]);
+    rerender(withQueryClient(<SldCanvas />));
+    expect(mockTopology?.buses).toHaveLength(401);
+    expect(screen.queryByTestId('sld-too-large')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rf-root')).toBeInTheDocument();
+    expect(useSldStore.getState().diagramHeld).toBe(false);
+  });
+
   it('does not offer the diagram of a case of over 500 buses at all', async () => {
     const buses = Array.from({ length: 501 }, (_, i) => bus(i + 1));
     mockTopology = makeTopology(buses);

@@ -146,7 +146,12 @@ beforeEach(() => {
   useLayoutStore.setState({ ...DEFAULT_LAYOUT });
   useEditJournalStore.getState().reset();
   useLayoutHistoryStore.getState().clear();
-  useSldStore.setState({ pickedNodeIds: [], pickedCount: 0, diagramLocked: false });
+  useSldStore.setState({
+    pickedNodeIds: [],
+    pickedCount: 0,
+    diagramLocked: false,
+    diagramHeld: false,
+  });
 });
 
 afterEach(() => {
@@ -1646,6 +1651,33 @@ describe('useCommandRegistry: Tidy diagram, Snap to grid, Align and Distribute',
       unsubscribe();
     }
     expect(seen).toEqual(['tidy', 'tidy-relayout']);
+  });
+
+  it('does not offer the commands of the diagram while it is held back, and offers them when it is drawn', () => {
+    MOCK_TOPOLOGY = oneBusTopology();
+    // The note of a case too large to draw stands where the diagram would: nothing is there to
+    // run Tidy, Fit view or the rest, which would do nothing and say nothing.
+    act(() => useSldStore.setState({ diagramHeld: true }));
+    try {
+      const held = renderHook(() => useCommandRegistry(), { wrapper });
+      const ids = [
+        'view.fit',
+        'view.reset-layout',
+        'view.tidy',
+        'view.tidy-relayout',
+        'view.snap-to-grid',
+      ];
+      for (const id of ids) {
+        expect(find(held.result.current, id), id).toBeUndefined();
+      }
+      held.unmount();
+    } finally {
+      act(() => useSldStore.setState({ diagramHeld: false }));
+    }
+    const drawn = renderHook(() => useCommandRegistry(), { wrapper });
+    for (const id of ['view.fit', 'view.reset-layout', 'view.tidy', 'view.tidy-relayout']) {
+      expect(find(drawn.result.current, id), id).toBeDefined();
+    }
   });
 
   it('keeps Tidy diagram in the menu, greyed out with why, while the diagram is locked', () => {

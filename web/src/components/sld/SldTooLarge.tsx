@@ -1,5 +1,8 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { toast } from '@/lib/toast';
+import { useCaseStore } from '@/store/case';
+import { ComponentDropZone } from './ComponentDropZone';
 import { tooLargeToOffer } from './largeCase';
 
 export interface SldTooLargeProps {
@@ -22,11 +25,24 @@ export interface SldTooLargeProps {
  * `DRAW_ON_REQUEST_BUSES` it offers the diagram to anyone who is willing to
  * wait for it; above that it does not, since the page would stop answering
  * for longer than the server keeps its session.
+ *
+ * It is a drop target like the empty page of a system with no buses: a row of the Components
+ * palette dropped here has no diagram to stand on, so it opens the form for that kind (the way
+ * to add an element to a case whose diagram is not drawn) and a notice says why, where a drop
+ * that did nothing would leave the person wondering.
  */
 export function SldTooLarge({ buses, onDraw, drawing = false, className }: SldTooLargeProps) {
   const offered = !tooLargeToOffer(buses);
+  const openAddPanel = useCaseStore((s) => s.openAddPanel);
   return (
-    <div
+    <ComponentDropZone
+      onDropComponent={(kind) => {
+        openAddPanel(kind);
+        toast.info('The diagram is not drawn, so there is nothing to drop it on', {
+          id: 'sld-too-large-drop',
+          description: 'The form to add it opens instead.',
+        });
+      }}
       role="status"
       data-testid="sld-too-large"
       className={cn(
@@ -63,6 +79,6 @@ export function SldTooLarge({ buses, onDraw, drawing = false, className }: SldTo
           Draw the diagram anyway
         </Button>
       )}
-    </div>
+    </ComponentDropZone>
   );
 }

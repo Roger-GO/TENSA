@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   DRAW_AT_ONCE_BUSES,
@@ -8,6 +8,25 @@ import {
   tooLargeToOffer,
 } from '@/components/sld/largeCase';
 import { SldTooLarge } from '@/components/sld/SldTooLarge';
+import { toast } from '@/lib/toast';
+import { useCaseStore } from '@/store/case';
+
+const MIME = 'application/andes-component-type';
+
+function drop(target: HTMLElement, kind: string): void {
+  const dataTransfer = {
+    getData: (mime: string) => (mime === MIME ? kind : ''),
+    types: [MIME],
+    dropEffect: 'copy',
+  };
+  fireEvent(target, createEvent.drop(target, { dataTransfer }));
+}
+
+afterEach(() => {
+  cleanup();
+  useCaseStore.getState().closeAddPanel();
+  vi.restoreAllMocks();
+});
 
 describe('tooLargeToDraw', () => {
   it('holds a case to the buses it is drawn at once for, which the 300-bus case is within', () => {
@@ -68,5 +87,24 @@ describe('SldTooLarge', () => {
     expect(card).toHaveTextContent(
       'The tables, the power flow and its violations, and the analyses work without it',
     );
+  });
+});
+
+describe('SldTooLarge as a drop target', () => {
+  it('opens the form for a component dropped on it and says why, where a drop would do nothing', () => {
+    const info = vi.spyOn(toast, 'info');
+    useCaseStore.getState().closeAddPanel();
+    render(<SldTooLarge buses={450} onDraw={() => {}} />);
+    drop(screen.getByTestId('sld-too-large'), 'PQ');
+    expect(useCaseStore.getState()).toMatchObject({ addPanelOpen: true, addPanelKind: 'PQ' });
+    expect(info).toHaveBeenCalledWith(
+      'The diagram is not drawn, so there is nothing to drop it on',
+      expect.objectContaining({ description: 'The form to add it opens instead.' }),
+    );
+  });
+
+  it('is still the status note it was', () => {
+    render(<SldTooLarge buses={2000} onDraw={() => {}} />);
+    expect(screen.getByTestId('sld-too-large')).toHaveAttribute('role', 'status');
   });
 });

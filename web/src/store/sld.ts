@@ -102,6 +102,13 @@ export interface SldState {
    */
   paletteDragKind: string | null;
   setPaletteDragKind: (kind: string | null) => void;
+  /**
+   * The case is open and its diagram is held back (`SldTooLarge`: more buses than are drawn
+   * at once, not asked for yet), so no canvas is mounted to run what the diagram's commands
+   * ask. Written by `SldCanvas`, and false with a diagram drawn or none to draw.
+   */
+  diagramHeld: boolean;
+  setDiagramHeld: (held: boolean) => void;
 }
 
 export const useSldStore = create<SldState>((set) => ({
@@ -137,6 +144,9 @@ export const useSldStore = create<SldState>((set) => ({
     ),
   paletteDragKind: null,
   setPaletteDragKind: (kind: string | null) => set({ paletteDragKind: kind }),
+  diagramHeld: false,
+  setDiagramHeld: (held: boolean) =>
+    set((s) => (s.diagramHeld === held ? s : { diagramHeld: held })),
 }));
 
 // The nodes picked together are those of one diagram. A bus goes by its idx,
