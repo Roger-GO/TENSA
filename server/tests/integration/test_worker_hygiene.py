@@ -4,8 +4,9 @@
 - A worker that dies in native code leaves the Python stack of its threads on stderr.
 - The clone scratch dir records the server (pid, pid space, start time), so a later
   server can tell it was abandoned, and closing the session removes it.
-- A worker's ordinary work, a power flow, a report and the bundle of an edited case, prints no out-of-workspace warning: its libraries and its own scratch directories
-  are not strays.
+- A worker's ordinary work, a power flow, a report and the bundle of an edited case, prints
+  no out-of-workspace warning: its libraries, its own scratch directories and TENSA's own
+  files are not strays.
 """
 
 from __future__ import annotations

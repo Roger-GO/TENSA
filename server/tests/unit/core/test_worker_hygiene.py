@@ -13,6 +13,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import zoneinfo
 from pathlib import Path
 from typing import Any
 
@@ -195,12 +196,16 @@ def test_the_installed_hook_logs_only_opens_outside_the_workspace(
 
 
 def _routine(
-    path: Path | str, made: set[str] | None = None, directories: tuple[str, ...] = ()
+    path: Path | str,
+    made: set[str] | None = None,
+    directories: tuple[str, ...] = (),
+    trees: tuple[str, ...] = (),
 ) -> bool:
     return worker._is_routine_open(
         os.path.realpath(path),
         worker._routine_files(*directories),
         set() if made is None else made,
+        tuple(worker._normalized_path(tree) for tree in trees),
     )
 
 
@@ -219,7 +224,7 @@ def test_the_null_device_and_the_system_mime_maps_are_routine_opens(
 def test_the_temporary_directory_itself_is_a_routine_open_and_what_is_in_it_is_not(
     layout: dict[str, Path],
 ) -> None:
-    """On Linux ``NamedTemporaryFile`` opens the directory to make a file with no name."""
+    """``NamedTemporaryFile`` opens the directory it makes its file in, on every platform."""
     temp = str(layout["other"])
     assert _routine(layout["other"], directories=(temp,))
     assert not _routine(layout["other"], directories=())
@@ -264,6 +269,20 @@ def test_remembering_a_temporary_path_never_raises_and_stays_bounded(
     assert 1 <= len(made) <= 3
     # The newest is always remembered, whatever was dropped to make room.
     assert _routine(layout["other"] / "t7" / "x", made)
+
+
+def test_a_nul_is_not_remembered_where_realpath_accepts_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On Windows ``realpath`` returns a path with a NUL unchanged instead of raising, so the
+    refusal has to be the function's own: the test failed there, and only there."""
+    monkeypatch.setattr(worker, "_normalized_path", lambda path: path)
+    made: set[str] = set()
+    for odd in ("bad\0path", b"bad\0path", Path("a") / "b\0c"):
+        worker._remember_temp_path(made, odd)
+    assert made == set()
+    worker._remember_temp_path(made, "fine")
+    assert made == {"fine"}
 
 
 def _install_with_captured_hook(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
@@ -337,6 +356,61 @@ def test_a_missing_temporary_directory_does_not_keep_the_hook_out(
     assert [r.levelname for r in caplog.records] == ["WARNING", "DEBUG"]
 
 
+def test_the_time_zone_database_is_routine_wherever_the_interpreter_keeps_its_own_tree(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``dateutil`` reads ``/usr/share/zoneinfo/UTC`` when ``pandas`` is imported. Under a
+    Python the distribution packages that is inside the interpreter's tree and was quiet; under
+    a hosted toolcache Python it was a warning from every worker, which failed CI on Linux."""
+    database = layout["other"] / "zoneinfo"
+    (database / "Etc").mkdir(parents=True)
+    (database / "Etc" / "UTC").write_bytes(b"TZif")
+    monkeypatch.setattr(zoneinfo, "TZPATH", (str(database),))
+    assert worker._routine_trees() == (_root(database),)
+    assert _routine(database / "Etc" / "UTC", trees=worker._routine_trees())
+    assert not _routine(layout["other"] / "x.dat", trees=worker._routine_trees())
+    # A directory that merely starts alike is not in it.
+    assert not _routine(layout["other"] / "zoneinfo2" / "UTC", trees=worker._routine_trees())
+
+    monkeypatch.setattr(worker, "_interpreter_roots", lambda: ())
+    hook = _install_with_captured_hook(layout["cases"], monkeypatch)
+    caplog.set_level("DEBUG", logger="tensa.worker.audit")
+    hook("open", (str(database / "Etc" / "UTC"), "rb", 0))
+    hook("open", (str(layout["other"] / "stolen.dat"), "r", 0))
+    assert [r.levelname for r in caplog.records] == ["DEBUG", "WARNING"]
+
+
+def test_a_system_with_no_time_zone_database_has_no_routine_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows has none (``zoneinfo.TZPATH`` is empty there, and ``tzdata`` is in site-packages)."""
+    monkeypatch.setattr(zoneinfo, "TZPATH", ())
+    assert worker._routine_trees() == ()
+
+
+def test_the_local_time_zone_file_is_a_routine_open_on_posix() -> None:
+    if os.name == "nt":
+        assert worker._normalized_path("/etc/localtime") not in worker._routine_files()
+    else:
+        assert worker._normalized_path("/etc/localtime") in worker._routine_files()
+
+
+def test_what_tensa_ships_is_read_by_its_worker_without_a_warning_even_from_a_checkout(
+    layout: dict[str, Path],
+) -> None:
+    """The worker reads the example catalog (the bundle of an edited case names the cases whose
+    notice it carries). In a checkout installed for development it sits outside site-packages,
+    where the hook warned of it: the example of worker hygiene failed in CI and here."""
+    import tensa
+
+    catalog = Path(tensa.__file__).resolve().parent / "examples" / "catalog.json"
+    assert catalog.is_file()
+    assert _verdict(catalog, layout["cases"], worker._interpreter_roots()) is None
+    # A file of the same name anywhere else is a stray.
+    stray = layout["other"] / "catalog.json"
+    assert _verdict(stray, layout["cases"], worker._interpreter_roots()) is not None
+
+
 def test_a_real_worker_hook_is_quiet_about_what_the_libraries_open_and_says_what_else_is(
     tmp_path: Path,
 ) -> None:
@@ -367,7 +441,7 @@ def test_a_real_worker_hook_is_quiet_about_what_the_libraries_open_and_says_what
             (Path(td) / "report.txt").write_text("x", encoding="utf-8")
             (Path(td) / "report.txt").read_text(encoding="utf-8")
         with tempfile.NamedTemporaryFile() as handle:
-            handle.write(b"x")  # on Linux this opens the temporary directory itself
+            handle.write(b"x")  # this opens the temporary directory itself
         with tempfile.NamedTemporaryFile(delete=False) as handle:
             pass
         Path(handle.name).read_text(encoding="utf-8")

@@ -72,6 +72,7 @@ import sysconfig
 import tempfile
 import threading
 import time
+import zoneinfo
 from collections.abc import Callable, Sequence
 from multiprocessing.connection import Connection
 from multiprocessing.synchronize import Event as EventType
@@ -272,11 +273,11 @@ def _is_within(path: str, root: str) -> bool:
 def _interpreter_roots() -> tuple[str, ...]:
     """Directories that hold the interpreter's own files, normalized.
 
-    ANDES reads data files from its install tree and the standard library reads
-    its own, so opens there are not worth a warning. Built from the interpreter's
-    own idea of its layout (prefixes, ``sysconfig``, site directories) instead of
-    a path pattern, so it holds for a venv, conda, Homebrew, python.org on Windows
-    and a distro package alike. On a system-wide interpreter a prefix is a shared
+    ANDES reads data files from its install tree, the standard library reads its own and
+    TENSA reads its own, so opens there are not worth a warning. Built from the
+    interpreter's own idea of its layout (prefixes, ``sysconfig``, site directories)
+    instead of a path pattern, so it holds for a venv, conda, Homebrew, python.org on
+    Windows and a distro package alike. On a system-wide interpreter a prefix is a shared
     tree such as ``/usr``; the hook only logs, so a quiet open there costs nothing.
     """
     paths = sysconfig.get_paths()
@@ -287,6 +288,10 @@ def _interpreter_roots() -> tuple[str, ...]:
         sys.base_exec_prefix,
         *(paths.get(key, "") for key in ("stdlib", "platstdlib", "purelib", "platlib")),
         site.getusersitepackages(),
+        # TENSA's own folder: the worker reads the example catalog and the cases TENSA bundles
+        # from it, and in a source checkout installed for development it is under none of
+        # the directories above.
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     ]
     # Very old virtualenv releases ship a ``site`` without ``getsitepackages``.
     with contextlib.suppress(AttributeError):
@@ -311,14 +316,28 @@ _MAX_REMEMBERED_TEMP_PATHS = 10_000
 def _routine_files(*directories: str) -> frozenset[str]:
     """The files the libraries the worker imports open as a matter of course, normalized.
 
-    ``dill`` opens the null device when it is imported, to learn the type of a file object, and
+    ``dill`` opens the null device when it is imported, to learn the type of a file object,
     ``mimetypes`` reads the system's MIME type maps (``mimetypes.knownfiles``) the first time
-    anything asks for a type, which ``openpyxl`` does. Neither reads anything of a case. Each
-    of ``directories`` is itself one too (not what is in it): on Linux ``NamedTemporaryFile``
-    opens the temporary directory to make a file that has no name.
+    anything asks for a type, which ``openpyxl`` does, and ``dateutil`` reads the local time
+    zone from ``/etc/localtime``. None of them reads anything of a case. Each of
+    ``directories`` is itself one too (not what is in it): ``NamedTemporaryFile`` opens the
+    temporary directory it makes its file in, on every platform.
     """
-    names = (os.devnull, *getattr(mimetypes, "knownfiles", ()), *directories)
+    local_time = () if os.name == "nt" else ("/etc/localtime",)
+    names = (os.devnull, *getattr(mimetypes, "knownfiles", ()), *local_time, *directories)
     return frozenset(_normalized_path(name) for name in names)
+
+
+def _routine_trees() -> tuple[str, ...]:
+    """The directories whose files the libraries the worker imports read as a matter of course,
+    normalized: the time zone database, where ``zoneinfo`` looks it up.
+
+    ``dateutil``, which ``pandas`` imports, reads ``/usr/share/zoneinfo/UTC`` to make its UTC
+    zone, and the database holds time zones and nothing of a case. A Python the distribution
+    packages keeps it under the interpreter's own tree, where it was quiet already; a
+    Python from a toolcache or a framework build does not.
+    """
+    return tuple(_normalized_path(directory) for directory in zoneinfo.TZPATH)
 
 
 def _remember_temp_path(made: set[str], path: object) -> None:
@@ -330,7 +349,12 @@ def _remember_temp_path(made: set[str], path: object) -> None:
     if not isinstance(path, (str, bytes, os.PathLike)):
         return
     try:
-        key = _normalized_path(os.fsdecode(path))
+        text = os.fsdecode(path)
+        # As in ``_out_of_workspace_open``: no file name holds a NUL, ``realpath`` raises
+        # ValueError for one on POSIX and returns it unchanged on Windows.
+        if "\0" in text:
+            return
+        key = _normalized_path(text)
     except (OSError, ValueError):
         return
     if len(made) >= _MAX_REMEMBERED_TEMP_PATHS:
@@ -338,17 +362,22 @@ def _remember_temp_path(made: set[str], path: object) -> None:
     made.add(key)
 
 
-def _is_routine_open(real: str, routine_files: frozenset[str], made: set[str]) -> bool:
+def _is_routine_open(
+    real: str,
+    routine_files: frozenset[str],
+    made: set[str],
+    routine_trees: Sequence[str] = (),
+) -> bool:
     """Whether an open outside the workspace is one the worker makes by design: a file the
-    libraries it imports open (``routine_files``), or a file or a directory this process made
-    through ``tempfile`` (``made``, from ``_remember_temp_path``), or something inside such a
-    directory.
+    libraries it imports open (``routine_files``), or anything in a directory they read from
+    (``routine_trees``), or a file or a directory this process made through ``tempfile``
+    (``made``, from ``_remember_temp_path``), or something inside such a directory.
 
     ``real`` is what ``_out_of_workspace_open`` answered. Another file of the temporary
     directory, one the process did not make, is not routine.
     """
     key = os.path.normcase(real)
-    if key in routine_files:
+    if key in routine_files or any(_is_within(key, tree) for tree in routine_trees):
         return True
     while True:
         if key in made:
@@ -424,6 +453,7 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
         routine_files = _routine_files(tempfile.gettempdir())
     except OSError:  # no usable temporary directory: nothing is made in one
         routine_files = _routine_files()
+    routine_trees = _routine_trees()
 
     def _hook(event: str, args: tuple[Any, ...]) -> None:
         if event != "open":
@@ -435,7 +465,7 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
         real = _out_of_workspace_open(args[0], workspace_root, interpreter_roots)
         if real is None:
             return
-        if _is_routine_open(real, routine_files, made):
+        if _is_routine_open(real, routine_files, made, routine_trees):
             log.debug("strict-fs: routine open outside the workspace: %s", real)
         else:
             log.warning("strict-fs: out-of-workspace open: %s", real)
