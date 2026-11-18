@@ -974,6 +974,52 @@ describe('SldCanvas', () => {
     });
   });
 
+  it('does not draw a case of over 400 buses until it is asked to, and says what works without it', async () => {
+    const buses = Array.from({ length: 401 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('huge-synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    const card = await screen.findByTestId('sld-too-large');
+    expect(card).toHaveTextContent('The diagram of 401 buses is not drawn yet');
+    expect(card).toHaveTextContent('The tables, the power flow');
+    // No layout was started, and nothing is on the canvas.
+    expect(screen.queryByTestId('rf-root')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sld-layout-skeleton')).not.toBeInTheDocument();
+    expect(elkLayout).not.toHaveBeenCalled();
+    await userEvent.setup().click(screen.getByTestId('sld-draw-anyway'));
+    // Asked for, it is the diagram the other cases get: laid out, with its banner.
+    await waitFor(() => {
+      expect(screen.getByTestId('rf-root')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('sld-too-large')).not.toBeInTheDocument();
+    expect(elkLayout).toHaveBeenCalled();
+  });
+
+  it('draws a case of exactly 400 buses at once', async () => {
+    const buses = Array.from({ length: 400 }, (_, i) => bus(i + 1));
+    mockTopology = makeTopology(buses);
+    act(() => {
+      useCaseStore.setState({
+        selection: {
+          primaryPath: parseWorkspacePath('large-synthetic.raw'),
+          addfiles: [],
+        },
+      });
+    });
+    render(withQueryClient(<SldCanvas />));
+    await waitFor(() => {
+      expect(screen.getByTestId('rf-root')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('sld-too-large')).not.toBeInTheDocument();
+  });
+
   it('does NOT show the >30-buses banner for a curated case', async () => {
     const buses = Array.from({ length: 39 }, (_, i) => bus(i + 1));
     mockTopology = makeTopology(buses);

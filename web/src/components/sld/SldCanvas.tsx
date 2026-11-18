@@ -176,6 +176,8 @@ import {
   type FigureSettings,
 } from './figure/figureSettings';
 import { SldLayoutSkeleton } from './SldLayoutSkeleton';
+import { tooLargeToDraw } from './largeCase';
+import { SldTooLarge } from './SldTooLarge';
 import { SldEmptySystem } from './SldEmptySystem';
 import { SldValuesLeftOff } from './SldValuesLeftOff';
 import { SldVoltageLegend } from './SldVoltageLegend';
@@ -4806,6 +4808,9 @@ export function SldCanvas() {
   const hasDrafts = useDrafts().length > 0;
   // An element was just added from a draft and its node is still to come.
   const placing = useDraftsStore((s) => Object.keys(s.placements).length > 0);
+  // The case whose diagram was asked for although it has more buses than are
+  // drawn at once (`SldTooLarge`).
+  const [askedFor, setAskedFor] = useState<string | null>(null);
 
   // TanStack Query v5 recreates the mutation result object every render but
   // guarantees `.mutate` is referentially stable; depend on it directly so
@@ -4832,6 +4837,12 @@ export function SldCanvas() {
   // that has it: the diagram stays, and the bus takes the place of the draft.
   if (topology.buses.length === 0 && !hasDrafts && !placing) {
     return <SldEmptySystem />;
+  }
+  // A case with a great many buses is not drawn until it is asked for: its
+  // picture takes minutes and the page does not answer while it is made. The
+  // tables, the power flow and the exports do not wait for it.
+  if (tooLargeToDraw(topology.buses.length) && askedFor !== primaryPath) {
+    return <SldTooLarge buses={topology.buses.length} onDraw={() => setAskedFor(primaryPath)} />;
   }
 
   return (
