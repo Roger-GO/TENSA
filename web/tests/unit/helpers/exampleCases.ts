@@ -18,6 +18,10 @@ const entry = (
 const branches = (pairs: readonly [Idx, Idx][], firstNumber: number): TopologyEntry[] =>
   pairs.map(([bus1, bus2], i) => entry(`Line_${firstNumber + i}`, 'Line', { bus1, bus2 }));
 
+/** A branch is named in the file after its ends, as `Line 4-5` or `Transformer 1-4`. */
+const named = (list: TopologyEntry[], word: string): TopologyEntry[] =>
+  list.map((e) => ({ ...e, name: `${word} ${String(e.params?.bus1)}-${String(e.params?.bus2)}` }));
+
 const loads = (buses: readonly Idx[], firstNumber: number): TopologyEntry[] =>
   buses.map((bus, i) => entry(`PQ_${firstNumber + i}`, 'PQ', { bus }));
 
@@ -87,37 +91,44 @@ export const IEEE14: TopologySummary = {
  * flags them and rates their two ends at different voltages. The branches and the loads are
  * numbered as ANDES numbers those of its own `wscc9.xlsx` (the six lines, then the three
  * transformers, and the loads at buses 5, 6 and 8), and the buses at the ends of a line are
- * the order the book gives them in.
+ * the order the book gives them in. The devices carry the names the file gives them (`Gen 2`,
+ * `Line 4-5`, `Load 5`), which a symbol and its label are drawn as wide as.
  */
 export const WSCC9: TopologySummary = {
   state: 'pre-setup',
   buses: Array.from({ length: 9 }, (_, i) => entry(i + 1, 'Bus', {}, `Bus ${i + 1}`)),
-  lines: branches(
-    [
-      [4, 5],
-      [4, 6],
-      [5, 7],
-      [6, 9],
-      [7, 8],
-      [8, 9],
-    ],
-    0,
+  lines: named(
+    branches(
+      [
+        [4, 5],
+        [4, 6],
+        [5, 7],
+        [6, 9],
+        [7, 8],
+        [8, 9],
+      ],
+      0,
+    ),
+    'Line',
   ),
-  transformers: branches(
-    [
-      [1, 4],
-      [2, 7],
-      [3, 9],
-    ],
-    6,
+  transformers: named(
+    branches(
+      [
+        [1, 4],
+        [2, 7],
+        [3, 9],
+      ],
+      6,
+    ),
+    'Transformer',
   ),
   generators: [
-    entry(2, 'PV', { bus: 2 }),
-    entry(3, 'PV', { bus: 3 }),
-    entry(1, 'Slack', { bus: 1 }),
-    ...[1, 2, 3].map((n) => entry(n, 'GENCLS', { bus: n, gen: n })),
+    entry(2, 'PV', { bus: 2 }, 'Gen 2'),
+    entry(3, 'PV', { bus: 3 }, 'Gen 3'),
+    entry(1, 'Slack', { bus: 1 }, 'Gen 1'),
+    ...[1, 2, 3].map((n) => entry(n, 'GENCLS', { bus: n, gen: n }, `GENCLS ${n}`)),
   ],
-  loads: loads([5, 6, 8], 0),
+  loads: [5, 6, 8].map((bus, i) => entry(`PQ_${i}`, 'PQ', { bus }, `Load ${bus}`)),
   shunts: [],
   controllers: [],
 };
