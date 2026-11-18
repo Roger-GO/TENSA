@@ -398,3 +398,128 @@ def test_a_ring_down_comparison_names_a_case_the_catalog_has() -> None:
             other = catalog.get(compare.case)
             assert other is not None and other.has_file, stem
             assert compare.case != stem
+
+
+def test_the_renewable_cases_have_the_network_of_ieee_14_and_take_the_file_s_two_line_events_out() -> (
+    None
+):
+    """The solar and the wind turbine file hold the IEEE 14-bus network of the catalog, so the
+    power flow reference is the one of IEEE 14 (the converter models do not enter the power
+    flow), and Line_1 is switched out at 1.0 s and in at 1.1 s by two Toggle events that the
+    runs which must stay quiet take out, by their idx."""
+    base = load_reference("ieee14")
+    assert base is not None
+    theirs = {c.quantity: c.expected for c in base.checks if c.kind == "independent-solver"}
+    for case in ("ieee14_solar", "ieee14_wt3"):
+        reference = load_reference(case)
+        assert reference is not None and reference.disturbance is not None, case
+        mine = {c.quantity: c.expected for c in reference.checks if c.kind == "independent-solver"}
+        assert mine == theirs, case
+        assert reference.disturbance.specs == []
+        assert [(e.model, e.idx) for e in reference.remove_events] == [
+            ("Toggle", "Toggler_1"),
+            ("Toggle", "Toggler_2"),
+        ]
+        # The network is the same again after the reclose: the machines end where they began.
+        assert reference.disturbance.settles_within_deg == 1.0
+
+
+def test_the_renewable_cases_allow_the_second_ring_down_pole_the_gap_it_has_and_no_more() -> None:
+    """The second-strongest ring-down pole of both cases (0.993 Hz, damping 0.206) is 0.058 in
+    damping from the nearest eigenvalue, which the 0.05 of the other cases would fail. The
+    entries say so, and 0.06 is the least that lets the check pass: a looser tolerance would
+    let a worse mismatch by."""
+    for case in ("ieee14_solar", "ieee14_wt3"):
+        reference = load_reference(case)
+        assert reference is not None
+        assert reference.ring_down.tolerance_damping == 0.06, case
+        assert reference.ring_down.tolerance_hz == 0.05
+        entry = load_catalog().get(case)
+        assert entry is not None and entry.verification is not None
+        text = " ".join(entry.caveats) + entry.verification.summary
+        assert "0.058" in text and "0.06" in text, case
+
+
+def test_the_renewable_dynamics_are_regression_baselines_and_say_so_in_the_entries() -> None:
+    """No independent computation exists for converter and wind turbine models here, so the
+    numbers of the disturbance run and of the modes are TENSA's own earlier output, and the
+    entries' summaries say that nothing independent exists for them."""
+    for case in ("ieee14_solar", "ieee14_wt3"):
+        reference = load_reference(case)
+        assert reference is not None
+        tds_or_eig = [c for c in reference.checks if c.analysis in ("tds", "eig")]
+        assert tds_or_eig and {c.kind for c in tds_or_eig} == {"regression-baseline"}, case
+        entry = load_catalog().get(case)
+        assert entry is not None and entry.verification is not None
+        assert "regression baselines" in entry.verification.summary
+        assert "No published or independent result exists" in entry.verification.summary
+
+
+# The buses where the University of Washington archive's stored state of the IEEE 118-bus data
+# is more than 2e-3 pu from the solution of the same data, with how far.
+STORED_118_OFF = {"30": 0.0173, "92": 0.003, "103": 0.009}
+
+
+def test_the_ieee_118_stored_state_is_not_a_solution_and_its_tolerance_is_what_it_allows() -> None:
+    """The file's voltages and angles are the archive's, to the archive's digits, and are not a
+    solution: pandapower's solution of the same data (the independent-solver checks of the same
+    file) differs from them by up to 0.0173 pu at bus 30 and 0.303 degrees at bus 1, and the
+    stored slack power by 2.5 MW. The entry quotes these, and the stored checks' tolerances are
+    those numbers rounded up, not a looser figure."""
+    reference = load_reference("ieee118")
+    assert reference is not None
+    by_kind = {
+        (c.kind, c.quantity): c for c in reference.checks if c.quantity.startswith("pf.")
+    }
+    stored_v = by_kind[("stored-solution", "pf.bus_voltage_pu")]
+    solved_v = by_kind[("independent-solver", "pf.bus_voltage_pu")]
+    stored_a = by_kind[("stored-solution", "pf.bus_angle_deg")]
+    solved_a = by_kind[("independent-solver", "pf.bus_angle_deg")]
+    stored_p = by_kind[("stored-solution", "pf.slack_p_mw")]
+    solved_p = by_kind[("independent-solver", "pf.slack_p_mw")]
+    for check in (stored_v, solved_v, stored_a, solved_a):
+        assert isinstance(check.expected, dict) and len(check.expected) == 118
+    assert isinstance(stored_v.expected, dict) and isinstance(solved_v.expected, dict)
+    assert isinstance(stored_a.expected, dict) and isinstance(solved_a.expected, dict)
+    assert isinstance(stored_p.expected, float) and isinstance(solved_p.expected, float)
+
+    dv = {k: abs(stored_v.expected[k] - solved_v.expected[k]) for k in stored_v.expected}
+    da = {k: abs(stored_a.expected[k] - solved_a.expected[k]) for k in stored_a.expected}
+    worst_v = max(dv, key=lambda k: dv[k])
+    worst_a = max(da, key=lambda k: da[k])
+    assert (worst_v, worst_a) == ("30", "1")
+    assert dv[worst_v] == pytest.approx(0.0173, abs=5e-5)
+    assert da[worst_a] == pytest.approx(0.303, abs=5e-4)
+    assert stored_v.expected["30"] == pytest.approx(0.968) and solved_v.expected["30"] == (
+        pytest.approx(0.985, abs=5e-4)
+    )
+    assert abs(stored_p.expected - solved_p.expected) == pytest.approx(2.54, abs=0.01)
+    assert stored_p.expected == pytest.approx(516.4)
+    # 114 of the 118 voltages are within 2e-3 pu (the archive keeps three decimals); the four
+    # that are not are the ones the entry's numbers come from.
+    off = {k: v for k, v in dv.items() if v > 2e-3}
+    assert len(off) == 4 and {"30", "92", "103"} <= set(off)
+    for bus, gap in STORED_118_OFF.items():
+        assert dv[bus] == pytest.approx(gap, abs=6e-4), bus
+    # The tolerances are the largest gaps rounded up (0.0173 to 0.02, 0.303 to 0.35, 2.54 to 3),
+    # so no stored value is held to less than the stored state itself keeps.
+    assert stored_v.tolerance.abs == 0.02 and 0.0173 < 0.02 < 2 * 0.0173
+    assert stored_a.tolerance.abs == 0.35 and 0.303 < 0.35 < 2 * 0.303
+    assert stored_p.tolerance.abs == 3.0 and 2.54 < 3.0 < 2 * 2.54
+    # And the solver's checks keep the tight tolerance the other cases have.
+    assert solved_v.tolerance.abs == 1e-4 and solved_a.tolerance.abs == 0.01
+    entry = load_catalog().get("ieee118")
+    assert entry is not None
+    assert "0.0173 pu (bus 30" in " ".join(entry.caveats) and "114 of the 118" in " ".join(entry.caveats)
+
+
+def test_the_ieee_118_case_is_a_steady_state_power_flow_case_with_no_dynamics_to_check() -> None:
+    reference = load_reference("ieee118")
+    assert reference is not None
+    assert reference.disturbance is None and reference.remove_events == []
+    assert {c.analysis for c in reference.checks} == {"pf"}
+    assert "regression-baseline" not in {c.kind for c in reference.checks}
+    entry = load_catalog().get("ieee118")
+    assert entry is not None
+    assert entry.category == "steady-state" and entry.analyses == ["pf"]
+    assert entry.size is not None and (entry.size.buses, entry.size.generators) == (118, 54)

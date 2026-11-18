@@ -45,9 +45,14 @@
  *   automatic layout once) and nothing is drawn over anything else, and every
  *   machine control is on the symbol of its unit (none is an orphan badge)
  *
- *   in the three small gallery cases (Kundur with a stabiliser, IEEE 14 with a fault, PJM 5-bus), added
- *   to the workspace first -> as they open, after a tidy and with the values of a power flow, nothing is
- *   drawn over anything else, and every exciter, governor and stabiliser is on the symbol of its unit
+ *   in the small gallery cases (Kundur with a stabiliser, IEEE 14 with a fault, PJM 5-bus, IEEE 14 with a
+ *   solar plant and with a type-3 wind turbine), added to the workspace first -> as they open, after a tidy
+ *   and with the values of a power flow, nothing is drawn over anything else, and every exciter, governor,
+ *   stabiliser and converter model is on the symbol of its unit (the seven models of the wind turbine too)
+ *
+ *   in IEEE 118, a steady-state gallery case of 118 buses that is added to the workspace first -> as it
+ *   opens, after a tidy, with the values of a power flow and laid out again, nothing is drawn over
+ *   anything else, and the generators' reactive limits that the power flow leaves are counted
  *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
@@ -523,14 +528,78 @@ test('wecc_full.xlsx: a gallery case of 179 buses is drawn with nothing over any
   expect(await overlapsOnScreen(page)).toEqual([]);
 });
 
-/** The three small cases of the gallery: the example id, and the file the gallery copies. */
-const SMALL_GALLERY: [string, string][] = [
+/** The device connectors of IEEE 118 that do not drop square onto their bar, as it is drawn. */
+const IEEE118_SLANTED: string[] = ['stub-load-PQ_46'];
+
+test('case118.m: a steady-state gallery case of 118 buses is drawn with nothing over anything else as it opens, tidied, with values and laid out again', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  // Not seeded: copy it from the user's ANDES, as the gallery's Add does.
+  const added = await request.post('/api/examples/ieee118/add');
+  expect([201, 409]).toContain(added.status());
+  const written: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().includes('/api/workspace/layout')) {
+      written.push(request.url());
+    }
+  });
+
+  // ---- As it opens ------------------------------------------------------------
+  await page.goto('/');
+  await openCase(page, 'case118.m');
+  const opened = await settled(page);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(problems(opened)).toEqual([]);
+  expect(branchesIntoDevices(opened)).toEqual([]);
+  expect(slantedConnectors(opened.edges)).toEqual(IEEE118_SLANTED);
+  // A static case has no machine control, so no badge of any kind.
+  await expect(page.locator('.react-flow__node-controller')).toHaveCount(0);
+  await expect(page.locator('[data-orphan="true"]')).toHaveCount(0);
+
+  // ---- Tidy ---------------------------------------------------------------------
+  await page.getByTestId('sld-tidy').click();
+  await expect(page.getByTestId('sld-tidy-note')).toHaveText('Already tidy: nothing was changed', {
+    timeout: 120_000,
+  });
+
+  // ---- With the values of a power flow ------------------------------------------
+  await runPowerFlow(page);
+  const shown = await settled(page);
+  expect(problems(shown)).toEqual([]);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(await labelProblems(page)).toEqual([]);
+  // The six generators past a reactive limit that the catalog's entry names, and the buses near
+  // a voltage limit it warns of, are what the Violations tab counts.
+  await expect(page.getByTestId('bottom-drawer-tab-violations')).toContainText('6');
+  // Opening a case, tidying a tidy diagram and running a power flow write nothing beside it.
+  expect(written).toEqual([]);
+
+  // ---- Laid out again -----------------------------------------------------------
+  await page.getByTestId('sld-arrange-trigger').click();
+  await page.getByTestId('sld-arrange-tidy-relayout').click();
+  const laidOut = await settled(page);
+  expect(problems(laidOut)).toEqual([]);
+  expect(branchesIntoDevices(laidOut)).toEqual([]);
+  expect(slantedConnectors(laidOut.edges)).toEqual(IEEE118_SLANTED);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+});
+
+/**
+ * The small cases of the gallery: the example id, the file the gallery copies, and what the
+ * Violations tab counts after a power flow where the entry in the catalog says (the generators past
+ * a reactive limit, since a power flow does not enforce them).
+ */
+const SMALL_GALLERY: [string, string, string?][] = [
   ['kundur_pss', 'kundur_ieeest.xlsx'],
   ['ieee14_fault', 'ieee14_fault.xlsx'],
   ['pjm5bus', 'pjm5bus.xlsx'],
+  ['ieee14_solar', 'ieee14_solar.xlsx', '2'],
+  ['ieee14_wt3', 'ieee14_wt3.xlsx', '2'],
 ];
 
-for (const [id, file] of SMALL_GALLERY) {
+for (const [id, file, violations] of SMALL_GALLERY) {
   test(`${file}: a small gallery case is drawn with nothing over anything else, as it opens, tidied and with values`, async ({
     page,
     request,
@@ -557,6 +626,9 @@ for (const [id, file] of SMALL_GALLERY) {
     expect(problems(shown)).toEqual([]);
     expect(await overlapsOnScreen(page)).toEqual([]);
     expect(await labelProblems(page)).toEqual([]);
+    if (violations !== undefined) {
+      await expect(page.getByTestId('bottom-drawer-tab-violations')).toContainText(violations);
+    }
   });
 }
 

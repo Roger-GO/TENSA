@@ -299,6 +299,55 @@ def test_the_gallery_has_the_three_small_variants_and_none_of_them_is_seeded() -
     assert len(names) == len({n.casefold() for n in names})
 
 
+def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_is_seeded() -> None:
+    catalog = load_catalog()
+    expected = {
+        "ieee14_solar": ("ieee14/ieee14_solar.xlsx", 14, "dynamic", {"pf", "tds", "eig"}),
+        "ieee14_wt3": ("ieee14/ieee14_wt3.xlsx", 14, "dynamic", {"pf", "tds", "eig"}),
+        "ieee118": ("matpower/case118.m", 118, "steady-state", {"pf"}),
+    }
+    for example_id, (path, buses, category, analyses) in expected.items():
+        example = catalog.get(example_id)
+        assert example is not None, example_id
+        assert not example.default and example.category == category
+        assert example.provenance.kind == "andes" and example.provenance.path == path
+        assert example.size is not None and example.size.buses == buses
+        assert set(example.analyses) == analyses
+        assert example.verification is not None and example.verification.checks
+        assert all(check.passed for check in example.verification.checks), example_id
+        # Every case says where its data comes from: a source for the system and one for ANDES.
+        assert example.citations and example.licence.name == "GPL-3.0-or-later"
+    # The 118-bus case is the only steady-state one: it is what the dialog's second group holds.
+    assert [e.id for e in catalog.examples if e.category == "steady-state"] == ["ieee118"]
+    # The renewable cases are the IEEE 14-bus case with a converter, which says what it is not.
+    for example_id in ("ieee14_solar", "ieee14_wt3"):
+        example = catalog.get(example_id)
+        assert example is not None
+        assert any("not the IEEE 14-bus case as the University of Washington" in c for c in example.caveats)
+
+
+def test_the_wind_turbine_entry_does_not_hide_its_growing_mode_and_the_118_entry_says_what_it_is_not() -> (
+    None
+):
+    catalog = load_catalog()
+    wind = catalog.get("ieee14_wt3")
+    assert wind is not None and wind.verification is not None
+    assert any(c.startswith("The case has a growing mode.") for c in wind.caveats)
+    assert "growing mode" in wind.summary
+    assert "not stable" in wind.verification.summary
+    # The solar case has no such mode and does not say it has.
+    solar = catalog.get("ieee14_solar")
+    assert solar is not None and not any("growing mode" in c for c in solar.caveats)
+    case118 = catalog.get("ieee118")
+    assert case118 is not None
+    text = " ".join(case118.caveats)
+    # Not the archive's file in two respects, and the stored state is not a solution.
+    assert "15 buses" in text and "86-87 and 68-116" in text
+    assert "is not a solution of the data" in text
+    # The base 110 kV rule of ANDES's reader does not apply: there is no bus with a base of 0.
+    assert "110 kV" in text and "does not apply" in text
+
+
 def test_the_entries_say_what_the_files_do_not_do_so_that_nobody_reads_more_into_them() -> None:
     """Two things a reader would assume and a run does not give: a stabiliser that damps, and
     governors that act. The entries say neither happens, and the first is not offered as an

@@ -239,11 +239,15 @@ def test_writing_the_stored_state_keeps_the_solvers_checks_and_replaces_its_own(
         )
 
 
-@pytest.mark.parametrize("example_id", ["npcc", "wecc"])
+@pytest.mark.parametrize("example_id", ["npcc", "wecc", "ieee118"])
 def test_the_stored_checks_that_ship_are_what_the_script_reads_from_the_file(
     script: ModuleType, example_id: str
 ) -> None:
-    relative = {"npcc": "npcc/npcc.xlsx", "wecc": "wecc/wecc_full.xlsx"}[example_id]
+    relative = {
+        "npcc": "npcc/npcc.xlsx",
+        "wecc": "wecc/wecc_full.xlsx",
+        "ieee118": "matpower/case118.m",
+    }[example_id]
     state = _stored(script, relative)
     shipped = load_reference(example_id)
     assert shipped is not None
@@ -303,6 +307,9 @@ def test_the_interpreter_for_each_half_is_found_or_the_error_says_what_to_set(
         "kundur_pss",
         "ieee14_fault",
         "pjm5bus",
+        "ieee14_solar",
+        "ieee14_wt3",
+        "ieee118",
     ],
 )
 def test_pandapower_gives_the_values_that_ship_in_the_reference_files(
@@ -372,3 +379,39 @@ def test_a_matpower_file_is_solved_with_no_andes_and_agrees_with_andes() -> None
     for idx, v, a in zip(system.Bus.idx.v, system.Bus.v.v, system.Bus.a.v, strict=True):
         assert solved["bus_voltage"][str(idx)] == pytest.approx(v, abs=1e-6)
         assert solved["bus_angle"][str(idx)] == pytest.approx(math.degrees(a), abs=1e-3)
+
+
+def test_a_stored_state_has_a_basis_of_its_own_where_the_file_does_not_keep_a_solver_s_digits(
+    script: ModuleType,
+) -> None:
+    """The RAW files that PSS/E solved keep five decimals of a voltage, and the checks of NPCC
+    and WECC hold them to that. The IEEE 118-bus data carries the archive's three decimals, which
+    are also 0.0173 pu from a solution, so its checks are held to what that state allows and say
+    where it comes from."""
+    state = {"bus_voltage": {"1": 1.01}, "bus_angle": {"1": 0.5}, "slack_p_mw": 12.5}
+    raw = script._stored_checks(state, "npcc.xlsx")  # noqa: SLF001
+    assert [c["tolerance"]["abs"] for c in raw] == [5e-5, 0.005, 0.1]
+    assert "taken from the RAW file" in raw[0]["reference"]
+    basis = script.STORED_BASES["ieee118"]
+    mine = script._stored_checks(state, "case118.m", basis)  # noqa: SLF001
+    assert [c["tolerance"]["abs"] for c in mine] == [0.02, 0.35, 3.0]
+    assert all("ieee118cdf.txt" in c["reference"] and "case118.m" in c["reference"] for c in mine)
+    assert all("not a solution of it" in c["reference"] for c in mine)
+    assert all("TENSA did not compute it" in c["reference"] for c in mine)
+    # Only the cases that have a basis of their own do: a case that is not listed gets the RAW one.
+    assert set(script.STORED_BASES) == {"ieee118"}
+
+
+def test_the_stored_command_uses_the_basis_of_the_case_it_is_given(
+    script: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _case_path("matpower/case118.m")
+    target = tmp_path / "ieee118.json"
+    assert script.cmd_stored(SimpleNamespace(id="ieee118", write=True, reference=str(target))) == 0
+    written = json.loads(target.read_text(encoding="utf-8"))["checks"]
+    assert [c["tolerance"]["abs"] for c in written] == [0.02, 0.35, 3.0]
+    capsys.readouterr()
+    # A file path names no case, so it is held to the RAW basis.
+    assert script.cmd_stored(SimpleNamespace(id=str(path), write=False, reference=None)) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert [c["tolerance"]["abs"] for c in shown] == [5e-5, 0.005, 0.1]

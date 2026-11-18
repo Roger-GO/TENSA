@@ -8,6 +8,12 @@
  *   Open puts its 179 buses on the diagram
  *   a small gallery case (PJM 5-bus): Add and Open put its 5 buses on the diagram, its four TG2 governors are
  *   in the Governors table, and the line trip the file holds is in the list of disturbances
+ *   the wind turbine gallery case (IEEE 14-bus with a type-3 wind turbine): Add and Open put its 14 buses on
+ *   the diagram, and the chain of the unit at bus 8 holds the converter, its two controls and the four models of
+ *   the turbine, none of them an orphan badge
+ *   the steady-state gallery case (IEEE 118-bus): the dialog lists it in a group of its own, Add and Open put its
+ *   118 buses on the diagram as a static case, and a power flow leaves the six generators past a reactive limit
+ *   that its catalog entry names
  *   the Exciters and Governors tables hold every exciter and governor the catalog counts for the case: the
  *   IEEE 39 governors (TGOV1N), the exciters of Kundur (EXDC2) and the 29 exciters and 29 governors of WECC
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
@@ -20,6 +26,7 @@
  * references and the buttons.
  */
 import { test, expect, type Page } from './fixtures';
+import { openCopy } from './sldDrawing';
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
@@ -61,11 +68,14 @@ test('the Project tab opens the example cases, with their sources, licences and 
   // The cursor is in the filter, ready to type.
   await expect(page.getByRole('searchbox', { name: 'Filter the example cases' })).toBeFocused();
 
-  // The five cases of a first run are in the workspace, so each says so. All of them, and the
-  // WECC case of the gallery, have machines, so the list has the one group of dynamic cases and
-  // none of steady-state ones.
+  // The five cases of a first run are in the workspace, so each says so. All of them have
+  // machines, so they are in the group of dynamic cases with the gallery's other cases that do;
+  // the IEEE 118-bus case of the gallery has none, and is the one case of the steady-state group.
   await expect(dialog.getByTestId('example-group-dynamic')).toBeVisible();
-  await expect(dialog.getByTestId('example-group-steady-state')).toHaveCount(0);
+  const steady = dialog.getByTestId('example-group-steady-state');
+  await expect(steady).toBeVisible();
+  await expect(steady.getByTestId(/^example-card-/)).toHaveCount(1);
+  await expect(steady.getByTestId('example-card-ieee118')).toBeVisible();
   for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
@@ -78,6 +88,11 @@ test('the Project tab opens the example cases, with their sources, licences and 
     '14 buses, 5 generators',
   );
   await expect(dialog.getByTestId('example-size-pjm5bus')).toHaveText('5 buses, 4 generators');
+  await expect(dialog.getByTestId('example-size-ieee14_solar')).toHaveText(
+    '14 buses, 5 generators',
+  );
+  await expect(dialog.getByTestId('example-size-ieee14_wt3')).toHaveText('14 buses, 5 generators');
+  await expect(dialog.getByTestId('example-size-ieee118')).toHaveText('118 buses, 54 generators');
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
     'already in your workspace and say Added',
@@ -219,6 +234,77 @@ test('a small gallery case is added, opened with its governors and the trip its 
   const trip = page.getByText('Toggle Line 6');
   await expect(trip).toBeVisible();
   await expect(page.getByText(/^Set by the case/).first()).toBeVisible();
+});
+
+test('the wind turbine gallery case is added and opened, with the four turbine models in the chain of its unit', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  await expect(dialog.getByTestId('example-card-ieee14_wt3')).toBeVisible();
+  const add = dialog.getByTestId('example-add-ieee14_wt3');
+  if ((await add.count()) > 0) {
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-ieee14_wt3')).toHaveText('Added');
+  await dialog.getByTestId('example-open-ieee14_wt3').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(14, { timeout: 90_000 });
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('ieee14_wt3.xlsx');
+
+  // The generator at bus 8 is one unit: its converter, the electrical and plant control of the
+  // converter, and the drive train, aerodynamics, pitch and torque control of the turbine, each
+  // under the one it names. The topology did not list the last four, so the unit showed a
+  // converter and nothing of a turbine. A chain that is drawn out is kept with the case, so it
+  // is drawn out in a copy of this run's own and the gallery's file keeps its layout.
+  await openCopy(page, `wt3-e2e-${Date.now()}`);
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(14, { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Show the control chain of generator 5' }).click();
+  await expect(page.getByTestId('unit-chain-5').getByRole('button')).toHaveText([
+    'PV5',
+    '└REGCA11REGC',
+    '└REECA11REEC',
+    '└REPCA11REPC',
+    '└WTDTA11WTDT',
+    '└WTARA11WTAR',
+    '└WTPTA11WTPT',
+    '└WTTQA11WTTQ',
+  ]);
+  // None of them is left in the gutter as a badge of its own.
+  await expect(page.locator('[data-orphan="true"]')).toHaveCount(0);
+  // The line trip and its reclose are the file's.
+  await expect(page.getByText('Set by the case (Toggler_1)')).toBeVisible();
+  await expect(page.getByText('Set by the case (Toggler_2)')).toBeVisible();
+});
+
+test('the steady-state gallery case is added and opened as a static case, and a power flow leaves six generators past a reactive limit', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  const steady = dialog.getByTestId('example-group-steady-state');
+  // It says it supports a power flow and nothing else.
+  await expect(steady.getByTestId('example-card-ieee118')).toContainText('Power flow');
+  await expect(steady.getByTestId('example-card-ieee118')).not.toContainText('Time domain');
+  const add = dialog.getByTestId('example-add-ieee118');
+  if ((await add.count()) > 0) {
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-ieee118')).toHaveText('Added');
+  await dialog.getByTestId('example-open-ieee118').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('case118.m', {
+    timeout: 90_000,
+  });
+  await expect(page.getByText('118 buses', { exact: true })).toBeVisible();
+  await expect(page.getByText('Static-only')).toBeVisible();
+
+  await page.getByTestId('run-pflow-button').click();
+  await expect(page.getByTestId('bottom-drawer-tab-violations')).toContainText('6', {
+    timeout: 60_000,
+  });
 });
 
 test('the Exciters and Governors tables list the exciters and governors the catalog counts, on IEEE 39 and Kundur', async ({

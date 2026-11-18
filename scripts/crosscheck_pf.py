@@ -39,7 +39,11 @@ work is in two steps that meet at a file:
            worth writing only where the file's state is a solution: a RAW file written by
            PSS/E after it solved the case holds one, a file that was saved before the case was
            solved holds a state the power flow then moves (IEEE 39 holds one that is 0.2 pu
-           from its solution), and the harness fails the check for such a file.
+           from its solution), and the harness fails the check for such a file. A state kept
+           to fewer digits than a solver gives, or saved from a run that was not tight, has a
+           basis of its own in ``STORED_BASES``, with the tolerance its source allows (the IEEE
+           118-bus data carries the archive's three-decimal state, which is 0.017 pu from a
+           solution).
 
 What the network holds, and where it differs from what ANDES solves, is listed in
 ``MODELLING`` below. The bus numbers are the ANDES ``idx`` of the buses, which is what
@@ -58,7 +62,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SERVER_SRC = REPO_ROOT / "server" / "src"
@@ -439,12 +443,54 @@ def stored_solution(system: Any) -> dict[str, Any]:
     }
 
 
-def _stored_checks(state: dict[str, Any], file_name: str) -> list[dict[str, Any]]:
+class StoredBasis(NamedTuple):
+    """Where a case file's stored state comes from and how close it is to a solution."""
+
+    origin: str
+    voltage: float
+    angle: float
+    slack_p: float
+
+
+# A RAW file written by PSS/E after it solved the case: the digits the file keeps are the whole
+# difference (five decimals of a per unit voltage, four of a degree).
+RAW_BASIS = StoredBasis(
+    origin="taken from the RAW file it was converted from, to the digits the file keeps",
+    voltage=5e-5,
+    angle=0.005,
+    slack_p=0.1,
+)
+
+# A state some other way of keeping a solution: one the file does not hold to a solver's
+# precision, so the tolerance is what its own source allows, and the case's entry says why.
+STORED_BASES: dict[str, StoredBasis] = {
+    # The final voltages and angles of the archive's IEEE CDF file, which MATPOWER's case118.m
+    # carries in its bus data as the archive's three decimals of a voltage and two of an angle.
+    # They are not a solution of the data: pandapower's and TENSA's solutions of it agree to 1e-7
+    # pu and differ from the stored state by up to 0.0173 pu (bus 30) and 0.303 degrees (bus 1),
+    # and the stored slack power by 2.5 MW, so the tolerance is the largest of those, rounded up.
+    "ieee118": StoredBasis(
+        origin=(
+            "the final voltages and angles of the University of Washington archive's "
+            "ieee118cdf.txt, which this file was converted from and carries to the archive's "
+            "three decimals of a voltage and two of an angle; a state saved with the data and "
+            "not a solution of it, since it differs from the solution of the same data by up to "
+            "0.017 pu and 0.30 degrees"
+        ),
+        voltage=0.02,
+        angle=0.35,
+        slack_p=3.0,
+    ),
+}
+
+
+def _stored_checks(
+    state: dict[str, Any], file_name: str, basis: StoredBasis = RAW_BASIS
+) -> list[dict[str, Any]]:
     """The ``stored-solution`` checks of a reference file that a case file's state gives."""
     why = (
-        f"the solved state stored in {file_name} (taken from the RAW file it was converted from, "
-        "to the digits the file keeps; TENSA did not compute it); written by "
-        "scripts/crosscheck_pf.py stored"
+        f"the solved state stored in {file_name} ({basis.origin}; TENSA did not compute it); "
+        "written by scripts/crosscheck_pf.py stored"
     )
     common = {"kind": "stored-solution", "reference": why, "generated_by": STORED_BY}
     return [
@@ -452,23 +498,21 @@ def _stored_checks(state: dict[str, Any], file_name: str) -> list[dict[str, Any]
             "name": "Bus voltage magnitudes against the solution stored in the case file",
             "quantity": "pf.bus_voltage_pu",
             "expected": {k: round(v, 9) for k, v in state["bus_voltage"].items()},
-            # The file keeps five decimals of a per unit voltage.
-            "tolerance": {"abs": 5e-5},
+            "tolerance": {"abs": basis.voltage},
             **common,
         },
         {
             "name": "Bus voltage angles against the solution stored in the case file",
             "quantity": "pf.bus_angle_deg",
             "expected": {k: round(v, 7) for k, v in state["bus_angle"].items()},
-            # Four decimals of a degree in the RAW file the angles come from.
-            "tolerance": {"abs": 0.005},
+            "tolerance": {"abs": basis.angle},
             **common,
         },
         {
             "name": "Slack active power against the solution stored in the case file",
             "quantity": "pf.slack_p_mw",
             "expected": round(state["slack_p_mw"], 6),
-            "tolerance": {"abs": 0.1},
+            "tolerance": {"abs": basis.slack_p},
             **common,
         },
     ]
@@ -479,7 +523,8 @@ def cmd_stored(args: argparse.Namespace) -> int:
 
     path, example_id = _find_case(args.id)
     system = andes.load(str(path), setup=False, no_output=True, default_config=True)
-    checks = _stored_checks(stored_solution(system), path.name)
+    basis = STORED_BASES.get(example_id or "", RAW_BASIS)
+    checks = _stored_checks(stored_solution(system), path.name, basis)
     if not args.write:
         print(json.dumps(checks, indent=1))
         return 0

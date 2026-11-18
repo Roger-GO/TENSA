@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "id": "ieee14_solar",
+  "remove_events": [
+    {"model": "Toggle", "idx": "Toggler_1"},
+    {"model": "Toggle", "idx": "Toggler_2"}
+  ],
+  "disturbance": {
+    "description": "Line_1 (bus 1 to bus 2) trips at 1.0 s and recloses at 1.1 s, the two events of the case file",
+    "specs": [],
+    "tf": 10.0,
+    "settles_within_deg": 1.0
+  },
+  "ring_down": {"tolerance_damping": 0.06},
+  "checks": [
+    {
+      "name": "Bus voltage magnitudes against pandapower",
+      "quantity": "pf.bus_voltage_pu",
+      "expected": {"1": 1.03, "2": 1.03, "3": 1.01, "4": 1.011403453, "5": 1.017255505, "6": 1.03, "7": 1.022471502, "8": 1.03, "9": 1.021768793, "10": 1.015542067, "11": 1.019115146, "12": 1.017406986, "13": 1.014450234, "14": 1.016340204},
+      "tolerance": {"abs": 0.0001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Bus voltage angles against pandapower",
+      "quantity": "pf.bus_angle_deg",
+      "expected": {"1": 0.0, "2": -1.7640699, "3": -3.5371292, "4": -4.4097758, "5": -3.8430258, "6": -6.4527357, "7": -4.8851919, "8": -1.5399571, "9": -7.2458559, "10": -7.4154963, "11": -7.079699, "12": -7.4730288, "13": -7.7207566, "14": -9.4811148},
+      "tolerance": {"abs": 0.01},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Network losses against pandapower",
+      "quantity": "pf.loss_mw",
+      "expected": 2.727213,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Slack active power against pandapower",
+      "quantity": "pf.slack_p_mw",
+      "expected": 81.427213,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Largest rotor angle spread in the disturbance run (Line_1 trip)",
+      "quantity": "tds.max_angle_spread_deg",
+      "expected": 53.979414,
+      "tolerance": {"abs": 0.05},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Lowest bus voltage in the disturbance run (Line_1 trip)",
+      "quantity": "tds.min_voltage_pu",
+      "expected": 0.99868449,
+      "tolerance": {"abs": 0.0001},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Lowest machine frequency in the disturbance run (Line_1 trip)",
+      "quantity": "tds.frequency_nadir_hz",
+      "expected": 59.951165,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output"
+    },
+    {
+      "name": "Least damped mode between 0.8 and 1.4 Hz: frequency",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 1.0539786,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.8, 1.4]
+    },
+    {
+      "name": "Least damped mode between 0.8 and 1.4 Hz: damping ratio",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.2618695,
+      "tolerance": {"abs": 0.002},
+      "kind": "regression-baseline",
+      "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output",
+      "window_hz": [0.8, 1.4]
+    }
+  ]
+}

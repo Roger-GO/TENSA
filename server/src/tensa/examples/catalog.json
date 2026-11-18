@@ -1638,6 +1638,504 @@
           }
         ]
       }
+    },
+    {
+      "id": "ieee14_solar",
+      "title": "IEEE 14-bus with a solar plant",
+      "summary": "The IEEE 14-bus case with the machine at bus 8 replaced by a converter-interfaced solar plant (the WECC converter, electrical control and plant control models) and a trip and reclose of a line built in: a small case for inverter-based generation, for a disturbance with a converter in the network and for the eigenvalues of one.",
+      "category": "dynamic",
+      "tags": [
+        "ieee",
+        "14-bus",
+        "solar",
+        "pv",
+        "inverter-based",
+        "renewable",
+        "converter",
+        "regca1",
+        "reeca1",
+        "repca1",
+        "line trip"
+      ],
+      "size": {
+        "buses": 14,
+        "generators": 5
+      },
+      "analyses": [
+        "pf",
+        "tds",
+        "eig"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "andes",
+        "path": "ieee14/ieee14_solar.xlsx",
+        "sha256": "d6da1df345902bf05b06d07a5715f2bd9f677f6c64422a4bb33fc011282b2dc6",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/ieee14_solar.xlsx",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17).",
+          "bibtex": "@misc{uw_pstca_ieee14,\n  title        = {{IEEE} 14 Bus Test Case},\n  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},\n  url          = {https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm"
+        },
+        {
+          "text": "ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_ieee14_readme,\n  title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},\n  howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},\n  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md"
+        },
+        {
+          "text": "ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_renewable_models,\n  title        = {{ANDES} model reference: renewable generator, electrical control and plant control groups},\n  howpublished = {ANDES release 2.0.0, docs.andes.app},\n  url          = {https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html"
+        },
+        {
+          "text": "WECC Renewable Energy Modeling Task Force, Generic Solar Photovoltaic System Dynamic Simulation Model Specification, Western Electricity Coordinating Council Modeling and Validation Work Group, September 2012 (also Sandia National Laboratories report SAND2013-8876 by A. Ellis, M. Behnke and R. Elliott, October 2013), https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf (accessed 2026-11-17). It specifies the converter (REGC_A), the electrical control (REEC_B) and the plant controller (REPC_A) of a central-station PV plant, and says that the available solar power is taken as constant through a run.",
+          "bibtex": "@techreport{wecc2012solarpv,\n  author      = {{WECC Renewable Energy Modeling Task Force}},\n  title       = {Generic Solar Photovoltaic System Dynamic Simulation Model Specification},\n  institution = {Western Electricity Coordinating Council, Modeling and Validation Work Group},\n  year        = {2012},\n  month       = sep,\n  url         = {https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf},\n  urldate     = {2026-11-17}\n}",
+          "url": "https://www.wecc.org/sites/default/files/documents/meeting/2024/WECC-Solar-PV-Dynamic-Model-Specification-September-2012.pdf"
+        },
+        {
+          "text": "P. Pourbeik, Proposed Changes to the WECC WT4 Generic Model for Type 4 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 16 December 2011 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the converter (regc_a), electrical control (reec_a) and plant controller (repc_a) models that ANDES's REGCA1, REECA1 and REPCA1 implement.",
+          "bibtex": "@techreport{pourbeik2013wt4,\n  author      = {Pourbeik, Pouyan},\n  title       = {Proposed Changes to the {WECC} {WT4} Generic Model for Type 4 Wind Turbine Generators},\n  institution = {Electric Power Research Institute, for the National Renewable Energy Laboratory (subcontract NFT-1-11342-01)},\n  year        = {2013},\n  note        = {Issued 16 December 2011, revised through 23 January 2013},\n  url         = {https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf},\n  urldate     = {2026-11-17}\n}",
+          "url": "https://www.wecc.org/sites/default/files/documents/program/2024/Report_on_WT4_Model_Description_PP012313.pdf"
+        },
+        {
+          "text": "P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, \"Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies,\" IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened.",
+          "bibtex": "@article{pourbeik2017generic,\n  author  = {Pourbeik, Pouyan and Sanchez-Gasca, Juan J. and Senthil, Jayapalan and Weber, James D. and Zadkhast, Pouya and Kazachkov, Yuriy and Tacke, Spencer and Wen, Jun and Ellis, Abraham},\n  title   = {Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies},\n  journal = {IEEE Transactions on Energy Conversion},\n  volume  = {32},\n  number  = {3},\n  pages   = {1108--1116},\n  year    = {2017},\n  month   = sep,\n  doi     = {10.1109/TEC.2016.2639050}\n}",
+          "doi": "10.1109/TEC.2016.2639050",
+          "url": "https://doi.org/10.1109/TEC.2016.2639050"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
+      },
+      "modifications": [],
+      "caveats": [
+        "The network, loads, dispatch and shunts are those of the IEEE 14-bus case of this catalog (the sheets for buses, loads, generators, lines, shunts and areas are the same as in ieee14_full.xlsx, compared sheet by sheet), which is not the IEEE 14-bus case as the University of Washington archive distributes it: the loads at buses 3, 4, 6 and 14, the dispatch, the voltage set-points and the transformer ratios are not the archive's, so the power flow solution differs from the one the archive stores by up to 0.06 pu in voltage and 11.8 degrees in angle (bus 8). Do not compare results of this file with published IEEE 14-bus results.",
+        "What differs from the IEEE 14-bus case of this catalog: the machine at bus 8 (its GENROU, TGOV1 and ESST3A) is gone, and the static generator of that bus, 35 MW and 7.4 MVAr at 1.03 per unit after the power flow, is taken over in a time-domain run by a converter model (REGCA1, rated 100 MVA), its electrical control (REECA1) and a plant controller (REPCA1, which monitors Line_20). The other four machines, with their governors and exciters, are the same, and the file adds the two line events below.",
+        "The converter's data is generic. ANDES gives no source for it (the README of the folder describes the file as a generic solar PV device that can also be used to model a Type-4 wind turbine), and many of its limits are 999 per unit so that they never act: the converter's ramp rate and current-rate limits, and the power, voltage and ramp limits of its electrical control and plant control. Do not read the numbers as a plant's.",
+        "The electrical control is REECA1, ANDES's implementation of the REEC_A model that the WECC reports on type 3 and type 4 wind turbines describe. The WECC specification of a solar PV plant pairs the same converter (REGC_A) and plant controller (REPC_A) with REEC_B instead, which this file does not use. As that specification says of its models, the available power is taken as constant for the whole run: there is no irradiance, and the plant delivers the 35 MW of the power flow.",
+        "Two events are built into the file: Line_1 (from bus 1 to bus 2) is switched out at 1.0 s and switched in at 1.1 s. The disturbance hardly reaches the converter: its active power stays between 34.8 and 35.1 MW and the voltage of its bus dips from 1.030 to 1.018 per unit. The run stays stable: the rotor angle spread, 50.2 degrees at the start, reaches 54.0 degrees and is back at 50.1 at 10 s, the lowest bus voltage is 0.999 per unit and the lowest machine frequency 59.95 Hz.",
+        "A power flow, which does not enforce reactive limits unless asked to (and pandapower's reference does not either), leaves the generators at buses BUS2 and BUS6 above their reactive limits (30.4 against 15 MVAr and 21.0 against 10 MVAr), so the Violations count reads 2 once it has run. The IEEE 14-bus case of this catalog has the same two.",
+        "The ring-down of a 2% load step in the time domain has its three strongest oscillations at 1.048, 0.993 and 1.215 Hz. The first and the third are within 0.006 Hz and 0.013, and 0.004 Hz and 0.005 in damping ratio, of eigenvalues. The second is 0.016 Hz and 0.058 from the nearest one (1.009 Hz, damping 0.264), which is outside the 0.05 the other cases allow, so the check of this case allows 0.06. The same pole comes out of load steps of 2, 5 and 10 percent, of fits that start from 0.1 s to 1.5 s after the step, and of integration steps of 33, 20 and 10 ms, so it is not noise, the step or the size of the disturbance: it is a difference between the simulation and ANDES's eigenvalue analysis of this case, whose cause was not found. The IEEE 14-bus case of this catalog, with a synchronous machine at bus 8 where this one has a converter, matches to 0.027."
+      ],
+      "verification": {
+        "summary": "Compared with an independent reference: the power flow (bus voltages, angles, losses and the slack's power) agrees with pandapower's solution of the same network to 5.5e-9 pu and 8.5e-7 degrees. The converter models do not enter the power flow, so this checks the network and the dispatch the converter starts from, and the numbers are those of the IEEE 14-bus case. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution (no state moves), and the ring-down of a 2% load step has the frequency and damping of eigenvalues for two of its three strongest oscillations, and for the third within 0.016 Hz and 0.058, outside the 0.05 allowed elsewhere (see the caveats): this case allows 0.06. After the line is switched out and in again the rotor angles end within 0.06 degrees of where they began, as they must when the network is the same again (an expectation, not a second computation). Not verified: the values of the disturbance run and of the modes are TENSA's own earlier output, kept as regression baselines to catch a change. No published or independent result exists for these converter models in this network.",
+        "checks": [
+          {
+            "name": "Ring-down of a small disturbance has the frequency and damping of eigenvalues",
+            "kind": "ring-down",
+            "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_2, run to 20 s",
+            "tolerance": "0.05 Hz and 0.06 in damping ratio",
+            "result": "1.048 Hz, damping 0.249 is eigenvalue 1.054 Hz, 0.262 (0.006 Hz and 0.013 apart); 0.993 Hz, damping 0.206 is eigenvalue 1.009 Hz, 0.264 (0.016 Hz and 0.058 apart); 1.215 Hz, damping 0.281 is eigenvalue 1.218 Hz, 0.285 (0.004 Hz and 0.005 apart)",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 5.51e-09 pu (bus 9) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 8.46e-07 deg (bus 14) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 2.72721, expected 2.72721, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_solar.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 81.4272, expected 81.4272, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Largest rotor angle spread in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.05 deg",
+            "result": "measured 53.9794, expected 53.9794, difference 4.32e-07 deg",
+            "passed": true
+          },
+          {
+            "name": "Lowest bus voltage in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.0001 pu",
+            "result": "measured 0.998684, expected 0.998684, difference 3.98e-09 pu",
+            "passed": true
+          },
+          {
+            "name": "Lowest machine frequency in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 59.9512, expected 59.9512, difference 4.86e-07 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 1.05398, expected 1.05398, difference 4.55e-08 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.261869, expected 0.261869, difference 1.66e-10",
+            "passed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "ieee14_wt3",
+      "title": "IEEE 14-bus with a type-3 wind turbine",
+      "summary": "The IEEE 14-bus case with the machine at bus 8 replaced by a type-3 wind turbine (the WECC converter, electrical control, plant control, drive train, aerodynamics, pitch and torque control models) and a trip and reclose of a line built in: a small case for a wind turbine in a network, with the slowly growing mode its linearisation has (see the caveats).",
+      "category": "dynamic",
+      "tags": [
+        "ieee",
+        "14-bus",
+        "wind",
+        "type-3",
+        "wind turbine",
+        "inverter-based",
+        "renewable",
+        "converter",
+        "regca1",
+        "wtdta1",
+        "line trip"
+      ],
+      "size": {
+        "buses": 14,
+        "generators": 5
+      },
+      "analyses": [
+        "pf",
+        "tds",
+        "eig"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "andes",
+        "path": "ieee14/ieee14_wt3.xlsx",
+        "sha256": "bf2d9eeddfe909e9f3cc1e50e95bf2e8a8b893b063c44d19b683e9c30ccde606",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/ieee14_wt3.xlsx",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17).",
+          "bibtex": "@misc{uw_pstca_ieee14,\n  title        = {{IEEE} 14 Bus Test Case},\n  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},\n  url          = {https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm"
+        },
+        {
+          "text": "ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES, and almost all the other files of the folder are made by adding models to it; it describes ieee14_solar.xlsx as a generic solar PV device that can also model a Type-4 wind turbine, and ieee14_wt3.xlsx as one generic Type-3 wind turbine (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_ieee14_readme,\n  title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},\n  howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},\n  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md"
+        },
+        {
+          "text": "ANDES documentation, model reference, release 2.0.0: the groups RenGen (REGCA1, which 'implements REGCA1 in PSS/E, or REGC_A in PSLF and Powerworld'), RenExciter (REECA1) and RenPlant (REPCA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html, https://docs.andes.app/en/v2.0.0/reference/models/RenExciter.html and https://docs.andes.app/en/v2.0.0/reference/models/RenPlant.html, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_renewable_models,\n  title        = {{ANDES} model reference: renewable generator, electrical control and plant control groups},\n  howpublished = {ANDES release 2.0.0, docs.andes.app},\n  url          = {https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://docs.andes.app/en/v2.0.0/reference/models/RenGen.html"
+        },
+        {
+          "text": "ANDES documentation, model reference, release 2.0.0: the groups RenGovernor (WTDTA1, the wind turbine drive train, a two-mass model when Htfrac is not 0), RenAerodynamics (WTARA1), RenPitch (WTPTA1) and RenTorque (WTTQA1) (https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html, https://docs.andes.app/en/v2.0.0/reference/models/RenAerodynamics.html, https://docs.andes.app/en/v2.0.0/reference/models/RenPitch.html and https://docs.andes.app/en/v2.0.0/reference/models/RenTorque.html, accessed 2026-11-17).",
+          "bibtex": "@misc{andes_wind_turbine_models,\n  title        = {{ANDES} model reference: wind turbine drive train, aerodynamics, pitch and torque control},\n  howpublished = {ANDES release 2.0.0, docs.andes.app},\n  url          = {https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://docs.andes.app/en/v2.0.0/reference/models/RenGovernor.html"
+        },
+        {
+          "text": "P. Pourbeik, Proposed Changes to the WECC WT3 Generic Model for Type 3 Wind Turbine Generators, EPRI report prepared under NREL subcontract NFT-1-11342-01, issued 26 March 2012 and revised through 23 January 2013, https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf (accessed 2026-11-17). It describes the seven models of the second-generation type 3 wind turbine: converter (regc_a), electrical control (reec_a), drive train (wtgt_a), aerodynamics (wtgar_a), pitch control (wtgpt_a), torque control (wtgtrq_a) and plant controller (repc_a), which are the seven models of this case.",
+          "bibtex": "@techreport{pourbeik2013wt3,\n  author      = {Pourbeik, Pouyan},\n  title       = {Proposed Changes to the {WECC} {WT3} Generic Model for Type 3 Wind Turbine Generators},\n  institution = {Electric Power Research Institute, for the National Renewable Energy Laboratory (subcontract NFT-1-11342-01)},\n  year        = {2013},\n  note        = {Issued 26 March 2012, revised through 23 January 2013},\n  url         = {https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf},\n  urldate     = {2026-11-17}\n}",
+          "url": "https://www.wecc.org/sites/default/files/documents/meeting/2024/Report_on_WT3_Model_Description_PP012313.pdf"
+        },
+        {
+          "text": "P. Pourbeik, J. J. Sanchez-Gasca, J. Senthil, J. D. Weber, P. Zadkhast, Y. Kazachkov, S. Tacke, J. Wen and A. Ellis, \"Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies,\" IEEE Transactions on Energy Conversion, vol. 32, no. 3, pp. 1108-1116, September 2017, doi:10.1109/TEC.2016.2639050. The paper on the WECC second-generation generic models that these cases' converter, electrical control and plant control models are. Its title, authors, volume, pages and date were read from Crossref and its abstract from OpenAlex, which says it presents the latest developments of the WECC Renewable Energy Modeling Task Force's generic models; the paper itself is behind the publisher's access and was not opened.",
+          "bibtex": "@article{pourbeik2017generic,\n  author  = {Pourbeik, Pouyan and Sanchez-Gasca, Juan J. and Senthil, Jayapalan and Weber, James D. and Zadkhast, Pouya and Kazachkov, Yuriy and Tacke, Spencer and Wen, Jun and Ellis, Abraham},\n  title   = {Generic Dynamic Models for Modeling Wind Power Plants and Other Renewable Technologies in Large-Scale Power System Studies},\n  journal = {IEEE Transactions on Energy Conversion},\n  volume  = {32},\n  number  = {3},\n  pages   = {1108--1116},\n  year    = {2017},\n  month   = sep,\n  doi     = {10.1109/TEC.2016.2639050}\n}",
+          "doi": "10.1109/TEC.2016.2639050",
+          "url": "https://doi.org/10.1109/TEC.2016.2639050"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES)."
+      },
+      "modifications": [],
+      "caveats": [
+        "The network, loads, dispatch and shunts are those of the IEEE 14-bus case of this catalog (the sheets for buses, loads, generators, lines, shunts and areas are the same as in ieee14_full.xlsx, compared sheet by sheet), which is not the IEEE 14-bus case as the University of Washington archive distributes it: the loads at buses 3, 4, 6 and 14, the dispatch, the voltage set-points and the transformer ratios are not the archive's, so the power flow solution differs from the one the archive stores by up to 0.06 pu in voltage and 11.8 degrees in angle (bus 8). Do not compare results of this file with published IEEE 14-bus results.",
+        "What differs from the IEEE 14-bus case of this catalog: the machine at bus 8 (its GENROU, TGOV1 and ESST3A) is gone, and the static generator of that bus, 35 MW and 7.4 MVAr at 1.03 per unit after the power flow, is taken over in a time-domain run by the seven models of a second-generation type-3 wind turbine: the converter (REGCA1, rated 100 MVA), its electrical control (REECA1), a plant controller (REPCA1, which monitors Line_20 and has a fourth BusFreq, BusFreq_4, for its frequency control, which is switched off), a two-mass drive train (WTDTA1, total inertia 6 MWs/MVA, half of it on the turbine side), the aerodynamics (WTARA1), the pitch control (WTPTA1) and the torque control (WTTQA1). The other four machines, with their governors and exciters, are the same, and the file adds the two line events below.",
+        "The data is generic. ANDES gives no source for it (the README of the folder describes the file as one generic Type-3 wind turbine), and the aerodynamic model has no wind speed: the turbine's mechanical power is the power flow's 35 MW for the whole run, so a run shows the turbine's controls answer to the network and not to the wind. Many limits of the converter and its controls are 999 per unit so that they never act. Do not read the numbers as a turbine's.",
+        "The case has a growing mode. ANDES's eigenvalue analysis returns one real eigenvalue with a positive real part, 0.0713 per second (an e-folding time of 14 s), so the Eigenvalues panel and the HTML report show an unstable mode. It is in the simulation too and not a leftover of the linearisation: in a run of 80 s after a 2% load step the generator-side speed of the drive train (state s2_y of WTDTA1 1) moves away from its equilibrium by 2.6e-7 per unit at 10 s and 4.9e-5 at 80 s, an exponential whose rate from 50 s on is 0.0713 per second, the eigenvalue's (test_ieee14_wt3_growth.py holds this against ANDES). It is far too slow to show in a run of the default 10 s, and the checks of this entry, which stop at 20 s, do not see it. Whether a turbine with this data would behave so no source says: the case with the same network and converter stack and no turbine has no such mode. ANDES's participation factors put the mode mostly on the integrator of the pitch control, a state that stays at zero in the run, so which state carries it is not stated here.",
+        "Two events are built into the file: Line_1 (from bus 1 to bus 2) is switched out at 1.0 s and switched in at 1.1 s. The disturbance hardly reaches the turbine: its active power stays between 34.8 and 35.1 MW and the voltage of its bus dips from 1.030 to 1.018 per unit, as in the solar case, whose disturbance run it matches to 6 digits in the angle spread, the lowest voltage and the lowest frequency. The run stays stable: the rotor angle spread, 50.2 degrees at the start, reaches 54.0 degrees and is back at 50.1 at 10 s, the lowest bus voltage is 0.999 per unit and the lowest machine frequency 59.95 Hz.",
+        "A power flow, which does not enforce reactive limits unless asked to (and pandapower's reference does not either), leaves the generators at buses BUS2 and BUS6 above their reactive limits (30.4 against 15 MVAr and 21.0 against 10 MVAr), so the Violations count reads 2 once it has run. The IEEE 14-bus case of this catalog has the same two.",
+        "The ring-down of a 2% load step in the time domain has its three strongest oscillations at 1.048, 0.993 and 1.215 Hz. The first and the third are within 0.006 Hz and 0.013, and 0.004 Hz and 0.005 in damping ratio, of eigenvalues. The second is 0.016 Hz and 0.058 from the nearest one (1.009 Hz, damping 0.264), which is outside the 0.05 the other cases allow, so the check of this case allows 0.06. The same pole comes out of load steps of 2, 5 and 10 percent, of fits that start from 0.1 s to 1.5 s after the step, and of integration steps of 33, 20 and 10 ms, so it is not noise, the step or the size of the disturbance: it is a difference between the simulation and ANDES's eigenvalue analysis of this case, whose cause was not found. The IEEE 14-bus case of this catalog, with a synchronous machine at bus 8 where this one has a converter, matches to 0.027. The turbine's own oscillation, at 0.156 Hz with damping 0.200, is not in the machines' speeds, so no ring-down check covers it and it is held as a regression baseline only."
+      ],
+      "verification": {
+        "summary": "Compared with an independent reference: the power flow agrees with pandapower's solution of the same network to 5.5e-9 pu and 8.5e-7 degrees; none of the turbine's models enters the power flow, so this checks the network and the dispatch. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution (no state moves), and the ring-down of a 2% load step has the frequency and damping of eigenvalues for two of its three strongest oscillations, and for the third within 0.016 Hz and 0.058, outside the 0.05 allowed elsewhere (see the caveats): this case allows 0.06. The case's growing mode is checked against ANDES by a test, not by the checks below, which stop at 20 s: the eigenvalue, 0.0713 per second, is the rate at which the turbine's speed moves away from its equilibrium in an 80 s run, to 1%. After the line is switched out and in again the rotor angles end within 0.07 degrees of where they began. Not verified: the values of the disturbance run and of the modes are TENSA's own earlier output, kept as regression baselines to catch a change. No published or independent result exists for these wind turbine models in this network, and the case is not stable in the sense of its eigenvalues.",
+        "checks": [
+          {
+            "name": "Ring-down of a small disturbance has the frequency and damping of eigenvalues",
+            "kind": "ring-down",
+            "reference": "matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_2, run to 20 s",
+            "tolerance": "0.05 Hz and 0.06 in damping ratio",
+            "result": "1.048 Hz, damping 0.249 is eigenvalue 1.054 Hz, 0.262 (0.006 Hz and 0.013 apart); 0.993 Hz, damping 0.206 is eigenvalue 1.009 Hz, 0.264 (0.016 Hz and 0.058 apart); 1.215 Hz, damping 0.281 is eigenvalue 1.218 Hz, 0.285 (0.004 Hz and 0.005 apart)",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_wt3.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 5.51e-09 pu (bus 9) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_wt3.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 8.46e-07 deg (bus 14) over 14 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_wt3.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 2.72721, expected 2.72721, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_wt3.xlsx; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 81.4272, expected 81.4272, difference 1.24e-06 MW",
+            "passed": true
+          },
+          {
+            "name": "Largest rotor angle spread in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.05 deg",
+            "result": "measured 53.9794, expected 53.9794, difference 8.33e-09 deg",
+            "passed": true
+          },
+          {
+            "name": "Lowest bus voltage in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.0001 pu",
+            "result": "measured 0.998685, expected 0.998684, difference 3.73e-09 pu",
+            "passed": true
+          },
+          {
+            "name": "Lowest machine frequency in the disturbance run (Line_1 trip)",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 59.9512, expected 59.9512, difference 4.56e-07 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 1.05398, expected 1.05398, difference 4.88e-08 Hz",
+            "passed": true
+          },
+          {
+            "name": "Least damped mode between 0.8 and 1.4 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.26187, expected 0.26187, difference 4.67e-10",
+            "passed": true
+          },
+          {
+            "name": "Wind turbine mode between 0.13 and 0.2 Hz: frequency",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002 Hz",
+            "result": "measured 0.155728, expected 0.155728, difference 4.6e-09 Hz",
+            "passed": true
+          },
+          {
+            "name": "Wind turbine mode between 0.13 and 0.2 Hz: damping ratio",
+            "kind": "regression-baseline",
+            "reference": "TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification)",
+            "tolerance": "0.002",
+            "result": "measured 0.199734, expected 0.199734, difference 4.33e-09",
+            "passed": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "ieee118",
+      "title": "IEEE 118-bus test case",
+      "summary": "The IEEE 118-bus test case of the University of Washington archive as MATPOWER holds it (case118): 118 buses, 54 generators and 186 branches, a network and its loading only. A medium-size case for the power flow, and for how the diagram and the tables handle a hundred buses; it has no machine models, so there is no time-domain run.",
+      "category": "steady-state",
+      "tags": [
+        "ieee",
+        "118-bus",
+        "power flow",
+        "matpower",
+        "uw archive",
+        "large",
+        "static"
+      ],
+      "size": {
+        "buses": 118,
+        "generators": 54
+      },
+      "analyses": [
+        "pf"
+      ],
+      "default": false,
+      "provenance": {
+        "kind": "andes",
+        "path": "matpower/case118.m",
+        "sha256": "bc2e6f22b4b9e776572885ee4b50e4f4ab2ee0c5577e9126e86d906f14c4b5f7",
+        "release": "ANDES 2.0.0",
+        "source_url": "https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/matpower/case118.m",
+        "retrieved": "2026-11-17"
+      },
+      "citations": [
+        {
+          "text": "118 Bus Power Flow Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm (accessed 2026-11-17). The page says the case represents a portion of the American Electric Power System (in the Midwestern US) as of December 1962, typed in from a copy of the AEP document by Rich Christie at the University of Washington in 1993 (in PECO PSAP format, then in IEEE Common Data Format, ieee118cdf.txt).",
+          "bibtex": "@misc{uw_pstca_ieee118,\n  title        = {118 Bus Power Flow Test Case},\n  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},\n  url          = {https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://labs.ece.uw.edu/pstca/pf118/pg_tca118bus.htm"
+        },
+        {
+          "text": "MATPOWER, data/case118.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m (accessed 2026-11-17). Its header says it was converted from the archive's IEEE CDF file (ieee118cdf.txt) on 15 October 2014 by cdf2matp, that the base kV data come from the archive's PSAP file and were added by hand on 10 March 2006, and that branches 86-87 and 68-116 were changed from transmission lines to transformers with a tap ratio of 1 on 15 February 2019. ANDES's copy of the file (andes/cases/matpower/case118.m) is byte for byte this one.",
+          "bibtex": "@misc{matpower_case118,\n  title        = {{MATPOWER} data/case118.m},\n  howpublished = {MATPOWER release 8.0},\n  url          = {https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m},\n  urldate      = {2026-11-17}\n}",
+          "url": "https://github.com/MATPOWER/matpower/blob/8.0/data/case118.m"
+        },
+        {
+          "text": "R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, \"MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education,\" IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case118 file.",
+          "bibtex": "@article{zimmerman2011matpower,\n  author  = {Zimmerman, Ray D. and Murillo-S{\\'a}nchez, Carlos E. and Thomas, Robert J.},\n  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {26},\n  number  = {1},\n  pages   = {12--19},\n  year    = {2011},\n  month   = feb,\n  doi     = {10.1109/TPWRS.2010.2051168}\n}",
+          "doi": "10.1109/TPWRS.2010.2051168",
+          "url": "https://doi.org/10.1109/TPWRS.2010.2051168"
+        },
+        {
+          "text": "H. Cui, F. Li and K. Tomsovic, \"Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis,\" IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019.",
+          "bibtex": "@article{cui2021andes,\n  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},\n  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},\n  journal = {IEEE Transactions on Power Systems},\n  volume  = {36},\n  number  = {2},\n  pages   = {1373--1384},\n  year    = {2021},\n  month   = mar,\n  doi     = {10.1109/TPWRS.2020.3017019}\n}",
+          "doi": "10.1109/TPWRS.2020.3017019",
+          "url": "https://doi.org/10.1109/TPWRS.2020.3017019"
+        }
+      ],
+      "licence": {
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/CURENT/andes/blob/v2.0.0/LICENSE",
+        "attribution": "ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES). The data is the archive's, which states no licence, and MATPOWER's licence notice says that its case files are not covered by its BSD license and have in most cases been included with permission or converted from data available from a public source. TENSA does not redistribute the file: it copies it from the user's own ANDES."
+      },
+      "modifications": [],
+      "caveats": [
+        "The system is a portion of the American Electric Power System as of December 1962, typed in from a copy of the AEP document by Rich Christie at the University of Washington in 1993 (the archive's page says so). The same page warns that the base kV levels in the bus names appear to be a bad guess and that the line MVA limits were not part of the original data. Take the file's 138, 345 and 161 kV (106, 11 and 1 buses) as the file's data and not as the real system's. The file carries no line ratings (all 186 are 0), so TENSA reports no loading for a line and its Violations table has no line limits to check.",
+        "The file is MATPOWER's case118 (ANDES's copy is byte for byte the one in MATPOWER 8.0), which is the archive's IEEE CDF data with two differences, found by comparing the loads, generator outputs, shunts, branch impedances, charging and ratios and the stored voltages and angles of the two files. First, the 15 buses where the archive lists a generator with a negative output (-9 MW at bus 4 to -184 MW at bus 116: buses 4, 8, 24, 27, 40, 42, 72, 73, 90, 91, 99, 107, 112, 113 and 116) have that output as extra load here and the generator kept at 0 MW to hold the voltage (bus 4 has 39 MW of load here against 30 MW and a generator of -9 MW in the archive), so the net injection at each bus is the archive's. Second, branches 86-87 and 68-116, lines in the archive, are transformers with a ratio of 1 here: MATPOWER's header records the change, of 15 February 2019, as made for consistency with the bus base voltages. 35 of the 54 generators are scheduled at 0 MW: the case has many voltage-control devices.",
+        "ANDES's MATPOWER reader gives a bus whose base voltage is 0 a base of 110 kV. This file has no such bus (every bus has the 138, 345 or 161 kV the PSAP file gave it), so the rule does not apply to it.",
+        "The voltages and angles the file carries are the archive's stored final state, to the archive's three decimals of a voltage and two of an angle (the same digits as ieee118cdf.txt, which was compared), and that state is not a solution of the data. TENSA's and pandapower's solutions agree to 1.4e-8 pu and 9.5e-6 degrees, and differ from the stored state by up to 0.0173 pu (bus 30, 0.968 stored and 0.985 solved) and 0.303 degrees (bus 1), with 114 of the 118 voltages within 2e-3 pu; the stored slack power is 516.4 MW against 513.9 MW solved. The check against the stored state therefore has the tolerance that state allows, 0.02 pu, 0.35 degrees and 3 MW, and the reference to hold TENSA to is pandapower's solution, to 1e-4 pu.",
+        "The case has no dynamic data: no machine, exciter or governor models, so TENSA offers a power flow and nothing in the time domain or the eigenvalue analysis.",
+        "A power flow, which does not enforce reactive limits unless asked to (and pandapower's reference does not either), leaves six generators outside their reactive limits, so the Violations count reads 6 once it has run: the generator at bus 103 above its maximum (75.4 against 40 MVAr) and those at buses 19, 32, 34, 92 and 105 below their minimum. The table also warns of buses near their voltage limits (0.943 pu at bus 76, against a minimum of 0.94)."
+      ],
+      "verification": {
+        "summary": "Compared with independent references: the power flow agrees with pandapower's solution of the same network, bus voltages to 1.4e-8 pu, angles to 9.5e-6 degrees, and the losses (132.863 MW) and the slack's power (513.863 MW) to 1.4e-4 MW. It also agrees with the state the University of Washington archive stores with the data, within what that state allows: it is not a solution (see the caveats), and the largest differences are 0.0173 pu, 0.303 degrees and 2.5 MW. The case has no time-domain run, so nothing in it is a regression baseline and nothing rests on TENSA's own earlier output.",
+        "checks": [
+          {
+            "name": "Bus voltage magnitudes against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case118.m (the final voltages and angles of the University of Washington archive's ieee118cdf.txt, which this file was converted from and carries to the archive's three decimals of a voltage and two of an angle; a state saved with the data and not a solution of it, since it differs from the solution of the same data by up to 0.017 pu and 0.30 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.02 pu",
+            "result": "largest difference 0.0173 pu (bus 30) over 118 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case118.m (the final voltages and angles of the University of Washington archive's ieee118cdf.txt, which this file was converted from and carries to the archive's three decimals of a voltage and two of an angle; a state saved with the data and not a solution of it, since it differs from the solution of the same data by up to 0.017 pu and 0.30 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "0.35 deg",
+            "result": "largest difference 0.303 deg (bus 1) over 118 buses",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against the solution stored in the case file",
+            "kind": "stored-solution",
+            "reference": "the solved state stored in case118.m (the final voltages and angles of the University of Washington archive's ieee118cdf.txt, which this file was converted from and carries to the archive's three decimals of a voltage and two of an angle; a state saved with the data and not a solution of it, since it differs from the solution of the same data by up to 0.017 pu and 0.30 degrees; TENSA did not compute it); written by scripts/crosscheck_pf.py stored",
+            "tolerance": "3 MW",
+            "result": "measured 513.863, expected 516.4, difference 2.54 MW",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage magnitudes against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.0001 pu",
+            "result": "largest difference 1.38e-08 pu (bus 38) over 118 buses",
+            "passed": true
+          },
+          {
+            "name": "Bus voltage angles against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 deg",
+            "result": "largest difference 9.48e-06 deg (bus 1) over 118 buses",
+            "passed": true
+          },
+          {
+            "name": "Network losses against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 132.863, expected 132.863, difference 0.00014 MW",
+            "passed": true
+          },
+          {
+            "name": "Slack active power against pandapower",
+            "kind": "independent-solver",
+            "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py",
+            "tolerance": "0.01 + 0.001 of the value MW",
+            "result": "measured 513.863, expected 513.863, difference 0.00014 MW",
+            "passed": true
+          }
+        ]
+      }
     }
   ]
 }

@@ -10,9 +10,11 @@ source, the citations and the licence of that case.
 ## ANDES example cases
 
 IEEE 14-bus with machines and controls, Kundur two-area system, IEEE 39-bus New England
-system, NPCC 140-bus system, WECC 179-bus system, and three smaller cases of the gallery:
+system, NPCC 140-bus system, WECC 179-bus system, and the smaller cases of the gallery:
 the Kundur system with a stabiliser on one generator, the IEEE 14-bus system with a fault
-built in, and the PJM 5-bus system with classical machines and a line trip.
+built in, the PJM 5-bus system with classical machines and a line trip, the IEEE 14-bus
+system with a solar plant, the IEEE 14-bus system with a type-3 wind turbine, and the IEEE
+118-bus case (a network for power flow, with no machine models).
 
 These files are part of ANDES, not of TENSA. TENSA does not redistribute them: it copies
 them from the ANDES installed on the user's machine when a case is added. ANDES is
@@ -41,8 +43,17 @@ whose header says it is distributed with permission. The library of Maslennikov 
 on its page that a publication using its material cite that paper. The NPCC and WECC files are ANDES's own
 versions of those systems. The PJM 5-bus file puts machines and governors on the network of
 `case5`, and ANDES gives no source for their data. The Kundur stabiliser and IEEE 14-bus
-fault files are the Kundur and IEEE 14-bus files with one device added each. The catalog
-says what was and was not compared with the publications.
+fault files are the Kundur and IEEE 14-bus files with one device added each. The IEEE
+14-bus solar and wind files are the IEEE 14-bus file with the machine at bus 8 replaced by
+converter models of the second generation of the WECC generic renewable models (the
+specifications of P. Pourbeik for the Type 3 and Type 4 wind turbines, written for the
+National Renewable Energy Laboratory, and the WECC specification of a solar PV plant, both
+described in the catalog); ANDES gives no source for their data. The IEEE 118-bus case is the
+data of the University of Washington archive (typed in by R. Christie, 1993) as MATPOWER's
+`case118` holds it, whose licence notice says that the MATPOWER case files are not covered by
+its own BSD license and have in most cases been included with permission or converted from
+data available from a public source; the archive's page states no licence. The catalog says
+what was and was not compared with the publications.
 
 ## Cases written by TENSA
 
