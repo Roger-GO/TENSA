@@ -68,6 +68,15 @@ export const IEEE14: TopologySummary = {
   controllers: [
     ...[1, 2, 3, 4, 5].map((n) => entry(`TGOV1_${n}`, 'TGOV1', { syn: `GENROU_${n}` })),
     entry('EXST1_1', 'EXST1', { syn: 'GENROU_2' }),
+    // The other four machines have an ESST3A, numbered from 2: the one of machine 1 is 2.
+    ...(
+      [
+        [2, 1],
+        [3, 3],
+        [4, 4],
+        [5, 5],
+      ] as const
+    ).map(([n, machine]) => entry(`ESST3A_${n}`, 'ESST3A', { syn: `GENROU_${machine}` })),
   ],
 };
 
@@ -197,15 +206,18 @@ export const KUNDUR: TopologySummary = {
   ],
   loads: loads([7, 8], 0),
   shunts: [],
-  controllers: [1, 2, 3, 4].map((n) => entry(n, 'TGOV1', { syn: n })),
+  controllers: [
+    ...[1, 2, 3, 4].map((n) => entry(n, 'TGOV1', { syn: n })),
+    ...[1, 2, 3, 4].map((n) => entry(n, 'EXDC2', { syn: n })),
+  ],
 };
 
 /**
  * `ieee39_full.xlsx` of ANDES: the New England system, 39 buses and 46 branches, 12 of them
  * transformers (the ten generator step-up units and two more, which the server lists for
  * their tap or their two rated voltages). Each of the ten generators has a round-rotor
- * machine, an IEEEX1 exciter and an IEEEST stabiliser; the governors are not listed by the
- * server. It has 19 loads and two capacitors.
+ * machine, an IEEEX1 exciter, a TGOV1N governor and an IEEEST stabiliser. It has 19 loads and
+ * two capacitors.
  */
 export const IEEE39: TopologySummary = {
   state: 'pre-setup',
@@ -284,6 +296,9 @@ export const IEEE39: TopologySummary = {
   controllers: [
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
       entry(`IEEEX1_${n}`, 'IEEEX1', { syn: `GENROU_${n}` }),
+    ),
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+      entry(`TGOV1_${n}`, 'TGOV1N', { syn: `GENROU_${n}` }),
     ),
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
       entry(`IEEEST_${n}`, 'IEEEST', { avr: `IEEEX1_${n}` }),

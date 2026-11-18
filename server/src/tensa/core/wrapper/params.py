@@ -19,6 +19,10 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     "SEXS",
     "IEEEG1",
     "TGOV1",
+    # TGOV1N is TGOV1 with the reference and the auxiliary signal summed after
+    # the droop; the IEEE 39 case a first workspace is seeded with has one on
+    # each of its machines.
+    "TGOV1N",
     "IEEEST",
     "REGCA1",
     # Unit 15 (v3.1): the R15 dynamic-model expansion — nine more
@@ -40,6 +44,11 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     # below is introspected from the real ANDES model classes.
     "EXST1",
     "ESST1A",
+    # Exciters the example cases use: EXDC2 (Kundur's four), ESST3A (four each on
+    # IEEE 14 and WECC 179). A model the topology does not list is a machine
+    # control that its Governors and Exciters tabs and its badges leave out.
+    "EXDC2",
+    "ESST3A",
     "GAST",
     "HYGOV",
     "IEESGO",
@@ -375,6 +384,22 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("T3", "number", unit="s"),
         ParamMeta("Dt", "number", unit="pu"),
     ),
+    "TGOV1N": (
+        # Same inputs as TGOV1 (TGOV1Data, tgov1.py:10-42); TGOV1NModel only
+        # sums pref and paux after the droop (tgov1.py:103-113).
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
+        ParamMeta("Tn", "number", unit="MVA"),
+        ParamMeta("wref0", "number", unit="pu"),
+        ParamMeta("R", "number", unit="pu"),
+        ParamMeta("VMAX", "number", unit="pu"),
+        ParamMeta("VMIN", "number", unit="pu"),
+        ParamMeta("T1", "number", unit="s"),
+        ParamMeta("T2", "number", unit="s"),
+        ParamMeta("T3", "number", unit="s"),
+        ParamMeta("Dt", "number", unit="pu"),
+    ),
     "IEEEST": (
         # idx + name from ModelData; avr (mandatory) from PSSBaseData
         # (pssbase.py:19-20). MODE (mandatory), busr/busf (optional refs),
@@ -480,6 +505,57 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("KC", "number"),
         ParamMeta("UELc", "number"),
         ParamMeta("VOSc", "number"),
+    ),
+    "EXDC2": (
+        # The IEEE type DC2 exciter that IEEEX1 is derived from by its limiter
+        # bounds: the same inputs (EXDC2Data, exdc2.py:13-93), listed so a case
+        # that names it (Kundur) shows its exciters.
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
+        ParamMeta("TR", "number", unit="s"),
+        ParamMeta("TA", "number", unit="s"),
+        ParamMeta("TC", "number", unit="s"),
+        ParamMeta("TB", "number", unit="s"),
+        ParamMeta("TE", "number", unit="s"),
+        ParamMeta("TF1", "number", unit="s"),
+        ParamMeta("KF1", "number", unit="pu"),
+        ParamMeta("KA", "number", unit="pu"),
+        ParamMeta("KE", "number", unit="pu"),
+        ParamMeta("VRMAX", "number", unit="pu"),
+        ParamMeta("VRMIN", "number", unit="pu"),
+        ParamMeta("E1", "number", unit="pu"),
+        ParamMeta("SE1", "number", unit="pu"),
+        ParamMeta("E2", "number", unit="pu"),
+        ParamMeta("SE2", "number", unit="pu"),
+    ),
+    "ESST3A": (
+        # idx + name from ModelData; syn from ExcBaseData (excbase.py:23).
+        # NumParams from ESST3AData (esst3a.py), in its order.
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("syn", "syn_idx", required=True),
+        ParamMeta("TR", "number", unit="s"),
+        ParamMeta("VIMAX", "number"),
+        ParamMeta("VIMIN", "number"),
+        ParamMeta("KM", "number"),
+        ParamMeta("TC", "number", unit="s"),
+        ParamMeta("TB", "number", unit="s"),
+        ParamMeta("KA", "number"),
+        ParamMeta("TA", "number", unit="s"),
+        ParamMeta("VRMAX", "number", unit="pu"),
+        ParamMeta("VRMIN", "number", unit="pu"),
+        ParamMeta("KG", "number"),
+        ParamMeta("KP", "number"),
+        ParamMeta("KI", "number"),
+        ParamMeta("VBMAX", "number", unit="pu"),
+        ParamMeta("KC", "number"),
+        ParamMeta("XL", "number"),
+        ParamMeta("VGMAX", "number", unit="pu"),
+        ParamMeta("THETAP", "number", unit="deg"),
+        ParamMeta("TM", "number", unit="s"),
+        ParamMeta("VMMAX", "number", unit="pu"),
+        ParamMeta("VMMIN", "number", unit="pu"),
     ),
     "GAST": (
         ParamMeta("idx", "string", required=True),

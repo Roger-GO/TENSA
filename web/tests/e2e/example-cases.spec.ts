@@ -6,6 +6,8 @@
  *   the command palette finds it; Escape closes it and the keyboard focus goes back
  *   a gallery case (WECC 179-bus, not seeded): Add copies it into the workspace, the card turns to Added, and
  *   Open puts its 179 buses on the diagram
+ *   the Exciters and Governors tables hold every exciter and governor the catalog counts for the case: the
+ *   IEEE 39 governors (TGOV1N), the exciters of Kundur (EXDC2) and the 29 exciters and 29 governors of WECC
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
  *   a bundled case whose file in the workspace is another one: the card says so, and Replace puts the shipped one there
  *
@@ -168,6 +170,35 @@ test('a gallery case is added to the workspace from its card, and opened on the 
   await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(179, { timeout: 90_000 });
   await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('wecc_full.xlsx');
   await expect(page.getByTestId('case-nav-loaded-size')).toHaveText('179 buses');
+
+  // Its tables hold what its entry counts: an exciter on each of the 29 machines (17 EXST1, 8
+  // ESDC2A and 4 ESST3A) and an IEEEG1 governor on each.
+  await page.getByTestId('bottom-drawer-tab-exciters').click();
+  await expect(page.getByTestId('exciters-grid-model-EXST1')).toContainText('17');
+  await expect(page.getByTestId('exciters-grid-model-ESDC2A')).toContainText('8');
+  await expect(page.getByTestId('exciters-grid-model-ESST3A')).toContainText('4');
+  await page.getByTestId('bottom-drawer-tab-governors').click();
+  await expect(page.getByTestId('governors-grid-model-IEEEG1')).toContainText('29');
+});
+
+test('the Exciters and Governors tables list the exciters and governors the catalog counts, on IEEE 39 and Kundur', async ({
+  page,
+}) => {
+  // IEEE 39 has a TGOV1N governor on each of its ten machines, which the table left out.
+  await openApp(page);
+  await page.getByTestId('saved-cases-row-ieee39_full.xlsx').click();
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(39, { timeout: 90_000 });
+  await page.getByTestId('bottom-drawer-tab-governors').click();
+  await expect(page.getByTestId('governors-grid-model-TGOV1N')).toContainText('10');
+  await page.getByTestId('bottom-drawer-tab-exciters').click();
+  await expect(page.getByTestId('exciters-grid-model-IEEEX1')).toContainText('10');
+
+  // Kundur has an EXDC2 exciter on each of its four machines.
+  await page.getByTestId('saved-cases-row-kundur_full.xlsx').click();
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('kundur_full.xlsx');
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(10, { timeout: 90_000 });
+  await page.getByTestId('bottom-drawer-tab-exciters').click();
+  await expect(page.getByTestId('exciters-grid-model-EXDC2')).toContainText('4');
 });
 
 test('the command palette finds the dialog, and Escape closes it and gives the keyboard back', async ({

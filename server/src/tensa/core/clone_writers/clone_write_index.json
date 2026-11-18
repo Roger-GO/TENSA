@@ -622,6 +622,403 @@
         }
       }
     },
+    "ESST3A": {
+      "xlsx": {
+        "sheet": "ESST3A",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "TR",
+          "VIMAX",
+          "VIMIN",
+          "KM",
+          "TC",
+          "TB",
+          "KA",
+          "TA",
+          "VRMAX",
+          "VRMIN",
+          "KG",
+          "KP",
+          "KI",
+          "VBMAX",
+          "KC",
+          "XL",
+          "VGMAX",
+          "THETAP",
+          "TM",
+          "VMMAX",
+          "VMMIN"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "TR": {
+          "xlsx": {
+            "column": "TR"
+          },
+          "dyr": {
+            "field": "TR",
+            "field_index": 2
+          }
+        },
+        "VIMAX": {
+          "xlsx": {
+            "column": "VIMAX"
+          },
+          "dyr": {
+            "field": "VIMAX",
+            "field_index": 3
+          }
+        },
+        "VIMIN": {
+          "xlsx": {
+            "column": "VIMIN"
+          },
+          "dyr": {
+            "field": "VIMIN",
+            "field_index": 4
+          }
+        },
+        "KM": {
+          "xlsx": {
+            "column": "KM"
+          },
+          "dyr": {
+            "field": "KM",
+            "field_index": 5
+          }
+        },
+        "TC": {
+          "xlsx": {
+            "column": "TC"
+          },
+          "dyr": {
+            "field": "TC",
+            "field_index": 6
+          }
+        },
+        "TB": {
+          "xlsx": {
+            "column": "TB"
+          },
+          "dyr": {
+            "field": "TB",
+            "field_index": 7
+          }
+        },
+        "KA": {
+          "xlsx": {
+            "column": "KA"
+          },
+          "dyr": {
+            "field": "KA",
+            "field_index": 8
+          }
+        },
+        "TA": {
+          "xlsx": {
+            "column": "TA"
+          },
+          "dyr": {
+            "field": "TA",
+            "field_index": 9
+          }
+        },
+        "VRMAX": {
+          "xlsx": {
+            "column": "VRMAX"
+          },
+          "dyr": {
+            "field": "VRMAX",
+            "field_index": 10
+          }
+        },
+        "VRMIN": {
+          "xlsx": {
+            "column": "VRMIN"
+          },
+          "dyr": {
+            "field": "VRMIN",
+            "field_index": 11
+          }
+        },
+        "KG": {
+          "xlsx": {
+            "column": "KG"
+          },
+          "dyr": {
+            "field": "KG",
+            "field_index": 12
+          }
+        },
+        "KP": {
+          "xlsx": {
+            "column": "KP"
+          },
+          "dyr": {
+            "field": "KP",
+            "field_index": 13
+          }
+        },
+        "KI": {
+          "xlsx": {
+            "column": "KI"
+          },
+          "dyr": {
+            "field": "KI",
+            "field_index": 14
+          }
+        },
+        "VBMAX": {
+          "xlsx": {
+            "column": "VBMAX"
+          },
+          "dyr": {
+            "field": "VBMAX",
+            "field_index": 15
+          }
+        },
+        "KC": {
+          "xlsx": {
+            "column": "KC"
+          },
+          "dyr": {
+            "field": "KC",
+            "field_index": 16
+          }
+        },
+        "XL": {
+          "xlsx": {
+            "column": "XL"
+          },
+          "dyr": {
+            "field": "XL",
+            "field_index": 17
+          }
+        },
+        "VGMAX": {
+          "xlsx": {
+            "column": "VGMAX"
+          },
+          "dyr": {
+            "field": "VGMAX",
+            "field_index": 18
+          }
+        },
+        "THETAP": {
+          "xlsx": {
+            "column": "THETAP"
+          },
+          "dyr": {
+            "field": "THETAP",
+            "field_index": 19
+          }
+        },
+        "TM": {
+          "xlsx": {
+            "column": "TM"
+          },
+          "dyr": {
+            "field": "TM",
+            "field_index": 20
+          }
+        },
+        "VMMAX": {
+          "xlsx": {
+            "column": "VMMAX"
+          },
+          "dyr": {
+            "field": "VMMAX",
+            "field_index": 21
+          }
+        },
+        "VMMIN": {
+          "xlsx": {
+            "column": "VMMIN"
+          },
+          "dyr": {
+            "field": "VMMIN",
+            "field_index": 22
+          }
+        }
+      }
+    },
+    "EXDC2": {
+      "xlsx": {
+        "sheet": "EXDC2",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "TR",
+          "KA",
+          "TA",
+          "TB",
+          "TC",
+          "VRMAX",
+          "VRMIN",
+          "KE",
+          "TE",
+          "KF1",
+          "TF1",
+          "Switch",
+          "E1",
+          "SE1",
+          "E2",
+          "SE2"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "TR": {
+          "xlsx": {
+            "column": "TR"
+          },
+          "dyr": {
+            "field": "TR",
+            "field_index": 2
+          }
+        },
+        "TA": {
+          "xlsx": {
+            "column": "TA"
+          },
+          "dyr": {
+            "field": "TA",
+            "field_index": 4
+          }
+        },
+        "TC": {
+          "xlsx": {
+            "column": "TC"
+          },
+          "dyr": {
+            "field": "TC",
+            "field_index": 6
+          }
+        },
+        "TB": {
+          "xlsx": {
+            "column": "TB"
+          },
+          "dyr": {
+            "field": "TB",
+            "field_index": 5
+          }
+        },
+        "TE": {
+          "xlsx": {
+            "column": "TE"
+          },
+          "dyr": {
+            "field": "TE",
+            "field_index": 10
+          }
+        },
+        "TF1": {
+          "xlsx": {
+            "column": "TF1"
+          },
+          "dyr": {
+            "field": "TF1",
+            "field_index": 12
+          }
+        },
+        "KF1": {
+          "xlsx": {
+            "column": "KF1"
+          },
+          "dyr": {
+            "field": "KF1",
+            "field_index": 11
+          }
+        },
+        "KA": {
+          "xlsx": {
+            "column": "KA"
+          },
+          "dyr": {
+            "field": "KA",
+            "field_index": 3
+          }
+        },
+        "KE": {
+          "xlsx": {
+            "column": "KE"
+          },
+          "dyr": {
+            "field": "KE",
+            "field_index": 9
+          }
+        },
+        "VRMAX": {
+          "xlsx": {
+            "column": "VRMAX"
+          },
+          "dyr": {
+            "field": "VRMAX",
+            "field_index": 7
+          }
+        },
+        "VRMIN": {
+          "xlsx": {
+            "column": "VRMIN"
+          },
+          "dyr": {
+            "field": "VRMIN",
+            "field_index": 8
+          }
+        },
+        "E1": {
+          "xlsx": {
+            "column": "E1"
+          },
+          "dyr": {
+            "field": "E1",
+            "field_index": 14
+          }
+        },
+        "SE1": {
+          "xlsx": {
+            "column": "SE1"
+          },
+          "dyr": {
+            "field": "SE1",
+            "field_index": 15
+          }
+        },
+        "E2": {
+          "xlsx": {
+            "column": "E2"
+          },
+          "dyr": {
+            "field": "E2",
+            "field_index": 16
+          }
+        },
+        "SE2": {
+          "xlsx": {
+            "column": "SE2"
+          },
+          "dyr": {
+            "field": "SE2",
+            "field_index": 17
+          }
+        }
+      }
+    },
     "EXST1": {
       "xlsx": {
         "sheet": "EXST1",
@@ -3316,6 +3713,69 @@
             "field": "Dt",
             "field_index": 8
           }
+        }
+      }
+    },
+    "TGOV1N": {
+      "xlsx": {
+        "sheet": "TGOV1N",
+        "idx_column": "idx"
+      },
+      "dyr": null,
+      "params": {
+        "Tn": {
+          "xlsx": {
+            "column": "Tn"
+          },
+          "dyr": null
+        },
+        "wref0": {
+          "xlsx": {
+            "column": "wref0"
+          },
+          "dyr": null
+        },
+        "R": {
+          "xlsx": {
+            "column": "R"
+          },
+          "dyr": null
+        },
+        "VMAX": {
+          "xlsx": {
+            "column": "VMAX"
+          },
+          "dyr": null
+        },
+        "VMIN": {
+          "xlsx": {
+            "column": "VMIN"
+          },
+          "dyr": null
+        },
+        "T1": {
+          "xlsx": {
+            "column": "T1"
+          },
+          "dyr": null
+        },
+        "T2": {
+          "xlsx": {
+            "column": "T2"
+          },
+          "dyr": null
+        },
+        "T3": {
+          "xlsx": {
+            "column": "T3"
+          },
+          "dyr": null
+        },
+        "Dt": {
+          "xlsx": {
+            "column": "Dt"
+          },
+          "dyr": null
         }
       }
     },

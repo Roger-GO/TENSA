@@ -2,9 +2,10 @@
  * The search of the diagram finds an element by what it is.
  *
  *   open IEEE 14, whose governors are named `TGOV1_1` to `TGOV1_5` and whose
- *   exciter `EXST1_1` -> Search -> a button for each kind the diagram has,
- *   with how many -> type "governor" -> the five governors, each said to be
- *   one -> type "exciter" -> the one exciter -> press it -> the symbol of its
+ *   exciters are one `EXST1_1` and four ESST3A -> Search -> a button for each
+ *   kind the diagram has, with how many -> type "governor" -> the five
+ *   governors, each said to be one -> type "exciter" -> the five exciters ->
+ *   press `EXST1_1` -> the symbol of its
  *   generating unit is selected, in the middle of the pane -> Search again,
  *   press Governors -> the five governors, nothing typed -> type "pss" -> the
  *   diagram has none, and which dynamic models it has -> add a three-bus
@@ -101,13 +102,13 @@ test('the search finds the controllers of a case by what they are', async ({ pag
   // ---- What the diagram has, by kind --------------------------------------
   await openSearch(page);
   await expect(filters).toHaveText([
-    'All 43',
+    'All 47',
     'Buses 14',
     'Generators 5',
     'Loads 11',
     'Shunts 2',
     'Machines 5',
-    'Exciters 1',
+    'Exciters 5',
     'Governors 5',
   ]);
 
@@ -118,7 +119,7 @@ test('the search finds the controllers of a case by what they are', async ({ pag
   await expect(page.getByRole('button', { name: 'Buses 0' })).toBeVisible();
 
   await input.fill('exciter');
-  await expect(tags).toHaveText(['ExciterEXST1']);
+  await expect(tags).toHaveText([...Array<string>(4).fill('ExciterESST3A'), 'ExciterEXST1']);
 
   // ---- A pick shows the symbol of the unit --------------------------------
   await page.getByRole('option', { name: /EXST1_1/ }).click();
@@ -134,13 +135,13 @@ test('the search finds the controllers of a case by what they are', async ({ pag
   await governors.click();
   await expect(governors).toHaveAttribute('aria-pressed', 'true');
   await expect(tags).toHaveText(Array<string>(5).fill('GovernorTGOV1'));
-  await page.getByRole('button', { name: 'All 43' }).click();
-  await expect(tags).toHaveCount(43);
+  await page.getByRole('button', { name: 'All 47' }).click();
+  await expect(tags).toHaveCount(47);
 
   // ---- A kind the diagram has none of -------------------------------------
   await input.fill('pss');
   await expect(page.getByTestId('sld-node-search-empty')).toContainText(
-    'The diagram has no PSS. Its dynamic models: 5 machines, 1 exciter and 5 governors.',
+    'The diagram has no PSS. Its dynamic models: 5 machines, 5 exciters and 5 governors.',
   );
   await input.fill('');
   await page.keyboard.press('Escape');

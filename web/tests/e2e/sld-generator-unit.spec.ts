@@ -1,8 +1,8 @@
 /**
  * A generator, its machine and their controllers are one symbol.
  *
- *   open IEEE 14, whose five generators each have a machine of another idx and
- *   a governor, one of them an exciter too -> five generator symbols and no
+ *   open IEEE 14, whose five generators each have a machine of another idx, a
+ *   governor and an exciter -> five generator symbols and no
  *   controller badge, each symbol naming its models in chips -> press a chip
  *   -> the Inspector shows that model and lists the whole unit -> go to the
  *   machine from that list -> its chip is marked -> the P and Q of the power
@@ -107,8 +107,10 @@ test('a generator with its machine and controllers is one symbol, whose chain ca
 
   const unit = page.getByTestId('generator-node-2');
   await expect(unit.getByTestId(/^unit-chip-/)).toHaveText(['SG', 'AVR', 'GOV']);
+  // The exciter of generator 3 is an ESST3A, which the case has on four of its machines.
   await expect(page.getByTestId('generator-node-3').getByTestId(/^unit-chip-/)).toHaveText([
     'SG',
+    'AVR',
     'GOV',
   ]);
   // As high as any device: the chips stand beside the machine symbol.
