@@ -592,9 +592,15 @@ def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_a
 
     steps = workflow["jobs"]["paper"]["steps"]
     uses = [str(step.get("uses", "")) for step in steps]
-    (build,) = [i for i, name in enumerate(uses) if name.startswith("openjournals/openjournals-draft-action@")]
+    (build,) = [
+        i for i, name in enumerate(uses) if name.startswith("openjournals/openjournals-draft-action@")
+    ]
     (upload,) = [i for i, name in enumerate(uses) if name.startswith("actions/upload-artifact@")]
     assert uses[0].startswith("actions/checkout@") and 0 < build < upload
+    # The action has no release tags, and `master` moves: the build is pinned to a commit of it,
+    # so a paper builds the same way twice, and the checkout is the major the other workflows use.
+    assert re.fullmatch(r"openjournals/openjournals-draft-action@[0-9a-f]{40}", uses[build])
+    assert uses[0] == "actions/checkout@v7"
 
     options = steps[build]["with"]
     assert options == {"journal": "joss", "paper-path": "paper/paper.md"}

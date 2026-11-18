@@ -5,8 +5,10 @@
 #
 # The job reads paper/ and writes the PDF into the runner's copy of it, so nothing in the
 # repository changes. It has read access to the repository and no secrets. The action
-# publishes no release tags, and `master` is the ref the Open Journals documentation gives;
-# it runs in a container image that Open Journals builds.
+# publishes no release tags, and its documentation names `master`; the build is pinned to the
+# commit that `master` was at on 2026-09-23, so that a paper builds the same way twice. Move
+# the pin by hand when the action changes. It runs in a container image that Open Journals
+# builds.
 #
 # It runs when a push changes anything under paper/, and by hand from the Actions tab.
 name: draft-pdf
@@ -27,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build the draft PDF
-        uses: openjournals/openjournals-draft-action@master
+        uses: openjournals/openjournals-draft-action@af22ceb4b8f9eff6b3a13c05747ccc2f573cf2e6 # master
         with:
           journal: joss
           paper-path: paper/paper.md
