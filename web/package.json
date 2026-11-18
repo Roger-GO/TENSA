@@ -23,7 +23,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "regen-api-types": "openapi-typescript ../server/openapi.json -o src/api/generated.ts || echo 'set ANDES_OPENAPI_URL or run tensa serve, then: openapi-typescript $ANDES_OPENAPI_URL -o src/api/generated.ts'",
+    "regen-api-types": "bash scripts/regenerate-api-types.sh",
     "regen-api-types:live": "bash scripts/regenerate-api-types.sh"
   },
   "dependencies": {

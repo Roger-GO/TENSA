@@ -8,8 +8,8 @@
 # against it, then kill the substrate.
 #
 # Pre-reqs:
-# - The tensa virtualenv is activated (or its `tensa` is on PATH).
-#   The default expectation matches AGENTS.md: `~/andes-project/.venv`.
+# - The tensa virtualenv is activated (or its `tensa` is on PATH), or ANDES_APP
+#   (below) is the path of its `tensa`.
 # - `pnpm install` has already run in `web/`.
 #
 # Usage (from repo root):
