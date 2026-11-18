@@ -106,6 +106,20 @@ def test_andes_itself_still_ends_these_runs_short_of_tf(case: str, tf: float) ->
     assert 0.0 < tf - float(ss.dae.t) < 3e-14
 
 
+def test_a_run_is_not_failed_by_the_exit_code_an_earlier_routine_left() -> None:
+    """ANDES adds to ``exit_code`` when a continuation power flow or an eigenvalue pre-check
+    fails and only a power flow sets it back, so a time-domain run that reached its end time
+    cleanly in such a session was reported as not converged."""
+    w = _wrapper(IEEE39)
+    ss = w._require_loaded()  # noqa: SLF001
+    w.run_pflow()
+    ss.exit_code = 1  # what a failed CPF left behind
+    result = w.run_tds(tf=1.0)
+
+    assert result.converged is True and result.final_t == 1.0
+    assert ss.exit_code == 0
+
+
 def test_a_run_that_leaves_its_stability_criteria_is_still_reported_as_failed() -> None:
     w = _wrapper(GEN_TRIP)
     result = w.run_tds(tf=10.0)
@@ -136,7 +150,10 @@ def test_a_run_aborted_a_step_short_of_tf_is_still_reported_as_failed() -> None:
     result = w.run_tds(tf=10.0, on_step=_stop_near_the_end, abort_flag=abort)
 
     assert result.converged is False
-    assert result.final_t < 10.0
+    # It stopped at the step the flag was set on (the one after 9.9 s), whether or not the
+    # clock then sums to 10 exactly: what the run reports is that it did not complete.
+    assert result.final_t <= 10.0 + 1e-9
+    assert result.callpert_count < round(10.0 * 30) + 1
 
 
 # ---- a sweep -------------------------------------------------------------------------

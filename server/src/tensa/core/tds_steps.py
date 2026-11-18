@@ -165,10 +165,12 @@ def landing_slack(system: Any, at: float) -> float:
     rounds to the numbers near the sum, which are ``numpy.spacing(at)`` apart:
     by half a spacing at most. A run of ``dae.kcount`` steps is so off by half
     that many spacings at most, and the whole of them leaves room for the
-    additions of the steps ANDES retries. Over a run of a few hundred seconds
-    that is far under ``_EPS``, which then holds; 3600 s of 1/30 s steps end
-    2.6e-9 s short, and IEEE 39 run to 4100 s with 0.2 s steps stops 1.5e-9 s
-    short, where its solver cannot take a step of that size either.
+    additions of the steps ANDES retries. Over a run of a hundred seconds or so
+    that is under ``_EPS``, which then holds (a run of 300 s of 1/30 s steps
+    reaches about half of it, and a run of about 500 s passes it); 3600 s of
+    1/30 s steps end 2.6e-9 s short, and IEEE 39 run to 4100 s with 0.2 s steps
+    stops 1.5e-9 s short, where its solver cannot take a step of that size
+    either.
     """
     steps = int(getattr(system.dae, "kcount", 0) or 0)
     return max(_EPS, steps * float(np.spacing(at)))

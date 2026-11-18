@@ -288,6 +288,12 @@ class TdsMixin(WrapperBase):
         self._controller_bank = controllers
         if controllers is not None:
             controllers.begin_run()
+        # ANDES only ever adds to ``exit_code`` (a failed continuation power flow, an eigenvalue
+        # pre-check that failed, a failed setup) and only a power flow sets it back to 0, so the
+        # code a run leaves says what the runs before it did as well. This run is judged on its
+        # own: a run that reaches its end time cleanly, in a session where a continuation power
+        # flow failed, is not one that failed.
+        ss.exit_code = 0
         try:
             ss.TDS.run()
         except Exception as exc:  # noqa: BLE001
