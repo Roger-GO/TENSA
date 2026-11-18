@@ -5,9 +5,9 @@ Usage:
     python validate_cli.py Line_14,Line_20 Line_3,Line_5 ...
 
 Each argument is one N-2 candidate ``a,b``. Every call is appended to
-``results/agent_claude_log.json`` (the budget audit trail); the tool
-refuses to exceed the task budget and refuses pairs outside the
-candidate list. Prints, per pair: convergence, severity, and the
+``results/agent_claude_log.json`` (the budget audit trail, with the TENSA
+and ANDES versions the server ran); the tool refuses to exceed the task
+budget and refuses pairs outside the candidate list. Prints, per pair: convergence, severity, and the
 worst-loaded surviving branches, i.e., exactly the observation an agent
 is entitled to.
 """
@@ -48,6 +48,7 @@ def main() -> None:
 
     t = Tensa()
     try:
+        versions = t.versions()
         t.load_case()
         for pair in pairs:
             obs = t.validate_pair(pair)
@@ -65,6 +66,7 @@ def main() -> None:
                     "pair": list(pair),
                     "converged": obs["converged"],
                     "severity": None if sev is None else round(sev, 6),
+                    "versions": versions,
                 }
             )
             tag = "COLLAPSE" if sev is None else f"sev={sev:.4f}"

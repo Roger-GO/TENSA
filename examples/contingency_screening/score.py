@@ -19,9 +19,28 @@ ratings, so numbers are NOT comparable to that paper's DC results.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from typing import Any
 
 from common import RESULTS, load_json, save_json
+
+
+def version_warning(oracle: dict[str, Any], submission: dict[str, Any]) -> str | None:
+    """Say when a submission was made with other TENSA or ANDES versions than the oracle.
+
+    The numbers of two versions can differ for reasons that have nothing to do with the agent,
+    so the pair is worth knowing. A file that names no versions (the ones committed before they
+    were recorded, or an agent's submission that left them out) says nothing either way.
+    """
+    made, truth = submission.get("versions"), oracle.get("versions")
+    if not made or not truth or made == truth:
+        return None
+
+    def named(versions: dict[str, str]) -> str:
+        return f"TENSA {versions.get('tensa', '?')} and ANDES {versions.get('andes', '?')}"
+
+    return f"made with {named(made)}, the oracle with {named(truth)}"
 
 
 def main() -> None:
@@ -32,6 +51,9 @@ def main() -> None:
     scores = {}
     for sub_path in sorted(Path(RESULTS).glob("submission_*.json")):
         sub = load_json(sub_path.name)
+        warning = version_warning(oracle, sub)
+        if warning:
+            print(f"WARNING: {sub_path.name} was {warning}", file=sys.stderr)
         ranking = [tuple(p) for p in sub["ranking"]][:k]
         validated = {tuple(p) for p in sub["validated"]}
         hit = [p for p in ranking if p in top]

@@ -1,4 +1,4 @@
-"""The contingency screening study in ``examples/`` can be found, set up and run from a fresh install.
+"""The contingency screening study in ``examples/`` can be found, set up and run from a new install.
 
 The study talks to a server over HTTP with ``httpx``, so these tests give it one made of
 ``httpx.MockTransport``: a four-bus network whose answers are fixed, enough to run the whole
@@ -29,7 +29,7 @@ from tests._repo import REPO_ROOT, SERVER_DIR
 pytestmark = pytest.mark.unit
 
 _STUDY = REPO_ROOT / "examples" / "contingency_screening"
-_MODULES = ("common", "build_task", "oracle", "baselines", "score")
+_MODULES = ("common", "build_task", "oracle", "baselines", "score", "validate_cli")
 _VERSIONS = {"tensa": "9.8.7", "andes": "6.5.4"}
 
 # A ring of four buses with one chord: five branches, so ten pairs, of which the connected
@@ -93,9 +93,10 @@ def study(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[_Study]:
 
         stand_in = SimpleNamespace(Client=client, HTTPStatusError=httpx.HTTPStatusError)
         monkeypatch.setattr(modules.common, "httpx", stand_in)
-        # ``score`` took the folder by name when it was imported; the others read it from ``common``.
+        # ``score`` took the folder by name when it was imported; the others read ``common``.
         monkeypatch.setattr(modules.common, "RESULTS", tmp_path)
         monkeypatch.setattr(modules.score, "RESULTS", tmp_path)
+        monkeypatch.setattr(modules.validate_cli, "RESULTS", tmp_path)
         return modules, seen
 
     yield load
@@ -146,6 +147,44 @@ def test_the_scripts_drive_the_server_named_by_tensa_url_and_record_what_it_runs
     assert len(task["candidates"]) == 8
 
 
+def test_the_validation_log_records_the_versions_and_scoring_warns_when_they_differ(
+    study: _Study,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An agent that validated through ``validate_cli.py`` left no trace of the TENSA and ANDES it
+    ran against, and nothing compared a submission's versions with the oracle's."""
+    modules, _ = study(None)
+    modules.build_task.main()
+    modules.oracle.main()
+    first, second = json.loads((tmp_path / "task.json").read_text())["candidates"][:2]
+    monkeypatch.setattr(sys, "argv", ["validate_cli.py", ",".join(first)])
+    modules.validate_cli.main()
+    monkeypatch.setattr(sys, "argv", ["validate_cli.py", ",".join(second)])
+    modules.validate_cli.main()
+    log = json.loads((tmp_path / "agent_claude_log.json").read_text())
+    assert [entry["pair"] for entry in log] == [first, second]
+    assert [entry["versions"] for entry in log] == [_VERSIONS, _VERSIONS]
+
+    def submit(name: str, versions: dict[str, str] | None) -> None:
+        body: dict[str, Any] = {"agent": name, "validated": [first], "ranking": [first]}
+        if versions is not None:
+            body["versions"] = versions
+        (tmp_path / f"submission_{name}.json").write_text(json.dumps(body), encoding="utf-8")
+
+    submit("same", _VERSIONS)
+    submit("other", {"tensa": "0.0.1", "andes": "1.0.0"})
+    submit("unrecorded", None)
+    capsys.readouterr()
+    modules.score.main()
+    err = capsys.readouterr().err
+    assert "submission_other.json was made with TENSA 0.0.1 and ANDES 1.0.0" in err
+    assert f"the oracle with TENSA {_VERSIONS['tensa']} and ANDES {_VERSIONS['andes']}" in err
+    # The same versions say nothing, and neither does a file that names none.
+    assert "submission_same.json" not in err and "submission_unrecorded.json" not in err
+
+
 def test_the_readme_cites_the_benchmark_by_its_first_author() -> None:
     """It said Zhang et al., one of the later authors of PowerAgentBench-SS, whose first author is
     Mylonas."""
@@ -184,7 +223,7 @@ def test_the_readme_says_what_the_study_needs_beyond_tensa() -> None:
 
 
 def test_the_readmes_command_copies_the_case_out_of_the_installed_andes(tmp_path: Path) -> None:
-    """The command is run as written, in a folder that has the ``study-workspace`` it copies into."""
+    """The command is run as written, in a folder that has the ``study-workspace`` it copies to."""
     pytest.importorskip("andes")
     import andes
 

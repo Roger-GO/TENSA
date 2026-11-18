@@ -101,15 +101,18 @@ port or host, set `TENSA_URL` to the address `tensa serve` prints, for example
 committed there, so copy this folder first to keep those.
 
 A run records the TENSA and ANDES versions it used, under `versions`, in
-`task.json`, `oracle.json` and the submissions of `baselines.py`. The files
+`task.json`, `oracle.json`, the submissions of `baselines.py` and every entry
+that `validate_cli.py` adds to its log. `score.py` warns when a submission names
+other versions than the oracle does, so an agent that writes its own submission
+should copy `versions` from its log into it. The files
 committed in `results/` come from before that was recorded, so they carry no
 versions. Running the scripts again with TENSA 0.5.0 and ANDES 2.0.0 gives the
 same task, oracle, scripted submissions and scores as the committed files, apart
 from `versions`. The oracle took 162 s on a workstation.
 
 The oracle itself is a byproduct worth noting: 562 independent
-outage->solve->restore cycles through the HTTP API complete in a few
-minutes on a laptop-class machine, at roughly 0.3 s per cycle.
+outage->solve->restore cycles through the HTTP API took 162 s on a
+workstation, at roughly 0.3 s per cycle. A slower machine takes longer.
 
 ## Why this example exists
 
