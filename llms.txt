@@ -15,7 +15,7 @@ GET /api/version and tensa --version say which version is running.
 ## Golden workflow (order matters)
 
 1. POST /sessions                          → {"session_id": "..."}  (one ANDES System per session, isolated subprocess)
-2. POST /sessions/{id}/case                {"primary_path": "ieee14/ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
+2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx and wscc9.xlsx); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
 3. (pre-setup only) POST /sessions/{id}/disturbances  (add faults/toggles/alters BEFORE running anything)
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
@@ -67,11 +67,12 @@ TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrat
                  POST /sessions/{id}/abort  (cooperative abort of a running TDS)
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
-                 overshoot_pct, damping {ratio, frequency_hz}; feed it a batch run's "traces")
+                 overshoot_pct, damping {ratio, frequency_hz}; not the "traces" object itself, which is 422: build "series" from a batch
+                 run's traces as [{"name": v.name, "t": traces.t, "y": v.values} for v in traces.variables])
 COMTRADE export: POST /comtrade  (no session; body {"t":[...],"channels":[{"name","values":[...],"unit"}], optional name, station,
                  device, frequency_hz, start_time, trigger_t} -> application/zip holding <name>.cfg and <name>.dat, an
                  IEEE C37.111-1999 record with ASCII data: one analog channel per signal, scaled over its own range, and a
-                 time stamp per sample; feed it "t" and "variables" of a batch run's "traces" as they are; "unit" is
+                 time stamp per sample; send a batch run's traces.t as "t" and traces.variables as "channels", as they are; "unit" is
                  optional, null values are written as missing; 413 over 5,000,000 values, channels times samples)
 Disturbances:    POST/GET /sessions/{id}/disturbances
   FaultSpec:  {"kind":"fault","bus_idx":"7","tf":1.0,"tc":1.1,"xf":0.05,"rf":0}   (3-phase fault at bus, applied tf→tc seconds)
@@ -132,7 +133,8 @@ Bundles:         POST /sessions/{id}/bundle/export (zip: case+disturbances+param
                  (export takes "layout" like a snapshot does, 413 over the cap; import writes layout.json beside the case,
                  "layout_restored"; a bundle with no layout that replaces a workspace case of other content removes the
                  layout that was beside it, and says so in "warnings")
-Reports:         GET /sessions/{id}/report
+Reports:         GET /sessions/{id}/report?routine=pflow|tds|eig  (routine is required; 409 until the session has run it;
+                 {"routine", "plain_text", "structured": {"tables": [{title, headers, rows}]}})
 Workspace:       GET /workspace/files · GET/PUT /workspace/layout?case_path=<rel>
                  (the layout of a case's diagram, <case>.layout.json, schema_version "2": positions of buses, devices
                  and placed controllers, branch routes ("routing": "auto", "polyline" for a route the UI made, "manual"
@@ -167,7 +169,7 @@ Examples:        GET /examples  → {"examples": [...]}: the catalog of example 
 Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
 Health:          GET /health  → {"status": "ok", "version", "andes_version", "sessions": {"active", "max"},
                  "cache": {"state": ready|unchecked|missing, "warm", "generating"}}  (poll it; no session, never waits for a worker;
-                 "cache" is ANDES's generated code: until it is ready, the first case load may take 30 s or more)
+                 "cache" is ANDES's generated code: until it is ready, the first case load may take 10 s or more)
 
 ## WebSockets (live streaming)
 

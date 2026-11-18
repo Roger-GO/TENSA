@@ -30,7 +30,7 @@ The page or a request answers 400 with `bad-host` or `bad-origin` when you reach
 
 ### The workspace has no cases
 
-An empty workspace is filled with five example cases the first time the server starts. A workspace that already holds a case file, even an unrelated one, is not filled. The list shows files with the extensions `.xlsx`, `.raw`, `.dyr`, `.m` and `.json`. Add the examples by copying cases in, dropping files on the window, or pointing `--workspace` at an empty directory.
+An empty workspace is filled with five example cases the first time the server starts. A workspace that already holds a case file, even an unrelated one, is not filled. The list shows files with the extensions `.xlsx`, `.raw`, `.dyr`, `.m` and `.json`. Add the examples with **Example cases** in the UI or with `tensa examples add ieee14 --workspace <dir>` ([Adding a case](examples.md#adding-a-case) has both), or point `--workspace` at an empty directory. Copying case files in and dropping them on the window work too.
 
 ### `tensa desktop` does not open a window
 
@@ -65,7 +65,7 @@ It answers `{"status": "ok", ...}` with the TENSA and ANDES versions, the number
 
 ### The first case takes a long time to load
 
-ANDES turns its model equations into Python code the first time it needs them, about 30 seconds on a laptop and longer on a slow machine, and the first case you load waits for that. `tensa warm-cache` does it ahead of time, and `tensa serve` does it in the background when the code is missing or stale, which it also is after an upgrade of ANDES. Later cases load in a moment.
+ANDES turns its model equations into Python code the first time it needs them, and the first case you load waits for that. Measured on a workstation, the first load took 10 seconds and a load with the code in place took 2. A slower machine takes longer. `tensa warm-cache` does it ahead of time, and `tensa serve` does it in the background when the code is missing or stale, which it also is after an upgrade of ANDES. Later cases load in a moment.
 
 ### A run says the case is locked, or the Add buttons are greyed out
 

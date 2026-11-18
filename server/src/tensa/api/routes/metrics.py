@@ -3,8 +3,9 @@ damping of signals the caller sends.
 
 ``POST /response-metrics`` holds no session. The web UI sends the series it plots
 (a streamed run's columns, narrowed to the window between its two cursors), and
-a script or an agent sends the ``traces`` of a batch TDS run. The definitions
-live in ``tensa.core.response_metrics``.
+a script or an agent sends the variables of the ``traces`` of a batch TDS run,
+renamed to series (``values`` becomes ``y``). The definitions live in
+``tensa.core.response_metrics``.
 """
 
 from __future__ import annotations
@@ -113,5 +114,6 @@ async def compute_response_metrics(body: ResponseMetricsRequest) -> ResponseMetr
     A series that cannot be described (too few samples, a window outside it)
     carries an ``error`` and the rest of the request is answered. The definitions
     are in each field's description. Needs no session: send the columns of a
-    streamed run, or the ``traces`` of a batch run."""
+    streamed run, or the variables of a batch run's ``traces``, each as a series
+    of the shared ``t`` and its ``values`` sent as ``y``."""
     return ResponseMetricsResponse(results=[_describe(s, body) for s in body.series])

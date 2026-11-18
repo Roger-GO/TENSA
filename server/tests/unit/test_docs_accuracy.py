@@ -13,13 +13,18 @@ import ast
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import typer
+from starlette.testclient import TestClient
 
 from tensa import cli, desktop
 from tensa.api.app import make_app
+from tensa.api.routes.reports import ReportRoutineEnum
+from tensa.api.schemas import TdsTraces, TdsTraceSeries
+from tensa.core.example_catalog import load_catalog
 from tests._cli import cli_runner
 from tests._repo import REPO_ROOT, pyproject
 
@@ -505,3 +510,195 @@ def test_every_page_and_help_text_names_the_same_cases_folder() -> None:
     assert "tensa mcp --workspace ~/tensa-cases" in " ".join(result.output.split())
     for document in ("CONTRIBUTING.md", "examples/README.md", "examples/run_fault_study.py"):
         assert "tensa serve --workspace ~/tensa-cases" in _read(document), document
+
+
+# ---- what a reader who runs the pages literally finds -------------------------
+
+# A run's traces are one ``t`` and a list of ``{name, values}``; the metrics route takes a
+# series with its own ``t`` and ``y``, and the COMTRADE route ``channels``. The batch
+# routes' ``TdsTraces`` is what a real run answers with, so the snippets are fed that.
+_TRACES = TdsTraces(
+    t=[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+    variables=[
+        TdsTraceSeries(name="omega GENROU 1", values=[1.0, 1.001, 1.004, 1.0, 0.998, 1.0, 1.0]),
+        TdsTraceSeries(name="omega GENROU 2", values=[1.0, 1.002, 1.006, 1.001, 0.997, 1.0, 1.0]),
+    ],
+    truncated=False,
+).model_dump()
+
+
+def _python_blocks(text: str) -> list[str]:
+    return re.findall(r"```python\n(.*?)```", text, flags=re.DOTALL)
+
+
+def _client(tmp_path: Path) -> TestClient:
+    return TestClient(
+        make_app(workspace=tmp_path, static_override=tmp_path),
+        base_url="http://127.0.0.1:8000",
+    )
+
+
+def test_the_api_guides_snippet_sends_a_batch_runs_traces_the_way_the_routes_take_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guide said to feed ``traces`` to the metrics and COMTRADE routes as they are, and both
+    answered 422. The snippet that replaced it is run here, with the batch run answered by a
+    stand-in and the two routes by the app itself."""
+    (block,) = [b for b in _python_blocks(_read("docs/api.md")) if "/response-metrics" in b]
+    assert block.startswith("import httpx\n")
+    answers: dict[str, Any] = {}
+    client = _client(tmp_path)
+
+    def post(url: str, *, json: Any = None, timeout: float | None = None) -> Any:
+        if url.endswith("/tds"):
+            assert json["dae_vars"], "the run has to name the variables it records"
+            return SimpleNamespace(json=lambda: {"traces": _TRACES})
+        route = "/api" + url.split("/api", 1)[1]
+        answers[route] = client.post(route, json=json)
+        return answers[route]
+
+    monkeypatch.chdir(tmp_path)
+    exec(
+        compile(block.removeprefix("import httpx\n"), "docs/api.md", "exec"),
+        {"httpx": SimpleNamespace(post=post)},
+    )
+
+    metrics = answers["/api/response-metrics"]
+    assert metrics.status_code == 200, metrics.text
+    assert [r["name"] for r in metrics.json()["results"]] == [
+        v["name"] for v in _TRACES["variables"]
+    ]
+    assert all(r["error"] is None for r in metrics.json()["results"])
+    record = answers["/api/comtrade"]
+    assert record.status_code == 200, record.text
+    assert record.headers["content-type"] == "application/zip"
+    assert (tmp_path / "fault.zip").read_bytes() == record.content
+
+
+@pytest.mark.parametrize("route", ["/api/response-metrics", "/api/comtrade"])
+def test_a_batch_runs_traces_as_they_stand_are_refused_by_both_routes(
+    tmp_path: Path, route: str
+) -> None:
+    """The guide says so, so a change that makes the routes take ``traces`` has to change it."""
+    assert _client(tmp_path).post(route, json=_TRACES).status_code == 422
+    assert "A request that sends `traces` itself answers 422." in _read("docs/api.md")
+
+
+def test_the_report_route_is_documented_with_its_required_routine(
+    openapi_schema: dict[str, Any],
+) -> None:
+    """``GET .../report`` answered 422 to the call the guide showed, which had no ``routine``."""
+    operation = openapi_schema["paths"]["/api/sessions/{session_id}/report"]["get"]
+    (routine,) = [p for p in operation["parameters"] if p["name"] == "routine"]
+    assert routine["required"] is True
+    guide, llms = _read("docs/api.md"), _read("llms.txt")
+    assert "routine=pflow" in guide and "routine=pflow|tds|eig" in llms
+    for value in ReportRoutineEnum:
+        assert f"`{value.value}`" in guide or f"routine={value.value}" in guide, value
+    assert " ".join(r.value for r in ReportRoutineEnum) == "pflow tds eig"
+
+
+# Where a case is loaded by name in a page, a script or the map for agents.
+_CASE_NAMED = re.compile(
+    r"""primary_path["']?\s*[:=]\s*["']([^"'$]+)["']"""
+    r"""|load_case\(\s*["']([^"']+)["']"""
+    r"""|CASE:-([\w.-]+)}"""
+)
+
+
+def test_every_case_a_page_or_script_loads_is_a_file_the_server_adds_to_a_workspace() -> None:
+    """``llms.txt`` loaded ``ieee14/ieee14_full.xlsx``, a folder the workspace does not have: the
+    files of the catalog sit in the root of the workspace, whatever folder ANDES keeps them in."""
+    named = {
+        file.name for example in load_catalog().examples for file in example.files() if file.primary
+    }
+    assert {"ieee14_full.xlsx", "kundur_full.xlsx", "wscc9.xlsx"} <= named
+    documents = [
+        "README.md",
+        "server/README.md",
+        "llms.txt",
+        "docs/api.md",
+        "docs/quickstart.md",
+        "docs/agents.md",
+        "examples/walkthrough.sh",
+        "examples/run_fault_study.py",
+        "examples/tensa_client.py",
+    ]
+    found = [
+        (document, next(g for g in match.groups() if g))
+        for document in documents
+        for match in _CASE_NAMED.finditer(_read(document))
+    ]
+    assert len(found) >= 6, found
+    strangers = [(d, name) for d, name in found if name not in named]
+    assert not strangers, f"these load a case the workspace does not hold: {strangers}"
+
+
+def test_the_examples_describe_what_their_scripts_do() -> None:
+    """``run_fault_study.py`` prints the lowest final bus voltage and not a frequency nadir, and a
+    workspace that the server starts on has the case already."""
+    readme, script = _read("examples/README.md"), _read("examples/run_fault_study.py")
+    assert "Lowest final bus voltage" in script
+    assert "nadir" not in readme
+    assert "lowest final bus voltage" in readme
+    walkthrough = _read("examples/walkthrough.sh")
+    assert "copied in" not in walkthrough
+    assert "tensa examples add ieee14" in walkthrough
+
+
+# The figures the pages gave for generating ANDES's code before anyone measured it: about 30 s
+# on a laptop (half a minute, a multi-minute prep) and 1.5 MB. Measured with ANDES 2.0.0: the
+# first case load waits about 10 s, ``tensa warm-cache`` takes 10 to 25 s, the code is 0.6 MB.
+_UNMEASURED_CACHE_FIGURES = re.compile(
+    r"about 30 s(?:econds)? on a laptop|\(~30 s\)|about half a minute|~1\.5 MB|multi-minute"
+    r"|(?<!\d )30 s or more|30 seconds on a laptop",
+    flags=re.IGNORECASE,
+)
+
+
+def test_no_page_or_help_text_gives_the_unmeasured_figures_for_generating_andes_code() -> None:
+    stale = _lines_with(_UNMEASURED_CACHE_FIGURES)
+    assert not stale, "these still carry a figure nobody measured:\n" + "\n".join(stale)
+    # The pages that say how long the code takes say the figure that was measured.
+    for document in ("docs/quickstart.md", "docs/install.md", "docs/troubleshooting.md"):
+        assert "10 seconds" in _read(document), document
+    assert "10 to 25 seconds" in _read("docs/install.md")
+    assert "0.6 MB" in _read("docs/install.md")
+
+
+def test_the_contributor_pages_say_what_ci_runs_on_each_system() -> None:
+    """They said CI runs everything on Linux, macOS and Windows. Only the server tests run on all
+    three, and on macOS and Windows they are the unit tests and the smoke test."""
+    for document in ("CONTRIBUTING.md", "docs/contributing-code.md"):
+        text = _read(document)
+        assert "CI runs everything" not in text, document
+        assert "smoke test" in text, document
+    assert "macOS and Windows the unit tests and a smoke test" in _read("docs/contributing-code.md")
+
+
+_PNPM_BUILTINS = {"install", "exec", "add", "remove", "dlx", "run", "audit", "outdated", "i"}
+
+
+def test_every_pnpm_script_a_page_names_is_a_script_of_the_web_package() -> None:
+    scripts = json.loads(_read("web/package.json"))["scripts"]
+    named = {
+        match.group(1)
+        for path in _written_by_hand()
+        if path.suffix == ".md"
+        for match in re.finditer(
+            r"\bpnpm (?:run )?([a-z][\w:-]*)", path.read_text(encoding="utf-8")
+        )
+        if match.group(1) not in _PNPM_BUILTINS
+    }
+    assert {"regen-api-types", "typecheck", "lint", "test", "build"} <= named
+    missing = sorted(named - set(scripts))
+    assert not missing, f"the pages name pnpm scripts that web/package.json lacks: {missing}"
+
+
+def test_regen_api_types_starts_a_throwaway_server_and_reads_its_openapi() -> None:
+    """The script read ``server/openapi.json``, a file that is not in the repository, printed a
+    hint when it failed and exited 0, so the command the contributor pages give did nothing."""
+    scripts = json.loads(_read("web/package.json"))["scripts"]
+    assert scripts["regen-api-types"] == "bash scripts/regenerate-api-types.sh"
+    assert "server/openapi.json" not in json.dumps(scripts)
+    assert (REPO_ROOT / "web" / "scripts" / "regenerate-api-types.sh").is_file()

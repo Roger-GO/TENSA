@@ -31,7 +31,7 @@ Work in a virtual environment so TENSA and ANDES stay apart from your other Pyth
 
     If PowerShell refuses to run `Activate.ps1`, allow scripts for that window only with `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`, then activate again. In `cmd.exe`, activate with `.venv\Scripts\activate.bat`.
 
-`pip` pulls in ANDES, FastAPI, pyarrow and the rest. ANDES turns its model equations into Python code the first time they are needed, which takes about 30 seconds on a laptop. `tensa serve` does that in the background when it starts, or you can do it ahead of time:
+`pip` pulls in ANDES, FastAPI, pyarrow and the rest. ANDES turns its model equations into Python code the first time they are needed. That takes about 10 seconds and leaves about 0.6 MB of code in `~/.andes/pycode`. `tensa serve` does it in the background when it starts. You can do it ahead of time with `tensa warm-cache`, which writes the same code and takes 10 to 25 seconds:
 
 ```bash
 tensa warm-cache

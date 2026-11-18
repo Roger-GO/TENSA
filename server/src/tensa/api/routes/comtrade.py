@@ -1,9 +1,10 @@
 """COMTRADE export endpoint: the signals the caller sends, as an IEEE C37.111 record.
 
 ``POST /comtrade`` holds no session. The web UI sends the columns of a streamed
-run, which live in the browser, and a script or an agent sends the ``traces`` of
-a batch TDS run. The answer is a ``.zip`` of the record's configuration file and
-its ASCII data file. What the two hold is described in ``tensa.core.comtrade``.
+run, which live in the browser, and a script or an agent sends the ``t`` and
+``variables`` of the ``traces`` of a batch TDS run, the variables as ``channels``.
+The answer is a ``.zip`` of the record's configuration file and its ASCII data
+file. What the two hold is described in ``tensa.core.comtrade``.
 """
 
 from __future__ import annotations
@@ -82,8 +83,8 @@ async def export_comtrade(body: ComtradeExportRequest) -> Response:
     by the time stamps, as it must for a run with an event in it. The values are
     the caller's own (per unit, MW, radians), and for a time-domain run they are
     phasor quantities, not instantaneous waveforms. Needs no session: send the
-    columns of a streamed run, or ``t`` and ``variables`` of a batch run's
-    ``traces``."""
+    columns of a streamed run, or ``t`` and, as ``channels``, ``variables`` of a
+    batch run's ``traces``."""
     problem = user_name_problem(body.name)
     if problem is not None:
         raise HTTPException(

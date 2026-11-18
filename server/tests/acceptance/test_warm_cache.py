@@ -49,6 +49,10 @@ def test_warm_cache_runs_green_and_populates_cache_dir() -> None:
     assert cache_dir.is_dir(), f"expected {cache_dir} to be populated after warm-cache"
     n_files = sum(1 for p in cache_dir.iterdir() if p.is_file())
     assert n_files > 0, f"expected non-empty {cache_dir}, got {n_files} files"
+    # The pages say the code is about 0.6 MB (102 files with ANDES 2.0.0). They are wrong
+    # when it is a different order of size, and the figure is the thing to update.
+    size = sum(p.stat().st_size for p in cache_dir.iterdir() if p.is_file())
+    assert 0.3e6 < size < 1.2e6, f"{cache_dir} holds {size} bytes; the pages say about 0.6 MB"
 
     # The warm-cache log line "cache ready: N files, X MB" should be present
     # in stderr so users can confirm the prep succeeded.

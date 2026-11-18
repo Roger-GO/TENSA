@@ -22,7 +22,7 @@ Subcommands:
   (``andes.prepare()``) so the cache is populated; ``serve`` runs it in the
   background when the cache needs it, so running it by hand is optional.
   Subsequent ``andes.load`` calls skip the cold-start prep. The cache lives at
-  ``~/.andes/pycode/`` (~1.5 MB) and is shared across all ANDES cases.
+  ``~/.andes/pycode/`` (about 0.6 MB) and is shared across all ANDES cases.
 """
 
 from __future__ import annotations
@@ -1188,15 +1188,15 @@ def warm_cache(
     """Warm the ANDES symbolic-equation cache.
 
     Runs ``andes.prepare()`` against the installed ANDES version. The
-    generated Python files land at ``~/.andes/pycode/`` (~1.5 MB total)
+    generated Python files land at ``~/.andes/pycode/`` (about 0.6 MB in all)
     and are shared across all ANDES cases; subsequent ``andes.load``
     calls skip the cold-start prep.
 
     Running this by hand is optional. Without a warm cache, the first case
-    you load pays the multi-minute prep cost, so ``tensa serve`` starts this
-    command in a background process when the cache is missing or has not been
-    checked against the installed ANDES (``--no-warm-cache`` skips that). Run
-    it yourself to have the cache ready before the server starts:
+    you load pays for the generation (about 10 s), so ``tensa serve`` starts
+    this command in a background process when the cache is missing or has not
+    been checked against the installed ANDES (``--no-warm-cache`` skips that).
+    Run it yourself to have the cache ready before the server starts:
 
         pip install tensa
         tensa warm-cache

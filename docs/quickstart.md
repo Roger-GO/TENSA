@@ -24,7 +24,7 @@ To have the app in a window of its own instead of a browser tab, run `tensa desk
 
 In the left rail, under **Saved cases**, click `ieee14_full.xlsx`. The one-line diagram appears, the **Buses** table at the bottom lists the 14 buses, and the left rail shows the case with its state, `pre-setup`, which means nothing has run yet.
 
-The first case you load after installing can take about half a minute while ANDES generates its code. Later loads are quick.
+The first case you load after installing can take about 10 seconds, and longer on a slow machine, while ANDES generates its code. Later loads are quick.
 
 A card near the case list walks you through these first steps. It appears once per browser profile and the **x** closes it.
 

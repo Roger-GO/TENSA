@@ -2,10 +2,10 @@
 
 ANDES turns its symbolic model equations into Python source the first time it
 needs them and keeps the result in ``~/.andes/pycode``. A machine without it pays
-for the generation inside the first case load: about 30 s on a laptop, a minute
-or two on a small CI runner. ``tensa warm-cache`` does the work ahead of time, but
-a step nobody was told about does not get run, and an ANDES upgrade brings the
-cost back unannounced.
+for the generation inside the first case load: about 10 s on a workstation,
+longer on a slower machine such as a small CI runner. ``tensa warm-cache`` does the
+work ahead of time, but a step nobody was told about does not get run, and an ANDES
+upgrade brings the cost back unannounced.
 
 ``tensa serve`` therefore looks at the cache as it starts. When the code is
 missing, or nobody has checked it against the installed ANDES, the server runs

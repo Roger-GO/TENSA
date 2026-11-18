@@ -45,7 +45,38 @@ The body of `POST .../pflow` is optional, and each setting in it applies to that
 
 `dae_vars` names ANDES variables to record, written as ANDES writes them (`omega GENROU 1`, `vf GENROU 2`). Their values at every step come back under `traces`. `GET .../dae-variables` lists the names a case offers, and takes `q`, `kind` and `model` to narrow the list. `controllers` closes a frequency loop on a battery or another distributed generation device: parameters of a `droop` or an `ffr`, never code. `GET .../tds/controllers` lists the devices a controller can command.
 
-Two routes work on what a run produced and hold no session. `POST /api/response-metrics` takes series (name, `t`, `y`) and answers with each one's nadir, rate of change, settling time, overshoot and damping, and `POST /api/comtrade` writes them as an IEEE C37.111 COMTRADE record in a `.zip`. Feed either the `traces` of a batch run as they are.
+Two routes work on what a run produced and hold no session. `POST /api/response-metrics` answers with each signal's nadir, rate of change, settling time, overshoot and damping, and `POST /api/comtrade` writes signals as an IEEE C37.111 COMTRADE record in a `.zip`. Neither takes the `traces` object as it stands, because their fields have other names. `traces` holds one `t` shared by all the variables and a `variables` list of `name` and `values`. `/response-metrics` wants a `series` list in which each item has its own `t` and its values as `y`, and `/comtrade` wants the shared `t` and the signals as `channels` (an optional `unit` can go on each). A request that sends `traces` itself answers 422.
+
+```python
+import httpx
+
+base = "http://127.0.0.1:8000/api"
+session_id = "..."  # the id that POST /api/sessions answered with, after a case is loaded
+run = httpx.post(
+    f"{base}/sessions/{session_id}/tds",
+    json={"tf": 5.0, "dae_vars": ["omega GENROU 1", "omega GENROU 2"]},
+    timeout=330,
+).json()
+traces = run["traces"]
+
+metrics = httpx.post(
+    f"{base}/response-metrics",
+    json={
+        "series": [
+            {"name": v["name"], "t": traces["t"], "y": v["values"]} for v in traces["variables"]
+        ]
+    },
+).json()
+print(metrics["results"][0]["nadir"])
+
+record = httpx.post(
+    f"{base}/comtrade",
+    json={"t": traces["t"], "channels": traces["variables"], "name": "fault"},
+)
+open("fault.zip", "wb").write(record.content)
+```
+
+Both take more settings, such as `t_start`, `t_end` and `settling_band` for the metrics and `station` and `trigger_t` for the record. The [route reference](reference/api.md) lists them.
 
 ### Other analyses
 
@@ -57,7 +88,7 @@ Two routes work on what a run produced and hold no session. `POST /api/response-
 | `POST .../sweep` | A parameter sweep over disturbance or simulation values, one time-domain run per value |
 | `POST .../snapshot`, `POST .../snapshot/restore` | Save and restore a snapshot |
 | `POST .../bundle/export`, `POST .../bundle/import` | A reproducibility bundle as a `.zip` |
-| `GET .../report` | The text of an ANDES report |
+| `GET .../report?routine=pflow`, `tds` or `eig` | The text of an ANDES report for that analysis, with its tables, as `plain_text` and `structured`. The routine is required, and the answer is 409 until the session has run it |
 | `GET .../jobs`, `DELETE .../jobs/{job_id}` | List the session's jobs, cancel one |
 | `GET .../messages` | What ANDES logged while commands ran |
 
@@ -87,7 +118,7 @@ Every error the server raises itself is an RFC 7807 problem document:
 | 422 | The request does not match its schema, or ANDES refused it. A JSON body sent without its content type is one |
 | 429 | The session cap is reached. Close a session and try again |
 
-A request that fails validation answers 422 with FastAPI's own `detail` list of the fields at fault.
+A request that fails validation answers 422 as one of these documents, and its `detail` names the fields at fault, as in `request body failed validation: [{'type': 'missing', 'loc': ('body', 'primary_path'), ...}]`.
 
 ## WebSockets
 

@@ -2,8 +2,11 @@
 # End-to-end TENSA API walkthrough in plain curl.
 #
 # Prereqs: a running server (`tensa serve --workspace <dir> --port 8000`)
-# and a case file inside that workspace (this script assumes ANDES's bundled
-# ieee14 xlsx has been copied in as `ieee14_full.xlsx` — adjust CASE below).
+# and a case file inside that workspace. A server that starts on an empty
+# workspace fills it with the example cases, `ieee14_full.xlsx` among them, which
+# is the case this script loads. For a workspace that already holds other files,
+# add it with `tensa examples add ieee14 --workspace <dir>`, or set CASE below to
+# a file the workspace has.
 set -euo pipefail
 
 BASE="${ANDES_APP_URL:-http://127.0.0.1:8000}/api"

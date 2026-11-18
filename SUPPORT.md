@@ -5,7 +5,7 @@ TENSA has one maintainer, who looks after it alongside other work. Replies are b
 ## Where to ask
 
 - **A question** (how do I, why does this result look like this, is this the intended behavior): open a thread in the **Q&A** category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a). Ideas and things you built go to the other categories there.
-- **A bug** (something broke, or the program does what the documentation says it should not): open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) and fill in the bug report template. It asks for what a report needs: the version, the case file or a small case that shows it, and what the server printed.
+- **A bug** (something broke, or the program does what the documentation says it should not): open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) and fill in the bug report template. It asks for what a report needs: the version, the case file or a small case that shows it, and the error card or the problem document, if there was one.
 - **A feature request**: open an issue with the feature request template, and say what you are trying to do rather than only what you would like added.
 - **A vulnerability**: do not open an issue or a discussion. Use [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new), which only the maintainer can read. [SECURITY.md](./SECURITY.md) has the details.
 - **A conduct concern**: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) says how to report it.

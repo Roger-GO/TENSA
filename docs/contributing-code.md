@@ -5,7 +5,7 @@ Contributions are welcome. TENSA has one maintainer (see [Support](support.md)),
 ## Before you start
 
 - For anything bigger than a small fix, open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) or a thread in [Discussions](https://github.com/Roger-GO/TENSA/discussions) first, so that the work does not go into a change that cannot be merged.
-- Some things are out of scope: authentication, multi-user hosting, contingency screening, optimal power flow, market simulation, EMTP, CIM/CGMES import, and dynamic models written at run time. Ask before you start on one of them.
+- Some things are out of scope: authentication, multi-user hosting, contingency screening inside the server (the [study in `examples/`](https://github.com/Roger-GO/TENSA/tree/main/examples/contingency_screening) runs outside it, over its API), optimal power flow, market simulation, EMTP, CIM/CGMES import, and dynamic models written at run time. Ask before you start on one of them.
 - Documentation changes are welcome too. [Contributing to the docs](contributing.md) says how the site is built.
 
 ## Set up
@@ -29,7 +29,7 @@ pnpm test
 
 ## Before you open a pull request
 
-CI runs everything on Linux, macOS and Windows, but a change that passes these locally rarely fails there:
+CI runs the whole server suite on Linux, and on macOS and Windows the unit tests and a smoke test (a real server, a power flow and a short time-domain run). Lint, types, the acceptance suite and every web job run on Linux only. A change that passes these locally rarely fails there:
 
 ```bash
 cd server

@@ -601,7 +601,8 @@ export interface paths {
          *     A series that cannot be described (too few samples, a window outside it)
          *     carries an ``error`` and the rest of the request is answered. The definitions
          *     are in each field's description. Needs no session: send the columns of a
-         *     streamed run, or the ``traces`` of a batch run.
+         *     streamed run, or the variables of a batch run's ``traces``, each as a series
+         *     of the shared ``t`` and its ``values`` sent as ``y``.
          */
         post: operations["computeResponseMetrics"];
         delete?: never;
@@ -628,8 +629,8 @@ export interface paths {
          *     by the time stamps, as it must for a run with an event in it. The values are
          *     the caller's own (per unit, MW, radians), and for a time-domain run they are
          *     phasor quantities, not instantaneous waveforms. Needs no session: send the
-         *     columns of a streamed run, or ``t`` and ``variables`` of a batch run's
-         *     ``traces``.
+         *     columns of a streamed run, or ``t`` and, as ``channels``, ``variables`` of a
+         *     batch run's ``traces``.
          */
         post: operations["exportComtrade"];
         delete?: never;
