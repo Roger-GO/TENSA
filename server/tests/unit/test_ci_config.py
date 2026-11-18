@@ -579,3 +579,26 @@ def test_every_test_id_fits_in_a_windows_environment_variable(
         if len(f"PYTEST_CURRENT_TEST={item.nodeid} (teardown)") > _WINDOWS_ENV_MAX
     ]
     assert too_long == []
+
+
+def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_artifact() -> None:
+    """The submission form asks the author to confirm that the paper compiles. This is the
+    check that it does: the journal's own action, on a push that changes ``paper/``."""
+    workflow = _load_required(_WORKFLOWS / "draft-pdf.yml")
+    triggers = _triggers(workflow)
+    assert "paper/**" in triggers["push"]["paths"]
+    assert "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "read"}
+
+    steps = workflow["jobs"]["paper"]["steps"]
+    uses = [str(step.get("uses", "")) for step in steps]
+    (build,) = [i for i, name in enumerate(uses) if name.startswith("openjournals/openjournals-draft-action@")]
+    (upload,) = [i for i, name in enumerate(uses) if name.startswith("actions/upload-artifact@")]
+    assert uses[0].startswith("actions/checkout@") and 0 < build < upload
+
+    options = steps[build]["with"]
+    assert options == {"journal": "joss", "paper-path": "paper/paper.md"}
+    assert (REPO_ROOT / options["paper-path"]).is_file()
+    # The action writes the PDF beside the paper, and the upload must read it from there.
+    assert steps[upload]["with"]["path"] == "paper/paper.pdf"
+    assert steps[upload]["with"]["if-no-files-found"] == "error"

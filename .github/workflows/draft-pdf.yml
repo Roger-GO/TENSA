@@ -1,0 +1,45 @@
+# Build the JOSS paper (paper/paper.md and its bibliography) into a PDF the way the journal
+# does, with the Open Journals draft action, and keep the PDF as an artifact of the run. A
+# paper that does not compile is a red check here, before the submission form asks for
+# confirmation that it does.
+#
+# The job reads paper/ and writes the PDF into the runner's copy of it, so nothing in the
+# repository changes. It has read access to the repository and no secrets. The action
+# publishes no release tags, and `master` is the ref the Open Journals documentation gives;
+# it runs in a container image that Open Journals builds.
+#
+# It runs when a push changes anything under paper/, and by hand from the Actions tab.
+name: draft-pdf
+
+on:
+  push:
+    paths:
+      - "paper/**"
+      - ".github/workflows/draft-pdf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paper:
+    name: build the paper draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the draft PDF
+        uses: openjournals/openjournals-draft-action@master
+        with:
+          journal: joss
+          paper-path: paper/paper.md
+
+      # The action writes paper.pdf next to the paper it was given.
+      - name: Upload the PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper
+          path: paper/paper.pdf
+          if-no-files-found: error
+          retention-days: 30
