@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+# 1.27 is the first release that writes a license expression as PEP 639 core metadata
+# (``License-Expression``); 1.26 writes the same string as the free-text ``License`` field.
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,16 +9,19 @@ name = "tensa"
 version = "0.5.0"
 description = "TENSA: an interactive web workbench for power system simulation, built on ANDES"
 readme = "README.md"
-license = { file = "LICENSE" }
+# PEP 639: the SPDX expression and the file that holds the text, so the package metadata
+# carries "GPL-3.0-or-later" and not the 35 KB of the license itself. The file is server/LICENSE,
+# a copy of the root one that keeps the sdist self-contained (tests/unit/test_packaging.py).
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 authors = [
-    { name = "Roger Gracia", email = "rollerg97@gmail.com" },
+    { name = "Rogelio Gracia Otalvaro", email = "rollerg97@gmail.com" },
 ]
 keywords = ["tensa", "power-systems", "andes", "simulation", "fastapi", "websocket"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -88,7 +93,7 @@ dev = [
     # tests/unit/test_packaging.py and tests/integration/test_packaging.py drive
     # the build hook and the build backend directly (``editables`` is what the
     # backend needs to build an editable wheel).
-    "hatchling>=1.25",
+    "hatchling>=1.27",
     "editables>=0.5",
 ]
 

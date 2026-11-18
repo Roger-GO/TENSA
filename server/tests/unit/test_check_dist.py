@@ -26,8 +26,12 @@ def _script() -> ModuleType:
     return load_module("check_dist", SCRIPTS_DIR / "check_dist.py")
 
 
-def _metadata(version: str, name: str = "tensa") -> str:
-    return f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n\nA long description.\n"
+def _metadata(version: str, name: str = "tensa", extra: str = "") -> str:
+    return (
+        f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n"
+        f"License-Expression: GPL-3.0-or-later\nLicense-File: LICENSE\n{extra}"
+        "\nA long description.\n"
+    )
 
 
 _CATALOG = json.dumps({"version": 1, "examples": []})
@@ -194,6 +198,41 @@ def test_a_wheel_without_the_license_is_refused(tmp_path: Path) -> None:
     _sdist(out)
     (problem,) = _script().check(out)
     assert "license" in problem
+
+
+@pytest.mark.parametrize(
+    ("fields", "complaint"),
+    [
+        ("License: GNU GENERAL PUBLIC LICENSE\n", "free-text License field"),
+        ("Classifier: License :: OSI Approved :: GNU General Public License v3\n", "classifier"),
+    ],
+)
+def test_a_license_written_the_old_way_is_refused_in_both_archives(
+    tmp_path: Path, fields: str, complaint: str
+) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    metadata = _metadata("0.5.0", extra=fields)
+    _wheel(out, extra={"tensa-0.5.0.dist-info/METADATA": metadata})
+    _sdist(out, extra={"PKG-INFO": metadata})
+    problems = _script().check(out)
+    assert len(problems) == 2
+    assert all(complaint in p for p in problems)
+    assert {".whl" in p for p in problems} == {True, False}
+
+
+@pytest.mark.parametrize(
+    "line", ["", "License-Expression: GPL-3.0-only\n"], ids=["absent", "another license"]
+)
+def test_the_license_expression_must_be_gpl_3_or_later(tmp_path: Path, line: str) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    metadata = "Metadata-Version: 2.4\nName: tensa\nVersion: 0.5.0\n" + line + "\nBody\n"
+    _wheel(out, extra={"tensa-0.5.0.dist-info/METADATA": metadata})
+    _sdist(out)
+    (problem,) = _script().check(out)
+    assert "GPL-3.0-or-later" in problem
+    assert ".whl" in problem
 
 
 def test_another_distribution_is_refused(tmp_path: Path) -> None:

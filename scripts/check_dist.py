@@ -20,7 +20,10 @@ checks are the ones a release must not skip:
 * neither carries a source map (``*.map``), which would add about 10 MB for
   nothing;
 * both carry the license text, and the sdist the build hook it needs to be built
-  again.
+  again;
+* both name the license as the SPDX expression in ``License-Expression`` (PEP 639),
+  with no free-text ``License`` field (a build tool that predates PEP 639 fills it with
+  the whole text of the license) and no ``License ::`` classifier.
 
 Every problem is printed. The exit status is 1 when there was one, 2 for bad
 usage, and 0 otherwise.
@@ -39,6 +42,7 @@ from pathlib import Path, PurePosixPath
 
 from packaging.version import InvalidVersion, Version
 
+LICENSE_EXPRESSION = "GPL-3.0-or-later"
 WHEEL_UI = "tensa/static"
 SDIST_UI = "src/tensa/static"
 WHEEL_EXAMPLES = "tensa/examples"
@@ -47,6 +51,20 @@ SDIST_EXAMPLES = "src/tensa/examples"
 
 def _metadata_field(text: str, field: str) -> str | None:
     return Parser().parsestr(text, headersonly=True).get(field)
+
+
+def _license_problems(kind: str, metadata: str) -> list[str]:
+    """The license must be the expression, and not the free-text field PEP 639 replaced."""
+    message = Parser().parsestr(metadata, headersonly=True)
+    problems: list[str] = []
+    found = message.get("License-Expression")
+    if found != LICENSE_EXPRESSION:
+        problems.append(f"{kind} has License-Expression {found!r}, not {LICENSE_EXPRESSION!r}")
+    if message.get("License") is not None:
+        problems.append(f"{kind} has a free-text License field: use License-Expression only")
+    if any(c.startswith("License ::") for c in message.get_all("Classifier", [])):
+        problems.append(f"{kind} has a License classifier, which License-Expression replaces")
+    return problems
 
 
 def _ui_problems(kind: str, names: Iterable[str], ui_dir: str) -> list[str]:
@@ -124,6 +142,7 @@ def _check_wheel(path: Path) -> tuple[str | None, list[str]]:
         catalog_text = wheel.read(catalog).decode("utf-8") if catalog in names else None
     problems = _ui_problems(path.name, names, WHEEL_UI)
     problems += _example_problems(path.name, names, catalog_text, WHEEL_EXAMPLES)
+    problems += _license_problems(path.name, metadata)
     if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
         problems.append(f"{path.name} has no license file under .dist-info/licenses/")
     if _metadata_field(metadata, "Name") != "tensa":
@@ -146,6 +165,7 @@ def _check_sdist(path: Path) -> tuple[str | None, list[str]]:
     names = list(members)
     problems = _ui_problems(path.name, names, SDIST_UI)
     problems += _example_problems(path.name, names, catalog_text, SDIST_EXAMPLES)
+    problems += _license_problems(path.name, metadata)
     for required in ("LICENSE", "hatch_build.py", "pyproject.toml"):
         if required not in members:
             problems.append(f"{path.name} has no {required}")

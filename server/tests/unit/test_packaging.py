@@ -76,10 +76,12 @@ def test_license_copy_matches_the_repository_license() -> None:
 def test_the_package_metadata_and_build_config_stay_inside_the_server_directory() -> None:
     """An sdist unpacks to a tree with nothing next to it, so no path may leave it."""
     config = pyproject()
-    license_file = config["project"]["license"]["file"]
-    assert not Path(license_file).is_absolute()
-    assert ".." not in Path(license_file).parts
-    assert (SERVER_DIR / license_file).is_file()
+    license_files = config["project"]["license-files"]
+    assert license_files, "the license file is not named"
+    for license_file in license_files:
+        assert not Path(license_file).is_absolute()
+        assert ".." not in Path(license_file).parts
+        assert (SERVER_DIR / license_file).is_file()
 
     targets = config["tool"]["hatch"]["build"]["targets"]
     for name, target in targets.items():
@@ -87,6 +89,36 @@ def test_the_package_metadata_and_build_config_stay_inside_the_server_directory(
             assert ".." not in Path(source).parts, f"{name} force-includes {source}"
     assert "hatch_build.py" in targets["sdist"]["include"]
     assert "LICENSE" in targets["sdist"]["include"]
+
+
+def test_the_license_is_an_spdx_expression_with_its_file_named() -> None:
+    """PEP 639: ``License-Expression`` in the metadata and the text in a file, where the
+    table form (``license = { file = ... }``) put all 35 KB of the text in the ``License``
+    field that PyPI shows."""
+    project = pyproject()["project"]
+    assert project["license"] == "GPL-3.0-or-later"
+    assert project["license-files"] == ["LICENSE"]
+    # PEP 639 deprecates the classifiers for it, and a build tool may refuse both.
+    assert not [c for c in project["classifiers"] if c.startswith("License ::")]
+
+
+def test_the_build_backend_is_new_enough_to_write_the_license_expression() -> None:
+    """Hatchling 1.26 reads the same string and writes it as the free-text ``License`` field
+    of metadata 2.3; 1.27 is the first to write ``License-Expression``. Both places that name
+    it (the build requirement and the extra the packaging tests need) hold the floor."""
+    config = pyproject()
+    requirements = [
+        *config["build-system"]["requires"],
+        *config["project"]["optional-dependencies"]["dev"],
+    ]
+    floors = [r for r in requirements if r.startswith("hatchling")]
+    assert len(floors) == 2
+    assert all(r == "hatchling>=1.27" for r in floors), floors
+
+
+def test_the_author_is_named_as_in_the_citation() -> None:
+    (author,) = pyproject()["project"]["authors"]
+    assert author["name"] == "Rogelio Gracia Otalvaro"
 
 
 def test_the_ui_hook_is_enabled_and_exists() -> None:

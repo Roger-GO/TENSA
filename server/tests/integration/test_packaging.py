@@ -20,6 +20,8 @@ import sys
 import tarfile
 import zipfile
 from dataclasses import dataclass
+from email.message import Message
+from email.parser import Parser
 from pathlib import Path
 
 import pytest
@@ -160,6 +162,30 @@ def test_neither_archive_ships_source_maps(built: Built) -> None:
 
 def test_the_wheel_records_the_license(built: Built) -> None:
     assert any(n.endswith(".dist-info/licenses/LICENSE") for n in _names(built.wheel))
+
+
+def _metadata_of(archive: Path) -> Message:
+    if archive.suffix == ".whl":
+        with zipfile.ZipFile(archive) as wheel:
+            (name,) = [n for n in wheel.namelist() if n.endswith(".dist-info/METADATA")]
+            return Parser().parsestr(wheel.read(name).decode("utf-8"), headersonly=True)
+    with tarfile.open(archive, "r:gz") as sdist:
+        member = sdist.extractfile(sdist.getnames()[0].split("/", 1)[0] + "/PKG-INFO")
+        assert member is not None
+        return Parser().parsestr(member.read().decode("utf-8"), headersonly=True)
+
+
+def test_both_archives_name_the_license_by_its_expression_and_not_by_its_text(
+    built: Built,
+) -> None:
+    """What PyPI shows: ``GPL-3.0-or-later``, from PEP 639's field, with the text in a file."""
+    for archive in (built.wheel, built.sdist):
+        metadata = _metadata_of(archive)
+        assert metadata["License-Expression"] == "GPL-3.0-or-later", archive.name
+        assert metadata.get_all("License-File") == ["LICENSE"], archive.name
+        assert metadata["License"] is None, archive.name
+        assert not [c for c in metadata.get_all("Classifier", []) if c.startswith("License ::")]
+        assert metadata["Author-email"] == "Rogelio Gracia Otalvaro <rollerg97@gmail.com>"
 
 
 def test_the_release_checks_pass_on_what_was_built(built: Built) -> None:
