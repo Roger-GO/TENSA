@@ -204,7 +204,7 @@ def test_the_support_pages_count_the_andes_contracts_as_the_file_does() -> None:
         assert "fourteen" in _read(document)
 
 
-# ---- the README and the first page of the docs -----------------------------------------------------
+# ---- the README and the first page of the docs ---------------------------------------------------
 
 ANALYSES = [
     "Power flow",
@@ -250,6 +250,11 @@ def test_the_readme_says_the_demo_is_a_script_and_the_script_calls_no_model() ->
     assert "calls no model" in readme
     script = _read("web/scripts/agent-demo.mjs")
     assert not re.search(r"anthropic|openai|claude|gemini", script, flags=re.IGNORECASE)
+    # What the script says of itself, in its header and in the badge it draws over the page,
+    # is what the README says: a scripted walkthrough, not an agent.
+    assert "Scripted walkthrough" in script.split("*/", 1)[0]
+    assert "SCRIPTED&nbsp;DEMO" in script
+    assert not re.search(r"\bAI(?:&nbsp;|\s)agent\b", script, flags=re.IGNORECASE)
 
 
 def test_the_readme_and_the_docs_say_where_to_get_help() -> None:
@@ -272,7 +277,7 @@ def test_the_documentation_navigation_lists_the_new_pages() -> None:
     }
 
 
-# ---- contributing and citing -------------------------------------------------------------------------
+# ---- contributing and citing ---------------------------------------------------------------------
 
 
 def test_contributing_links_the_code_of_conduct_and_gives_the_right_commands() -> None:
@@ -316,7 +321,7 @@ def test_the_citing_page_gives_the_software_doi_when_there_is_one_and_says_so_wh
     assert "license = {GPL-3.0-or-later}" in page
 
 
-# ---- one name for the author and one wording for the license ---------------------------------------------
+# ---- one name for the author and one wording for the license -------------------------------------
 
 
 def test_the_author_is_one_person_under_one_name() -> None:

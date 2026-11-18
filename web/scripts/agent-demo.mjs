@@ -1,7 +1,9 @@
 /**
- * Agent showcase demo — records a video of an AI agent building the WSCC
- * IEEE 9-bus system from scratch through the real UI, then running power
- * flow, a fault + time-domain simulation, eigenvalue analysis, and CPF.
+ * Scripted walkthrough — records a video of a fixed Playwright script
+ * building the WSCC IEEE 9-bus system from scratch through the real UI,
+ * then running power flow, a fault + time-domain simulation, eigenvalue
+ * analysis, and CPF. It calls no model: every click, drag and number is
+ * written out below, so a run does the same thing every time.
  *
  * Prereqs: a running server with the built SPA, e.g.
  *   tensa serve --port 18800 --workspace /tmp/oss-ws
@@ -25,7 +27,7 @@ const SIZE = { width: 1600, height: 900 };
 // ---------------------------------------------------------------------------
 
 // `at` is the canvas drop position (client px) — buses are placed by
-// dragging the Bus row of the Components tab onto the canvas, so the agent
+// dragging the Bus row of the Components tab onto the canvas, so the script
 // lays out the diagram by hand the way a human would. Positions trace the
 // canonical WSCC 9-bus one-line: generator buses 2/3 at the top corners, the
 // 230 kV chain 7-8-9 across the middle, 5/6 below, and bus 4 → bus 1 (G1)
@@ -308,7 +310,7 @@ async function main() {
       }
       el.innerHTML =
         `<div style="display:flex;align-items:center;gap:10px;justify-content:center">` +
-        `<span style="background:#2563eb;border-radius:6px;padding:2px 8px;font-size:11px;letter-spacing:.06em">AI&nbsp;AGENT</span>` +
+        `<span style="background:#2563eb;border-radius:6px;padding:2px 8px;font-size:11px;letter-spacing:.06em">SCRIPTED&nbsp;DEMO</span>` +
         `<span style="font-size:16px;font-weight:600">${title}</span></div>` +
         (sub ? `<div style="margin-top:4px;font-size:13px;color:#d1d5db">${sub}</div>` : '');
     };
@@ -370,7 +372,7 @@ async function main() {
   }
 
   // -- arrange the buses into the canonical WSCC 9-bus one-line shape -------
-  // Auto-layout drops new buses in a grid; the agent drags each one into the
+  // Auto-layout drops new buses in a grid; the script drags each one into the
   // textbook arrangement (gen buses 2/3 at the top corners, the 230 kV chain
   // 7-8-9 across the middle, 5/6 below, 4 → 1 down the centre). Real node
   // drags persist via the same path a user's drag uses.
