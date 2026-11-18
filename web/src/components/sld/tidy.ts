@@ -39,12 +39,20 @@
  *   column that goes on under it reads as the same line from further off.
  * - A bar is not drawn out to a tap past its tip to within `BAR_GAP` of the
  *   bar of another bus: the two would read as one bar with a break in it.
+ *   The other bar is taken as the routes made before this one have drawn it
+ *   out, so two buses that both draw their bars out towards each other keep
+ *   the gap too.
  *
- * Those two rules are prices and not walls (`THROUGH_COST`, more than any way
- * round that a diagram has room for): a branch that has no other way takes
- * the fault, which beats a line drawn from tap to tap over whatever stands
- * between. The overlap checker then finds it, and a plan with such a fault
- * is refused (`tidyPlan.ts`).
+ * The first of those rules is a price and not a wall (`THROUGH_COST`, more
+ * than any way round that a diagram has room for): a branch that has no
+ * other way takes the fault, which beats a line drawn from tap to tap over
+ * whatever stands between. The second is a wall for every search but the
+ * one that is made when the first found no way (`routeClear`): a price is
+ * no help to a search that takes the first way it finds, which is what the
+ * routes that come last in a crowd are given, and a few more bends round the
+ * bar are better than two bars that read as one. The overlap checker finds
+ * a fault that is taken, and a plan with such a fault is refused
+ * (`tidyPlan.ts`).
  * - It keeps clear of every generator, load and shunt, of the line of a bar
  *   it is not connected to, of the label of every bus but its own two
  *   (which it only passes on its way out of the south face), and of the
@@ -144,7 +152,8 @@ export const CROSS_COST = 120;
 /**
  * What a bend, or a tap, costs that would read as one line with another
  * across a bar (`THROUGH_REACH`, `TIP_THROUGH_REACH`), or that draws a bar
- * out to within `BAR_GAP` of another, as a length of route: more than any
+ * out to within `BAR_GAP` of another (only where the search is let take
+ * one, `routeClear`), as a length of route: more than any
  * way round it that a diagram has room for, so that it is taken only by a
  * branch that has no other way. A fault is better than a line drawn from tap
  * to tap over whatever stands between. Large enough that the search finds
@@ -1536,6 +1545,8 @@ export function tidyRoutes(
         if (throughSymbol(bus.row * nC + c, node, self)) continue;
         const grows = over > 0 ? growth(bus, x) : [];
         if (avoided === Infinity || grows === null) continue;
+        const closes = over > 0 && closesOnABar(bus, x);
+        if (closes && !barFaults) continue;
         out.push({
           node,
           dir: V,
@@ -1546,7 +1557,7 @@ export function tidyRoutes(
             TAP_BIAS * Math.abs(x - bus.cx) +
             (over > 0 ? OVERHANG_COST + over : 0) +
             (readsThroughTap(bus, x, side) ? THROUGH_COST : 0) +
-            (over > 0 && closesOnABar(bus, x) ? THROUGH_COST : 0) +
+            (closes ? THROUGH_COST : 0) +
             CROSS_COST * occH[node]! +
             avoided,
           over,
@@ -1619,6 +1630,12 @@ export function tidyRoutes(
   let ranOut = false;
   /** Whether the last search looked at every way it could go, where it was told to look, and found none. */
   let noWay = false;
+  /**
+   * Whether a route may take a tap that draws a bar out to within `BAR_GAP`
+   * of another (`closesOnABar`), at the price of `THROUGH_COST`. Not unless
+   * the search for one that does not found no way (`routeClear`).
+   */
+  let barFaults = false;
 
   /** The points a route is drawn through. */
   const pointsOf = (source: Terminal, path: readonly number[], target: Terminal): Point[] => {
@@ -2210,6 +2227,24 @@ export function tidyRoutes(
   }
 
   /**
+   * `routeBetween`, with no tap that draws a bar out to within `BAR_GAP` of
+   * another, and where that looks at every way and finds none, with one at
+   * the price of `THROUGH_COST`. A way a few bends longer is better than two
+   * bars that read as one, and a search that takes the first way it finds
+   * (`anyWay`) takes a priced fault as readily as any other tap: the tap of a
+   * route that comes late in a crowd would be the fault.
+   */
+  const routeClear = (self: Branch, window: number | null, roomy: boolean): Found | null => {
+    barFaults = false;
+    const clear = routeBetween(self, window, roomy);
+    if (clear !== null || !noWay) return clear;
+    barFaults = true;
+    const faulty = routeBetween(self, window, roomy);
+    barFaults = false;
+    return faulty;
+  };
+
+  /**
    * The route of `branch` around everything that is there now: looked for
    * around its two buses first, and across the whole diagram when there is
    * none there (and not when the steps ran out with more to look at there:
@@ -2219,8 +2254,8 @@ export function tidyRoutes(
     // A transformer by a way that has room for its symbol; with no such
     // way, by any way there is, which is still better than none.
     for (const roomy of branch.transformer ? [true, false] : [false]) {
-      const near = routeBetween(branch, SEARCH_WINDOW, roomy);
-      const found = near !== null || !noWay ? near : routeBetween(branch, null, roomy);
+      const near = routeClear(branch, SEARCH_WINDOW, roomy);
+      const found = near !== null || !noWay ? near : routeClear(branch, null, roomy);
       if (found !== null || !noWay) return found;
     }
     return null;
@@ -2284,7 +2319,7 @@ export function tidyRoutes(
     hurryFor = Math.min(LAST_CHANCE_STEPS, lastChance - steps);
     let route: Found | null = null;
     for (const roomy of branch.transformer ? [true, false] : [false]) {
-      route ??= routeBetween(branch, SEARCH_WINDOW, roomy) ?? routeBetween(branch, null, roomy);
+      route ??= routeClear(branch, SEARCH_WINDOW, roomy) ?? routeClear(branch, null, roomy);
     }
     if (route !== null) take(branch, route);
   }

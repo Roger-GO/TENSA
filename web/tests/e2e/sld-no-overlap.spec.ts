@@ -34,6 +34,17 @@
  *   own, Tidy diagram, and the page reloaded -> nothing is drawn over
  *   anything else and the placement is what it was after the reload
  *
+ *   in NPCC, a generator that is put under its bus where a load of that bus
+ *   stands between the two -> it stays where it was dropped, with its connector
+ *   stepped round the load and 6 or more from it, and nothing is drawn over
+ *   anything else, as dropped, after a tidy and after a reload
+ *
+ *   in WECC 179, a gallery case that is added to the workspace first -> as it
+ *   opens, after a tidy, with the values of a power flow and laid out again,
+ *   no two bars read as one (buses 108 and 129 stand level, 10 px apart in the
+ *   automatic layout once) and nothing is drawn over anything else, and every
+ *   machine control is on the symbol of its unit (none is an orphan badge)
+ *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
  *   bar of bus 12 that is drawn out to its tap keeps its gap to bar 13
@@ -442,6 +453,150 @@ for (const { file, generator, load } of [
     }
   });
 }
+
+/**
+ * The device connectors of WECC 179 that do not drop square onto their bar: four shunts, whose
+ * buses are so crowded that the shunt has no place in line with its tap.
+ */
+const WECC_SLANTED = [
+  'stub-shunt-Shunt_11',
+  'stub-shunt-Shunt_13',
+  'stub-shunt-Shunt_14',
+  'stub-shunt-Shunt_3',
+];
+
+test('wecc_full.xlsx: a gallery case of 179 buses is drawn with nothing over anything else, and no two bars read as one, as it opens, tidied, with values and laid out again', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  // WECC is not seeded into a workspace: copy it from the user's ANDES, as the gallery's Add
+  // does. A workspace another run already added it to answers with a conflict, which is the same.
+  const added = await request.post('/api/examples/wecc/add');
+  expect([201, 409]).toContain(added.status());
+  const written: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().includes('/api/workspace/layout')) {
+      written.push(request.url());
+    }
+  });
+
+  // ---- As it opens ------------------------------------------------------------
+  await page.goto('/');
+  await openCase(page, 'wecc_full.xlsx');
+  const opened = await settled(page);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  // `problems` holds the bars to `BAR_GAP` apart (buses 129 and 108 were 10 px apart).
+  expect(problems(opened)).toEqual([]);
+  expect(branchesIntoDevices(opened)).toEqual([]);
+  expect(slantedConnectors(opened.edges)).toEqual(WECC_SLANTED);
+  // Every exciter, governor and stabiliser names a machine or an exciter of the case that the
+  // server lists, so each is on the symbol of its unit and none is left in the gutter.
+  await expect(page.locator('.react-flow__node-controller')).toHaveCount(0);
+  await expect(page.locator('[data-orphan="true"]')).toHaveCount(0);
+
+  // ---- Tidy ---------------------------------------------------------------------
+  await page.getByTestId('sld-tidy').click();
+  await expect(page.getByText('The diagram is already tidy.').last()).toBeVisible();
+  await expect(page.getByTestId('sld-tidy-note')).toHaveText('Already tidy: nothing was changed');
+
+  // ---- With the values of a power flow ------------------------------------------
+  await runPowerFlow(page);
+  const shown = await settled(page);
+  expect(problems(shown)).toEqual([]);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+  expect(await labelProblems(page)).toEqual([]);
+  // Opening a case, tidying a tidy diagram and running a power flow write nothing beside it.
+  expect(written).toEqual([]);
+
+  // ---- Laid out again -----------------------------------------------------------
+  await page.getByTestId('sld-arrange-trigger').click();
+  await page.getByTestId('sld-arrange-tidy-relayout').click();
+  const laidOut = await settled(page);
+  expect(problems(laidOut)).toEqual([]);
+  expect(branchesIntoDevices(laidOut)).toEqual([]);
+  expect(slantedConnectors(laidOut.edges)).toEqual(WECC_SLANTED);
+  expect(await overlapsOnScreen(page)).toEqual([]);
+});
+
+test('npcc.xlsx: a generator put under its bus, behind a load of that bus, stays where it is dropped with its connector stepped round the load, as dropped, tidied and reloaded', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await openCase(page, 'npcc.xlsx');
+  await settled(page);
+  await openCopy(page, `no-overlap-npcc-behind-${Date.now()}`);
+  await settled(page);
+  await runPowerFlow(page);
+  const opened = await settled(page);
+  expect(problems(opened)).toEqual([]);
+
+  // Generator 31 hangs from bus 86 over its bar; the load PQ_44 of the same bus hangs under it.
+  // The generator is put beside the east tip of the bar first, then under the bar, in the column
+  // of the load and below it: straight up to the bar, its connector would run through the load.
+  const bus = opened.nodes['86']!;
+  const load = opened.nodes['load-PQ_44']!;
+  const unit = opened.nodes['generator-31']!;
+  expect(load.y).toBeGreaterThan(bus.y);
+  await dragInDiagram(
+    page,
+    'generator-31',
+    bus.x + (bus.barLeft ?? 0) + (bus.barLength ?? bus.width) + 50 - unit.x,
+    bus.y + 3 - unit.height / 2 - unit.y,
+  );
+  expect(problems(await settled(page))).toEqual([]);
+  const beside = (await drawing(page)).nodes['generator-31']!;
+  const to = {
+    x: load.x + load.width / 2 - unit.width / 2 - 2,
+    y: load.y + load.height + 28,
+  };
+  await dragInDiagram(page, 'generator-31', to.x - beside.x, to.y - beside.y);
+  const dropped = await settled(page);
+  expect(await overlapsOnScreen(page), 'with the generator behind the load').toEqual([]);
+
+  // It stays where it was dropped (to the pointer, which at the zoom this diagram is fitted at
+  // is a few units), below the load, and its connector steps round the load: out of the face that
+  // looks at the bar, across, and square onto the bar beside the load. That is the one thing
+  // `problems` says of it (a connector has one bend or none, but for one that goes round a
+  // symbol).
+  const placed = dropped.nodes['generator-31']!;
+  expect(Math.abs(placed.x - to.x)).toBeLessThan(12);
+  expect(Math.abs(placed.y - to.y)).toBeLessThan(12);
+  expect(placed.y).toBeGreaterThan(load.y + load.height);
+  expect(problems(dropped)).toEqual(['stub-generator-31: more than one bend']);
+  const connector = dropped.edges['stub-generator-31']!.points;
+  expect(connector).toHaveLength(4);
+  const [, , across, landing] = connector as [
+    [number, number],
+    [number, number],
+    [number, number],
+    [number, number],
+  ];
+  expect(across[1]).toBeGreaterThan(load.y + load.height);
+  expect(landing[0]).toBe(across[0]);
+  // 6 or more from the box of the load (`SYMBOL_CLEAR`, less the pixel of slack of the reading).
+  const off = Math.max(load.x - landing[0], landing[0] - (load.x + load.width));
+  expect(off).toBeGreaterThanOrEqual(6 - NEAR);
+
+  await page.getByTestId('sld-tidy').click();
+  const tidy = await settled(page);
+  expect(problems(tidy)).toEqual(['stub-generator-31: more than one bend']);
+  expect(await overlapsOnScreen(page), 'after the tidy').toEqual([]);
+  expect(tidy.edges['stub-generator-31']!.points).toEqual(connector);
+
+  // Reloaded, it is drawn as it was left.
+  await page.reload();
+  await expect(page.locator('.react-flow__node').first()).toBeVisible({ timeout: 90_000 });
+  const again = await settled(page);
+  expect(await overlapsOnScreen(page), 'after the reload').toEqual([]);
+  for (const [id, node] of Object.entries(tidy.nodes)) {
+    expect({ x: again.nodes[id]?.x, y: again.nodes[id]?.y }, id).toEqual({ x: node.x, y: node.y });
+  }
+  for (const [id, edge] of Object.entries(tidy.edges)) {
+    expect(again.edges[id]?.points, id).toEqual(edge.points);
+  }
+});
 
 test('kundur_full.xlsx: a load pulled down beside bars 12 and 13 stays where it is dropped, and the bars keep their gap', async ({
   page,
