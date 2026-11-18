@@ -1,6 +1,6 @@
 # Example case verification
 
-TENSA 0.5.0 with ANDES 2.0.0, Python 3.12.3, Linux-6.8.0-107-generic-x86_64-with-glibc2.39, 2026-11-18T17:29:43+00:00.
+TENSA 0.6.0 with ANDES 2.0.0, Python 3.12.3, Linux-6.8.0-107-generic-x86_64-with-glibc2.39, 2026-11-18T20:44:20+00:00.
 
 Each case below was added from the catalog, opened and run through the HTTP API of a real server, and each check says what it was compared with and how close it had to be. The page is written by `python scripts/verify_example_cases.py --markdown docs/examples-verification.md`, which runs every case of the catalog that has a file.
 
@@ -8,27 +8,27 @@ Each case below was added from the catalog, opened and run through the HTTP API 
 
 | Case | Result | Checks | Seconds |
 | --- | --- | --- | --- |
-| ieee14 | pass | 19 (0 failed) | 7.6 |
-| kundur | pass | 21 (0 failed) | 5.69 |
-| wscc9 | pass | 25 (0 failed) | 6.13 |
-| ieee39 | pass | 22 (0 failed) | 8.62 |
-| npcc | pass | 25 (0 failed) | 10.74 |
-| wecc | pass | 25 (0 failed) | 13.79 |
-| kundur_pss | pass | 24 (0 failed) | 10.11 |
-| ieee14_fault | pass | 19 (0 failed) | 8.28 |
-| pjm5bus | pass | 24 (0 failed) | 5.63 |
-| ieee14_solar | pass | 20 (0 failed) | 14.93 |
+| ieee14 | pass | 19 (0 failed) | 7.83 |
+| kundur | pass | 21 (0 failed) | 5.67 |
+| wscc9 | pass | 25 (0 failed) | 6.14 |
+| ieee39 | pass | 22 (0 failed) | 8.63 |
+| npcc | pass | 25 (0 failed) | 11.12 |
+| wecc | pass | 25 (0 failed) | 13.86 |
+| kundur_pss | pass | 24 (0 failed) | 9.66 |
+| ieee14_fault | pass | 19 (0 failed) | 8.32 |
+| pjm5bus | pass | 24 (0 failed) | 5.11 |
+| ieee14_solar | pass | 20 (0 failed) | 14.77 |
 | ieee14_wt3 | pass | 22 (0 failed) | 16.89 |
 | rts24 | pass | 7 (0 failed) | 1.27 |
-| ieee30 | pass | 7 (0 failed) | 1.27 |
-| ieee57 | pass | 7 (0 failed) | 1.29 |
-| rts_gmlc | pass | 14 (0 failed) | 2.63 |
-| pegase89 | pass | 10 (0 failed) | 1.32 |
-| ieee118 | pass | 10 (0 failed) | 1.35 |
-| activsg200 | pass | 14 (0 failed) | 2.71 |
-| ieee300 | pass | 9 (0 failed) | 1.41 |
-| pegase1354 | pass | 7 (0 failed) | 2.06 |
-| activsg2000 | pass | 14 (0 failed) | 4.87 |
+| ieee30 | pass | 7 (0 failed) | 1.26 |
+| ieee57 | pass | 7 (0 failed) | 1.28 |
+| rts_gmlc | pass | 14 (0 failed) | 2.62 |
+| pegase89 | pass | 10 (0 failed) | 1.3 |
+| ieee118 | pass | 10 (0 failed) | 1.34 |
+| activsg200 | pass | 14 (0 failed) | 2.66 |
+| ieee300 | pass | 9 (0 failed) | 1.39 |
+| pegase1354 | pass | 7 (0 failed) | 2.02 |
+| activsg2000 | pass | 14 (0 failed) | 4.7 |
 
 ## ieee14: IEEE 14-bus, with machines and controls
 

@@ -4,6 +4,33 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-18
+
+### Highlights
+
+**Example cases**
+
+- A catalog of 21 example cases, from the 9-bus WSCC system to the 2,000-bus Texas grid, each with where its file comes from, how to cite it (as text and as BibTeX) and the licence it is under, and 11 more entries that only link to data TENSA cannot ship. An empty workspace now starts with five: IEEE 14, Kundur, WSCC 9-bus, IEEE 39 and NPCC 140-bus.
+- **Example cases** in the app, and `tensa examples list`, `add` and `cite` on the command line, add a case to the workspace and show its references. The API and the MCP server offer the same.
+- The WSCC 9-bus case has its three machines, built from the data of Anderson and Fouad's book. ANDES's own file of the network has none, and three of its line reactances are not the book's.
+- Every case with a file is run through a real server and checked, against an independent reference where one exists. The report is a page of the documentation.
+
+**Diagram**
+
+- A case of more than 400 buses opens without its diagram until you ask for it, and a large diagram is drawn in about half the time.
+- Two bars on one row keep their distance when lines draw both out, and the values of a generator stand clear of its control chain.
+
+**Analysis and reliability**
+
+- A time-domain run to its end time is no longer reported as not converged because of a rounding error in the last step (IEEE 39 and the WECC case ran into it), and a system of machines with no damping reports its eigenvalues on the imaginary axis.
+- A session's worker prints no warning for the files its libraries read as a matter of course.
+
+**Project and community**
+
+- A support policy, a Code of Conduct, private reporting of vulnerabilities, a statement of who TENSA is for, and a page on how to cite it. The licence is written as the SPDX expression `GPL-3.0-or-later` in the package metadata and everywhere else.
+- The documentation was run against a real server and corrected where it was wrong, and the contingency screening study can be found and run from a fresh install.
+- The example Python client is `TensaClient` and the environment variables are `TENSA_*`; the old names still work. The MCP server reports TENSA's own version.
+
 ### Added
 - A catalog of example cases, and a way to add any of them to a workspace. `server/src/tensa/examples/catalog.json` is the one record of every case: what it is for, its size, the analyses it supports (power flow, time domain, eigenvalues), where its file comes from (the user's own ANDES, a file bundled with TENSA, or only links), the publications to cite for the system and for the dataset, the licence and what it asks for, every change made to the data, caveats, and how the results were checked where that has been done. It is validated when it is loaded, so a path that leaves its folder, a file name that Windows or macOS would not keep, two cases that would write one file, or a first-run case with no file is refused, and `NOTICE.md` beside it carries the attribution of every source. It holds every case the app offers, each with its source, licence and citations (the entries below say which), and the first start seeds exactly the cases it marks as first-run. `GET /api/examples` lists the catalog with whether each case is already in the workspace and whether its file can be found. `POST /api/examples/{id}/add` copies a case into the workspace: 404 for an unknown id or a file the installed ANDES does not hold, 409 when a file is already there unless `overwrite=true` (nothing is written then, so a case is never half added), 400 for an entry that is only links. `tensa examples list [--json]`, `tensa examples add <id>... [--force]` and `tensa examples cite <id> [--bibtex]` do the same from the command line, and the MCP tools `list_examples` and `add_example` for an assistant. Adding a case writes `EXAMPLE-SOURCES.md` in the workspace root with the source, citations and licence of everything added. It is not a case file, so the file list does not show it and it does not stop an empty workspace being seeded. An ANDES case is copied from the ANDES installed on the machine, and when that file is not the one the catalog was written against, as with another ANDES release, it is added anyway with a warning. The documentation has a page of the cases, `docs/examples.md`, written from the catalog by `scripts/gen_examples_page.py` (a test fails when it is out of date), and the wheel and the sdist carry the catalog, the notice and every case file the catalog bundles, which `scripts/check_dist.py` checks.
 - An Example cases dialog in the web app, for the catalog above. **Example cases** is a button in the Workspace part of the Project tab beside **Add files**, an item of the Workspace menu and a command in the command palette, and the empty pages offer it too (the diagram with no case, an empty workspace, the palette's Open case page with no files). The cases are grouped as dynamic and steady-state, and each card says its size, the analyses it supports, what it is for, and where it comes from, with its source and licence as links that open in a new tab. **Add to workspace** copies the case in (the card then says **Added**, and the keyboard focus goes to its **Open** button), **Open** loads it and closes the dialog, and **Cite** shows the references and copies them as text or as BibTeX, saying which beside the buttons. A case that is greyed out says why (the installed ANDES lacks it, there is no session yet, another case is loading), a warning about the file, a conflict or a refusal from the server is said in the card, and an entry that is only links shows an **Open source page** link. A line under the filter says how many cases are in the workspace already (a new workspace starts with the default set, so those cards open as **Added**), what Add and Open do, and that a case whose file is deleted from the workspace folder offers Add again. A filter narrows the cards by name, size or analysis and keeps what was opened in a card it hides, the dialog opens with the cursor in it, and Escape gives the keyboard back to what opened the dialog. The two example routes are tagged for the dialog in the GUI-parity ledger, which no longer lists them as deferred.
@@ -619,6 +646,7 @@ First public open-source release.
 ### Changed
 - Removed the per-launch token auth system. The server now trusts the local OS user, binds to loopback by default, and keeps Host/Origin allow-list checks. Network exposure is explicit (`--bind`) and documented in SECURITY.md.
 
+[0.6.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.6.0
 [0.5.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Roger-GO/TENSA/releases/tag/v0.3.0
