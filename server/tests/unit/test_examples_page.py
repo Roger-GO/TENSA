@@ -84,7 +84,30 @@ def test_the_page_is_in_the_navigation() -> None:
     nav = REPO_ROOT / "mkdocs.yml"
     if not nav.is_file():
         pytest.skip("mkdocs.yml is not next to the tests")
-    assert "examples.md" in json.dumps(yaml.safe_load(nav.read_text(encoding="utf-8"))["nav"])
+    pages = json.dumps(yaml.safe_load(nav.read_text(encoding="utf-8"))["nav"])
+    assert "examples.md" in pages
+    assert "examples-verification.md" in pages
+
+
+REPORT = REPO_ROOT / "docs" / "examples-verification.md"
+
+
+def test_the_verification_report_has_a_section_for_each_case_with_a_file_and_all_passed() -> None:
+    """The report is what ``scripts/verify_example_cases.py`` wrote on the last full run. A case
+    added to the catalog without the harness being run again is missing from it, and a report of a
+    run that failed does not stand as the record of the cases."""
+    if not REPORT.is_file():
+        pytest.skip("docs/examples-verification.md is not next to the tests")
+    page = REPORT.read_text(encoding="utf-8")
+    with_a_file = [e for e in load_catalog().examples if e.has_file]
+    assert with_a_file
+    for example in with_a_file:
+        assert f"\n## {example.id}: " in page, f"{example.id} is not in the verification report"
+        assert f"| {example.id} | pass |" in page
+    assert "**All checks passed**" in page
+    assert f"{len(with_a_file)} cases" in page
+    assert "FAIL" not in page
+    assert "—" not in page and "–" not in page
 
 
 # ---- the renderer, on catalogs the shipped one does not yet have --------------------------

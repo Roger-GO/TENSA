@@ -54,6 +54,7 @@ nav:
   - Concepts: concepts.md
   - Using TENSA:
       - Example cases: examples.md
+      - Example case verification: examples-verification.md
       - API guide: api.md
       - Agents and MCP: agents.md
   - Reference:

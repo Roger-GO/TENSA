@@ -1417,6 +1417,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"TENSA {report['tensa']} with ANDES {report['andes']}, Python {report['python']}, "
         f"{report['platform']}, {report['generated']}.",
         "",
+        "Each case below was added from the catalog, opened and run through the HTTP API of a "
+        "real server, and each check says what it was compared with and how close it had to "
+        "be. The page is written by `python scripts/verify_example_cases.py --markdown "
+        "docs/examples-verification.md`, which runs every case of the catalog that has a file.",
+        "",
         f"**{'All checks passed' if report['passed'] else 'There are failed checks'}**: "
         f"{counts['cases']} cases, {counts['checks']} checks, {counts['checks_failed']} failed, "
         f"{counts['cases_failed']} cases not passing. {counts['against_a_reference']} checks "

@@ -7,6 +7,8 @@ data, what to be careful about and how its results were checked.
 
 This page is written from the catalog (`server/src/tensa/examples/catalog.json`) by
 `scripts/gen_examples_page.py`, so it says what the program says. Do not edit it by hand.
+Every check behind the "Verification" of a case, with what it was compared with and how close
+it had to be, is in the [verification report](examples-verification.md).
 
 ## Adding a case
 

@@ -321,6 +321,8 @@ def test_the_report_counts_what_is_a_reference_a_baseline_and_a_sanity_check(
     # A pipe in a name does not break the table, and no long dash is written.
     assert "a \\| b" in page and "Demo \\| case" in page
     assert "—" not in page and "–" not in page
+    # The page says how it is written, so a reader of the docs can make it again.
+    assert "scripts/verify_example_cases.py --markdown docs/examples-verification.md" in page
     assert json.loads(json.dumps(report))["cases"][1]["error"] == "boom"
 
 
