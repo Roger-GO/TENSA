@@ -10,7 +10,9 @@ source, the citations and the licence of that case.
 ## ANDES example cases
 
 IEEE 14-bus with machines and controls, Kundur two-area system, IEEE 39-bus New England
-system, NPCC 140-bus system and WECC 179-bus system.
+system, NPCC 140-bus system, WECC 179-bus system, and three smaller cases of the gallery:
+the Kundur system with a stabiliser on one generator, the IEEE 14-bus system with a fault
+built in, and the PJM 5-bus system with classical machines and a line trip.
 
 These files are part of ANDES, not of TENSA. TENSA does not redistribute them: it copies
 them from the ANDES installed on the user's machine when a case is added. ANDES is
@@ -31,11 +33,16 @@ Washington; the two-area system of P. Kundur, "Power System Stability and Contro
 "A practical method for the direct analysis of transient stability" (IEEE Transactions on
 Power Apparatus and Systems, 1979); the NPCC 48-machine, 140-bus system, a test bed of CURENT
 that is described as converted from the Power System Toolbox (J. H. Chow and K. W. Cheung,
-IEEE Transactions on Power Systems, 1992); and the WECC 179-bus, 29-machine system, which the
-test cases library of S. Maslennikov et al. (IEEE PES General Meeting, 2016) is built on.
-That library's page asks that a publication using its material cite that paper. The NPCC
-and WECC files are ANDES's own versions of those systems, and the catalog says what was and
-was not compared with the publications.
+IEEE Transactions on Power Systems, 1992); the WECC 179-bus, 29-machine system, which the
+test cases library of S. Maslennikov et al. (IEEE PES General Meeting, 2016) is built on;
+and the PJM 5-bus system of F. Li and R. Bo, "Small test systems for power system economic
+studies" (IEEE PES General Meeting, 2010), which MATPOWER distributes as its `case5` file,
+whose header says it is distributed with permission. The library of Maslennikov et al. asks
+on its page that a publication using its material cite that paper. The NPCC and WECC files are ANDES's own
+versions of those systems. The PJM 5-bus file puts machines and governors on the network of
+`case5`, and ANDES gives no source for their data. The Kundur stabiliser and IEEE 14-bus
+fault files are the Kundur and IEEE 14-bus files with one device added each. The catalog
+says what was and was not compared with the publications.
 
 ## Cases written by TENSA
 

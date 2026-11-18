@@ -56,6 +56,9 @@ file in its place once you have confirmed it, since that overwrites your copy.
 | [IEEE 39-bus New England system, with machines, controls and stabilisers](#ieee39) | 39 buses, 10 generators | Power flow, Time domain, Eigenvalues | yes | Your ANDES install |
 | [NPCC 140-bus, 48-machine system](#npcc) | 140 buses, 48 generators | Power flow, Time domain, Eigenvalues | yes | Your ANDES install |
 | [WECC 179-bus, 29-machine system](#wecc) | 179 buses, 29 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
+| [Kundur two-area system with a stabiliser on one generator](#kundur_pss) | 10 buses, 4 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
+| [IEEE 14-bus with a fault built in](#ieee14_fault) | 14 buses, 5 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
+| [PJM 5-bus system with classical machines and a line trip](#pjm5bus) | 5 buses, 4 generators | Power flow, Time domain, Eigenvalues | no | Your ANDES install |
 
 ### IEEE 14-bus, with machines and controls { #ieee14 }
 
@@ -627,3 +630,331 @@ BibTeX:
 | Least damped mode between 0.4 and 0.8 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.0212344, expected 0.0212344, difference 4.6e-11 | yes |
 | Least damped mode between 0.8 and 1.2 Hz: frequency | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 0.960922, expected 0.960922, difference 3e-09 Hz | yes |
 | Least damped mode between 0.8 and 1.2 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.0249476, expected 0.0249476, difference 3.53e-10 | yes |
+
+### Kundur two-area system with a stabiliser on one generator { #kundur_pss }
+
+The modified Kundur two-area system of the Kundur case with a power system stabiliser model (IEEEST) on the exciter of generator 1: a case for putting a stabiliser on the diagram and seeing what it does to the modes. As the file sets it, the stabiliser leaves the damping of the inter-area mode where it was.
+
+- **Id:** `kundur_pss`
+- **Kind:** Dynamic
+- **Size:** 10 buses, 4 generators
+- **Analyses:** Power flow, Time domain, Eigenvalues
+- **First run:** no
+- **File:** `kundur_ieeest.xlsx`
+
+**Source.** Copied from your own ANDES installation (`andes/cases/kundur/kundur_ieeest.xlsx`); TENSA does not redistribute it. The catalog recorded the file as of ANDES 2.0.0, with SHA-256 `d5c144218747e37b80b957d00e5320ca0c07b7520e36e30194ef0381faedab2e`, and warns when the file on your machine is a different one. The recorded file is from <https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/kundur/kundur_ieeest.xlsx>, retrieved 2026-11-17.
+
+**Licence.** [GPL-3.0-or-later](https://github.com/CURENT/andes/blob/v2.0.0/LICENSE). ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES).
+
+**Citations**
+
+- P. Kundur, Power System Stability and Control. New York: McGraw-Hill, 1994, ISBN 0-07-035958-X.
+- M. Klein, G. J. Rogers and P. Kundur, "A fundamental study of inter-area oscillations in power systems," IEEE Transactions on Power Systems, vol. 6, no. 3, pp. 914-921, 1991, doi:10.1109/59.119229. [DOI](https://doi.org/10.1109/59.119229)
+- CRESYM Colib, Kundur two-area system (test case page: the data of the book's system, with a load flow and the small-signal examples), https://colib.net/testCases/kundur_two_area_system/index.html (accessed 2026-11-17). Used here only to compare the file with the book's data. [Link](https://colib.net/testCases/kundur_two_area_system/index.html)
+- ANDES, andes/models/pss/ieeest.py, release 2.0.0: the IEEEST power system stabiliser model that the case's IEEEST_1 is an instance of, with its input signal selection, two second-order filters, two lead-lag blocks, gain, washout and output limiter (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@book{kundur1994,
+  author    = {Kundur, Prabha},
+  title     = {Power System Stability and Control},
+  publisher = {McGraw-Hill},
+  address   = {New York},
+  year      = {1994},
+  isbn      = {007035958X}
+}
+```
+
+```bibtex
+@article{klein1991fundamental,
+  author  = {Klein, M. and Rogers, G. J. and Kundur, P.},
+  title   = {A fundamental study of inter-area oscillations in power systems},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {6},
+  number  = {3},
+  pages   = {914--921},
+  year    = {1991},
+  doi     = {10.1109/59.119229}
+}
+```
+
+```bibtex
+@misc{colib_kundur_two_area,
+  title        = {Kundur two-area system},
+  howpublished = {CRESYM Colib, test cases},
+  url          = {https://colib.net/testCases/kundur_two_area_system/index.html},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@misc{andes_ieeest,
+  title        = {{ANDES} model {IEEEST}: power system stabiliser},
+  howpublished = {ANDES release 2.0.0, andes/models/pss/ieeest.py},
+  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/models/pss/ieeest.py},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- This is the Kundur case of this catalog with one model added, so what that entry says the file is and is not holds here too: it is ANDES's modified version of the book's system (10 buses where the book has 11), and its results must not be compared with the book's. The model added is an IEEEST stabiliser, IEEEST_1, on the exciter of generator 1 (EXDC2_1), with the rotor speed as its input. Every other sheet holds the data of the Kundur case's file, apart from the sixteenth significant digit of some bus angles.
+- The stabiliser does not add damping. Every parameter of IEEEST_1 that sets its dynamics is 1 (the filter constants A1 to A6, the lead-lag and washout constants T1 to T6 and the gain KS), which makes it a second-order low-pass filter with its corner at 1 rad/s followed by a washout. At the frequency of the inter-area mode (0.647 Hz) its gain is 0.06 and it lags the speed by about 150 degrees, where a stabiliser leads it. The inter-area mode has a damping ratio of 0.03432 in the eigenvalue analysis with it and 0.03431 without it (the Kundur case), and the ring-down of a 2% load step gives the damping of that oscillation as 0.0339 in both. The case shows the model and its place on the diagram; it is not a tuned stabiliser, and it is no example of a stabiliser improving a case.
+- The stabiliser adds two oscillatory modes to the eigenvalue analysis: a pair at -0.5 +- j0.866 per second (0.138 Hz, damping ratio 0.5), the roots of the denominator of its second filter, which the rest of the system does not move, and one at 0.145 Hz (damping ratio 0.42). It also moves the two slow modes the Kundur case has at 0.116 and 0.181 Hz to 0.110 and 0.187 Hz.
+- One event is built into the file: Line_8 is switched out at 2 s.
+- The file gives the generators at buses 2, 12 and 11 one value for both of their reactive limits (300, 550 and -100 MVAr), so a power flow, which does not enforce reactive limits unless asked to (and pandapower's reference does not either), leaves all three outside them and the Violations count reads 3 once it has run. The solution is that of the Kundur case, whose file holds the same limits.
+- The eigenvalues the book gives for its system could not be read from any source opened for this entry, and they belong to another network and other exciters in any case, so no published mode is compared.
+
+**Verification.** Compared with independent references: the power flow agrees with pandapower's solution of the same network (the Kundur case's) to 2.3e-7 pu and 4.4e-5 degrees, and the eigenvalue analysis has the pole pair of the stabiliser's second filter where the roots of its denominator put it, computed from the file's parameters with numpy (0.13783 Hz, damping ratio 0.5, to 3e-7 Hz). Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution (largest change 3.5e-6), and the ring-down of a 2% load step has the frequencies and damping ratios of the eigenvalues, within 0.016 Hz and 0.009. The effect of the stabiliser was measured in the time domain, against the case without it: the damping ratio of the inter-area oscillation in the same ring-down is 0.03389 with the stabiliser and 0.03389 without it (the Kundur case), a change under 1e-4 where the check allows 0.005. There is no improvement to verify, and the entry does not claim one. Not verified: the Line_8 trip run and the mode values are TENSA's own earlier output, kept as regression baselines to catch a change. No published result exists for this file.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Ring-down of a small disturbance has the frequency and damping of eigenvalues | the ring-down of a time-domain run | matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_1, run to 20 s | 0.05 Hz and 0.05 in damping ratio | 0.649 Hz, damping 0.034 is eigenvalue 0.647 Hz, 0.034 (0.002 Hz and 0.000 apart); 1.132 Hz, damping 0.098 is eigenvalue 1.141 Hz, 0.089 (0.010 Hz and 0.009 apart); 1.124 Hz, damping 0.082 is eigenvalue 1.108 Hz, 0.087 (0.016 Hz and 0.005 apart) | yes |
+| Damping of the mode between 0.3 and 0.9 Hz against kundur | the ring-down of a time-domain run | matrix pencil poles of the machines' speeds in the time-domain run of kundur after the same small disturbance, read the same way | between -0.005 and +0.005 in damping ratio | 0.649 Hz with damping 0.03389 here, 0.649 Hz with 0.03389 in kundur: a change of +0.00000 | yes |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_ieeest.xlsx; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 2.33e-07 pu (bus 7) over 10 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_ieeest.xlsx; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 4.41e-05 deg (bus 8) over 10 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_ieeest.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 92.8029, expected 92.8024, difference 0.000533 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for kundur_ieeest.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 726.803, expected 726.802, difference 0.000526 MW | yes |
+| Largest rotor angle spread in the disturbance run (Line_8 trip) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.05 deg | measured 30.7113, expected 30.7113, difference 4.37e-07 deg | yes |
+| Lowest bus voltage in the disturbance run (Line_8 trip) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.0001 pu | measured 0.871602, expected 0.871602, difference 3.73e-09 pu | yes |
+| Lowest machine frequency in the disturbance run (Line_8 trip) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 59.9992, expected 59.9992, difference 5.04e-08 Hz | yes |
+| Inter-area mode between 0.3 and 0.9 Hz: frequency | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 0.646885, expected 0.646885, difference 1.65e-10 Hz | yes |
+| Inter-area mode between 0.3 and 0.9 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.0343232, expected 0.0343232, difference 9.3e-11 | yes |
+| Least damped local mode between 0.9 and 1.5 Hz: frequency | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 1.10779, expected 1.10779, difference 1.91e-08 Hz | yes |
+| Least damped local mode between 0.9 and 1.5 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.086558, expected 0.086558, difference 3.15e-10 | yes |
+| Pole of the stabiliser's second filter: frequency | an independent solver | the roots of 1 + A3 s + A4 s^2, the denominator of the stabiliser's second input filter, with A3 = A4 = 1 from the case file: s = -1/2 +- j sqrt(3)/2 per second (numpy.roots, nothing of TENSA or ANDES); the filter's numerator is the same polynomial (A5 = A3, A6 = A4), so no signal passes through these states and the loop does not move them | 0.0001 Hz | measured 0.137832, expected 0.137832, difference 2.24e-07 Hz | yes |
+| Pole of the stabiliser's second filter: damping ratio | an independent solver | the roots of 1 + A3 s + A4 s^2, the denominator of the stabiliser's second input filter, with A3 = A4 = 1 from the case file: s = -1/2 +- j sqrt(3)/2 per second (numpy.roots, nothing of TENSA or ANDES); the filter's numerator is the same polynomial (A5 = A3, A6 = A4), so no signal passes through these states and the loop does not move them | 0.0001 | measured 0.5, expected 0.5, difference 5.55e-16 | yes |
+
+### IEEE 14-bus with a fault built in { #ieee14_fault }
+
+The IEEE 14-bus case with machines and controls (the data of the IEEE 14-bus entry) with a three-phase fault at bus 9 from 1.0 s to 1.1 s already in the file, so that a time-domain run shows a disturbance as soon as the case is open.
+
+- **Id:** `ieee14_fault`
+- **Kind:** Dynamic
+- **Size:** 14 buses, 5 generators
+- **Analyses:** Power flow, Time domain, Eigenvalues
+- **First run:** no
+- **File:** `ieee14_fault.xlsx`
+
+**Source.** Copied from your own ANDES installation (`andes/cases/ieee14/ieee14_fault.xlsx`); TENSA does not redistribute it. The catalog recorded the file as of ANDES 2.0.0, with SHA-256 `1a23244877af3b22ac9852ebb94dc6a40253d32b852413b0b9d986f40bf8d8b6`, and warns when the file on your machine is a different one. The recorded file is from <https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/ieee14_fault.xlsx>, retrieved 2026-11-17.
+
+**Licence.** [GPL-3.0-or-later](https://github.com/CURENT/andes/blob/v2.0.0/LICENSE). ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES).
+
+**Citations**
+
+- IEEE 14 Bus Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm (accessed 2026-11-17). [Link](https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm)
+- ANDES, andes/cases/ieee14/README.md, release 2.0.0: the power flow data of ieee14.raw is by J. Conto and the dynamic data by H. Cui, both written for ANDES (https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md)
+- ANDES, andes/models/timer.py, release 2.0.0: the Fault model, a three-phase-to-ground fault applied at a bus at one time and cleared at another through a small reactance and resistance to ground, which the case's Fault_1 is an instance of (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py, accessed 2026-11-17). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca_ieee14,
+  title        = {{IEEE} 14 Bus Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/pf14/pg_tca14bus.htm},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@misc{andes_ieee14_readme,
+  title        = {{ANDES} cases: {IEEE} 14-bus systems (README)},
+  howpublished = {ANDES release 2.0.0, andes/cases/ieee14/README.md},
+  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/ieee14/README.md},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@misc{andes_fault,
+  title        = {{ANDES} model {Fault}: three-phase-to-ground fault},
+  howpublished = {ANDES release 2.0.0, andes/models/timer.py},
+  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/models/timer.py},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The dynamic data (round-rotor machines, a TGOV1 governor on each, an EXST1 exciter on one machine and an ESST3A on each of the other four) was written for ANDES by H. Cui, according to the ANDES cases README, and is not published by the IEEE.
+- This is not the IEEE 14-bus case as the University of Washington archive distributes it. The line and transformer reactances, the line charging and the shunt at bus 9 are the archive's. The rest was changed in the PSS/E version prepared by J. Conto: the loads at buses 3, 4, 6 and 14 (bus 3 takes 50 MW and 25 MVAr where the archive has 94.2 MW and 19.0 MVAr), a 15 MVAr shunt at bus 14, the dispatch (generators at buses 2, 3, 6 and 8 deliver 40, 40, 30 and 35 MW, where the archive has power at buses 1 and 2 only), the voltage set-points (1.03 pu at buses 1, 2, 6 and 8 and 1.01 at bus 3, where the archive has 1.060, 1.045, 1.010, 1.070 and 1.090), the reactive limits, and the ratio of the four transformers (0.99677 on each, where the archive has 0.978, 0.969, 0.932 and none).
+- The power flow solution therefore differs from the one the archive stores, by up to 0.06 pu in voltage and 11.8 degrees in angle (bus 8). Do not compare results of this file with published IEEE 14-bus results.
+- This is the IEEE 14-bus case of this catalog with one device added, Fault_1: a three-phase fault at bus 9 from 1.0 s to 1.1 s, through ANDES's default fault reactance of 1e-4 per unit and no resistance. Every other sheet of the file is the same as in that case's file, so the power flow, the eigenvalues and the notes above hold for both. The fault is cleared at 1.1 s with no line tripped, so the network after it is the network before it.
+- A power flow, which does not enforce reactive limits unless asked to (and pandapower's reference does not either), leaves the generators at buses BUS2 and BUS6 above their reactive limits (30.4 against 15 MVAr and 21.0 against 10 MVAr), so the Violations count reads 2 once it has run. The IEEE 14-bus case of this catalog has the same two.
+- The fault changes nothing in a power flow or an eigenvalue analysis. In a time-domain run it takes the lowest bus voltage to 0.0004 pu and the rotor angle spread from its initial 50.2 degrees to 60.2 degrees at most; the spread is back at 50.6 degrees at 10 s, and no machine loses synchronism.
+
+**Verification.** Compared with an independent reference: the power flow (bus voltages, angles, losses and the slack's power) agrees with pandapower's solution of the same network to 5.5e-9 pu and 8.5e-7 degrees. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution, and the ring-down of a 2% load step has the frequencies and damping ratios of the eigenvalues, within 0.025 Hz and 0.027. Not verified: the fault run and the mode values are TENSA's own earlier output, kept as regression baselines to catch a change. They are equal, to the eight digits kept, to the baselines of the IEEE 14-bus case, whose run adds the same fault through the API, so the fault in the file is the fault the entry says. No published result exists for this data.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Ring-down of a small disturbance has the frequency and damping of eigenvalues | the ring-down of a time-domain run | matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load PQ_2, run to 20 s | 0.05 Hz and 0.05 in damping ratio | 1.012 Hz, damping 0.248 is eigenvalue 1.019 Hz, 0.275 (0.006 Hz and 0.027 apart); 0.952 Hz, damping 0.229 is eigenvalue 0.949 Hz, 0.245 (0.004 Hz and 0.015 apart); 1.078 Hz, damping 0.270 is eigenvalue 1.053 Hz, 0.261 (0.025 Hz and 0.009 apart) | yes |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_fault.xlsx; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 5.51e-09 pu (bus 9) over 14 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_fault.xlsx; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 8.46e-07 deg (bus 14) over 14 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_fault.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 2.72721, expected 2.72721, difference 1.24e-06 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for ieee14_fault.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 81.4272, expected 81.4272, difference 1.24e-06 MW | yes |
+| Largest rotor angle spread in the disturbance run (fault at bus 9) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.05 deg | measured 60.2428, expected 60.2428, difference 2.19e-07 deg | yes |
+| Lowest bus voltage in the disturbance run (fault at bus 9) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.0001 pu | measured 0.000444015, expected 0.000444015, difference 1.63e-13 pu | yes |
+| Lowest machine frequency in the disturbance run (fault at bus 9) | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 59.9556, expected 59.9556, difference 1.85e-07 Hz | yes |
+| Least damped mode between 0.8 and 1.4 Hz: frequency | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 Hz | measured 0.948748, expected 0.948748, difference 3.92e-09 Hz | yes |
+| Least damped mode between 0.8 and 1.4 Hz: damping ratio | TENSA's own earlier output (a baseline, not a verification) | TENSA 0.5.0 with ANDES 2.0.0, 2026-11-17: its own earlier output (a regression baseline: TENSA's own earlier output, not a verification) | 0.002 | measured 0.244586, expected 0.244586, difference 5.43e-10 | yes |
+
+### PJM 5-bus system with classical machines and a line trip { #pjm5bus }
+
+The PJM 5-bus test system of Li and Bo with four classical-model machines, a governor on each and a trip of one of two parallel lines at 2 s built in: the smallest case of the gallery, for a first time-domain run, a line outage and the swing between machines. The governors do nothing in ANDES 2.0.0 as it is configured (see the caveats).
+
+- **Id:** `pjm5bus`
+- **Kind:** Dynamic
+- **Size:** 5 buses, 4 generators
+- **Analyses:** Power flow, Time domain, Eigenvalues
+- **First run:** no
+- **File:** `pjm5bus.xlsx`
+
+**Source.** Copied from your own ANDES installation (`andes/cases/5bus/pjm5bus.xlsx`); TENSA does not redistribute it. The catalog recorded the file as of ANDES 2.0.0, with SHA-256 `aa4f0e4ee6754221f3245b2e72cc44d23e5ddbcd39d2e5f9a70e0dabc82d8e83`, and warns when the file on your machine is a different one. The recorded file is from <https://github.com/CURENT/andes/blob/v2.0.0/andes/cases/5bus/pjm5bus.xlsx>, retrieved 2026-11-17.
+
+**Licence.** [GPL-3.0-or-later](https://github.com/CURENT/andes/blob/v2.0.0/LICENSE). ANDES asks that research or consulting that uses it cite its paper, which is among the citations of this case (ANDES README, section Citing ANDES).
+
+**Citations**
+
+- F. Li and R. Bo, "Small test systems for power system economic studies," Proceedings of the 2010 IEEE Power & Energy Society General Meeting, July 2010, pp. 1-4, doi:10.1109/PES.2010.5589973. The paper MATPOWER's case5 file names as the source of the network. Its title, authors, venue and pages were read from Crossref; the paper itself is behind the publisher's access and was not opened. [DOI](https://doi.org/10.1109/PES.2010.5589973)
+- MATPOWER, data/case5.m, release 8.0, https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m (accessed 2026-11-17). Its header describes the data as a modified 5-bus, 5-generator case based on the PJM 5-bus system, created by Rui Bo in 2006 and modified in 2010 and 2014, and distributed with permission. ANDES's copy of the file (andes/cases/matpower/case5.m) is byte for byte this one. Used here to compare the network of the case with the system as MATPOWER holds it. [Link](https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m)
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for the library that distributes the case5 file the network is taken from. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- F. Milano, Power System Modelling and Scripting. Berlin, Heidelberg: Springer, 2010, doi:10.1007/978-3-642-13669-6. The book that ANDES's source names for its TG2 governor model, the one this case's governors are (the book was not opened). [DOI](https://doi.org/10.1007/978-3-642-13669-6)
+- ANDES, andes/models/governor/tg2.py and andes/core/discrete.py, release 2.0.0: the TG2 governor, whose speed input goes through a dead band block (https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py), and the DeadBandRT block, whose flags stand at "inside the band" while the block is not enabled (https://github.com/CURENT/andes/blob/v2.0.0/andes/core/discrete.py), accessed 2026-11-17. Together they are why the governors of this case do not act (see the caveats). [Link](https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py)
+- H. Cui, F. Li and K. Tomsovic, "Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis," IEEE Transactions on Power Systems, vol. 36, no. 2, pp. 1373-1384, March 2021, doi:10.1109/TPWRS.2020.3017019. [DOI](https://doi.org/10.1109/TPWRS.2020.3017019)
+
+BibTeX:
+
+```bibtex
+@inproceedings{li2010small,
+  author    = {Li, Fangxing and Bo, Rui},
+  title     = {Small test systems for power system economic studies},
+  booktitle = {Proceedings of the 2010 IEEE Power \& Energy Society General Meeting},
+  year      = {2010},
+  month     = jul,
+  pages     = {1--4},
+  doi       = {10.1109/PES.2010.5589973}
+}
+```
+
+```bibtex
+@misc{matpower_case5,
+  title        = {{MATPOWER} case5: a modified 5-bus system based on the {PJM} 5-bus system},
+  howpublished = {MATPOWER release 8.0, data/case5.m},
+  url          = {https://github.com/MATPOWER/matpower/blob/8.0/data/case5.m},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray Daniel and Murillo-S{\'a}nchez, Carlos Edmundo and Thomas, Robert John},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+```bibtex
+@book{milano2010power,
+  author    = {Milano, Federico},
+  title     = {Power System Modelling and Scripting},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {2010},
+  doi       = {10.1007/978-3-642-13669-6}
+}
+```
+
+```bibtex
+@misc{andes_tg2,
+  title        = {{ANDES} model {TG2}: turbine governor type 2, and the {DeadBandRT} block},
+  howpublished = {ANDES release 2.0.0, andes/models/governor/tg2.py and andes/core/discrete.py},
+  url          = {https://github.com/CURENT/andes/blob/v2.0.0/andes/models/governor/tg2.py},
+  urldate      = {2026-11-17}
+}
+```
+
+```bibtex
+@article{cui2021andes,
+  author  = {Cui, Hantao and Li, Fangxing and Tomsovic, Kevin},
+  title   = {Hybrid Symbolic-Numeric Framework for Power System Modeling and Analysis},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {36},
+  number  = {2},
+  pages   = {1373--1384},
+  year    = {2021},
+  month   = mar,
+  doi     = {10.1109/TPWRS.2020.3017019}
+}
+```
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The network is MATPOWER's case5 (Li and Bo's PJM 5-bus system), checked against ANDES's copy of that file: the five buses at 230 kV, the loads of 300, 300 and 400 MW, the six lines, the slack at bus 4 with no output of its own (it takes the losses, 3.9 MW) and the dispatch of the generators at buses 3 and 5 (323.49 and 466.51 MW) are the same. What differs: the two generators at bus 1 (40 and 170 MW) are one of 210 MW, the generators carry no limits on their active or reactive power (999 per unit), the line ratings and the cost data are not carried, and a second line between buses 1 and 2 (Line 1-2 (2), the same r, x and b as Line 1-2) has been added, which the event of the file trips at 2 s so that the trip islands nothing.
+- The machines are four classical models (GENCLS) at buses 1, 3, 4 and 5, rated 200, 300, 200 and 300 MVA, each with an inertia constant of 2 s, no damping and a transient reactance of 1.7 per unit on its own base. ANDES gives no source for these dynamic data (there is no README for this folder, and the file's history there shows only H. Cui's edits since February 2020), so do not read them as Li and Bo's. With that reactance and 1000 MW of load the machines' internal voltages come out at 2.3 to 2.8 per unit and their rotor angles start about 77 degrees apart.
+- The governors do nothing. Each machine has a TG2 governor (droop 0.05, time constants 0.2 s and 10 s, on the machine's base), and ANDES 2.0.0 does not move the machine's mechanical power with the default configuration: the dead band block in front of its input is disabled (TG2.config.deadband = 0), and a block that is disabled stands at "inside the band", which makes the governor's input zero. A 50% increase of the 400 MW load at bus 4 at 1 s takes the slowest machine to 0.840 per unit of speed with the governors as the file has them and with them taken out alike, and to 0.973 with the dead band enabled in ANDES (which TENSA does not expose). The case therefore behaves as four classical machines with constant mechanical power, and its checks hold it to exactly that; should ANDES change this, the checks that compare it with the classical model will fail.
+- One event is built into the file: Line 1-2 (2) is switched out at 2 s. The run stays stable and the machines' angles hardly change (the largest rotor angle spread is 77.1 degrees against 76.6 at the start).
+- The power flow has no published solution to compare with: MATPOWER's case5 stores every bus at 1 per unit and 0 degrees, which is a start and not a solution.
+
+**Verification.** Compared with independent references: the power flow agrees with pandapower's solution of the same network to 1.2e-8 pu and 2.2e-6 degrees. Because every machine is classical, the dynamics have an independent reference too: the swing equations Kron-reduced and linearised in numpy (the three oscillatory modes, 1.079, 1.458 and 1.725 Hz, undamped as the machines have no damping, which TENSA's eigenvalue analysis reproduces to 2e-6 Hz and 1e-4 in damping ratio), and integrated with scipy for the line trip, which TENSA's run matches to 0.017 degrees in the largest rotor angle spread, 3.5e-5 pu in the lowest voltage and 5e-5 Hz in the lowest frequency (the angle spread at 10 s, which sits on an oscillation, to 0.3 degrees). These references hold the machines' mechanical power constant, which is what ANDES 2.0.0 runs with these governors (see the caveats), so they verify the network and the machines, not the governors. Checks of TENSA against its own linearisation: the undisturbed 10 s run stays at its solution, and the ring-down of a 2% load step has the frequencies of the eigenvalues, within 0.017 Hz. No published result exists for this data; every check above is against a reference that does not come from TENSA, and none is a regression baseline.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Ring-down of a small disturbance has the frequency and damping of eigenvalues | the ring-down of a time-domain run | matrix pencil poles of the machines' speeds in a time-domain run, against the eigenvalues of the same case at the same operating point; step of load 2, run to 20 s | 0.05 Hz and 0.05 in damping ratio | 1.096 Hz, damping 0.000 is eigenvalue 1.079 Hz, 0.000 (0.017 Hz and 0.000 apart); 1.714 Hz, damping 0.000 is eigenvalue 1.725 Hz, 0.000 (0.011 Hz and 0.000 apart); 1.454 Hz, damping -0.000 is eigenvalue 1.458 Hz, 0.000 (0.004 Hz and 0.000 apart) | yes |
+| Frequency of mode 1 of 3, 1.079 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.001 Hz | measured 1.07906, expected 1.07906, difference 1.5e-06 Hz | yes |
+| Damping ratio of mode 1 of 3, 1.079 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.0001 | measured 0, expected 0, difference 0 | yes |
+| Frequency of mode 2 of 3, 1.458 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.001 Hz | measured 1.45832, expected 1.45832, difference 5.39e-07 Hz | yes |
+| Damping ratio of mode 2 of 3, 1.458 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.0001 | measured 0, expected 0, difference 0 | yes |
+| Frequency of mode 3 of 3, 1.725 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.001 Hz | measured 1.72514, expected 1.72514, difference 5.94e-07 Hz | yes |
+| Damping ratio of mode 3 of 3, 1.725 Hz, against the linearised swing equations | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py | 0.0001 | measured 0, expected 0, difference 0 | yes |
+| Largest rotor angle spread in the disturbance run | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s | 0.05 deg | measured 77.0658, expected 77.0492, difference 0.0166 deg | yes |
+| Rotor angle spread at the end of the disturbance run | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s | 0.5 deg | measured 76.3566, expected 76.6593, difference 0.303 deg | yes |
+| Lowest bus voltage in the disturbance run | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s | 5e-05 pu | measured 0.984015, expected 0.98405, difference 3.53e-05 pu | yes |
+| Lowest machine frequency in the disturbance run | an independent solver | the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s | 0.002 Hz | measured 59.9991, expected 59.9991, difference 5.05e-05 Hz | yes |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py | 0.0001 pu | largest difference 1.17e-08 pu (bus 1) over 5 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 2.18e-06 deg (bus 4) over 5 buses | yes |
+| Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 3.93872, expected 3.9387, difference 1.84e-05 MW | yes |
+| Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 3.93872, expected 3.9387, difference 1.84e-05 MW | yes |

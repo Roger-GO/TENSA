@@ -87,13 +87,13 @@ def test_the_default_cases_pass_their_verification(tmp_path: Path) -> None:
 
 @pytest.mark.acceptance
 def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
-    """The cases that are not seeded (the WECC 179-bus case for now) are run the same way."""
+    """The cases that are not seeded (the WECC 179-bus case and three small ones) are run the same way."""
     if not SCRIPT.is_file():
         pytest.skip("scripts/verify_example_cases.py is not next to the tests")
     if examples._andes_cases_dir() is None:  # noqa: SLF001
         pytest.skip("ANDES is not installed")
     gallery = [e.id for e in load_catalog().examples if e.has_file and not e.default]
-    assert "wecc" in gallery
+    assert {"wecc", "kundur_pss", "ieee14_fault", "pjm5bus"} <= set(gallery)
     report_json = tmp_path / "report.json"
     done = _run([*gallery, "--json", str(report_json), "--markdown", str(tmp_path / "r.md")], 900)
     assert done.returncode == 0, done.stderr[-3000:] + _failed_checks(report_json)
@@ -106,6 +106,19 @@ def test_the_gallery_cases_pass_their_verification_too(tmp_path: Path) -> None:
     names = [c["name"] for c in wecc["checks"]]
     assert "Disturbance run ends where it began" in names
     assert "The small disturbance does not grow" in names
+
+    # The stabiliser case is held to the case without the stabiliser, in the time domain.
+    pss = next(c for c in report["cases"] if c["id"] == "kundur_pss")
+    assert "Damping of the mode between 0.3 and 0.9 Hz against kundur" in [
+        c["name"] for c in pss["checks"]
+    ]
+    # The classical case's dynamics are checked against an independent computation, and none of
+    # its checks is TENSA's own earlier output.
+    pjm = next(c for c in report["cases"] if c["id"] == "pjm5bus")
+    pjm_kinds = {c["kind"] for c in pjm["checks"]}
+    assert {"independent-solver", "ring-down"} <= pjm_kinds
+    assert "regression-baseline" not in pjm_kinds
+    assert any("swing equations" in c["reference"] for c in pjm["checks"])
 
 
 @pytest.mark.acceptance

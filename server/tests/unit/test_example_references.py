@@ -18,6 +18,7 @@ from tensa.core.example_catalog import load_catalog
 from tensa.core.example_references import (
     ExampleReference,
     ReferenceFileError,
+    RingDownCompare,
     Tolerance,
     load_reference,
     parse_reference,
@@ -297,3 +298,103 @@ def test_tolerance_is_absolute_plus_relative() -> None:
     assert tolerance.allows(-10.0, -9.0)
     assert Tolerance(abs=0.5).text() == "0.5"
     assert Tolerance(abs=0.5, rel=0.01).text() == "0.5 + 0.01 of the value"
+
+
+def test_the_ieee_14_fault_case_has_its_fault_in_the_file_and_takes_it_out_for_the_quiet_runs() -> (
+    None
+):
+    """Fault_1 of the file is the disturbance, so the reference adds nothing; the undisturbed
+    runs name it, or the fault would act in them."""
+    reference = load_reference("ieee14_fault")
+    assert reference is not None and reference.disturbance is not None
+    assert reference.disturbance.specs == []
+    assert [(e.model, e.idx) for e in reference.remove_events] == [("Fault", 1)]
+    # The network is the IEEE 14-bus case's, so its power flow reference is the same one.
+    mine = {c.quantity: c.expected for c in reference.checks if c.kind == "independent-solver"}
+    other = load_reference("ieee14")
+    assert other is not None
+    theirs = {c.quantity: c.expected for c in other.checks if c.kind == "independent-solver"}
+    assert mine == theirs
+
+
+def test_the_ieee_14_fault_run_is_the_ieee_14_run_with_the_same_fault_added_by_the_api() -> None:
+    """The baselines of the two cases are one set of numbers: the fault in the file is the
+    fault at bus 9 from 1.0 s to 1.1 s the IEEE 14-bus reference adds."""
+    reference, other = load_reference("ieee14_fault"), load_reference("ieee14")
+    assert reference is not None and other is not None and other.disturbance is not None
+    (fault,) = other.disturbance.specs
+    assert (fault.kind, fault.bus_idx, fault.tf, fault.tc) == ("fault", 9, 1.0, 1.1)
+    baselines = {
+        c.quantity + str(c.window_hz): c.expected
+        for c in reference.checks
+        if c.kind == "regression-baseline"
+    }
+    assert baselines == {
+        c.quantity + str(c.window_hz): c.expected
+        for c in other.checks
+        if c.kind == "regression-baseline"
+    }
+    assert baselines
+
+
+def test_the_kundur_stabiliser_case_is_held_to_the_kundur_case_in_the_time_domain() -> None:
+    reference = load_reference("kundur_pss")
+    assert reference is not None and reference.ring_down.compare is not None
+    compare = reference.ring_down.compare
+    assert compare.case == "kundur"
+    # The window holds the inter-area mode (0.65 Hz) and none of the local modes (1.1 Hz).
+    assert compare.window_hz[0] < 0.647 < compare.window_hz[1] < 1.1
+    # The stabiliser is not claimed to add damping: the change allowed is about zero.
+    assert compare.change[0] < 0 < compare.change[1] <= 0.01
+    other = load_reference("kundur")
+    assert other is not None
+    assert [(e.model, e.idx) for e in reference.remove_events] == [
+        (e.model, e.idx) for e in other.remove_events
+    ]
+    # The file's own pole pair of the stabiliser's second filter is checked against its roots.
+    poles = [c for c in reference.checks if "second filter" in c.name]
+    assert {c.quantity: c.expected for c in poles} == {
+        "eig.mode_frequency_hz": pytest.approx(0.137832, abs=1e-6),
+        "eig.mode_damping_ratio": 0.5,
+    }
+    assert all(c.kind == "independent-solver" for c in poles)
+
+
+def test_the_pjm_5_bus_case_is_checked_against_the_classical_model_and_has_no_baseline() -> None:
+    reference = load_reference("pjm5bus")
+    assert reference is not None and reference.disturbance is not None
+    assert reference.disturbance.specs == []
+    assert [(e.model, e.idx) for e in reference.remove_events] == [("Toggle", 0)]
+    kinds = {c.kind for c in reference.checks}
+    assert kinds == {"independent-solver"}
+    dynamics = [c for c in reference.checks if c.generated_by == "scripts/crosscheck_classical.py"]
+    assert len(dynamics) == 10  # three modes (frequency and damping) and four disturbance numbers
+    # Said where the reader meets it: these hold the governors' output constant.
+    assert all("TG2 governors held at their initial output" in c.reference for c in dynamics)
+
+
+def test_a_ring_down_comparison_names_a_case_a_window_and_the_change_it_allows() -> None:
+    plan = {"compare": {"case": "kundur", "window_hz": [0.3, 0.9], "change": [-0.005, 0.005]}}
+    parsed = parse_reference(json.dumps(_document(ring_down=plan)))
+    assert parsed.ring_down.compare == RingDownCompare(
+        case="kundur", window_hz=(0.3, 0.9), change=(-0.005, 0.005)
+    )
+    assert parse_reference(json.dumps(_document())).ring_down.compare is None
+    for bad in (
+        {"case": "kundur", "window_hz": [0.9, 0.3], "change": [0, 0.1]},
+        {"case": "kundur", "window_hz": [0.3, 0.9], "change": [0.1, -0.1]},
+        {"case": "Not An Id", "window_hz": [0.3, 0.9], "change": [0, 0.1]},
+        {"case": "kundur", "window_hz": [0.3, 0.9]},
+    ):
+        with pytest.raises(ReferenceFileError):
+            parse_reference(json.dumps(_document(ring_down={"compare": bad})))
+
+
+def test_a_ring_down_comparison_names_a_case_the_catalog_has() -> None:
+    catalog = load_catalog()
+    for stem, reference in _shipped():
+        compare = reference.ring_down.compare
+        if compare is not None:
+            other = catalog.get(compare.case)
+            assert other is not None and other.has_file, stem
+            assert compare.case != stem

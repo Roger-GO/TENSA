@@ -278,6 +278,48 @@ def test_the_shipped_catalog_loads_and_seeds_the_five_first_run_cases() -> None:
     assert wecc is not None and not wecc.default and wecc.category == "dynamic"
 
 
+def test_the_gallery_has_the_three_small_variants_and_none_of_them_is_seeded() -> None:
+    catalog = load_catalog()
+    expected = {
+        "kundur_pss": ("kundur/kundur_ieeest.xlsx", 10),
+        "ieee14_fault": ("ieee14/ieee14_fault.xlsx", 14),
+        "pjm5bus": ("5bus/pjm5bus.xlsx", 5),
+    }
+    for example_id, (path, buses) in expected.items():
+        example = catalog.get(example_id)
+        assert example is not None, example_id
+        assert not example.default and example.category == "dynamic"
+        assert example.provenance.kind == "andes" and example.provenance.path == path
+        assert example.size is not None and example.size.buses == buses
+        assert set(example.analyses) == {"pf", "tds", "eig"}
+        assert example.verification is not None and example.verification.checks
+        assert all(check.passed for check in example.verification.checks), example_id
+    # The files are different from the seeded ones, so adding one never overwrites another.
+    names = [f.name for e in catalog.examples for f in e.files()]
+    assert len(names) == len({n.casefold() for n in names})
+
+
+def test_the_entries_say_what_the_files_do_not_do_so_that_nobody_reads_more_into_them() -> None:
+    """Two things a reader would assume and a run does not give: a stabiliser that damps, and
+    governors that act. The entries say neither happens, and the first is not offered as an
+    improvement."""
+    catalog = load_catalog()
+    kundur = catalog.get("kundur_pss")
+    assert kundur is not None
+    assert any("does not add damping" in caveat for caveat in kundur.caveats)
+    assert "no improvement" in (kundur.verification.summary if kundur.verification else "")
+    pjm = catalog.get("pjm5bus")
+    assert pjm is not None
+    assert any("The governors do nothing" in caveat for caveat in pjm.caveats)
+    assert "TG2" in " ".join(pjm.caveats)
+    # What the case is checked against does not come from TENSA: no baseline stands for a check.
+    assert pjm.verification is not None
+    assert {c.kind for c in pjm.verification.checks} <= {
+        "independent-solver",
+        "ring-down",
+    }
+
+
 def test_the_shipped_catalog_is_the_json_a_reader_of_the_file_sees() -> None:
     text = (examples_dir() / "catalog.json").read_text(encoding="utf-8")
     assert parse_catalog(text) is not None

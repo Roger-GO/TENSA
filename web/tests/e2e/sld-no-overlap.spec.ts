@@ -45,6 +45,10 @@
  *   automatic layout once) and nothing is drawn over anything else, and every
  *   machine control is on the symbol of its unit (none is an orphan badge)
  *
+ *   in the three small gallery cases (Kundur with a stabiliser, IEEE 14 with a fault, PJM 5-bus), added
+ *   to the workspace first -> as they open, after a tidy and with the values of a power flow, nothing is
+ *   drawn over anything else, and every exciter, governor and stabiliser is on the symbol of its unit
+ *
  *   a load of Kundur pulled down level with bus 12 and bus 13, west of the
  *   bar of bus 13 -> it stays where it was dropped, with no notice, and the
  *   bar of bus 12 that is drawn out to its tap keeps its gap to bar 13
@@ -518,6 +522,43 @@ test('wecc_full.xlsx: a gallery case of 179 buses is drawn with nothing over any
   expect(slantedConnectors(laidOut.edges)).toEqual(WECC_SLANTED);
   expect(await overlapsOnScreen(page)).toEqual([]);
 });
+
+/** The three small cases of the gallery: the example id, and the file the gallery copies. */
+const SMALL_GALLERY: [string, string][] = [
+  ['kundur_pss', 'kundur_ieeest.xlsx'],
+  ['ieee14_fault', 'ieee14_fault.xlsx'],
+  ['pjm5bus', 'pjm5bus.xlsx'],
+];
+
+for (const [id, file] of SMALL_GALLERY) {
+  test(`${file}: a small gallery case is drawn with nothing over anything else, as it opens, tidied and with values`, async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    // Not seeded: copy it from the user's ANDES, as the gallery's Add does. A workspace another
+    // run already added it to answers with a conflict, which is the same.
+    const added = await request.post(`/api/examples/${id}/add`);
+    expect([201, 409]).toContain(added.status());
+    await page.goto('/');
+    await openCase(page, file);
+    const opened = await settled(page);
+    expect(await overlapsOnScreen(page)).toEqual([]);
+    expect(problems(opened)).toEqual([]);
+    expect(branchesIntoDevices(opened)).toEqual([]);
+    await expect(page.locator('.react-flow__node-controller')).toHaveCount(0);
+    await expect(page.locator('[data-orphan="true"]')).toHaveCount(0);
+
+    await page.getByTestId('sld-tidy').click();
+    await expect(page.getByTestId('sld-tidy-note')).toHaveText('Already tidy: nothing was changed');
+
+    await runPowerFlow(page);
+    const shown = await settled(page);
+    expect(problems(shown)).toEqual([]);
+    expect(await overlapsOnScreen(page)).toEqual([]);
+    expect(await labelProblems(page)).toEqual([]);
+  });
+}
 
 test('npcc.xlsx: a generator put under its bus, behind a load of that bus, stays where it is dropped with its connector stepped round the load, as dropped, tidied and reloaded', async ({
   page,

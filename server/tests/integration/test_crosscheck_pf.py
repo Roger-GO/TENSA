@@ -291,7 +291,20 @@ def test_the_interpreter_for_each_half_is_found_or_the_error_says_what_to_set(
     not os.environ.get("TENSA_VERIFY_PYTHON"),
     reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
 )
-@pytest.mark.parametrize("example_id", ["ieee14", "kundur", "wscc9", "ieee39", "npcc", "wecc"])
+@pytest.mark.parametrize(
+    "example_id",
+    [
+        "ieee14",
+        "kundur",
+        "wscc9",
+        "ieee39",
+        "npcc",
+        "wecc",
+        "kundur_pss",
+        "ieee14_fault",
+        "pjm5bus",
+    ],
+)
 def test_pandapower_gives_the_values_that_ship_in_the_reference_files(
     example_id: str, tmp_path: Path
 ) -> None:

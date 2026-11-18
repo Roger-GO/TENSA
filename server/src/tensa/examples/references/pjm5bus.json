@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "id": "pjm5bus",
+  "remove_events": [
+    {"model": "Toggle", "idx": 0}
+  ],
+  "disturbance": {
+    "description": "Line 1-2 (2) trips at 2 s (an event of the case file)",
+    "specs": [],
+    "tf": 10.0
+  },
+  "checks": [
+    {
+      "name": "Frequency of mode 1 of 3, 1.079 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 1.079057,
+      "tolerance": {"abs": 0.001},
+      "window_hz": [0.889, 1.269],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Damping ratio of mode 1 of 3, 1.079 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.0,
+      "tolerance": {"abs": 0.0001},
+      "window_hz": [0.889, 1.269],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Frequency of mode 2 of 3, 1.458 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 1.458322,
+      "tolerance": {"abs": 0.001},
+      "window_hz": [1.325, 1.592],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Damping ratio of mode 2 of 3, 1.458 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.0,
+      "tolerance": {"abs": 0.0001},
+      "window_hz": [1.325, 1.592],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Frequency of mode 3 of 3, 1.725 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_frequency_hz",
+      "expected": 1.72514,
+      "tolerance": {"abs": 0.001},
+      "window_hz": [1.592, 1.859],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Damping ratio of mode 3 of 3, 1.725 Hz, against the linearised swing equations",
+      "quantity": "eig.mode_damping_ratio",
+      "expected": 0.0,
+      "tolerance": {"abs": 0.0001},
+      "window_hz": [1.592, 1.859],
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Largest rotor angle spread in the disturbance run",
+      "quantity": "tds.max_angle_spread_deg",
+      "expected": 77.049186,
+      "tolerance": {"abs": 0.05},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Rotor angle spread at the end of the disturbance run",
+      "quantity": "tds.final_angle_spread_deg",
+      "expected": 76.659256,
+      "tolerance": {"abs": 0.5},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Lowest bus voltage in the disturbance run",
+      "quantity": "tds.min_voltage_pu",
+      "expected": 0.98405,
+      "tolerance": {"abs": 5e-05},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Lowest machine frequency in the disturbance run",
+      "quantity": "tds.frequency_nadir_hz",
+      "expected": 59.999068,
+      "tolerance": {"abs": 0.002},
+      "kind": "independent-solver",
+      "reference": "the swing equations of the classical model solved independently of TENSA and ANDES (the network and machines ANDES holds for pjm5bus.xlsx, its TG2 governors held at their initial output because ANDES 2.0.0 does not move them with the dead band off: Kron reduction, linearisation, scipy DOP853), numpy 2.4.6, scipy 1.18.1; written by scripts/crosscheck_classical.py; integrated with a step of 0.0333333 s",
+      "generated_by": "scripts/crosscheck_classical.py"
+    },
+    {
+      "name": "Bus voltage magnitudes against pandapower",
+      "quantity": "pf.bus_voltage_pu",
+      "expected": {"0": 1.0, "1": 0.991799327, "2": 1.0, "3": 1.0, "4": 1.0},
+      "tolerance": {"abs": 0.0001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Bus voltage angles against pandapower",
+      "quantity": "pf.bus_angle_deg",
+      "expected": {"0": 2.802368, "1": 0.4011647, "2": 0.3671542, "3": 0.0, "4": 3.7247491},
+      "tolerance": {"abs": 0.01},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Network losses against pandapower",
+      "quantity": "pf.loss_mw",
+      "expected": 3.938699,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    },
+    {
+      "name": "Slack active power against pandapower",
+      "quantity": "pf.slack_p_mw",
+      "expected": 3.938699,
+      "tolerance": {"abs": 0.01, "rel": 0.001},
+      "kind": "independent-solver",
+      "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for pjm5bus.xlsx; written by scripts/crosscheck_pf.py",
+      "generated_by": "scripts/crosscheck_pf.py"
+    }
+  ]
+}

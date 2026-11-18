@@ -58,20 +58,48 @@ def test_the_dump_carries_the_machines_of_the_case_and_says_what_it_leaves_out()
     assert rest["events"] == ["Toggle"]
 
 
+def test_the_dump_carries_the_trips_and_faults_the_case_file_holds() -> None:
+    """The classical check integrates what the file does by itself, so the dump hands it over
+    in the form the disturbances route takes."""
+    andes = pytest.importorskip("andes")
+    cases = pytest.importorskip("tensa.core.examples")._andes_cases_dir()  # noqa: SLF001
+    if cases is None:
+        pytest.skip("ANDES's cases are not installed")
+    pf: ModuleType = load_module("crosscheck_pf_for_events", SCRIPTS_DIR / "crosscheck_pf.py")
+
+    def events(path: str) -> list[dict[str, object]]:
+        system = andes.load(str(cases / path), setup=False, no_output=True, default_config=True)
+        system.setup()
+        return list(pf.dump_network(system)["machines"]["file_events"])
+
+    assert events("5bus/pjm5bus.xlsx") == [
+        {"kind": "toggle", "model": "Line", "dev_idx": 6, "t": 2.0}
+    ]
+    assert events("ieee14/ieee14_fault.xlsx") == [
+        {"kind": "fault", "bus_idx": 9, "tf": 1.0, "tc": 1.1, "xf": 1e-4, "rf": 0.0}
+    ]
+    # A Toggler that is switched off does not act, so it is not a disturbance of the file.
+    assert events("ieee39/ieee39_full.xlsx") == []
+
+
 @pytest.mark.skipif(
     not os.environ.get("TENSA_VERIFY_PYTHON"),
     reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
 )
-def test_the_independent_values_that_ship_for_wscc9_are_what_the_script_computes(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("example_id", "options", "count"),
+    [("wscc9", [], 8), ("pjm5bus", ["--governors", "inert"], 10)],
+)
+def test_the_independent_values_that_ship_are_what_the_script_computes(
+    example_id: str, options: list[str], count: int, tmp_path: Path
 ) -> None:
     pytest.importorskip("andes")
     script = "scripts/crosscheck_classical.py"
-    target = tmp_path / "wscc9.json"
-    shutil.copy(references_dir() / "wscc9.json", target)
+    target = tmp_path / f"{example_id}.json"
+    shutil.copy(references_dir() / f"{example_id}.json", target)
     subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / "crosscheck_classical.py"), "run", "wscc9", "--write"]
-        + ["--reference", str(target)],
+        [sys.executable, str(SCRIPTS_DIR / "crosscheck_classical.py"), "run", example_id, "--write"]
+        + ["--reference", str(target), *options],
         check=True,
         env={**os.environ},
         capture_output=True,
@@ -79,10 +107,10 @@ def test_the_independent_values_that_ship_for_wscc9_are_what_the_script_computes
         timeout=300,
     )
     written = {c["name"]: c for c in json.loads(target.read_text(encoding="utf-8"))["checks"]}
-    shipped = load_reference("wscc9")
+    shipped = load_reference(example_id)
     assert shipped is not None
     mine = [c for c in shipped.checks if c.generated_by == script]
-    assert len(mine) == 8
+    assert len(mine) == count
     for check in mine:
         assert check.name in written, check.name
         assert written[check.name]["expected"] == pytest.approx(check.expected, abs=1e-5), (
@@ -90,3 +118,25 @@ def test_the_independent_values_that_ship_for_wscc9_are_what_the_script_computes
         )
         window = written[check.name].get("window_hz")
         assert (window is None and check.window_hz is None) or tuple(window) == check.window_hz
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TENSA_VERIFY_PYTHON"),
+    reason="TENSA_VERIFY_PYTHON does not name a Python with pandapower",
+)
+def test_a_case_with_a_governor_is_refused_without_the_option_and_the_message_says_what_to_ask(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("andes")
+    target = tmp_path / "pjm5bus.json"
+    shutil.copy(references_dir() / "pjm5bus.json", target)
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "crosscheck_classical.py"), "run", "pjm5bus"]
+        + ["--reference", str(target)],
+        env={**os.environ},
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert done.returncode != 0
+    assert "TG2" in (done.stdout + done.stderr)

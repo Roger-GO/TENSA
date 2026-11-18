@@ -6,6 +6,8 @@
  *   the command palette finds it; Escape closes it and the keyboard focus goes back
  *   a gallery case (WECC 179-bus, not seeded): Add copies it into the workspace, the card turns to Added, and
  *   Open puts its 179 buses on the diagram
+ *   a small gallery case (PJM 5-bus): Add and Open put its 5 buses on the diagram, its four TG2 governors are
+ *   in the Governors table, and the line trip the file holds is in the list of disturbances
  *   the Exciters and Governors tables hold every exciter and governor the catalog counts for the case: the
  *   IEEE 39 governors (TGOV1N), the exciters of Kundur (EXDC2) and the 29 exciters and 29 governors of WECC
  *   a case the list calls missing, which the server has: Add says it is there, and the card turns to Added
@@ -68,9 +70,14 @@ test('the Project tab opens the example cases, with their sources, licences and 
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');
   }
-  // The gallery case is listed with its size, and is not one of them.
+  // The gallery case is listed with its size, and is not one of them. Nor are the three small ones.
   await expect(dialog.getByTestId('example-card-wecc')).toBeVisible();
   await expect(dialog.getByTestId('example-size-wecc')).toHaveText('179 buses, 29 generators');
+  await expect(dialog.getByTestId('example-size-kundur_pss')).toHaveText('10 buses, 4 generators');
+  await expect(dialog.getByTestId('example-size-ieee14_fault')).toHaveText(
+    '14 buses, 5 generators',
+  );
+  await expect(dialog.getByTestId('example-size-pjm5bus')).toHaveText('5 buses, 4 generators');
   // A line under the filter says why they do, though nothing was added in this session.
   await expect(dialog.getByTestId('example-cases-workspace-note')).toContainText(
     'already in your workspace and say Added',
@@ -94,9 +101,9 @@ test('the Project tab opens the example cases, with their sources, licences and 
   }
 
   // Cite shows the references and copies them, as text and as BibTeX.
-  await dialog.getByRole('button', { name: /^Cite: IEEE 14-bus/ }).click();
+  await dialog.getByRole('button', { name: /^Cite: IEEE 14-bus, with machines/ }).click();
   await expect(dialog.getByTestId('example-cite-panel-ieee14')).toBeVisible();
-  await dialog.getByRole('button', { name: /^Copy as BibTeX: IEEE 14-bus/ }).click();
+  await dialog.getByRole('button', { name: /^Copy as BibTeX: IEEE 14-bus, with machines/ }).click();
   await expect(
     page.locator('[data-sonner-toast]').filter({ hasText: 'Copied the BibTeX' }),
   ).toBeVisible();
@@ -105,7 +112,7 @@ test('the Project tab opens the example cases, with their sources, licences and 
   const bibtex = await page.evaluate(() => navigator.clipboard.readText());
   expect(bibtex).toContain('@article{cui2021andes');
   expect(bibtex).toContain('10.1109/TPWRS.2020.3017019');
-  await dialog.getByRole('button', { name: /^Copy as text: IEEE 14-bus/ }).click();
+  await dialog.getByRole('button', { name: /^Copy as text: IEEE 14-bus, with machines/ }).click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toContain('Hybrid Symbolic-Numeric Framework');
@@ -113,8 +120,9 @@ test('the Project tab opens the example cases, with their sources, licences and 
   // The filter narrows the list to what is typed.
   await page.getByRole('searchbox', { name: 'Filter the example cases' }).fill('kundur');
   await expect(dialog.getByTestId('example-card-kundur')).toBeVisible();
+  await expect(dialog.getByTestId('example-card-kundur_pss')).toBeVisible();
   await expect(dialog.getByTestId('example-card-ieee14')).toBeHidden();
-  await expect(dialog.getByTestId('example-cases-count')).toHaveText(/^1 of \d+$/);
+  await expect(dialog.getByTestId('example-cases-count')).toHaveText(/^2 of \d+$/);
   // The card that was hidden has what was opened in it when the filter lets it back.
   await page.getByRole('searchbox', { name: 'Filter the example cases' }).fill('');
   await expect(dialog.getByTestId('example-cite-panel-ieee14')).toBeVisible();
@@ -124,7 +132,7 @@ test('the Project tab opens the example cases, with their sources, licences and 
 test('Open on a card closes the dialog and puts the case on the diagram', async ({ page }) => {
   await openApp(page);
   await page.getByTestId('example-cases-open').click();
-  await page.getByRole('button', { name: /^Open: IEEE 14-bus/ }).click();
+  await page.getByRole('button', { name: /^Open: IEEE 14-bus, with machines/ }).click();
 
   await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
   // The 14 buses of the case are drawn, and the Project tab names it as the loaded case.
@@ -136,8 +144,12 @@ test('Open on a card closes the dialog and puts the case on the diagram', async 
   // Asked again, the dialog says which case is the open one.
   await page.getByTestId('example-cases-open').click();
   await expect(page.getByTestId('example-open-now-ieee14')).toHaveText('Open now');
-  await expect(page.getByRole('button', { name: /^Open: IEEE 14-bus/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Open: Kundur/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /^Open: IEEE 14-bus, with machines/ })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole('button', { name: /^Open: Kundur two-area system, modified/ }),
+  ).toBeEnabled();
 });
 
 test('a gallery case is added to the workspace from its card, and opened on the diagram', async ({
@@ -179,6 +191,34 @@ test('a gallery case is added to the workspace from its card, and opened on the 
   await expect(page.getByTestId('exciters-grid-model-ESST3A')).toContainText('4');
   await page.getByTestId('bottom-drawer-tab-governors').click();
   await expect(page.getByTestId('governors-grid-model-IEEEG1')).toContainText('29');
+});
+
+test('a small gallery case is added, opened with its governors and the trip its file holds', async ({
+  page,
+}) => {
+  await openApp(page);
+  await page.getByTestId('example-cases-open').click();
+  const dialog = page.getByRole('dialog', { name: 'Example cases' });
+  await expect(dialog.getByTestId('example-card-pjm5bus')).toBeVisible();
+  const add = dialog.getByTestId('example-add-pjm5bus');
+  if ((await add.count()) > 0) {
+    await add.click();
+  }
+  await expect(dialog.getByTestId('example-added-pjm5bus')).toHaveText('Added');
+  await dialog.getByTestId('example-open-pjm5bus').click();
+  await expect(page.getByTestId('example-cases-dialog')).toHaveCount(0);
+  await expect(page.getByTestId(/^bus-node-\d+$/)).toHaveCount(5, { timeout: 90_000 });
+  await expect(page.getByTestId('case-nav-loaded-name')).toHaveText('pjm5bus.xlsx');
+
+  // A TG2 governor on each of its four machines, which the table left out while the topology did
+  // not list the model, and a GOV chip on each generator's symbol.
+  await page.getByTestId('bottom-drawer-tab-governors').click();
+  await expect(page.getByTestId('governors-grid-model-TG2')).toContainText('4');
+  await expect(page.getByTestId(/^unit-chip-TG2-\d+$/)).toHaveCount(4);
+  // The trip of the second line between buses 1 and 2 at 2 s is the file's, and says so.
+  const trip = page.getByText('Toggle Line 6');
+  await expect(trip).toBeVisible();
+  await expect(page.getByText(/^Set by the case/).first()).toBeVisible();
 });
 
 test('the Exciters and Governors tables list the exciters and governors the catalog counts, on IEEE 39 and Kundur', async ({
