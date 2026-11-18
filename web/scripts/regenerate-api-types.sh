@@ -8,7 +8,7 @@
 # against it, then kill the substrate.
 #
 # Pre-reqs:
-# - The tensa virtualenv is activated (or its `tensa` is on PATH), or ANDES_APP
+# - The tensa virtualenv is activated (or its `tensa` is on PATH), or TENSA_BIN
 #   (below) is the path of its `tensa`.
 # - `pnpm install` has already run in `web/`.
 #
@@ -16,11 +16,14 @@
 #   ./web/scripts/regenerate-api-types.sh
 #
 # Override the substrate binary or port:
-#   ANDES_APP=/path/to/tensa PORT=8800 ./web/scripts/regenerate-api-types.sh
+#   TENSA_BIN=/path/to/tensa PORT=8800 ./web/scripts/regenerate-api-types.sh
+#
+# ANDES_APP, the name TENSA_BIN had while the project was called ANDES App, still works
+# when TENSA_BIN is not set.
 set -euo pipefail
 
 PORT="${PORT:-8765}"
-ANDES_APP="${ANDES_APP:-tensa}"
+TENSA_BIN="${TENSA_BIN:-${ANDES_APP:-tensa}}"
 
 # Resolve the web/ dir relative to this script so the script works from
 # any cwd.
@@ -41,8 +44,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[regen] starting $ANDES_APP serve on port $PORT..."
-"$ANDES_APP" serve \
+echo "[regen] starting $TENSA_BIN serve on port $PORT..."
+"$TENSA_BIN" serve \
   --port "$PORT" \
   --workspace "$TMP_WORKSPACE" \
   >/dev/null 2>&1 &

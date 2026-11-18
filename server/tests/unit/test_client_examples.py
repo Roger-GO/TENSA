@@ -12,14 +12,20 @@ away from a checkout.
 
 from __future__ import annotations
 
+import contextlib
 import http.server
+import io
 import json
+import os
 import re
+import shutil
+import socket
 import subprocess
 import sys
 import textwrap
 import threading
-from collections.abc import Iterator
+import urllib.error
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +39,12 @@ _EXAMPLES = REPO_ROOT / "examples"
 _JSON = "application/json"
 
 
-@pytest.fixture
-def recorder() -> Iterator[tuple[str, list[dict[str, Any]]]]:
-    """A local server that answers ``{"ok": true}`` and records each request it gets."""
+@contextlib.contextmanager
+def _stand_in_server(
+    answer: Callable[[str, str], bytes],
+) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """A local server that records each request it gets and answers it with
+    ``answer(method, path)``, the bytes of a JSON body."""
     seen: list[dict[str, Any]] = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -49,7 +58,7 @@ def recorder() -> Iterator[tuple[str, list[dict[str, Any]]]]:
                     "body": self.rfile.read(length) if length else b"",
                 }
             )
-            payload = b'{"ok": true}'
+            payload = answer(self.command, self.path)
             self.send_response(200)
             self.send_header("Content-Type", _JSON)
             self.send_header("Content-Length", str(len(payload)))
@@ -72,12 +81,19 @@ def recorder() -> Iterator[tuple[str, list[dict[str, Any]]]]:
         thread.join(timeout=5)
 
 
+@pytest.fixture
+def recorder() -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """A local server that answers ``{"ok": true}`` and records each request it gets."""
+    with _stand_in_server(lambda _method, _path: b'{"ok": true}') as served:
+        yield served
+
+
 def test_the_example_client_sends_a_json_body_as_json(
     recorder: tuple[str, list[dict[str, Any]]],
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    app = client.AndesApp(base)
+    app = client.TensaClient(base)
 
     app.request("POST", "/sessions/abc/case", {"primary_path": "ieee14.raw"})
     app.request("POST", "/sessions/abc/pflow", {})
@@ -139,7 +155,7 @@ def test_the_example_client_passes_power_flow_settings_through(
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    session = client.Session(client.AndesApp(base), "abc")
+    session = client.Session(client.TensaClient(base), "abc")
 
     session.run_pflow()
     session.run_pflow(flat_start=True, tolerance=1e-4)
@@ -154,7 +170,7 @@ def test_the_example_client_lists_andes_variables_and_describes_signals(
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    app = client.AndesApp(base)
+    app = client.TensaClient(base)
     session = client.Session(app, "abc")
 
     session.dae_variables()
@@ -176,7 +192,7 @@ def test_the_example_client_asks_for_a_comtrade_record_and_returns_its_bytes(
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    app = client.AndesApp(base)
+    app = client.TensaClient(base)
     traces = {"t": [0.0, 0.1], "variables": [{"name": "omega GENROU 1", "values": [1.0, 1.01]}]}
 
     archive = app.comtrade(traces["t"], traces["variables"], name="ieee14", trigger_t=0.1)
@@ -199,7 +215,7 @@ def test_the_example_client_reads_the_messages_of_a_session(
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    session = client.Session(client.AndesApp(base), "abc")
+    session = client.Session(client.TensaClient(base), "abc")
 
     session.messages()
     session.messages(level="error", after=40)
@@ -214,7 +230,7 @@ def test_the_example_client_runs_with_controllers_and_lists_what_they_can_comman
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    session = client.Session(client.AndesApp(base), "abc")
+    session = client.Session(client.TensaClient(base), "abc")
     droop = {"type": "droop", "model": "ESD1", "idx": 1, "gain": 50}
 
     session.tds_controllers()
@@ -230,7 +246,7 @@ def test_the_example_client_uploads_a_case_file_as_its_own_bytes(
 ) -> None:
     base, seen = recorder
     client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
-    app = client.AndesApp(base)
+    app = client.TensaClient(base)
     case = tmp_path / "My Case.raw"
     case.write_bytes(b"\xff\x00 not text \r\n")
 
@@ -580,3 +596,203 @@ def test_the_curl_walkthrough_labels_every_json_body() -> None:
     assert len(with_body) >= 4, with_body
     unlabeled = [line for line in with_body if f"Content-Type: {_JSON}" not in line]
     assert not unlabeled, f"curl sends -d as a form without a JSON Content-Type: {unlabeled}"
+
+
+# ---- the names the project and its client go by ------------------------------
+
+
+def test_the_client_keeps_the_names_it_had_when_the_project_was_called_andes_app() -> None:
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    assert client.TensaClient.__name__ == "TensaClient"
+    assert client.TensaClientError.__name__ == "TensaClientError"
+    # The same classes, so a script that imports or catches the old names keeps working.
+    assert client.AndesApp is client.TensaClient
+    assert client.AndesAppError is client.TensaClientError
+
+
+def test_a_refused_request_raises_the_client_error_that_both_names_catch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    problem = {"title": "Conflict", "detail": "a System is loaded", "recovery": {"kind": "reload-case"}}
+
+    def refuse(request: Any, timeout: float | None = None) -> Any:
+        body = io.BytesIO(json.dumps(problem).encode())
+        raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {}, body)
+
+    monkeypatch.setattr(client.urllib.request, "urlopen", refuse)
+
+    with pytest.raises(client.AndesAppError) as raised:
+        client.TensaClient("http://127.0.0.1:1").request("POST", "/sessions/abc/case", {})
+    assert isinstance(raised.value, client.TensaClientError)
+    assert (raised.value.status, raised.value.problem) == (409, problem)
+    assert "[409] Conflict: a System is loaded" in str(raised.value)
+
+
+def test_the_pages_and_the_examples_name_the_client_by_its_current_name() -> None:
+    """The class is ``TensaClient``; ``AndesApp`` stays only so that old scripts run, and
+    the examples README says so. No page teaches it, and every name a page imports is there."""
+    client = load_module("tensa_client", _EXAMPLES / "tensa_client.py")
+    pages = [
+        *sorted((REPO_ROOT / "docs").glob("*.md")),
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "llms.txt",
+        _EXAMPLES / "run_fault_study.py",
+    ]
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        assert "AndesApp" not in text, f"{page.relative_to(REPO_ROOT)} teaches the old name"
+        for name in re.findall(r"from tensa_client import (\w+)", text):
+            assert hasattr(client, name), f"{page.relative_to(REPO_ROOT)} imports {name}"
+    assert "TensaClient" in (REPO_ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+
+
+# The walkthrough reads which server and which case from the environment: ``TENSA_URL`` and
+# ``TENSA_CASE``, and ``ANDES_APP_URL`` and ``ANDES_APP_CASE``, their names while the project
+# was called ANDES App, when those are not set.
+_NEEDS_A_SHELL = pytest.mark.skipif(
+    sys.platform == "win32" or not all(shutil.which(tool) for tool in ("bash", "curl", "python3")),
+    reason="the scripts are for a POSIX shell with curl and python3",
+)
+_WALKTHROUGH_ANSWER = json.dumps(
+    {"session_id": "s1", "state": "loaded", "converged": True, "bus_voltages": {"1": 1.0}}
+).encode()
+
+
+def _clean_environment() -> dict[str, str]:
+    """This process's environment without anything the scripts read, and with a proxy
+    setting that cannot send a loopback address elsewhere."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(("TENSA_", "ANDES_APP"))
+    }
+    env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1"
+    return env
+
+
+def _run_walkthrough(
+    variables: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
+    """Run ``examples/walkthrough.sh`` against a stand-in server, with ``variables`` in its
+    environment; ``{base}`` in a value is the stand-in's address."""
+    script = _EXAMPLES / "walkthrough.sh"
+    if not script.is_file():
+        pytest.skip("examples/walkthrough.sh is not next to the tests")
+    with _stand_in_server(lambda _method, _path: _WALKTHROUGH_ANSWER) as (base, seen):
+        env = {**_clean_environment(), **{k: v.format(base=base) for k, v in variables.items()}}
+        done = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+    return done, seen
+
+
+@_NEEDS_A_SHELL
+@pytest.mark.parametrize(
+    "variables",
+    [
+        {"TENSA_URL": "{base}"},
+        {"TENSA_URL": "{base}/"},
+        {"TENSA_URL": "{base}/api"},
+        {"ANDES_APP_URL": "{base}"},
+        {"TENSA_URL": "{base}", "ANDES_APP_URL": "http://127.0.0.1:9"},
+    ],
+    ids=["new", "with the slash the server prints", "with /api", "old name", "new wins"],
+)
+def test_the_curl_walkthrough_finds_the_server_by_either_name_of_its_address(
+    variables: dict[str, str],
+) -> None:
+    done, seen = _run_walkthrough(variables)
+    assert done.returncode == 0, done.stderr + done.stdout
+    assert seen[0]["method"] == "POST" and seen[0]["path"] == "/api/sessions"
+    assert all(request["path"].startswith("/api/sessions") for request in seen)
+
+
+@_NEEDS_A_SHELL
+@pytest.mark.parametrize(
+    ("variables", "loaded"),
+    [
+        ({"TENSA_URL": "{base}"}, "ieee14_full.xlsx"),
+        ({"TENSA_URL": "{base}", "TENSA_CASE": "a.xlsx"}, "a.xlsx"),
+        ({"TENSA_URL": "{base}", "ANDES_APP_CASE": "b.xlsx"}, "b.xlsx"),
+        ({"TENSA_URL": "{base}", "TENSA_CASE": "a.xlsx", "ANDES_APP_CASE": "b.xlsx"}, "a.xlsx"),
+    ],
+    ids=["default", "new", "old name", "new wins"],
+)
+def test_the_curl_walkthrough_loads_the_case_named_by_either_name_of_the_variable(
+    variables: dict[str, str], loaded: str
+) -> None:
+    done, seen = _run_walkthrough(variables)
+    assert done.returncode == 0, done.stderr + done.stdout
+    (case,) = [r for r in seen if r["path"].endswith("/case")]
+    assert json.loads(case["body"]) == {"primary_path": loaded}
+
+
+def _closed_port() -> int:
+    """A loopback port nothing listens on."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+@_NEEDS_A_SHELL
+def test_the_acceptance_walkthrough_takes_the_port_by_either_name() -> None:
+    script = Path(__file__).resolve().parents[1] / "acceptance" / "walkthrough.sh"
+    if not script.is_file():
+        pytest.skip("server/tests/acceptance/walkthrough.sh is not next to the tests")
+    ports = (_closed_port(), _closed_port())
+
+    def run(**variables: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(script)],
+            env={**_clean_environment(), **variables},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+
+    # Nothing listens, so each run stops at its first request and names the port it used.
+    new = run(TENSA_PORT=str(ports[0]))
+    old = run(ANDES_APP_PORT=str(ports[1]))
+    both = run(TENSA_PORT=str(ports[0]), ANDES_APP_PORT=str(ports[1]))
+    assert str(ports[0]) in new.stderr
+    assert str(ports[1]) in old.stderr
+    assert str(ports[0]) in both.stderr and str(ports[1]) not in both.stderr
+    neither = run()
+    assert neither.returncode == 2
+    assert "TENSA_PORT must be set" in neither.stderr
+
+
+@_NEEDS_A_SHELL
+def test_the_api_type_script_starts_the_tensa_it_is_given_by_either_name() -> None:
+    script = REPO_ROOT / "web" / "scripts" / "regenerate-api-types.sh"
+    if not script.is_file():
+        pytest.skip("web/scripts/regenerate-api-types.sh is not next to the tests")
+    text = script.read_text(encoding="utf-8")
+    (assignment,) = [line for line in text.splitlines() if line.startswith("TENSA_BIN=")]
+    assert '"$TENSA_BIN" serve' in text
+
+    def resolved(**variables: str) -> str:
+        done = subprocess.run(
+            ["bash", "-c", f'{assignment}\nprintf %s "$TENSA_BIN"'],
+            env={**_clean_environment(), **variables},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=True,
+        )
+        return done.stdout
+
+    assert resolved() == "tensa"
+    assert resolved(TENSA_BIN="/new/tensa") == "/new/tensa"
+    assert resolved(ANDES_APP="/old/tensa") == "/old/tensa"
+    assert resolved(TENSA_BIN="/new/tensa", ANDES_APP="/old/tensa") == "/new/tensa"

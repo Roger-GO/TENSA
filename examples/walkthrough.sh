@@ -5,12 +5,22 @@
 # and a case file inside that workspace. A server that starts on an empty
 # workspace fills it with the example cases, `ieee14_full.xlsx` among them, which
 # is the case this script loads. For a workspace that already holds other files,
-# add it with `tensa examples add ieee14 --workspace <dir>`, or set CASE below to
+# add it with `tensa examples add ieee14 --workspace <dir>`, or set TENSA_CASE (below) to
 # a file the workspace has.
+#
+# Settings, by environment variable:
+#   TENSA_URL   the address `tensa serve` prints (default http://127.0.0.1:8000)
+#   TENSA_CASE  the case file to load, by its name in the workspace (default ieee14_full.xlsx)
+# ANDES_APP_URL and ANDES_APP_CASE, their names while the project was called ANDES App,
+# still work when the new ones are not set.
 set -euo pipefail
 
-BASE="${ANDES_APP_URL:-http://127.0.0.1:8000}/api"
-CASE="${ANDES_APP_CASE:-ieee14_full.xlsx}"
+URL="${TENSA_URL:-${ANDES_APP_URL:-http://127.0.0.1:8000}}"
+# The address as `tensa serve` prints it ends in a slash, and one copied from a page may end in /api.
+URL="${URL%/}"
+URL="${URL%/api}"
+BASE="$URL/api"
+CASE="${TENSA_CASE:-${ANDES_APP_CASE:-ieee14_full.xlsx}}"
 
 jqr() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 

@@ -314,7 +314,7 @@ def test_serve_reload_resolves_port_zero_for_the_app_factory(
         assert result.exit_code == 0, result.output
         port = run_kwargs["port"]
         assert port > 0
-        assert os.environ["ANDES_APP_RELOAD_PORT"] == str(port)
+        assert os.environ["TENSA_RELOAD_PORT"] == str(port)
         # The reloader's subprocess builds the app from those env vars.
         app = cli._reload_app_factory()
     assert _get(app, port, f"http://127.0.0.1:{port}") == 200
@@ -498,18 +498,90 @@ def test_serve_reload_hands_the_sweep_worker_bound_to_the_app_factory(
     with mock.patch.dict(os.environ):
         # A value left over from an earlier ``serve --reload`` in this process must
         # not leak into one that did not ask for it.
-        os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] = "7"
+        os.environ["TENSA_RELOAD_SWEEP_WORKERS"] = "7"
         args = ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
 
         assert runner.invoke(cli.app, [*args, "--sweep-workers", "2"]).exit_code == 0
-        assert os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] == "2"
+        assert os.environ["TENSA_RELOAD_SWEEP_WORKERS"] == "2"
         cli._reload_app_factory()
         assert built_apps[-1]["kwargs"]["sweep_workers"] == 2
 
         assert runner.invoke(cli.app, args).exit_code == 0
-        assert "ANDES_APP_RELOAD_SWEEP_WORKERS" not in os.environ
+        assert "TENSA_RELOAD_SWEEP_WORKERS" not in os.environ
         cli._reload_app_factory()
         assert built_apps[-1]["kwargs"]["sweep_workers"] is None
+
+
+def _reload_environment(prefix: str, workspace: Path, **extra: str) -> dict[str, str]:
+    """The settings ``serve --reload`` hands over, under ``prefix``."""
+    values = {"WORKSPACE": str(workspace), "MAX_SESSIONS": "7", "IDLE": "90.0", **extra}
+    return {prefix + name: value for name, value in values.items()}
+
+
+def test_the_reload_factory_still_reads_the_old_variable_names(
+    tmp_path: Path, built_apps: list[dict[str, Any]]
+) -> None:
+    """The settings were ``ANDES_APP_RELOAD_*`` while the project was called ANDES App."""
+    old = _reload_environment(
+        "ANDES_APP_RELOAD_", tmp_path / "ws", SWEEP_WORKERS="3", PORT="8123", BIND="127.0.0.2"
+    )
+    with mock.patch.dict(os.environ, old):
+        cli._reload_app_factory()
+    kwargs = built_apps[-1]["kwargs"]
+    assert kwargs["max_sessions"] == 7
+    assert kwargs["idle_timeout_seconds"] == 90.0
+    assert kwargs["sweep_workers"] == 3
+    assert (kwargs["bind_host"], kwargs["bind_port"]) == ("127.0.0.2", 8123)
+    assert kwargs["workspace"] == (tmp_path / "ws").resolve()
+
+
+def test_a_new_reload_variable_wins_over_the_old_one_and_an_empty_value_counts(
+    tmp_path: Path, built_apps: list[dict[str, Any]]
+) -> None:
+    old = _reload_environment("ANDES_APP_RELOAD_", tmp_path / "ws", SWEEP_WORKERS="3")
+    new = {"TENSA_RELOAD_MAX_SESSIONS": "2", "TENSA_RELOAD_SWEEP_WORKERS": ""}
+    with mock.patch.dict(os.environ, {**old, **new}):
+        cli._reload_app_factory()
+    kwargs = built_apps[-1]["kwargs"]
+    assert kwargs["max_sessions"] == 2
+    # The new name is set, to nothing: that is no value, and the old one does not stand in.
+    assert kwargs["sweep_workers"] is None
+    # What only the old name sets is still read.
+    assert kwargs["idle_timeout_seconds"] == 90.0
+
+
+def test_the_reload_factory_without_a_workspace_says_which_variable_is_missing() -> None:
+    with mock.patch.dict(os.environ):
+        for name in [n for n in os.environ if n.startswith(("TENSA_RELOAD_", "ANDES_APP_RELOAD_"))]:
+            del os.environ[name]
+        with pytest.raises(RuntimeError, match="TENSA_RELOAD_WORKSPACE"):
+            cli._reload_app_factory()
+
+
+def test_serve_reload_clears_the_old_variable_names_it_would_otherwise_let_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_server: type[_FakeServer],
+    built_apps: list[dict[str, Any]],
+) -> None:
+    """A value under the old name, left in the environment by something else, must not
+    stand in for an option this ``serve`` did not pass."""
+    monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
+    stale = _reload_environment(
+        "ANDES_APP_RELOAD_", tmp_path / "elsewhere", SWEEP_WORKERS="9", LOG_FILE=str(tmp_path / "x.log")
+    )
+    with mock.patch.dict(os.environ, stale):
+        result = runner.invoke(
+            cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
+        )
+        assert result.exit_code == 0, result.output
+        assert [n for n in os.environ if n.startswith("ANDES_APP_RELOAD_")] == []
+        cli._reload_app_factory()
+    kwargs = built_apps[-1]["kwargs"]
+    assert kwargs["workspace"] == (tmp_path / "ws").resolve()
+    assert kwargs["max_sessions"] == 4
+    assert kwargs["sweep_workers"] is None
+    assert not (tmp_path / "x.log").exists()
 
 
 # ------------------------------------------------------------ open watcher
@@ -755,14 +827,14 @@ def test_serve_reload_does_not_inherit_the_logging_options_of_an_earlier_run(
 ) -> None:
     monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **kw: None)
     with mock.patch.dict(os.environ):
-        os.environ["ANDES_APP_RELOAD_LOG_FILE"] = str(tmp_path / "stale.log")
-        os.environ["ANDES_APP_RELOAD_LOG_JSON"] = "1"
+        os.environ["TENSA_RELOAD_LOG_FILE"] = str(tmp_path / "stale.log")
+        os.environ["TENSA_RELOAD_LOG_JSON"] = "1"
         result = runner.invoke(
             cli.app, ["serve", "--workspace", str(tmp_path / "ws"), "--reload"]
         )
         assert result.exit_code == 0, result.output
-        assert "ANDES_APP_RELOAD_LOG_FILE" not in os.environ
-        assert os.environ["ANDES_APP_RELOAD_LOG_JSON"] == ""
+        assert "TENSA_RELOAD_LOG_FILE" not in os.environ
+        assert os.environ["TENSA_RELOAD_LOG_JSON"] == ""
         cli._reload_app_factory()
     assert not (tmp_path / "stale.log").exists()
 

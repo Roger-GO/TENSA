@@ -85,10 +85,10 @@ A session is one ANDES system in its own process. You create it, load a case int
 The repository has a Python client that uses only the standard library, `examples/tensa_client.py`. Copy that one file next to your script:
 
 ```python
-from tensa_client import AndesApp
+from tensa_client import TensaClient
 
-app = AndesApp("http://127.0.0.1:8000")
-with app.session() as s:
+client = TensaClient("http://127.0.0.1:8000")
+with client.session() as s:
     s.load_case("ieee14_full.xlsx")
     s.add_fault(bus_idx="4", tf=1.0, tc=1.1)
     print(s.run_pflow()["converged"])

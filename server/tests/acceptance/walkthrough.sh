@@ -2,7 +2,8 @@
 # Phase A R3 acceptance: curl-only end-to-end walkthrough of the substrate.
 #
 # Required env:
-#   ANDES_APP_PORT — port the substrate is listening on
+#   TENSA_PORT: the port the substrate is listening on (ANDES_APP_PORT, its name while the
+#   project was called ANDES App, still works when TENSA_PORT is not set)
 #
 # Required workspace state (current dir):
 #   ieee14.raw + ieee14.dyr placed inside the workspace before this runs
@@ -11,7 +12,11 @@
 
 set -euo pipefail
 
-PORT="${ANDES_APP_PORT:?ANDES_APP_PORT must be set}"
+PORT="${TENSA_PORT:-${ANDES_APP_PORT:-}}"
+if [ -z "$PORT" ]; then
+  echo "TENSA_PORT must be set to the port the server is listening on" >&2
+  exit 2
+fi
 BASE="http://127.0.0.1:$PORT"
 
 curl_t() {

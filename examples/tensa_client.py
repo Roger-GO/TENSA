@@ -6,10 +6,10 @@ project (or let an LLM agent import it). For the full API surface see
 
 Usage::
 
-    from tensa_client import AndesApp
+    from tensa_client import TensaClient
 
-    app = AndesApp("http://127.0.0.1:8000")
-    with app.session() as s:
+    client = TensaClient("http://127.0.0.1:8000")
+    with client.session() as s:
         s.load_case("ieee14_full.xlsx")
         s.add_fault(bus_idx="7", tf=1.0, tc=1.1)
         print(s.run_pflow()["converged"])
@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-class AndesAppError(RuntimeError):
+class TensaClientError(RuntimeError):
     """Raised on any non-2xx response, carrying the RFC-7807 ProblemDetails."""
 
     def __init__(self, status: int, problem: dict[str, Any]):
@@ -39,7 +39,7 @@ class AndesAppError(RuntimeError):
         super().__init__(f"[{status}] {problem.get('title')}: {problem.get('detail')}{hint}")
 
 
-class AndesApp:
+class TensaClient:
     """Top-level handle to a running ``tensa serve`` instance."""
 
     def __init__(self, base_url: str = "http://127.0.0.1:8000", timeout: float = 330.0):
@@ -80,7 +80,7 @@ class AndesApp:
                 problem = json.loads(e.read())
             except Exception:
                 problem = {"title": e.reason, "detail": ""}
-            raise AndesAppError(e.code, problem) from None
+            raise TensaClientError(e.code, problem) from None
 
     @contextmanager
     def session(self) -> Iterator["Session"]:
@@ -91,7 +91,7 @@ class AndesApp:
         finally:
             try:
                 self.request("DELETE", f"/sessions/{sid}")
-            except AndesAppError:
+            except TensaClientError:
                 pass
 
     def workspace_files(self) -> list[dict[str, Any]]:
@@ -135,10 +135,16 @@ class AndesApp:
         return self.request("POST", "/comtrade", body, binary=True)
 
 
+# The names these two classes had while the project was called ANDES App. They are the
+# same classes, so a script that imports or catches the old names keeps working.
+AndesApp = TensaClient
+AndesAppError = TensaClientError
+
+
 class Session:
     """One isolated ANDES ``System`` living in its own server-side subprocess."""
 
-    def __init__(self, app: AndesApp, session_id: str):
+    def __init__(self, app: TensaClient, session_id: str):
         self.app = app
         self.id = session_id
 

@@ -19,3 +19,15 @@ files, `tensa examples add ieee14 --workspace ~/tensa-cases` adds it.
 
 For the complete API contract, see `http://127.0.0.1:8000/docs` (interactive) or
 [`../llms.txt`](../llms.txt) (condensed map, written for LLM agents).
+
+## Settings
+
+`walkthrough.sh` reads two environment variables: `TENSA_URL`, the address `tensa serve` prints
+(default `http://127.0.0.1:8000`), and `TENSA_CASE`, the case file to load by its name in the
+workspace (default `ieee14_full.xlsx`). The contingency screening study reads `TENSA_URL` too.
+`ANDES_APP_URL` and `ANDES_APP_CASE`, the names they had when the project was called ANDES App,
+still work when the new ones are not set.
+
+The Python client takes the address as an argument, `TensaClient("http://127.0.0.1:8000")`. A
+script written against its old class names, `AndesApp` and `AndesAppError`, keeps working: they
+are the same classes as `TensaClient` and `TensaClientError`.

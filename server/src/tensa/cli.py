@@ -160,6 +160,14 @@ _DESKTOP_HOST = "127.0.0.1"
 # answer within a few seconds.
 _GRACEFUL_SHUTDOWN_SECONDS = 3
 
+# ``serve --reload`` hands its options to the reloader's child, which builds the app
+# without arguments, through ``TENSA_RELOAD_<NAME>`` environment variables. They were
+# ``ANDES_APP_RELOAD_<NAME>`` while the project was called ANDES App: the child still reads
+# one of those when the new name is not set, and ``serve`` clears them so that a value left
+# in the environment by something else cannot stand in for an option it did not pass.
+_RELOAD_ENV = "TENSA_RELOAD_"
+_LEGACY_RELOAD_ENV = "ANDES_APP_RELOAD_"
+
 # The signals besides Ctrl+C that ask a server to stop: ``kill <pid>`` and a
 # service manager send SIGTERM, and Ctrl+Break on Windows is SIGBREAK.
 _STOP_SIGNALS = tuple(
@@ -502,7 +510,7 @@ def serve(
     # ``--reload`` runs uvicorn against an import-string factory so the
     # reloader subprocess can re-import the app on source changes. The factory
     # is called with no args in the worker, so config is threaded through
-    # ``ANDES_APP_RELOAD_*`` env vars set here.
+    # ``TENSA_RELOAD_*`` env vars set here.
     if reload:
         # uvicorn's reloader binds its own socket, so ours can't be handed
         # over; reserve a concrete port number for the factory instead (the
@@ -513,23 +521,17 @@ def serve(
         except OSError as exc:
             log.error("cannot bind %s:%s: %s", bind, port, exc)
             raise typer.Exit(code=_STARTUP_FAILURE) from exc
-        os.environ["ANDES_APP_RELOAD_WORKSPACE"] = str(canonical_workspace)
-        os.environ["ANDES_APP_RELOAD_BIND"] = bind
-        os.environ["ANDES_APP_RELOAD_PORT"] = str(reload_port)
-        os.environ["ANDES_APP_RELOAD_ORIGINS"] = ",".join(sorted(extra_origins))
-        os.environ["ANDES_APP_RELOAD_HOSTS"] = ",".join(sorted(extra_hosts))
-        os.environ["ANDES_APP_RELOAD_MAX_SESSIONS"] = str(max_sessions)
-        os.environ["ANDES_APP_RELOAD_IDLE"] = str(idle_timeout_seconds)
-        if sweep_workers is not None:
-            os.environ["ANDES_APP_RELOAD_SWEEP_WORKERS"] = str(sweep_workers)
-        else:
-            os.environ.pop("ANDES_APP_RELOAD_SWEEP_WORKERS", None)
-        os.environ["ANDES_APP_RELOAD_LOG_LEVEL"] = log_level.value
-        os.environ["ANDES_APP_RELOAD_LOG_JSON"] = "1" if log_json else ""
-        if log_path is not None:
-            os.environ["ANDES_APP_RELOAD_LOG_FILE"] = str(log_path)
-        else:
-            os.environ.pop("ANDES_APP_RELOAD_LOG_FILE", None)
+        _hand_to_reloader("WORKSPACE", str(canonical_workspace))
+        _hand_to_reloader("BIND", bind)
+        _hand_to_reloader("PORT", str(reload_port))
+        _hand_to_reloader("ORIGINS", ",".join(sorted(extra_origins)))
+        _hand_to_reloader("HOSTS", ",".join(sorted(extra_hosts)))
+        _hand_to_reloader("MAX_SESSIONS", str(max_sessions))
+        _hand_to_reloader("IDLE", str(idle_timeout_seconds))
+        _hand_to_reloader("SWEEP_WORKERS", None if sweep_workers is None else str(sweep_workers))
+        _hand_to_reloader("LOG_LEVEL", log_level.value)
+        _hand_to_reloader("LOG_JSON", "1" if log_json else "")
+        _hand_to_reloader("LOG_FILE", None if log_path is None else str(log_path))
         watch_dir = Path(__file__).resolve().parent  # the tensa package
         log.info("dev --reload: watching %s for changes", watch_dir)
         log.info(
@@ -748,36 +750,58 @@ def _accepts_connections(host: str, port: int) -> bool:
         return False
 
 
+def _hand_to_reloader(name: str, value: str | None) -> None:
+    """Set ``TENSA_RELOAD_<name>`` to ``value``, or remove it when ``value`` is ``None``;
+    the legacy spelling is removed either way."""
+    os.environ.pop(_LEGACY_RELOAD_ENV + name, None)
+    if value is None:
+        os.environ.pop(_RELOAD_ENV + name, None)
+    else:
+        os.environ[_RELOAD_ENV + name] = value
+
+
+def _reload_setting(name: str, default: str = "") -> str:
+    """What ``serve`` handed over as ``name``: the new variable if it is set (an empty
+    value counts), else the legacy one, else ``default``."""
+    for prefix in (_RELOAD_ENV, _LEGACY_RELOAD_ENV):
+        if prefix + name in os.environ:
+            return os.environ[prefix + name]
+    return default
+
+
 def _reload_app_factory() -> FastAPI:
     """App factory for ``serve --reload`` (DEV ONLY).
 
     uvicorn's reloader re-imports this module in a worker subprocess and calls
     this with no args, so every config value is read from the
-    ``ANDES_APP_RELOAD_*`` env vars that ``serve`` sets before ``uvicorn.run``.
+    ``TENSA_RELOAD_*`` env vars that ``serve`` sets before ``uvicorn.run``
+    (``ANDES_APP_RELOAD_*``, their old names, are read too).
     Not used on the normal (non-reload) path.
 
     The logging options ride along the same way. This process owns the log file
     (``serve`` opens none under ``--reload``), and uvicorn's own lines keep its
     default format, since its reloader configures them before this runs.
     """
-    log_file_env = os.environ.get("ANDES_APP_RELOAD_LOG_FILE")
+    log_file_env = _reload_setting("LOG_FILE")
     configure_logging(
-        level=os.environ.get("ANDES_APP_RELOAD_LOG_LEVEL", "info").upper(),
-        json_lines=bool(os.environ.get("ANDES_APP_RELOAD_LOG_JSON")),
+        level=_reload_setting("LOG_LEVEL", "info").upper(),
+        json_lines=bool(_reload_setting("LOG_JSON")),
         log_file=Path(log_file_env) if log_file_env else None,
     )
-    workspace = Path(os.environ["ANDES_APP_RELOAD_WORKSPACE"])
-    bind = os.environ.get("ANDES_APP_RELOAD_BIND", "127.0.0.1")
-    port = int(os.environ.get("ANDES_APP_RELOAD_PORT", "0"))
-    origins = frozenset(
-        o for o in os.environ.get("ANDES_APP_RELOAD_ORIGINS", "").split(",") if o
-    )
-    hosts = frozenset(
-        h for h in os.environ.get("ANDES_APP_RELOAD_HOSTS", "").split(",") if h
-    )
-    max_sessions = int(os.environ.get("ANDES_APP_RELOAD_MAX_SESSIONS", "4"))
-    idle = float(os.environ.get("ANDES_APP_RELOAD_IDLE", "180.0"))
-    sweep_workers_env = os.environ.get("ANDES_APP_RELOAD_SWEEP_WORKERS")
+    workspace_env = _reload_setting("WORKSPACE")
+    if not workspace_env:
+        raise RuntimeError(
+            "TENSA_RELOAD_WORKSPACE is not set: _reload_app_factory is what "
+            "`tensa serve --reload` hands to uvicorn, and is not meant to be called otherwise"
+        )
+    workspace = Path(workspace_env)
+    bind = _reload_setting("BIND", "127.0.0.1")
+    port = int(_reload_setting("PORT", "0"))
+    origins = frozenset(o for o in _reload_setting("ORIGINS").split(",") if o)
+    hosts = frozenset(h for h in _reload_setting("HOSTS").split(",") if h)
+    max_sessions = int(_reload_setting("MAX_SESSIONS", "4"))
+    idle = float(_reload_setting("IDLE", "180.0"))
+    sweep_workers_env = _reload_setting("SWEEP_WORKERS")
     return make_app(
         workspace=ensure_workspace(workspace),
         bind_host=bind,

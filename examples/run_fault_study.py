@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import sys
 
-from tensa_client import AndesApp
+from tensa_client import TensaClient
 
 CASE = sys.argv[1] if len(sys.argv) > 1 else "ieee14_full.xlsx"
 
-app = AndesApp("http://127.0.0.1:8000")
+client = TensaClient("http://127.0.0.1:8000")
 
-with app.session() as s:
+with client.session() as s:
     print(f"Loading {CASE} ...")
     s.load_case(CASE)
 

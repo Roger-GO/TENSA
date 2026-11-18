@@ -112,7 +112,7 @@ def test_curl_walkthrough_runs_green(tmp_path: Path) -> None:
             ["bash", str(script)],
             env={
                 **os.environ,
-                "ANDES_APP_PORT": str(port),
+                "TENSA_PORT": str(port),
             },
             cwd=str(workspace),
             capture_output=True,
