@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 import sys
 import threading
 from collections.abc import Iterator
@@ -465,6 +466,8 @@ class FakeApi:
         self.bus_padding = 0  # buses in the listing beyond the three, ahead of the machines
         self.overstates = 0  # how many more variables the listing claims than it holds
         self.listing_calls: list[dict[str, int]] = []
+        self.open_sessions: list[str] = []
+        self.damping_shift: dict[str, float] = {}  # added to the mode's damping, by session
         self.reload_world()
 
     def reload_world(self) -> None:
@@ -508,7 +511,9 @@ class FakeApi:
 
     def call(self, method: str, path: str, body: Any = None, **query: Any) -> Any:
         self.log.append(f"{method} {path}")
-        if method == "DELETE" and path == "/sessions/s1":
+        if method == "DELETE" and re.fullmatch(r"/sessions/s\d+", path):
+            if path.rsplit("/", 1)[1] in self.open_sessions:
+                self.open_sessions.remove(path.rsplit("/", 1)[1])
             return None
         if path.startswith("/examples/") and path.endswith("/add"):
             if self.fail_add:
@@ -519,7 +524,10 @@ class FakeApi:
                 "warnings": [],
             }
         if path == "/sessions":
-            return {"session_id": "s1"}
+            # One session is s1, and a second opened beside it is s2.
+            sid = f"s{len(self.open_sessions) + 1}"
+            self.open_sessions.append(sid)
+            return {"session_id": sid}
         if path.endswith(("/case", "/reload")):
             self.reload_world()
             return self.topology()
@@ -556,7 +564,7 @@ class FakeApi:
                 "mode_count": 3,
             }
         if path.endswith("/tds"):
-            return self.tds(body)
+            return self.tds(body, path.split("/")[2])
         raise AssertionError(f"the fake has no answer for {method} {path}")
 
     def variables(self) -> list[dict[str, Any]]:
@@ -574,13 +582,14 @@ class FakeApi:
         ]
         return items
 
-    def tds(self, body: dict[str, Any]) -> dict[str, Any]:
+    def tds(self, body: dict[str, Any], sid: str = "s1") -> dict[str, Any]:
         self.tds_requests.append(list(body["dae_vars"]))
         self.tds_steps.append(body.get("h"))
         tf = float(body["tf"])
         t = np.arange(0, tf + 1e-9, 1 / 30)
         stepped = any(s.get("src") == "Req" for s in self.specs)
         f, z = self.MODE
+        z += self.damping_shift.get(sid, 0.0)
         swing = _oscillation(t, f, z - self.grow / (2 * math.pi * f), 0.5, amplitude=1e-3)
         swing = swing if stepped else np.zeros_like(t)
         tripped = np.where(t >= 2.0, 1.0, 0.0) if self.events else np.zeros_like(t)
@@ -1008,3 +1017,92 @@ def test_the_catalog_is_not_written_for_a_case_without_a_summary_or_that_did_not
     with_summary = _catalog_file(tmp_path, summary="x", checks=[])
     with pytest.raises(ValueError, match="did not pass"):
         harness.update_catalog([bad], with_summary)
+
+
+# ---- a mode's damping held to the case it is a variant of ---------------------------------
+
+COMPARE = {"case": "kundur", "window_hz": [0.3, 0.9], "change": [-0.005, 0.005]}
+COMPARE_NAME = "Damping of the mode between 0.3 and 0.9 Hz against kundur"
+
+
+def _compare_check(result: Any) -> Any:
+    return next(c for c in result.checks if c.name == COMPARE_NAME)
+
+
+def test_a_mode_held_to_another_case_passes_when_the_two_runs_have_the_same_damping(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": COMPARE}))
+    check = _compare_check(result)
+    assert check.passed and check.kind == "ring-down" and result.passed
+    assert check.measured == pytest.approx(0, abs=1e-4)
+    assert check.tolerance == "between -0.005 and +0.005 in damping ratio"
+    # The other case is added from the catalog and run in a session of its own beside the first,
+    # which closes before this one, and no other check was disturbed by it.
+    assert "POST /examples/kundur/add" in fake.log
+    assert fake.log.count("POST /sessions") == 2
+    assert fake.log.index("DELETE /sessions/s2") < fake.log.index("DELETE /sessions/s1")
+    assert not any(c.name == COMPARE_NAME for c in _run(harness, fake)[0].checks)
+
+
+def test_a_mode_that_the_other_case_damps_more_fails_a_comparison_that_allows_no_difference(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    fake.damping_shift = {"s2": 0.05}  # the other case's ring-down is damped 0.084, not 0.034
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": COMPARE}))
+    check = _compare_check(result)
+    assert not check.passed and not result.passed
+    assert check.measured == pytest.approx(-0.05, abs=0.005)
+    # Allowed to be lower by that much, the same two runs pass.
+    wide = {**COMPARE, "change": [-0.06, 0.0]}
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": wide}))
+    assert _compare_check(result).passed
+
+
+def test_a_comparison_that_asks_for_a_gain_in_damping_fails_when_there_is_none(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    better = {**COMPARE, "change": [0.01, 0.2]}
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": better}))
+    check = _compare_check(result)
+    assert not check.passed and check.measured == pytest.approx(0, abs=1e-4)
+    fake.damping_shift = {"s2": -0.02}  # the other case is damped less: this one gained 0.02
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": better}))
+    assert _compare_check(result).passed
+
+
+def test_a_comparison_names_a_case_the_catalog_has_with_a_reference_or_fails_in_words(
+    harness: ModuleType, fake: FakeApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = {**COMPARE, "case": "no_such_case"}
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": missing}))
+    check = next(c for c in result.checks if c.name.endswith("against no_such_case"))
+    assert not check.passed and "no such case with a file" in check.result
+    assert "POST /sessions" in fake.log and fake.log.count("POST /sessions") == 1
+    # A case with no reference would run with the events of its file acting.
+    monkeypatch.setattr(harness, "load_reference", lambda example_id, *a, **k: None)
+    result, _ = _run(
+        harness,
+        fake,
+        _reference(ring_down={"compare": COMPARE}),
+    )
+    check = _compare_check(result)
+    assert not check.passed and "has no reference file" in check.result
+
+
+def test_the_other_cases_run_has_its_own_events_taken_out(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    _run(harness, fake, _reference(ring_down={"compare": COMPARE}))
+    # The reference of the kundur case names Toggle 1; the fake lists it as an event of the file.
+    deleted = [call for call in fake.log if call == "DELETE /sessions/s2/elements/Toggle/1"]
+    assert len(deleted) == 1
+
+
+def test_a_mode_with_no_oscillation_in_the_window_of_either_run_fails_and_says_which(
+    harness: ModuleType, fake: FakeApi
+) -> None:
+    far = {**COMPARE, "window_hz": [1.5, 2.5]}  # the fake's mode is at 0.65 Hz
+    result, _ = _run(harness, fake, _reference(ring_down={"compare": far}))
+    check = next(c for c in result.checks if c.name.endswith("against kundur"))
+    assert not check.passed and "no oscillation between 1.5 and 2.5 Hz" in check.result

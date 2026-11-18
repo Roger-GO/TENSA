@@ -219,3 +219,58 @@ def test_the_disturbance_is_read_from_the_reference_of_the_case(
     path.write_text(json.dumps({"version": 1, "id": "demo"}), encoding="utf-8")
     with pytest.raises(script.CrosscheckError, match="no disturbance"):
         script.load_plan(path)
+
+
+def test_a_tg2_governor_is_refused_unless_it_is_said_to_do_nothing(script: ModuleType) -> None:
+    """ANDES 2.0.0 holds a TG2's input at zero with its dead band off, so the machine keeps the
+    power it started with; the check takes that on only when asked, and only for a TG2."""
+    network = _network(other_models=["TG2"])
+    with pytest.raises(script.CrosscheckError, match="TG2"):
+        script.ClassicalModel(network, VOLTAGES)
+    with pytest.raises(script.CrosscheckError, match="TG2"):
+        script.ClassicalModel(network, VOLTAGES, governors="refuse")
+    held = script.ClassicalModel(network, VOLTAGES, governors="inert")
+    plain = script.ClassicalModel(_network(), VOLTAGES)
+    assert held.modes() == plain.modes()
+    # Another model beside it is still not the classical one, and the message names that one.
+    with pytest.raises(script.CrosscheckError) as caught:
+        script.ClassicalModel(_network(other_models=["TG2", "EXDC2"]), VOLTAGES, "inert")
+    assert "EXDC2" in str(caught.value) and "TG2" not in str(caught.value)
+    # Another governor is not covered by what is known of TG2.
+    with pytest.raises(script.CrosscheckError, match="TGOV1"):
+        script.ClassicalModel(_network(other_models=["TGOV1"]), VOLTAGES, governors="inert")
+
+
+def test_the_events_of_the_case_file_are_part_of_the_disturbance(script: ModuleType) -> None:
+    trip = {"kind": "toggle", "model": "Line", "dev_idx": "L1", "t": 0.2}
+    network = _network(file_events=[trip])
+    assert script.disturbance_events(network, []) == [trip]
+    fault = _fault(1, 0.5, 0.6)
+    # The file's events and the reference's act together, the file's first, as in a run of the harness.
+    assert script.disturbance_events(network, [fault]) == [trip, fault]
+    assert script.disturbance_events(_network(), [fault]) == [fault]
+    with pytest.raises(script.CrosscheckError, match="neither the reference nor the case's file"):
+        script.disturbance_events(_network(), [])
+
+
+def test_a_trip_in_the_file_gives_the_run_a_trip_in_the_reference_gives(script: ModuleType) -> None:
+    trip = {"kind": "toggle", "model": "Line", "dev_idx": "L1", "t": 0.2}
+    model = script.ClassicalModel(_network(file_events=[trip]), VOLTAGES)
+    from_file = model.simulate(
+        script.disturbance_events(_network(file_events=[trip]), []), 1.0, 0.01
+    )
+    from_reference = model.simulate(script.disturbance_events(_network(), [trip]), 1.0, 0.01)
+    assert from_file == from_reference
+    quiet = model.simulate([{**trip, "t": 5.0}], tf=1.0, step=0.01)  # a trip after the run ends
+    assert from_file["max_angle_spread_deg"] != pytest.approx(
+        quiet["max_angle_spread_deg"], abs=1e-6
+    )
+
+
+def test_a_reference_with_no_specs_is_a_plan_whose_events_are_in_the_file(
+    script: ModuleType, tmp_path: Path
+) -> None:
+    path = tmp_path / "demo.json"
+    plan = {"description": "a trip in the file", "specs": [], "tf": 10.0}
+    path.write_text(json.dumps({"version": 1, "id": "demo", "disturbance": plan}), encoding="utf-8")
+    assert script.load_plan(path) == ([], 10.0, pytest.approx(1 / 30))

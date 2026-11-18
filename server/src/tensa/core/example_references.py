@@ -175,6 +175,41 @@ class DisturbancePlan(_Model):
     )
 
 
+class RingDownCompare(_Model):
+    """Another case whose ring-down this case's is compared with, in the time domain."""
+
+    case: _Id = Field(
+        ...,
+        description=(
+            "The example the case is a variant of (the same system without what this one adds). "
+            "Its own reference gives the events its run takes out."
+        ),
+    )
+    window_hz: tuple[float, float] = Field(
+        ...,
+        description=(
+            "The frequency window, in Hz, of the mode compared: the ring-down pole in it with "
+            "the most energy is taken in each case."
+        ),
+    )
+    change: tuple[float, float] = Field(
+        ...,
+        description=(
+            "How far this case's damping ratio of that pole may lie from the other case's: "
+            "``[lowest, highest]`` of this one's minus the other's. A stabiliser that adds "
+            "damping gives a range above zero; one that does nothing, a range about zero."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _holds_together(self) -> Self:
+        if not 0 <= self.window_hz[0] < self.window_hz[1]:
+            raise ValueError("window_hz is [low, high] with low < high")
+        if self.change[0] > self.change[1]:
+            raise ValueError("change is [lowest, highest] with lowest <= highest")
+        return self
+
+
 class RingDownPlan(_Model):
     """The small disturbance whose ring-down the harness compares with the eigenvalues."""
 
@@ -208,6 +243,15 @@ class RingDownPlan(_Model):
             "of a few tens of seconds cannot tell a pole that dies within a second or two from "
             "its neighbours, so what the fit finds there is not a fair test of an eigenvalue. "
             "``null`` compares every pole."
+        ),
+    )
+    compare: RingDownCompare | None = Field(
+        None,
+        description=(
+            "Hold the damping of a mode to the damping the same disturbance gives in another "
+            "case (a variant without what this one adds, such as a stabiliser). Both are read "
+            "from time-domain runs, so the comparison does not rest on the eigenvalue analysis "
+            "of either."
         ),
     )
 

@@ -296,6 +296,42 @@ _NETWORK_GROUPS = frozenset(
 _EVENT_GROUPS = frozenset({"TimedEvent"})
 
 
+def _file_events(system: Any) -> list[dict[str, Any]]:
+    """The line trips (``Toggle`` of a ``Line``) and faults the case file holds that are on.
+
+    They are written the way ``POST /sessions/{id}/disturbances`` takes them, so that the
+    classical check integrates what the file says without a second copy of it in the reference.
+    A ``Toggle`` of another model is left out: the classical check refuses a disturbance it
+    does not know when it reads one, and says so.
+    """
+    events: list[dict[str, Any]] = []
+    toggles = system.Toggle
+    for k in range(toggles.n):
+        if toggles.u.v[k]:
+            events.append(
+                {
+                    "kind": "toggle",
+                    "model": str(toggles.model.v[k]),
+                    "dev_idx": toggles.dev.v[k],
+                    "t": float(toggles.t.v[k]),
+                }
+            )
+    faults = system.Fault
+    for k in range(faults.n):
+        if faults.u.v[k]:
+            events.append(
+                {
+                    "kind": "fault",
+                    "bus_idx": faults.bus.v[k],
+                    "tf": float(faults.tf.v[k]),
+                    "tc": float(faults.tc.v[k]),
+                    "xf": float(faults.xf.v[k]),
+                    "rf": float(faults.rf.v[k]),
+                }
+            )
+    return events
+
+
 def _classical_machines(system: Any, pos: Any) -> dict[str, Any]:
     """The machines of the classical model (``GENCLS``) the case holds, per unit on the base.
 
@@ -303,7 +339,9 @@ def _classical_machines(system: Any, pos: Any) -> dict[str, Any]:
     ``ra`` and ``xd1`` to the system base at ``setup()``, so the values are read as they are.
     ``other_models`` names every other device model of the case that is not part of the
     network (a round-rotor machine, an exciter, a governor), which the classical check cannot
-    represent; ``events`` names the events of the file.
+    represent; ``events`` names the models of the events of the file and ``file_events`` gives
+    the line trips and the faults among them as the disturbance specs the classical check
+    integrates, so that a case whose disturbance is built into its file has one to check.
     """
     machines = system.GENCLS
     other = sorted(
@@ -320,6 +358,7 @@ def _classical_machines(system: Any, pos: Any) -> dict[str, Any]:
         if model.n
     )
     return {
+        "file_events": _file_events(system),
         "classical": [
             {
                 "idx": machines.idx.v[k],

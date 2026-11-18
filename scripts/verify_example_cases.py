@@ -37,6 +37,10 @@ Checks no reference file is needed for:
   ``tolerance_damping``, 0.05 each unless it says otherwise): this compares the linearisation
   with the simulation. Poles damped more than ``ring_down.max_damping_ratio`` are left out, and
   the run must not grow (``GROWTH_WINDOW``, ``GROWTH_LIMIT``);
+- where the reference says ``ring_down.compare``, the damping of the strongest oscillation in a
+  frequency window is read from the ring-down runs of this case and of the case it is a variant
+  of (the same disturbance, in a session of its own), and the difference must lie in the range
+  the reference gives: a stabiliser that damps a mode shows as a gain, one that does not as none;
 - the case's disturbance run completes and its rotor angles end within
   ``disturbance.stable_below_deg`` of each other, and, where the reference says
   ``disturbance.settles_within_deg``, within that many degrees of the spread they began with.
@@ -749,6 +753,38 @@ def verify_case(
     return result, measured
 
 
+def add_example(
+    api: Api, example: Example, replace_file: bool, result: CaseResult
+) -> tuple[str, list[str], str]:
+    """Add a case from the catalog: the name of its file, its companion files and what happened.
+
+    A file the workspace already holds is used as it is, unless ``replace_file``; either is said
+    in the notes of ``result``.
+    """
+    try:
+        added = api.post(f"/examples/{example.id}/add", overwrite=replace_file)
+        primary = added["primary"]
+        extra = [f["name"] for f in added["files"][1:]]
+        warnings = list(added.get("warnings") or [])
+        what = "added to the workspace" + (
+            " over the copy there" if added["files"][0]["replaced"] else ""
+        )
+        if warnings:
+            result.notes.extend(f"The server warned: {w}" for w in warnings)
+    except ApiError as exc:
+        if exc.status != 409:
+            raise
+        # Not ours to replace: use the workspace's own copy and say so.
+        primary = Path(example.provenance.path or "").name
+        extra = [Path(f.path).name for f in example.files() if not f.primary]
+        what = "already in the workspace, and used as it is"
+        result.notes.append(
+            f"The workspace already held the file of {example.id}, which was not replaced: what "
+            "was checked is that copy."
+        )
+    return primary, extra, what
+
+
 def _verify(
     api: Api,
     example: Example,
@@ -767,27 +803,7 @@ def _verify(
             )
         # 1. Add from the catalog.
         log("add")
-        try:
-            added = api.post(f"/examples/{example.id}/add", overwrite=replace_file)
-            primary = added["primary"]
-            extra = [f["name"] for f in added["files"][1:]]
-            warnings = list(added.get("warnings") or [])
-            what = "added to the workspace" + (
-                " over the copy there" if added["files"][0]["replaced"] else ""
-            )
-            if warnings:
-                result.notes.extend(f"The server warned: {w}" for w in warnings)
-        except ApiError as exc:
-            if exc.status != 409:
-                raise
-            # Not ours to replace: use the workspace's own copy and say so.
-            primary = Path(example.provenance.path or "").name
-            extra = [Path(f.path).name for f in example.files() if not f.primary]
-            what = "already in the workspace, and used as it is"
-            result.notes.append(
-                "The workspace already held this case's file, which was not replaced: what was "
-                "checked is that copy."
-            )
+        primary, extra, what = add_example(api, example, replace_file, result)
         result.file = primary
         result.sanity(
             "Case adds from the catalog",
@@ -824,7 +840,7 @@ def _verify(
             bool(pf["converged"]),
         )
         if "tds" in example.analyses and pf["converged"]:
-            _dynamic(session, example, reference, result, measured, log)
+            _dynamic(session, example, reference, result, measured, log, replace_file)
         elif "tds" in example.analyses:
             result.notes.append(
                 "The power flow did not converge, so the time-domain and eigenvalue runs were skipped."
@@ -842,6 +858,7 @@ def _dynamic(
     result: CaseResult,
     measured: Measured,
     log: Log,
+    replace_file: bool = False,
 ) -> None:
     api = session.api
     remove = reference.remove_events if reference else []
@@ -909,7 +926,7 @@ def _dynamic(
             f"largest real part {max(real):.3g}",
             eig["mode_count"] > 0,
         )
-        _ring_down(session, ring, remove, names, modes, result, log)
+        _ring_down(session, ring, remove, names, modes, result, log, replace_file)
 
     # The case's own disturbance.
     log("disturbance")
@@ -976,36 +993,34 @@ def _dynamic(
                 )
 
 
-def _ring_down(
-    session: Session,
-    plan: RingDownPlan,
-    remove: Sequence[EventRef],
-    names: Variables,
-    modes: Sequence[tuple[float, float]],
-    result: CaseResult,
-    log: Log,
-) -> None:
-    log("ring-down")
-    name = "Ring-down of a small disturbance has the frequency and damping of eigenvalues"
-    how = (
-        "matrix pencil poles of the machines' speeds in a time-domain run, against the "
-        "eigenvalues of the same case at the same operating point"
-    )
+@dataclass
+class RingDownRun:
+    """The run of a small disturbance: the machines' speeds, or what stood in the way."""
+
+    t: np.ndarray | None = None
+    speeds: list[np.ndarray] = field(default_factory=list)
+    stepped: Any = None  # the idx of the load that was stepped, when the plan gave no specs
+    failure: tuple[str, str] | None = None  # what was needed, and what was found instead
+
+
+def _ring_down_run(
+    session: Session, plan: RingDownPlan, remove: Sequence[EventRef], names: Variables
+) -> RingDownRun:
+    """Reload the case, take its events out, apply the small disturbance and run it.
+
+    The speeds are taken relative to their mean when there are several, which leaves the swings
+    between machines and drops the drift they share (a case with no governor drifts together
+    after a load step, which is no mode).
+    """
     session.fresh(remove, keep_events=False)
     specs: list[Any] = list(plan.specs)
     stepped = None
     if not specs:
         loads = [x for x in session.topology["loads"] if x.get("kind") == "PQ"]
         if not loads:
-            result.sanity(
-                name,
-                "eig",
-                how,
-                "a PQ load to step",
-                "the case has no PQ load; give ring_down.specs",
-                False,
+            return RingDownRun(
+                failure=("a PQ load to step", "the case has no PQ load; give ring_down.specs")
             )
-            return
         load = max(loads, key=lambda x: abs(x["params"].get("p0", 0.0)))
         stepped = load["idx"]
         # In a time-domain run a load is a constant impedance (ANDES's default), which reads
@@ -1021,22 +1036,43 @@ def _ring_down(
             )
         ]
     if not names.omega:
-        result.sanity(
-            name, "eig", how, "machines with a speed", "the case has no synchronous machine", False
-        )
-        return
+        return RingDownRun(failure=("machines with a speed", "the case has no synchronous machine"))
     session.disturb(specs)
     session.pflow()
     run = session.tds(plan.tf, names.omega)
     ok, text = completes(run, plan.tf)
     if not ok or not run.get("traces"):
-        result.sanity(name, "eig", how, f"the run reaches {plan.tf:g} s", text, False)
-        return
+        return RingDownRun(failure=(f"the run reaches {plan.tf:g} s", text))
     t, series = trace_arrays(run["traces"])
     speeds = [series[n] for n in names.omega]
     if len(speeds) > 1:  # speeds relative to their mean leave the swings between machines
         mean = np.mean(np.vstack(speeds), axis=0)
         speeds = [s - mean for s in speeds]
+    return RingDownRun(t=t, speeds=speeds, stepped=stepped)
+
+
+def _ring_down(
+    session: Session,
+    plan: RingDownPlan,
+    remove: Sequence[EventRef],
+    names: Variables,
+    modes: Sequence[tuple[float, float]],
+    result: CaseResult,
+    log: Log,
+    replace_file: bool = False,
+) -> None:
+    log("ring-down")
+    name = "Ring-down of a small disturbance has the frequency and damping of eigenvalues"
+    how = (
+        "matrix pencil poles of the machines' speeds in a time-domain run, against the "
+        "eigenvalues of the same case at the same operating point"
+    )
+    run = _ring_down_run(session, plan, remove, names)
+    if run.failure is not None or run.t is None:
+        needed, found = run.failure or ("a run", "none")
+        result.sanity(name, "eig", how, needed, found, False)
+        return
+    t, speeds, stepped = run.t, run.speeds, run.stepped
     early, late = swing_peaks(t, speeds, plan.start_t, GROWTH_WINDOW)
     result.sanity(
         "The small disturbance does not grow",
@@ -1084,6 +1120,111 @@ def _ring_down(
             detail,
             all(m["matched"] for m in matches),
             measured=max(m["gap_hz"] for m in matches),
+        )
+    )
+    if plan.compare is not None:
+        _compare_ring_down(session, plan, run, replace_file, result, log)
+
+
+def mode_in_window(
+    t: np.ndarray, speeds: Sequence[np.ndarray], plan: RingDownPlan, window_hz: tuple[float, float]
+) -> Pole | None:
+    """The ring-down pole with the most energy inside ``window_hz``, or ``None``."""
+    poles = ring_down_poles(
+        t, speeds, plan.start_t, window_hz, 1, max_damping=plan.max_damping_ratio
+    )
+    return poles[0] if poles else None
+
+
+def _compare_ring_down(
+    session: Session,
+    plan: RingDownPlan,
+    run: RingDownRun,
+    replace_file: bool,
+    result: CaseResult,
+    log: Log,
+) -> None:
+    """Hold a mode's damping, seen in the time domain, to that of the case it is a variant of.
+
+    The other case is added from the catalog and run through the same small disturbance in a
+    session of its own; the damping of the strongest oscillation in the window is read off both
+    runs by the matrix pencil method, so neither number comes from an eigenvalue analysis.
+    """
+    compare = plan.compare
+    assert compare is not None and run.t is not None
+    name = (
+        f"Damping of the mode between {compare.window_hz[0]:g} and {compare.window_hz[1]:g} Hz "
+        f"against {compare.case}"
+    )
+    log(f"ring-down of {compare.case}")
+    other = load_catalog().get(compare.case)
+    if other is None or not other.has_file:
+        result.sanity(
+            name,
+            "eig",
+            "the example catalog",
+            f"{compare.case} is a case with a file",
+            "the catalog has no such case with a file",
+            False,
+        )
+        return
+    other_reference = load_reference(compare.case)
+    if other_reference is None:
+        # Its reference says which events of its file to take out, or they would act in its run.
+        result.sanity(
+            name,
+            "eig",
+            "the reference file of " + compare.case,
+            "a reference file naming the events to take out",
+            f"{compare.case} has no reference file",
+            False,
+        )
+        return
+    remove = other_reference.remove_events
+    api = session.api
+    primary, extra, _ = add_example(api, other, replace_file, result)
+    sibling = Session(api, primary, extra)
+    try:
+        names = choose_variables(list_variables(api, sibling.id))
+        theirs = _ring_down_run(sibling, plan, remove, names)
+    finally:
+        sibling.close()
+    how = (
+        f"matrix pencil poles of the machines' speeds in the time-domain run of {compare.case} "
+        "after the same small disturbance, read the same way"
+    )
+    allowed = f"between {compare.change[0]:+g} and {compare.change[1]:+g} in damping ratio"
+    if theirs.failure is not None or theirs.t is None:
+        needed, found = theirs.failure or ("a run", "none")
+        result.sanity(name, "eig", how, needed, f"{compare.case}: {found}", False)
+        return
+    mine = mode_in_window(run.t, run.speeds, plan, compare.window_hz)
+    other_pole = mode_in_window(theirs.t, theirs.speeds, plan, compare.window_hz)
+    if mine is None or other_pole is None:
+        who = compare.case if other_pole is None else "this case"
+        result.sanity(
+            name,
+            "eig",
+            how,
+            allowed,
+            f"no oscillation between {compare.window_hz[0]:g} and {compare.window_hz[1]:g} Hz "
+            f"in the run of {who}",
+            False,
+        )
+        return
+    change = mine.damping - other_pole.damping
+    result.add(
+        Check(
+            name,
+            "eig",
+            "ring-down",
+            how,
+            allowed,
+            f"{mine.frequency_hz:.3f} Hz with damping {mine.damping:.5f} here, "
+            f"{other_pole.frequency_hz:.3f} Hz with {other_pole.damping:.5f} in {compare.case}: "
+            f"a change of {change:+.5f}",
+            compare.change[0] <= change <= compare.change[1],
+            measured=change,
         )
     )
 
