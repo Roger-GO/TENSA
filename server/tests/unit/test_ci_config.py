@@ -55,6 +55,7 @@ _RETIRED_RUNNER_IMAGES = (
 # image since 19 October 2026, and 1.59 stops with "Playwright does not support chromium
 # on ubuntu26.04-x64".
 _PLAYWRIGHT_FOR_UBUNTU_26_04 = (1, 61)
+_FIRST_UBUNTU_NEEDING_PLAYWRIGHT_1_61 = (26, 4)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -103,21 +104,56 @@ def test_test_matrix_covers_three_operating_systems() -> None:
 
 
 def _runner_labels(workflow: dict[str, Any]) -> set[str]:
-    """Every runner label a workflow's jobs ask for, the entries of a matrix included."""
+    """Every runner label a workflow's jobs ask for, the entries of a matrix included, in
+    lower case (GitHub does not tell ``macOS-14`` from ``macos-14``). A `runs-on` this does
+    not read stops the test rather than let a retired image through unseen: an expression
+    other than ``matrix.os`` over a list, and a group (a runner group names no image)."""
     labels: set[str] = set()
     for job in workflow.get("jobs", {}).values():
         runs_on = job.get("runs-on", [])
+        if isinstance(runs_on, dict):
+            # ``{group: ..., labels: ...}``: the labels are the ones that name an image.
+            runs_on = runs_on.get("labels", [])
         asked = [runs_on] if isinstance(runs_on, str) else list(runs_on)
         matrix = job.get("strategy", {}).get("matrix", {})
         for label in asked:
             if label == "${{ matrix.os }}":
-                labels.update(matrix["os"])
+                entries = matrix["os"]
+                assert isinstance(entries, list), f"teach _runner_labels to read {entries!r}"
+                labels.update(entries)
                 labels.update(entry["os"] for entry in matrix.get("include", []) if "os" in entry)
             else:
-                # A label this does not read would let a retired image through unseen.
                 assert "${{" not in label, f"teach _runner_labels to read {label!r}"
                 labels.add(label)
-    return labels
+    return {label.lower() for label in labels}
+
+
+def test_the_runner_label_reader_reads_every_form_of_runs_on_or_refuses_it() -> None:
+    def labels(job: dict[str, Any]) -> set[str]:
+        return _runner_labels({"jobs": {"j": job}})
+
+    assert labels({"runs-on": "macOS-14"}) == {"macos-14"}
+    assert labels({"runs-on": {"group": "big", "labels": ["macOS-14-large"]}}) == {"macos-14-large"}
+    assert labels({"runs-on": {"group": "big"}}) == set()
+    matrix = {"os": ["ubuntu-latest", "macOS-14"], "include": [{"os": "windows-2019"}]}
+    assert labels({"runs-on": "${{ matrix.os }}", "strategy": {"matrix": matrix}}) == {
+        "ubuntu-latest",
+        "macos-14",
+        "windows-2019",
+    }
+    # An expression for the list is not read as the characters of its text.
+    with pytest.raises(AssertionError, match="teach _runner_labels"):
+        labels({"runs-on": "${{ matrix.os }}", "strategy": {"matrix": {"os": "${{ fromJSON(x) }}"}}})
+    with pytest.raises(AssertionError, match="teach _runner_labels"):
+        labels({"runs-on": "${{ inputs.runner }}"})
+
+
+def test_the_ubuntu_of_a_job_is_read_from_its_label() -> None:
+    assert _ubuntu_of("ubuntu-latest") is None
+    assert _ubuntu_of("Ubuntu-26.04") == (26, 4)
+    assert _ubuntu_of("ubuntu-24.04-arm") == (24, 4)
+    with pytest.raises(AssertionError, match="teach _ubuntu_of"):
+        _ubuntu_of(["self-hosted", "linux"])
 
 
 def test_no_workflow_asks_for_a_runner_image_that_is_retired() -> None:
@@ -365,6 +401,18 @@ def test_the_e2e_job_says_which_closed_page_keeps_its_session() -> None:
     assert "a page the test runner closes does not" in comments
 
 
+def _ubuntu_of(runs_on: Any) -> tuple[int, int] | None:
+    """The Ubuntu release a job's ``runs-on`` names, or ``None`` when it names the moving
+    ``ubuntu-latest`` (which is on the newest release, so the newest is what to check)."""
+    label = runs_on if isinstance(runs_on, str) else ""
+    label = label.lower()
+    if label == "ubuntu-latest":
+        return None
+    named = re.fullmatch(r"ubuntu-(\d+)\.(\d+)(?:-.*)?", label)
+    assert named is not None, f"teach _ubuntu_of to read the runs-on {runs_on!r} of the e2e job"
+    return int(named.group(1)), int(named.group(2))
+
+
 def test_the_locked_playwright_installs_its_browser_on_the_ubuntu_the_e2e_job_runs_on() -> None:
     """The e2e job installs Chromium with ``playwright install --with-deps``, which an
     older Playwright refuses on a newer Ubuntu before it installs anything. While the
@@ -372,8 +420,9 @@ def test_the_locked_playwright_installs_its_browser_on_the_ubuntu_the_e2e_job_ru
     has to be one that knows the image the label moves to; a job pinned to an image has
     nothing to check here."""
     jobs = _load(_WORKFLOWS / "web.yml")["jobs"]
-    if jobs["e2e"]["runs-on"] != "ubuntu-latest":
-        pytest.skip("the e2e job is pinned to an image, so no Ubuntu moves under its Playwright")
+    ubuntu = _ubuntu_of(jobs["e2e"]["runs-on"])
+    if ubuntu is not None and ubuntu < _FIRST_UBUNTU_NEEDING_PLAYWRIGHT_1_61:
+        pytest.skip("the e2e job is pinned to an Ubuntu older than 26.04, which Playwright 1.59 handles")
     lock = _read_required(REPO_ROOT / "web" / "pnpm-lock.yaml")
     found = re.search(
         r"^ {6}'@playwright/test':\n {8}specifier: \S+\n {8}version: (\d+)\.(\d+)\.\d+$",
