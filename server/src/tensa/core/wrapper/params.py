@@ -59,6 +59,12 @@ _CONTROLLER_MODEL_NAMES: tuple[str, ...] = (
     "REGCP1",
     "REECA1",
     "REPCA1",
+    # Drive train, aerodynamics, pitch and torque control of a type-3 wind turbine, which the
+    # IEEE 14-bus wind example case has on top of its converter stack.
+    "WTDTA1",
+    "WTARA1",
+    "WTPTA1",
+    "WTTQA1",
     # ESD1, ANDES's distributed energy storage: a converter with a state of
     # charge that takes over a static generator on its bus, as REGCA1 does.
     # ``tensa.core.esd1`` holds what an add or an edit of one is checked for.
@@ -778,6 +784,65 @@ _PARAMS_BY_MODEL: dict[str, tuple[ParamMeta, ...]] = {
         ParamMeta("Tg", "number"),
         ParamMeta("Ddn", "number"),
         ParamMeta("Dup", "number"),
+    ),
+    # The four models a type-3 wind turbine has beyond the converter stack above (the
+    # example case ieee14_wt3 has one): drive train (WTDTA1), aerodynamics (WTARA1), pitch
+    # control (WTPTA1) and torque control (WTTQA1). Each names the one before it, down to
+    # the REECA1 that the drive train names in ``ree``. Parameters from the ANDES models
+    # (wtdta1.py, wtara1.py, wtpta1.py, wttqa1.py).
+    "WTDTA1": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("ree", "string", required=True),
+        ParamMeta("H", "number", unit="MWs/MVA"),
+        ParamMeta("DAMP", "number", unit="pu"),
+        ParamMeta("Htfrac", "number"),
+        ParamMeta("Freq1", "number", unit="pu (Hz)"),
+        ParamMeta("Dshaft", "number", unit="pu"),
+        ParamMeta("w0", "number", unit="pu"),
+    ),
+    "WTARA1": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("rego", "string", required=True),
+        ParamMeta("Ka", "number", unit="pu/deg"),
+        ParamMeta("theta0", "number", unit="deg"),
+    ),
+    "WTPTA1": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("rea", "string", required=True),
+        ParamMeta("Kiw", "number", unit="pu"),
+        ParamMeta("Kpw", "number", unit="pu"),
+        ParamMeta("Kic", "number", unit="pu"),
+        ParamMeta("Kpc", "number", unit="pu"),
+        ParamMeta("Kcc", "number", unit="pu"),
+        ParamMeta("Tp", "number", unit="s"),
+        ParamMeta("thmax", "number", unit="deg"),
+        ParamMeta("thmin", "number", unit="deg"),
+        ParamMeta("dthmax", "number", unit="deg"),
+        ParamMeta("dthmin", "number", unit="deg"),
+    ),
+    "WTTQA1": (
+        ParamMeta("idx", "string", required=True),
+        ParamMeta("name", "string", required=True),
+        ParamMeta("rep", "string", required=True),
+        ParamMeta("Kip", "number", unit="pu"),
+        ParamMeta("Kpp", "number", unit="pu"),
+        ParamMeta("Tp", "number", unit="s"),
+        ParamMeta("Twref", "number", unit="s"),
+        ParamMeta("Temax", "number", unit="pu"),
+        ParamMeta("Temin", "number", unit="pu"),
+        ParamMeta("Tflag", "number"),
+        ParamMeta("p1", "number", unit="pu"),
+        ParamMeta("sp1", "number", unit="pu"),
+        ParamMeta("p2", "number", unit="pu"),
+        ParamMeta("sp2", "number", unit="pu"),
+        ParamMeta("p3", "number", unit="pu"),
+        ParamMeta("sp3", "number", unit="pu"),
+        ParamMeta("p4", "number", unit="pu"),
+        ParamMeta("sp4", "number", unit="pu"),
+        ParamMeta("Tn", "number", unit="MVA"),
     ),
     # ESD1, the distributed energy storage model: PVD1's converter params
     # (pvd1.py, PVD1Data) followed by the state-of-charge ones (esd1.py,

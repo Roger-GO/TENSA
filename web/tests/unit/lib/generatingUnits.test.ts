@@ -237,6 +237,33 @@ describe('generatingUnits', () => {
     expect(loose).toEqual([]);
   });
 
+  it('continues the chain of a wind turbine through its drive train, aerodynamics, pitch and torque control', () => {
+    // ieee14_wt3.xlsx: the converter stack of ieee14_solar.xlsx, and a WTDTA1 1 with `ree: 1`,
+    // a WTARA1 1 with `rego: 1`, a WTPTA1 1 with `rea: 1` and a WTTQA1 1 with `rep: 1`: seven
+    // models numbered 1, each of which names the one before it.
+    const { units, loose } = generatingUnits(
+      topologyOf(
+        [entry(5, 'PV', { bus: 8 })],
+        [
+          entry(1, 'REGCA1', { bus: 8, gen: 5 }),
+          entry(1, 'REECA1', { reg: 1 }),
+          entry(1, 'REPCA1', { ree: 1 }),
+          // The four of the turbine come last and in the opposite order to the chain.
+          entry(1, 'WTTQA1', { rep: 1 }),
+          entry(1, 'WTPTA1', { rea: 1 }),
+          entry(1, 'WTARA1', { rego: 1 }),
+          entry(1, 'WTDTA1', { ree: 1 }),
+        ],
+      ),
+    );
+    expect(units.map(shape)).toEqual([
+      '5@8: PV 5 generator 0, REGCA1 1 renewable 1, REECA1 1 renewable 2, REPCA1 1 renewable 3, ' +
+        'WTDTA1 1 renewable 3, WTARA1 1 renewable 4, WTPTA1 1 renewable 5, WTTQA1 1 renewable 6',
+    ]);
+    // None of the four is an orphan badge in the gutter.
+    expect(loose).toEqual([]);
+  });
+
   it('lists a machine before a battery on the same generator', () => {
     const { units } = generatingUnits(
       topologyOf(
@@ -432,6 +459,10 @@ describe('unitChipLabel', () => {
     expect(label('REGCP1')).toBe('REGC');
     expect(label('REECA1')).toBe('REEC');
     expect(label('REPCA1')).toBe('REPC');
+    expect(label('WTDTA1')).toBe('WTDT');
+    expect(label('WTARA1')).toBe('WTAR');
+    expect(label('WTPTA1')).toBe('WTPT');
+    expect(label('WTTQA1')).toBe('WTTQ');
     expect(label('ESD1')).toBe('ESD1');
     expect(label('PVD1')).toBe('PVD1');
     expect(unitChipLabel({ kind: 'Coupling', role: 'measurement' })).toBe('COUP');

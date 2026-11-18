@@ -93,11 +93,19 @@ function refOf(entry: TopologyEntry, param: string): string | null {
  * never a model of another group. A stabiliser whose exciter the case does
  * not list therefore belongs to no unit: it is not hung on the governor that
  * happens to have the exciter's idx.
+ *
+ * A wind turbine continues the converter's chain: its drive train (`WTDTA1`)
+ * names the electrical control in `ree`, its aerodynamics the drive train in
+ * `rego`, its pitch control the aerodynamics in `rea` and its torque control
+ * the pitch control in `rep`.
  */
 const CHAIN_REFS: ReadonlyArray<{ param: string; meant: (kind: string) => boolean }> = [
   { param: 'avr', meant: (kind) => subKindForControllerClass(kind) === 'exciter' },
   { param: 'reg', meant: (kind) => kind.startsWith('REG') },
   { param: 'ree', meant: (kind) => kind.startsWith('REE') },
+  { param: 'rego', meant: (kind) => kind.startsWith('WTD') },
+  { param: 'rea', meant: (kind) => kind.startsWith('WTAR') },
+  { param: 'rep', meant: (kind) => kind.startsWith('WTP') },
 ];
 
 /** The order the controllers of one model are listed in. */

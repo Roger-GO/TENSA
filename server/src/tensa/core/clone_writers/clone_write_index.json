@@ -3862,6 +3862,399 @@
           "dyr": null
         }
       }
+    },
+    "WTARA1": {
+      "xlsx": {
+        "sheet": "WTARA1",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "Ka",
+          "theta0"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "Ka": {
+          "xlsx": {
+            "column": "Ka"
+          },
+          "dyr": {
+            "field": "Ka",
+            "field_index": 2
+          }
+        },
+        "theta0": {
+          "xlsx": {
+            "column": "theta0"
+          },
+          "dyr": {
+            "field": "theta0",
+            "field_index": 3
+          }
+        }
+      }
+    },
+    "WTDTA1": {
+      "xlsx": {
+        "sheet": "WTDTA1",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "H",
+          "DAMP",
+          "Htfrac",
+          "Freq1",
+          "Dshaft"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "H": {
+          "xlsx": {
+            "column": "H"
+          },
+          "dyr": {
+            "field": "H",
+            "field_index": 2
+          }
+        },
+        "DAMP": {
+          "xlsx": {
+            "column": "DAMP"
+          },
+          "dyr": {
+            "field": "DAMP",
+            "field_index": 3
+          }
+        },
+        "Htfrac": {
+          "xlsx": {
+            "column": "Htfrac"
+          },
+          "dyr": {
+            "field": "Htfrac",
+            "field_index": 4
+          }
+        },
+        "Freq1": {
+          "xlsx": {
+            "column": "Freq1"
+          },
+          "dyr": {
+            "field": "Freq1",
+            "field_index": 5
+          }
+        },
+        "Dshaft": {
+          "xlsx": {
+            "column": "Dshaft"
+          },
+          "dyr": {
+            "field": "Dshaft",
+            "field_index": 6
+          }
+        },
+        "w0": {
+          "xlsx": {
+            "column": "w0"
+          },
+          "dyr": null
+        }
+      }
+    },
+    "WTPTA1": {
+      "xlsx": {
+        "sheet": "WTPTA1",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "Kiw",
+          "Kpw",
+          "Kic",
+          "Kpc",
+          "Kcc",
+          "Tp",
+          "TetaMax",
+          "TetaMin",
+          "RTetaMax",
+          "RTetaMin"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "Kiw": {
+          "xlsx": {
+            "column": "Kiw"
+          },
+          "dyr": {
+            "field": "Kiw",
+            "field_index": 2
+          }
+        },
+        "Kpw": {
+          "xlsx": {
+            "column": "Kpw"
+          },
+          "dyr": {
+            "field": "Kpw",
+            "field_index": 3
+          }
+        },
+        "Kic": {
+          "xlsx": {
+            "column": "Kic"
+          },
+          "dyr": {
+            "field": "Kic",
+            "field_index": 4
+          }
+        },
+        "Kpc": {
+          "xlsx": {
+            "column": "Kpc"
+          },
+          "dyr": {
+            "field": "Kpc",
+            "field_index": 5
+          }
+        },
+        "Kcc": {
+          "xlsx": {
+            "column": "Kcc"
+          },
+          "dyr": {
+            "field": "Kcc",
+            "field_index": 6
+          }
+        },
+        "Tp": {
+          "xlsx": {
+            "column": "Tp"
+          },
+          "dyr": {
+            "field": "Tp",
+            "field_index": 7
+          }
+        },
+        "thmax": {
+          "xlsx": {
+            "column": "thmax"
+          },
+          "dyr": {
+            "field": "TetaMax",
+            "field_index": 8
+          }
+        },
+        "thmin": {
+          "xlsx": {
+            "column": "thmin"
+          },
+          "dyr": {
+            "field": "TetaMin",
+            "field_index": 9
+          }
+        },
+        "dthmax": {
+          "xlsx": {
+            "column": "dthmax"
+          },
+          "dyr": {
+            "field": "RTetaMax",
+            "field_index": 10
+          }
+        },
+        "dthmin": {
+          "xlsx": {
+            "column": "dthmin"
+          },
+          "dyr": {
+            "field": "RTetaMin",
+            "field_index": 11
+          }
+        }
+      }
+    },
+    "WTTQA1": {
+      "xlsx": {
+        "sheet": "WTTQA1",
+        "idx_column": "idx"
+      },
+      "dyr": {
+        "inputs": [
+          "BUS",
+          "ID",
+          "Tflag",
+          "Kpp",
+          "Kip",
+          "Tp",
+          "Twref",
+          "Temax",
+          "Temin",
+          "p1",
+          "spd1",
+          "p2",
+          "spd2",
+          "p3",
+          "spd3",
+          "p4",
+          "spd4",
+          "TRATE"
+        ],
+        "locator_fields": [
+          "BUS",
+          "ID"
+        ]
+      },
+      "params": {
+        "Kip": {
+          "xlsx": {
+            "column": "Kip"
+          },
+          "dyr": {
+            "field": "Kip",
+            "field_index": 4
+          }
+        },
+        "Kpp": {
+          "xlsx": {
+            "column": "Kpp"
+          },
+          "dyr": {
+            "field": "Kpp",
+            "field_index": 3
+          }
+        },
+        "Tp": {
+          "xlsx": {
+            "column": "Tp"
+          },
+          "dyr": {
+            "field": "Tp",
+            "field_index": 5
+          }
+        },
+        "Twref": {
+          "xlsx": {
+            "column": "Twref"
+          },
+          "dyr": {
+            "field": "Twref",
+            "field_index": 6
+          }
+        },
+        "Temax": {
+          "xlsx": {
+            "column": "Temax"
+          },
+          "dyr": {
+            "field": "Temax",
+            "field_index": 7
+          }
+        },
+        "Temin": {
+          "xlsx": {
+            "column": "Temin"
+          },
+          "dyr": {
+            "field": "Temin",
+            "field_index": 8
+          }
+        },
+        "Tflag": {
+          "xlsx": {
+            "column": "Tflag"
+          },
+          "dyr": {
+            "field": "Tflag",
+            "field_index": 2
+          }
+        },
+        "p1": {
+          "xlsx": {
+            "column": "p1"
+          },
+          "dyr": {
+            "field": "p1",
+            "field_index": 9
+          }
+        },
+        "sp1": {
+          "xlsx": {
+            "column": "sp1"
+          },
+          "dyr": null
+        },
+        "p2": {
+          "xlsx": {
+            "column": "p2"
+          },
+          "dyr": {
+            "field": "p2",
+            "field_index": 11
+          }
+        },
+        "sp2": {
+          "xlsx": {
+            "column": "sp2"
+          },
+          "dyr": null
+        },
+        "p3": {
+          "xlsx": {
+            "column": "p3"
+          },
+          "dyr": {
+            "field": "p3",
+            "field_index": 13
+          }
+        },
+        "sp3": {
+          "xlsx": {
+            "column": "sp3"
+          },
+          "dyr": null
+        },
+        "p4": {
+          "xlsx": {
+            "column": "p4"
+          },
+          "dyr": {
+            "field": "p4",
+            "field_index": 15
+          }
+        },
+        "sp4": {
+          "xlsx": {
+            "column": "sp4"
+          },
+          "dyr": null
+        },
+        "Tn": {
+          "xlsx": {
+            "column": "Tn"
+          },
+          "dyr": null
+        }
+      }
     }
   }
 }
