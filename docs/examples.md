@@ -71,6 +71,17 @@ file in its place once you have confirmed it, since that overwrites your copy.
 | [IEEE 300-bus test case](#ieee300) | 300 buses, 69 generators | Power flow | no | Your ANDES install |
 | [PEGASE 1354-bus test case (part of the European transmission system)](#pegase1354) | 1354 buses, 260 generators | Power flow | no | Bundled with TENSA |
 | [ACTIVSg2000 synthetic 2000-bus test case (Texas)](#activsg2000) | 2000 buses, 544 generators | Power flow | no | Bundled with TENSA |
+| [ACTIVSg200 with dynamic data (Texas A&M), 200 buses](#activsg200_dyn) | 200 buses, 49 generators | - | no | Link |
+| [ACTIVSg2000 with dynamic data (Texas A&M), 2000 buses](#activsg2000_dyn) | 2000 buses, 544 generators | Power flow | no | Link |
+| [Reduced 240-bus WECC with renewables (NLR), 243 buses](#wecc240) | 243 buses, 146 generators | Power flow | no | Link |
+| [IEEE PES small-signal stability benchmark systems](#pes_benchmarks) | - | - | no | Link |
+| [Nordic test system for voltage stability (IEEE PES), 74 buses](#nordic) | 74 buses, 20 generators | - | no | Link |
+| [IEEE 145-bus 50-generator and 162-bus 17-generator dynamic cases (University of Washington)](#uw_dynamic) | - | - | no | Link |
+| [MATPOWER case library](#matpower_library) | - | - | no | Link |
+| [PGLib-OPF benchmark library](#pglib_opf_library) | - | - | no | Link |
+| [University of Washington Power Systems Test Case Archive](#uw_archive) | - | - | no | Link |
+| [Texas A&M Electric Grid Test Case Repository](#tamu_repository) | - | - | no | Link |
+| [Edinburgh GB network and test case archive](#edinburgh_gb) | - | - | no | Link |
 
 ### IEEE 14-bus, with machines and controls { #ieee14 }
 
@@ -2295,3 +2306,840 @@ BibTeX:
 | Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 deg | largest difference 0.000617 deg (bus 5139) over 2000 buses | yes |
 | Network losses against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 1631.68, expected 1631.66, difference 0.02 MW | yes |
 | Slack active power against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case_ACTIVSg2000.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py | 0.01 + 0.001 of the value MW | measured 1252.25, expected 1252.23, difference 0.02 MW | yes |
+
+### ACTIVSg200 with dynamic data (Texas A&M), 200 buses { #activsg200_dyn }
+
+The 200-bus synthetic Illinois grid of the Electric Grid Test Case Repository of Texas A&M University, with the PSS/E data of its transient stability models (a RAW and a DYR file). TENSA holds no file of it, and its dynamic data was not tried: the repository gives the files only after a form that asks for an email address, which TENSA does not fill in. The network alone is in this catalog as ACTIVSg200, from MATPOWER.
+
+- **Id:** `activsg200_dyn`
+- **Kind:** Dynamic
+- **Size:** 200 buses, 49 generators
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [Texas A&M University: free for commercial or non-commercial use (no licence named)](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/). The page says the dataset is provided free for commercial or non-commercial use and encourages users to fill in its feedback form and to cite the appropriate papers: its references page asks for the paper of the algorithms (Birchfield et al. 2017) and, for the dynamic models, the two papers of Xu et al. above. It does not say whether the files may be passed on, so TENSA bundles none.
+
+**Citations**
+
+- ACTIVSg200: 200-bus synthetic grid, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location, and that it is free for commercial or non-commercial use (it names no licence); it offers the case in the PowerWorld, MATPOWER, PSS/E RAW and PSLF formats with the files for its transient stability models, and asks users to cite the appropriate papers. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/)
+- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
+- T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
+- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+
+BibTeX:
+
+```bibtex
+@misc{tamu_activsg200,
+  title        = {{ACTIVSg200}: 200-bus synthetic grid},
+  howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
+  url          = {https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{birchfield2017grid,
+  author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
+  title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {32},
+  number  = {4},
+  pages   = {3258--3265},
+  year    = {2017},
+  month   = jul,
+  doi     = {10.1109/TPWRS.2016.2616385}
+}
+```
+
+```bibtex
+@article{xu2018modeling,
+  author  = {Xu, Ti and Birchfield, Adam B. and Overbye, Thomas J.},
+  title   = {Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {33},
+  number  = {6},
+  pages   = {6501--6509},
+  year    = {2018},
+  month   = nov,
+  doi     = {10.1109/TPWRS.2018.2823702}
+}
+```
+
+```bibtex
+@inproceedings{xu2017creation,
+  author    = {Xu, Ti and Birchfield, Adam B. and Shetye, Komal S. and Overbye, Thomas J.},
+  title     = {Creation of Synthetic Electric Grid Models for Transient Stability Studies},
+  booktitle = {2017 IREP Symposium on Bulk Power System Dynamics and Control},
+  address   = {Espinho, Portugal},
+  year      = {2017},
+  url       = {https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf}
+}
+```
+
+```bibtex
+@misc{tamu_references,
+  title        = {References},
+  howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
+  url          = {https://electricgrids.engr.tamu.edu/references/},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [ACTIVSg200 on the Texas A&M repository](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/): The download is at the foot of the page, behind a form that asks for an email address.
+- [References of the repository](https://electricgrids.engr.tamu.edu/references/): Says which papers to cite for the cases and for their dynamic models.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- Nothing of this dataset was downloaded or run. The page of the repository gives the files after a form with an email address, a name and an organisation, which TENSA's checks do not submit; so what its DYR file holds, and what ANDES does with it, are not known here. The ACTIVSg2000 dynamic data of the same authors was tried (see that entry) and is the nearest evidence.
+- What ANDES does with a PSS/E dynamic file, from the table of the installed ANDES 2.0.0: it reads GENROU, GENCLS, the exciters, governors and stabilisers it has as the models of the same name, reads GENSAL as GENROU and GGOV1 as TGOV1 and ESAC6A, SCRX and EXPIC1 as SEXS (approximations: the data of one model is given to another with fewer parts), and when a machine model is missing (GENROE and GENSAE are) it refuses the whole dynamic file.
+- The system is synthetic. The page says it bears no relation to the actual grid in its location, except that generation and load profiles are similar.
+- The size is that of the MATPOWER file of the same network in this catalog (ACTIVSg200: 200 buses, 49 generators).
+
+**Verification.** Nothing was run: the dynamic files are behind a form (see the caveats), so there is no result to report and nothing is marked verified.
+
+### ACTIVSg2000 with dynamic data (Texas A&M), 2000 buses { #activsg2000_dyn }
+
+The 2000-bus synthetic grid on the footprint of Texas of the Texas A&M repository, with the PSS/E data of its transient stability models: 544 generators with 435 machine models, and their exciters, governors and stabilisers. TENSA holds no file of it. Tried on copies from another repository: ANDES reads all 16 models of the dynamic data (5 of them as other models), the power flow agrees with pandapower to 3.5e-7 pu, and the 10 s run does not start. The network alone is in this catalog as ACTIVSg2000, from MATPOWER.
+
+- **Id:** `activsg2000_dyn`
+- **Kind:** Dynamic
+- **Size:** 2000 buses, 544 generators
+- **Analyses:** Power flow
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [Texas A&M University: free for commercial or non-commercial use (no licence named)](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/). The page says the dataset is provided free for commercial or non-commercial use and encourages users to fill in its feedback form and to cite the appropriate papers: its references page asks for the paper of the algorithms (Birchfield et al. 2017) and, for the dynamic models, the two papers of Xu et al. above. It does not say whether the files may be passed on, so TENSA bundles none. The copies tested are in a repository that states no licence at all.
+
+**Citations**
+
+- ACTIVSg2000: 2000-bus synthetic grid on footprint of Texas, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/ (accessed 2026-11-18). The page says the case is entirely synthetic, built from public information and a statistical analysis of real power systems, that it bears no relation to the actual grid in its location except that generation and load profiles are similar, and that Texas A&M University researchers provide it free for commercial or non-commercial use (it names no licence). It offers the case in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, with parameters for transient stability and geomagnetic disturbance studies, and asks users to cite the appropriate papers, which the repository's references page (https://electricgrids.engr.tamu.edu/references/) lists, naming Birchfield et al. 2017 for the algorithms that created the case. [Link](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/)
+- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+- T. Xu, A. B. Birchfield and T. J. Overbye, "Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids," IEEE Transactions on Power Systems, vol. 33, no. 6, pp. 6501-6509, November 2018, doi:10.1109/TPWRS.2018.2823702. Reference [10] of the repository's page, which asks that users of the dynamic models cite it. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the copy on the authors' group site was opened and its abstract read, which says the paper assigns and tunes generator models and builds the dynamics of a 2000-bus synthetic case as its example. [DOI](https://doi.org/10.1109/TPWRS.2018.2823702)
+- T. Xu, A. B. Birchfield, K. S. Shetye and T. J. Overbye, "Creation of Synthetic Electric Grid Models for Transient Stability Studies," 2017 IREP Symposium on Bulk Power System Dynamics and Control, Espinho, Portugal, 2017. Reference [5] of the repository's page, which asks that users of the dynamic models cite it. The copy on the authors' group site (https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf) was opened and its abstract read: it extends the synthetic base models with generator models and a tuning process, and builds the dynamic cases of two synthetic networks. [Link](https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf)
+- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+
+BibTeX:
+
+```bibtex
+@misc{tamu_activsg2000,
+  title        = {{ACTIVSg2000}: 2000-bus synthetic grid on footprint of Texas},
+  howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
+  url          = {https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{birchfield2017grid,
+  author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
+  title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {32},
+  number  = {4},
+  pages   = {3258--3265},
+  year    = {2017},
+  month   = jul,
+  doi     = {10.1109/TPWRS.2016.2616385}
+}
+```
+
+```bibtex
+@article{xu2018modeling,
+  author  = {Xu, Ti and Birchfield, Adam B. and Overbye, Thomas J.},
+  title   = {Modeling, Tuning, and Validating System Dynamics in Synthetic Electric Grids},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {33},
+  number  = {6},
+  pages   = {6501--6509},
+  year    = {2018},
+  month   = nov,
+  doi     = {10.1109/TPWRS.2018.2823702}
+}
+```
+
+```bibtex
+@inproceedings{xu2017creation,
+  author    = {Xu, Ti and Birchfield, Adam B. and Shetye, Komal S. and Overbye, Thomas J.},
+  title     = {Creation of Synthetic Electric Grid Models for Transient Stability Studies},
+  booktitle = {2017 IREP Symposium on Bulk Power System Dynamics and Control},
+  address   = {Espinho, Portugal},
+  year      = {2017},
+  url       = {https://overbye.engr.tamu.edu/wp-content/uploads/sites/146/2022/01/IREP_Ti_WithFooter.pdf}
+}
+```
+
+```bibtex
+@misc{tamu_references,
+  title        = {References},
+  howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
+  url          = {https://electricgrids.engr.tamu.edu/references/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{sienna_powersystemstestdata,
+  title        = {{PowerSystemsTestData}},
+  author       = {{Sienna platform}},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/Sienna-Platform/PowerSystemsTestData},
+  note         = {commit a2ecae9ff3cf},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [ACTIVSg2000 on the Texas A&M repository](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/): The download is at the foot of the page, behind a form that asks for an email address.
+- [References of the repository](https://electricgrids.engr.tamu.edu/references/): Says which papers to cite for the cases and for their dynamic models.
+- [ACTIVSg2000.RAW in the Sienna test data repository](https://github.com/Sienna-Platform/PowerSystemsTestData/blob/a2ecae9ff3cfe6d219744f1b10e4edd4eeecabc9/ACTIVSg2000/ACTIVSg2000.RAW): A copy, pinned to a commit; no licence is stated there.
+- [ACTIVSg2000_dynamics.dyr in the Sienna test data repository](https://github.com/Sienna-Platform/PowerSystemsTestData/blob/a2ecae9ff3cfe6d219744f1b10e4edd4eeecabc9/psse_dyr/ACTIVSg2000_dynamics.dyr): A copy, pinned to a commit; no licence is stated there.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- Where the files come from. The page of the repository gives them only after a form that asks for an email address, a name and an organisation, which TENSA's checks do not submit. The files tried are the copies in the Sienna test data repository (commit a2ecae9ff3cf, whose README calls the folder the TAMU power flow dataset for ERCOT; it names no source and states no licence): ACTIVSg2000/ACTIVSg2000.RAW (SHA-256 d7191f8d9ba1bc7ce8247a060fc6e12bcb0dc5b7ba4f7e6cf68c7233f7a13cea) and psse_dyr/ACTIVSg2000_dynamics.dyr (05a6c833eac0b2a2c8f7925c0a022a28733ab43ec40a7dd80107d20c291c550d). They may differ from what the repository gives today.
+- The RAW file is not the data of the MATPOWER file of the gallery: its header is dated 14 February 2018, and the losses of its power flow are 1628.7 MW where the MATPOWER file's are 1631.7 MW (both by pandapower).
+- What loads. The dynamic data has 1,739 records of 16 PSS/E models: IEEEST 434, GENROU 410, GGOV1 367, ESST4B 278, EXPIC1 61, IEEEG1 43, EXAC2 38, GENSAL 25, HYGOV 25, IEEET1 23, ESDC1A 12, ESAC6A 7, EXAC1 6, SCRX 5, ESAC1A 4 and ESDC2A 1. ANDES reads every model: 1,274 records as the model of the same name, and 465 as another model, an approximation: GGOV1 (367) as TGOV1, EXPIC1 (61), ESAC6A (7) and SCRX (5) as SEXS, and GENSAL (25) as GENROU. Nothing is dropped. ANDES corrects a parameter of four ESAC1A exciters (TA to 0.04 and TF to 1) and warns of it.
+- The 10 s run does not start. With the dynamic data the power flow converges (3 iterations), and the run then stops in ANDES's initialisation with an IndexError ("boolean index did not match indexed array") in andes/core/discrete.py, in the code that reports the limits it adjusted: it is raised for the anti-windup limiter LA_lim of the 12 ESDC1A exciters. TENSA answers the request with a 422. It was reproduced with ANDES alone (TDS.run) and not worked round here, so no time-domain or eigenvalue result exists for this data.
+- The power flow starts from a state the file stores that it does not reproduce: 0.040 pu and 0.51 degrees from it (0.017 pu and 0.68 degrees with reactive limits enforced). The MATPOWER version of this system shows the same kind of gap (0.035 pu and 0.64 degrees), which its entry explains by the 153 generator buses held at a reactive limit in the stored solution; that this file has the same cause was not checked. pandapower agrees with TENSA to 3.5e-7 pu, so the gap is not a fault of TENSA's solver.
+- The system is synthetic. The page says it bears no relation to the actual grid in its location, except that generation and load profiles are similar, based on public data.
+
+**Verification.** Tried on 2026-11-18 with scripts/check_external_datasets.py (trial activsg2000-dyn), through the HTTP API of a real server. Compared with an independent solver: the power flow (bus voltages, angles, losses and the slack's power) agrees with pandapower's solution of the network ANDES reads from the RAW file. Not matched: the file's stored state, which no power flow of ANDES reproduces (see the caveats), so that check is recorded as failed. Not verified: the time-domain run and the eigenvalues, which do not exist because ANDES cannot initialise the case.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES reads from ACTIVSg2000.RAW of the Sienna copy, written out by scripts/crosscheck_pf.py, which refuses a network ANDES solves differently; run by scripts/check_external_datasets.py | 0.0001 pu | largest difference 3.48e-07 pu (bus 5184) over 2000 buses | yes |
+| Bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, as above | 0.01 deg | largest difference 0.00062 deg (bus 5139) over 2000 buses | yes |
+| Network losses and the slack's power against pandapower | an independent solver | pandapower 3.5.6, as above | 0.01 + 0.001 of the value MW | losses differ by 0.0200 MW and the slack's power by 0.0200 MW | yes |
+| Bus voltage magnitudes against the solution stored in the file | a solution stored with the source | the voltages in the bus records of ACTIVSg2000.RAW (the Sienna copy), as ANDES reads them, before any power flow | 0.01 pu (a sanity bound: the state is another program's solution, to the digits it kept) | largest difference 0.0397 pu (bus 6085) over 2000 buses; outside the bound | no |
+| Bus voltage angles against the solution stored in the file | a solution stored with the source | the angles in the bus records of ACTIVSg2000.RAW (the Sienna copy), as ANDES reads them, before any power flow | 0.5 deg | largest difference 0.509 deg (bus 3137) over 2000 buses; outside the bound | no |
+
+### Reduced 240-bus WECC with renewables (NLR), 243 buses { #wecc240 }
+
+The reduced Western Interconnection model of the National Laboratory of the Rockies (NLR, formerly NREL): a 2018 summer peak with 243 buses, 146 generating units at 56 plants (109 synchronous machines and 37 renewable plants) and dynamic models, as PSS/E files. TENSA holds no file of it. Tried on its download: the network and its dynamic data open, all nine models of the data are read as themselves, and the power flow converges, but the 10 s run does not start because ANDES cannot initialise the renewable controls.
+
+- **Id:** `wecc240`
+- **Kind:** Dynamic
+- **Size:** 243 buses, 146 generators
+- **Analyses:** Power flow
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [NREL disclaimer (as in the NLR download)](https://www.nlr.gov/grid/test-case-repository.html). The disclaimer in the download (NREL Disclaimer.txt, SHA-256 90fa4bd727bf945a5d72543f4e1b646d90543325015fe8942a4b40594e2c69a7) grants the right, without any fee, to use or copy the data provided that its entire notice appears in all copies, and asks users to credit DOE/NREL/ALLIANCE in any publication that results from its use; the names DOE, NREL and ALLIANCE may not be used to endorse or promote any product or commercial entity without written permission. It does not say that the data may be distributed, so TENSA bundles none. The copies in the Sienna test data repository state no licence at all.
+
+**Citations**
+
+- H. Yuan, R. S. Biswas, J. Tan and Y. Zhang, "Developing a Reduced 240-Bus WECC Dynamic Model for Frequency Response Study of High Renewable Integration," 2020 IEEE/PES Transmission and Distribution Conference and Exposition (T&D), October 2020, pp. 1-5, doi:10.1109/TD39804.2020.9299666. The paper the files' headers and the NLR readme name as the reference of the system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TD39804.2020.9299666)
+- J. Price and J. Goodin, "Reduced network modeling of WECC as a market design prototype," 2011 IEEE Power and Energy Society General Meeting, July 2011, pp. 1-6, doi:10.1109/PES.2011.6039476. The 240-bus model the NLR page says the repository's system starts from. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/PES.2011.6039476)
+- Test Case Repository for High Energy Study, 240-Bus Western Electricity Coordinating Council Test System, National Laboratory of the Rockies (NLR, formerly the National Renewable Energy Laboratory), https://www.nlr.gov/grid/test-case-repository.html (accessed 2026-11-18). The page describes the reduced WECC model, its 2018 base case and its dynamic models, offers the download used here (wecc-osl.zip, the cases of the 2021 IEEE-NASPI Oscillation Source Location contest) and asks users to cite the original author. [Link](https://www.nlr.gov/grid/test-case-repository.html)
+- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+
+BibTeX:
+
+```bibtex
+@inproceedings{yuan2020developing,
+  author    = {Yuan, Haoyu and Biswas, Rajarshi Sen and Tan, Jin and Zhang, Yingchen},
+  title     = {Developing a Reduced 240-Bus {WECC} Dynamic Model for Frequency Response Study of High Renewable Integration},
+  booktitle = {2020 IEEE/PES Transmission and Distribution Conference and Exposition (T\&D)},
+  pages     = {1--5},
+  year      = {2020},
+  month     = oct,
+  doi       = {10.1109/TD39804.2020.9299666}
+}
+```
+
+```bibtex
+@inproceedings{price2011reduced,
+  author    = {Price, James and Goodin, John},
+  title     = {Reduced network modeling of {WECC} as a market design prototype},
+  booktitle = {2011 IEEE Power and Energy Society General Meeting},
+  pages     = {1--6},
+  year      = {2011},
+  month     = jul,
+  doi       = {10.1109/PES.2011.6039476}
+}
+```
+
+```bibtex
+@misc{nlr_test_case_repository,
+  title        = {Test Case Repository for High Energy Study: 240-Bus Western Electricity Coordinating Council Test System},
+  author       = {{National Laboratory of the Rockies}},
+  howpublished = {NLR Grid Modernization},
+  url          = {https://www.nlr.gov/grid/test-case-repository.html},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{sienna_powersystemstestdata,
+  title        = {{PowerSystemsTestData}},
+  author       = {{Sienna platform}},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/Sienna-Platform/PowerSystemsTestData},
+  note         = {commit a2ecae9ff3cf},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [240-bus WECC test system on the NLR test case repository](https://www.nlr.gov/grid/test-case-repository.html): The page of the system, with its references and the download below.
+- [wecc-osl.zip: the cases of the 2021 IEEE-NASPI OSL contest (RAW, DYR, disclaimer and readme)](https://www.nlr.gov/media/docs/libraries/grid/wecc-osl.zip?sfvrsn=f85a054e_1): 2.1 MB. The disclaimer inside is the licence.
+- [The 2018 RAW file in the Sienna test data repository](https://github.com/Sienna-Platform/PowerSystemsTestData/blob/a2ecae9ff3cfe6d219744f1b10e4edd4eeecabc9/psse_raw/240busWECC_2018_PSS33.raw): A copy of an earlier version, pinned to a commit; no licence is stated there.
+- [The 2018 DYR file in the Sienna test data repository](https://github.com/Sienna-Platform/PowerSystemsTestData/blob/a2ecae9ff3cfe6d219744f1b10e4edd4eeecabc9/psse_dyr/240busWECC_2018_PSS.dyr): A copy of an earlier version, pinned to a commit; no licence is stated there.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- Which files. The NLR download (wecc-osl.zip, 2,121,896 bytes, SHA-256 dfb91ad14e42fbc8515eafa637a3f0c85996e5508736edbef2886a40fc0e6e87) is the version prepared for the 2021 IEEE-NASPI Oscillation Source Location contest: a PSS/E revision 34 RAW file (243 buses, 329 lines, 122 transformers, 7 switched shunts, 139 loads) and a DYR file, with 10 IEEEST stabilisers added by the contest's committee. Its readme says the contest cases themselves used another dispatch and topology and two HVDC models, which are not in the download. The Sienna test data repository holds an earlier version: a revision 32 RAW file and a DYR file without the stabilisers (SHA-256 217c4f4a... and ce0b8bf9...).
+- What loads. The dynamic data has 448 records of nine PSS/E models: GENROU 109, SEXS 109, GAST 47, REGCA1 37, REECB1 37, REPCA1 37, TGOV1 37, HYGOV 25 and IEEEST 10. ANDES reads every one as the model of the same name: nothing is approximated and nothing is dropped. The case opens with 243 buses and the power flow converges in 3 iterations; ANDES warns that six slack generators are enabled on bus 3933.
+- The 10 s run does not start. ANDES stops in its initialisation ("Initialization FAILED"): in each of the 37 REECB1 renewable electrical controls the lower limit VMIN of its PI controller, 0.9, clamps the variable PIQ_ys where the unconstrained value is 0, which leaves a residual of 0.018 in the equation of PIQ_xi. TENSA reports the run as failed. The earlier version in the Sienna repository fails the same way. Whether the fault is in ANDES's initialisation of REECB1 or in how this data is read was not investigated, so no time-domain or eigenvalue result exists for this data.
+- A second pair of files in the Sienna repository (240_bus_new_2.raw with 240_bus_remap2_dera2.dyr: 379 buses, with 90 renewable plants and three DERA1 distributed energy models) does not open with its dynamic data: ANDES has no DERA1 model, and a machine model that is missing makes it refuse the whole dynamic file. Its network alone opens, its power flow converges and it agrees with pandapower to 1.4e-6 pu and 0.0012 degrees.
+- The power flow is 0.0064 pu and 0.445 degrees from the state the file stores (0.0064 pu and 0.433 degrees for the Sienna copy), and enforcing reactive limits does not change it (0.0064 pu). The cause was not found.
+- No independent solver was run on this network: the step that hands ANDES's network to pandapower stops at it (the slack generator is out of service), and the PSS/E reader of scripts/crosscheck_pf.py reads revision 33 only.
+
+**Verification.** Tried on 2026-11-18 with scripts/check_external_datasets.py (trials wecc240, wecc240-mirror, wecc240-dera), through the HTTP API of a real server. Compared with a reference that is not TENSA's: the power flow, with the state the file stores, within 0.0064 pu and 0.445 degrees (a loose bound, not a match). Not verified: no independent solver could be run on this network, and there is no time-domain or eigenvalue result because ANDES cannot initialise the case.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Bus voltage magnitudes against the solution stored in the file | a solution stored with the source | the voltages in the bus records of the NLR RAW file, as ANDES reads them, before any power flow | 0.01 pu (a sanity bound: the state is the file's own, to the digits it kept) | largest difference 0.00642 pu (bus 6304) over 243 buses | yes |
+| Bus voltage angles against the solution stored in the file | a solution stored with the source | the angles in the bus records of the NLR RAW file, as ANDES reads them, before any power flow | 0.5 deg | largest difference 0.445 deg (bus 7001) over 243 buses | yes |
+
+### IEEE PES small-signal stability benchmark systems { #pes_benchmarks }
+
+The benchmark systems of the IEEE PES Task Force on Benchmark Systems for Stability Controls, made to compare small-signal stability methods and the tuning of stabilisers: the three-machine infinite-bus system, the Brazilian 7-bus equivalent, the two-area four-generator system, the simplified 14-generator Australian system and the NETS-NYPS 68-bus system (the page also lists the IEEE 39-bus system, which this catalog has from ANDES), in the files of several programs. TENSA holds no file. Tried on the PSS/E files of the page: none opens with its dynamic data, because ANDES lacks models they need; only the network of the two-area system opens and solves.
+
+- **Id:** `pes_benchmarks`
+- **Kind:** Dynamic
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [None stated (the page calls the material working papers and gives no support)](https://cmte.ieee.org/pes-psdp/benchmark-systems-2/). The page names no licence. It says the reports and implementations were developed by the contributors to the Task Force, are not peer-reviewed documents, come with no commitment of support, and that any citation of the reports should mention them as working papers; the consistent documentation is Technical Report PES-TR18, free to PES members only. Since nothing says the files may be passed on, TENSA bundles none.
+
+**Citations**
+
+- Benchmark Systems for Small-Signal Stability Analysis and Control, IEEE PES Task Force on Benchmark Systems for Stability Controls, https://cmte.ieee.org/pes-psdp/benchmark-systems-2/ (accessed 2026-11-18). The page lists the benchmark systems with, for each, the reports and the files of the programs they were prepared for. It says the reports and implementations are not peer-reviewed documents, that the authors give no support, and that any citation of the reports should mention them as working papers. [Link](https://cmte.ieee.org/pes-psdp/benchmark-systems-2/)
+- IEEE PES Task Force on Benchmark Systems for Stability Controls, "Benchmark Systems for Small-Signal Stability Analysis and Control," Technical Report PES-TR18, IEEE Power & Energy Society, 1 August 2015, 390 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18 (accessed 2026-11-18). The report that documents the benchmark systems consistently, which the benchmark page points to. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18)
+- C. Canizares, T. Fernandes, E. Geraldi, L. Gerin-Lajoie, M. Gibbard, I. Hiskens, J. Kersulis, R. Kuiava, L. Lima, F. DeMarco, N. Martins, B. C. Pal, A. Piardi, R. Ramos, J. dos Santos, D. Silva, A. K. Singh, B. Tamimi and D. Vowles, "Benchmark Models for the Analysis and Control of Small-Signal Oscillatory Dynamics in Power Systems," IEEE Transactions on Power Systems, vol. 32, no. 1, pp. 715-722, January 2017, doi:10.1109/TPWRS.2016.2561263. The paper of the Task Force on its benchmark systems, with the authors as Crossref lists them. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title, volume and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2561263)
+- Simplified 14-generator model of the South East Australian power system, version 04, The University of Adelaide, http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/ (accessed 2026-11-18). The developers' server, which the benchmark page names for this system; its listing shows the model data (85 KB), the small-signal and state-space results, a 1.5 GB archive of transient stability results and the report of the model. Only the listing was opened. [Link](http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/)
+- PowerSystemsTestData, Sienna platform, https://github.com/Sienna-Platform/PowerSystemsTestData (commit a2ecae9ff3cf, accessed 2026-11-18; the repository was NREL-Sienna/PowerSystemsTestData, which now redirects). A data repository of the Sienna software that holds copies of the reduced WECC and ACTIVSg2000 files; its README names no source for them and the repository states no licence. [Link](https://github.com/Sienna-Platform/PowerSystemsTestData)
+
+BibTeX:
+
+```bibtex
+@misc{pes_benchmark_page,
+  title        = {Benchmark Systems for Small-Signal Stability Analysis and Control},
+  author       = {{IEEE PES Task Force on Benchmark Systems for Stability Controls}},
+  howpublished = {IEEE PES Power System Dynamic Performance Committee},
+  url          = {https://cmte.ieee.org/pes-psdp/benchmark-systems-2/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@techreport{pestr18,
+  author      = {{IEEE PES Task Force on Benchmark Systems for Stability Controls}},
+  title       = {Benchmark Systems for Small-Signal Stability Analysis and Control},
+  institution = {IEEE Power \& Energy Society},
+  type        = {Technical Report},
+  number      = {PES-TR18},
+  year        = {2015},
+  month       = aug,
+  url         = {https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18}
+}
+```
+
+```bibtex
+@article{canizares2017benchmark,
+  author  = {Canizares, C. and Fernandes, T. and Geraldi, E. and Gerin-Lajoie, L. and Gibbard, M. and Hiskens, I. and Kersulis, J. and Kuiava, R. and Lima, L. and DeMarco, F. and Martins, N. and Pal, B. C. and Piardi, A. and Ramos, R. and dos Santos, J. and Silva, D. and Singh, A. K. and Tamimi, B. and Vowles, D.},
+  title   = {Benchmark Models for the Analysis and Control of Small-Signal Oscillatory Dynamics in Power Systems},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {32},
+  number  = {1},
+  pages   = {715--722},
+  year    = {2017},
+  month   = jan,
+  doi     = {10.1109/TPWRS.2016.2561263}
+}
+```
+
+```bibtex
+@misc{au14_adelaide,
+  title        = {Simplified 14-generator model of the {South East Australian} power system, version 04},
+  howpublished = {The University of Adelaide, Power Systems Control group},
+  url          = {http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{sienna_powersystemstestdata,
+  title        = {{PowerSystemsTestData}},
+  author       = {{Sienna platform}},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/Sienna-Platform/PowerSystemsTestData},
+  note         = {commit a2ecae9ff3cf},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [Benchmark systems page of the IEEE PES Task Force](https://cmte.ieee.org/pes-psdp/benchmark-systems-2/): Links the files of every system; the downloads are on Google Drive and need the resource key in the link.
+- [Technical Report PES-TR18 at the PES Resource Center](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr18): Free for PES members, $70 for others.
+- [Australian 14-generator model on the University of Adelaide server](http://www.eleceng.adelaide.edu.au/groups/PCON/PowerSystems/IEEE/AU14G/Ver04/): One archive in the listing is 1.5 GB.
+- [NETS-NYPS 68-bus DYR file in the Sienna test data repository](https://github.com/Sienna-Platform/PowerSystemsTestData/blob/a2ecae9ff3cfe6d219744f1b10e4edd4eeecabc9/psse_dyr/NETS-NYPS%2068%20Bus%20System.dyr): A copy, pinned to a commit; no licence is stated there and no RAW file comes with it.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- What the page gives for PSS/E, system by system. Three-machine infinite-bus: PSS/E saved cases (a .sav, a snapshot .snp and a .sld) and Python run scripts, no RAW or DYR file. Brazilian 7-bus: a revision 32 RAW and a DYR file. Two-area four-generator: a RAW file (revision 32, though it is named 33) and three DYR files. Australian 14-generator: revision 29 RAW files and DYR files, in an 86 KB archive the page links (the model data of its MudPack-PSS/E files). NETS-NYPS 68-bus: no PSS/E file, only MATLAB and ANAREDE/PacDyn/ANATEM files. The files are on a Google Drive link of the page; it needs the resource key the page's link carries, and without it Google asks for a sign-in.
+- Three-machine infinite-bus: the PSS/E saved case is binary, and ANDES cannot read it ("Unable to determine case format"). So nothing opens.
+- Brazilian 7-bus: the dynamic data uses GENSAE (5 machines), which ANDES does not have, and ANDES then refuses the whole dynamic file ("No SynGen device found"); its other models, SEXS (5) and IEEEST (4), are supported. The network alone opens, but its power flow does not converge in ANDES (26 iterations, mismatch 6.3) and pandapower does not solve the network ANDES reads either; the cause was not investigated.
+- Two-area four-generator: the dynamic data uses GENROE (4 machines), which ANDES does not have, so the dynamic file is refused; its ESST1A (4) is supported. The network alone opens and its power flow converges in 1 iteration; it agrees with pandapower to 2.4e-7 pu and 2.6e-5 degrees and with the state the file stores to 5.4e-6 pu and 0.0002 degrees. That is a power flow of a network with no machines.
+- Australian 14-generator: ANDES cannot read the RAW file, which is revision 29: its reader warns that the version is not explicitly supported, reads it as version 33 and raises an IndexError in its generator data. Its dynamic data has GENROE (12), CSVGN1 (5, a static var compensator) and IEELAL (1), which ANDES does not have, ESST1A (11), IEEEST (14), ESAC1A (3), GENCLS (1) and GENSAL (2, read as GENROU).
+- NETS-NYPS 68-bus: the DYR file of the Sienna test data repository (no RAW file comes with it) has GENROU (16), IEEEST (12), SEXS (1) and DC4B (11), which ANDES does not have.
+- The IEEE 39-bus system the page lists is not this entry's concern: the catalog has an IEEE 39-bus case from ANDES with machines.
+
+**Verification.** Tried on 2026-11-18 with scripts/check_external_datasets.py (trials pes-twoarea, pes-brazil7, pes-au14, pes-3machine, pes-nyps68), through the HTTP API of a real server, on the files of the page (and the Sienna copy for the 68-bus system). Compared with independent references: the power flow of the two-area network alone, with pandapower and with the state its file stores. Not verified: every other result of the entry is a refusal or a failure, which is recorded in the caveats, and there is no time-domain or eigenvalue result for any of the systems.
+
+| Check | Compared with | Reference | Tolerance | Result | Passed |
+| --- | --- | --- | --- | --- | --- |
+| Two-area network, bus voltage magnitudes against pandapower | an independent solver | pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES reads from Benchmark_4ger_33_2015.raw (the archive of the page's two-area link), written out by scripts/crosscheck_pf.py; run by scripts/check_external_datasets.py | 0.0001 pu | largest difference 2.39e-07 pu (bus 9) over 11 buses | yes |
+| Two-area network, bus voltage angles against pandapower | an independent solver | pandapower 3.5.6, as above | 0.01 deg | largest difference 2.58e-05 deg (bus 9) over 11 buses | yes |
+| Two-area network, losses and the slack's power against pandapower | an independent solver | pandapower 3.5.6, as above | 0.01 + 0.001 of the value MW | losses differ by 0.000435 MW and the slack's power by 0.000435 MW | yes |
+| Two-area network, bus voltage magnitudes against the solution stored in the file | a solution stored with the source | the voltages in the bus records of Benchmark_4ger_33_2015.raw, as ANDES reads them, before any power flow | 0.01 pu | largest difference 5.42e-06 pu (bus 10) over 11 buses | yes |
+| Two-area network, bus voltage angles against the solution stored in the file | a solution stored with the source | the angles in the bus records of Benchmark_4ger_33_2015.raw, as ANDES reads them, before any power flow | 0.5 deg | largest difference 0.00022 deg (bus 9) over 11 buses | yes |
+
+### Nordic test system for voltage stability (IEEE PES), 74 buses { #nordic }
+
+The Nordic test system of the IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, a variant of the Nordic32 system for long-term voltage stability, with 74 buses and 20 generators as its page states, whose behaviour rests on overexcitation limiters and load tap changers. TENSA holds no file. The PSS/E files of the page are binary saved cases, which ANDES cannot read, and ANDES has no model of either of those two controls.
+
+- **Id:** `nordic`
+- **Kind:** Dynamic
+- **Size:** 74 buses, 20 generators
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [None stated by the IEEE PES page; Apache License 2.0 for the SPS-L repository](https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system/blob/main/LICENSE). The page of the Task Force states no licence and says the material was developed by the Task Force's contributors with an internal peer review and no commitment of support. The SPS-L repository, whose files are in RAMSES format and not the PSS/E ones, is under the Apache License 2.0, which allows copying and redistribution with the licence text and the notices kept; its README asks users to cite Technical Report PES-TR19 (above). TENSA bundles nothing of either.
+
+**Citations**
+
+- IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, "Test Systems for Voltage Stability Analysis and Security Assessment," Technical Report PES-TR19, IEEE Power & Energy Society, 25 August 2015, 161 pages, https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19 (accessed 2026-11-18). The report that defines the Nordic and RVS test systems, which the repository's README asks to cite. Its page was opened; the report is free for PES members and costs $70 for others, and was not read. [Link](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19)
+- Test Systems for Voltage Stability Analysis and Security Assessment, IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, https://cmte.ieee.org/pes-psdp/489-2/ (accessed 2026-11-18). The page describes the Nordic test system (a variant of the Nordic32 system, 50 Hz, 74 buses, 102 branches, 20 generators with step-up transformers and overexcitation limiters, 22 loads controlled by load tap changers) and gives its input data for RAMSES, PSS/E, ANATEM and DigSilent PowerFactory, and sample outputs. [Link](https://cmte.ieee.org/pes-psdp/489-2/)
+- IEEE Nordic Test System in RAMSES format, SPS-L, https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system (accessed 2026-11-18). A repository of the data for the STEPSS platform (RAMSES and HELIOS), under the Apache License 2.0, whose README asks that users of the system cite Technical Report PES-TR19. [Link](https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system)
+
+BibTeX:
+
+```bibtex
+@techreport{pestr19,
+  author      = {{IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment}},
+  title       = {Test Systems for Voltage Stability Analysis and Security Assessment},
+  institution = {IEEE Power \& Energy Society},
+  type        = {Technical Report},
+  number      = {PES-TR19},
+  year        = {2015},
+  month       = aug,
+  url         = {https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19}
+}
+```
+
+```bibtex
+@misc{pes_nordic_page,
+  title        = {Test Systems for Voltage Stability Analysis and Security Assessment},
+  author       = {{IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment}},
+  howpublished = {IEEE PES Power System Dynamic Performance Committee},
+  url          = {https://cmte.ieee.org/pes-psdp/489-2/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{spsl_nordic,
+  title        = {{IEEE} Nordic Test System in {RAMSES} format},
+  author       = {{SPS-L}},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [Test systems for voltage stability analysis, page of the IEEE PES Task Force](https://cmte.ieee.org/pes-psdp/489-2/): Links the input data for RAMSES, PSS/E, ANATEM and DigSilent PowerFactory (Google Drive) and sample outputs.
+- [Technical Report PES-TR19 at the PES Resource Center](https://resourcecenter.ieee-pes.org/publications/technical-reports/pestr19): Free for PES members, $70 for others.
+- [IEEE Nordic test system in RAMSES format, SPS-L repository](https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system): Apache License 2.0; for the STEPSS platform, not for ANDES.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- Which files. The page's input data for PSS/E (a Google Drive link, 26,699 bytes, SHA-256 cdfeae242e3c2710107061a23563e9c2307d03e3e96def5e5c71b8a03c12f23e) is an archive of a PSS/E saved case (Nordic_voltage_collapse_0.sav and its converted copy), a snapshot (Nordic_voltage_collapse_new.snp) and a Python script: binary PSS/E files, no RAW or DYR file. Given to TENSA, the saved case is refused (ANDES: "Unable to determine case format"). The SPS-L repository holds the same system as RAMSES data files (lf_A.dat, dyn_A.dat and so on), which ANDES does not read either.
+- What ANDES lacks. The system's voltage collapse is the behaviour of the generators' overexcitation limiters and of the load tap changers of its 22 distribution loads, and ANDES 2.0.0 has no model of an overexcitation limiter or of a load tap changer (none of its 100 models is one). A case that ANDES could read would therefore not be this system.
+- ANDES's own cases include a case called nordic44, a different system (the 44-bus Nordic model of ALSETLab); its README says most of its dynamic models are not supported. It is not in this catalog.
+- The page also gives the RVS test system (75 buses, 32 generators) as PSS/E files; it is not part of this entry.
+- The size is as the page states it (74 buses, 20 generators); no file of it could be read here.
+
+**Verification.** Tried on 2026-11-18 with scripts/check_external_datasets.py (trial nordic): the PSS/E archive of the page was downloaded and its saved case offered to TENSA through the HTTP API, which refused it. Nothing was run, so nothing is verified.
+
+### IEEE 145-bus 50-generator and 162-bus 17-generator dynamic cases (University of Washington) { #uw_dynamic }
+
+Two dynamic stability test cases of the University of Washington Power Systems Test Case Archive, provided by Iowa State University: a 50-generator system with a 145-bus power flow (classical machine data and exciter data) and a 17-generator system with a 162-bus power flow (classical data), the subject of an IEEE committee report. TENSA holds no file. Both are text files in the IEEE Common Data Format and an EPRI dynamic format, which ANDES does not read, so TENSA cannot open them.
+
+- **Id:** `uw_dynamic`
+- **Kind:** Dynamic
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [None stated (the archive's disclaimer and content policy)](https://labs.ece.uw.edu/pstca/pg_tcaintro.htm). The archive names no licence. Its disclaimer says it is operated voluntarily as a public service with no guarantee of any kind, that the material is for research and education and not for commercial gain, and that material found to be copyrighted or proprietary is removed once it is called to the maintainer's attention. The two cases were provided by Professor Vijay Vittal and Roger Treinen of Iowa State University, whom the pages thank. Since nothing says the files may be passed on, TENSA bundles none.
+
+**Citations**
+
+- 50 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm (accessed 2026-11-18). The page says the case, with a 145-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University, was previously distributed by Iowa State on diskette and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the dynamic and exciter data seem to be in the EPRI format of the manual EPRI EL-2001-CCM. [Link](https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm)
+- 17 Generator Dynamic Test Case, Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm (accessed 2026-11-18). The page says the case, with a 162-bus power flow, was provided courtesy of Professor Vijay Vittal and Roger Treinen of Iowa State University and was the subject of an IEEE Committee report; the power flow is in the IEEE Common Data Format and the classical dynamic data seems to be in the EPRI format. [Link](https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm)
+- V. Vittal, D. Martin, R. Chu, J. Fish, J. C. Giri, C. K. Tang, F. Eugenio Villaseca and R. G. Farmer, "Transient stability test systems for direct stability methods," IEEE Transactions on Power Systems, vol. 7, no. 1, pp. 37-43, February 1992, doi:10.1109/59.141684. Probably the IEEE committee report that the archive's pages say the two cases were the subject of: the pages do not name it, and the identification rests on a search result that describes the report's test systems as a 17-generator, 162-bus system and a 50-generator, 145-bus system. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; the repository record of Cleveland State University (https://engagedscholarship.csuohio.edu/enece_facpub/82) was opened and its abstract read, which says the report presents a standard set of test system data with benchmark results. Its text could not be opened, so the identification was not confirmed from it. [DOI](https://doi.org/10.1109/59.141684)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca_dyn50,
+  title        = {50 Generator Dynamic Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@misc{uw_pstca_dyn17,
+  title        = {17 Generator Dynamic Test Case},
+  howpublished = {Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{vittal1992transient,
+  author  = {Vittal, V. and Martin, D. and Chu, R. and Fish, J. and Giri, J. C. and Tang, C. K. and Villaseca, F. Eugenio and Farmer, R. G.},
+  title   = {Transient stability test systems for direct stability methods},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {7},
+  number  = {1},
+  pages   = {37--43},
+  year    = {1992},
+  month   = feb,
+  doi     = {10.1109/59.141684}
+}
+```
+
+**Links**
+
+- [50-generator dynamic test case (145-bus power flow), UW archive](https://labs.ece.uw.edu/pstca/dyn50/pg_tcadd50.htm): Three text files.
+- [17-generator dynamic test case (162-bus power flow), UW archive](https://labs.ece.uw.edu/pstca/dyn17/pg_tcadd17.htm): Two text files.
+- [IEEE Common Data Format, as the archive describes it](https://labs.ece.uw.edu/pstca/formats/cdf.txt): The format of the power flow files.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The files. 50-generator: dd50cdf.txt (the power flow, 145 buses, 87,615 bytes, SHA-256 2fb27dcc222f61382fccfb408dc825d1cd80b52eea9176bac84fb215d7c1775e), dd50cldat.txt (classical data) and dd50exdat.txt (exciter data). 17-generator: dd17cdf.txt (the power flow, 162 buses, 61,281 bytes, SHA-256 1caa0c2af1b74c4772906fabb0978722649b8454573fab36e7c6b6f2dd4b27f3) and dd17cldat.txt (classical data only). The archive says the dynamic data seems to be in the EPRI format of the manual EPRI EL-2001-CCM.
+- TENSA cannot open them. ANDES reads no IEEE Common Data Format file and no EPRI dynamic format, and the workspace lists .xlsx, .raw, .dyr, .json and .m files only. Given the power flow file as it is, TENSA's session refuses it (ANDES: "Unable to determine case format"). A conversion of the network to another format was not tried, and the dynamic data would need models written for ANDES from the EPRI data.
+- The size is not stated because the two systems differ: 145 buses and 50 generators, and 162 buses and 17 generators, as the files' headers and titles say.
+
+**Verification.** Tried on 2026-11-18 with scripts/check_external_datasets.py (trials uw145 and uw162): the power flow file of each was downloaded and offered to TENSA through the HTTP API, which refused both. Nothing was run, so nothing is verified.
+
+### MATPOWER case library { #matpower_library }
+
+The case files that come with MATPOWER, the power flow and optimal power flow package of PSERC: 78 case files in the MATPOWER case format (one .m file each), from 4 buses to 70,000, among them the IEEE cases, PEGASE and ACTIVSg. TENSA bundles four of them (the PEGASE 89 and 1354-bus and ACTIVSg200 and ACTIVSg2000 cases) and ANDES carries copies of the IEEE 14, 118, 300 and PJM 5-bus ones. Any other can be downloaded, put in the workspace folder and opened for a power flow.
+
+- **Id:** `matpower_library`
+- **Kind:** Steady state
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [3-clause BSD for MATPOWER's code; the case files are not covered by it](https://github.com/MATPOWER/matpower/blob/master/LICENSE). The licence file says the case files distributed with MATPOWER are not covered by the BSD license and that in most cases the data has either been included with permission or converted from data available from a public source: each case file carries its own terms and credits in its header (the ACTIVSg and PEGASE cases are CC BY 4.0, for example). The README asks that publications derived from the use of MATPOWER or its data files cite the 2011 paper and the software, and that the version be named; some case files ask for more citations, which their headers give.
+
+**Citations**
+
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+- R. D. Zimmerman and C. E. Murillo-Sanchez, MATPOWER (Version 8.1), 2025 [Software], https://matpower.org, doi:10.5281/zenodo.15871662. The citation the MATPOWER README gives for version 8.1 of the software; the general, version-independent DOI is 10.5281/zenodo.3236535. Both DOIs resolve to Zenodo. [DOI](https://doi.org/10.5281/zenodo.15871662)
+
+BibTeX:
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+```bibtex
+@misc{zimmerman2025matpower,
+  author       = {Zimmerman, R. D. and Murillo-S{\'a}nchez, C. E.},
+  title        = {{MATPOWER} (Version 8.1)},
+  year         = {2025},
+  howpublished = {Software},
+  url          = {https://matpower.org},
+  doi          = {10.5281/zenodo.15871662}
+}
+```
+
+**Links**
+
+- [MATPOWER](https://matpower.org): The project page, with the manual.
+- [The data folder of release 8.1](https://github.com/MATPOWER/matpower/tree/8.1/data): The case files, each with its header.
+- [MATPOWER licence](https://github.com/MATPOWER/matpower/blob/master/LICENSE): The BSD licence of the code and the note on the case files.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- Read the header of a case file before using it: it names the source, the terms and the papers to cite. TENSA's entries for the four files it bundles quote them.
+- ANDES 2.0.0's MATPOWER reader drops the phase shift of a branch whose tap ratio is 0, where MATPOWER applies it (found with the PEGASE cases; their entries give the size of the effect). Only a power flow is possible: the files hold no machine models.
+- Release 8.1 is the one the bundled files were taken from. The library changes between releases, so name the release when citing a case.
+
+**Verification.** Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.
+
+### PGLib-OPF benchmark library { #pglib_opf_library }
+
+The Power Grid Lib of the IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms: 66 networks from 3 to 78,484 buses in the MATPOWER case format, each in a base, a heavily loaded (api) and a small angle difference (sad) variant, curated for benchmarking AC optimal power flow. TENSA bundles three of the base cases (the IEEE 30-bus and 57-bus and the RTS-24). Any other can be downloaded, put in the workspace folder and opened for a power flow.
+
+- **Id:** `pglib_opf_library`
+- **Kind:** Steady state
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [CC BY 4.0 (the case files); MIT (the software)](https://creativecommons.org/licenses/by/4.0/). The README says all case files are provided under the Creative Commons Attribution License, which allows anyone to share or adapt them as long as they give appropriate credit to the original author, provide a link to the licence and indicate if changes were made; the LICENSE file says to see the data files for their specific copyright holders and attribution. The README encourages users to cite the original sources named in the file headers and the library's report, and to name the version.
+
+**Citations**
+
+- S. Babaeinejadsarookolaee, A. Birchfield, R. D. Christie, C. Coffrin, C. DeMarco, R. Diao, M. Ferris, S. Fliscounakis, S. Greene, R. Huang, C. Josz, R. Korab, B. Lesieutre, J. Maeght, T. W. K. Mak, D. K. Molzahn, T. J. Overbye, P. Panciatici, B. Park, J. Snodgrass, A. Tbaileh, P. Van Hentenryck and R. Zimmerman, "The Power Grid Library for Benchmarking AC Optimal Power Flow Algorithms," arXiv:1908.02788, August 2019. The report of the library the file comes from (IEEE PES Power Grid Library, pglib-opf), which its README names as its detailed report and which asks that the version be given when it is cited: this is v23.07. [Link](https://arxiv.org/abs/1908.02788)
+- IEEE PES Power Grid Library, pglib-opf, https://github.com/power-grid-lib/pglib-opf (accessed 2026-11-18). The repository of the benchmark library, curated by the IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms; its README asks that the version number be named when it is referenced. [Link](https://github.com/power-grid-lib/pglib-opf)
+- R. D. Zimmerman, C. E. Murillo-Sanchez and R. J. Thomas, "MATPOWER: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education," IEEE Transactions on Power Systems, vol. 26, no. 1, pp. 12-19, February 2011, doi:10.1109/TPWRS.2010.2051168. The paper for MATPOWER, which every publication derived from its use or its data files is asked to cite. [DOI](https://doi.org/10.1109/TPWRS.2010.2051168)
+
+BibTeX:
+
+```bibtex
+@misc{babaeinejadsarookolaee2019pglib,
+  author        = {Babaeinejadsarookolaee, Sogol and Birchfield, Adam and Christie, Richard D. and Coffrin, Carleton and DeMarco, Christopher and Diao, Ruisheng and Ferris, Michael and Fliscounakis, Stephane and Greene, Scott and Huang, Renke and Josz, Cedric and Korab, Roman and Lesieutre, Bernard and Maeght, Jean and Mak, Terrence W. K. and Molzahn, Daniel K. and Overbye, Thomas J. and Panciatici, Patrick and Park, Byungkwon and Snodgrass, Jonathan and Tbaileh, Ahmad and Van Hentenryck, Pascal and Zimmerman, Ray},
+  title         = {The Power Grid Library for Benchmarking {AC} Optimal Power Flow Algorithms},
+  year          = {2019},
+  eprint        = {1908.02788},
+  archivePrefix = {arXiv},
+  note          = {library version v23.07}
+}
+```
+
+```bibtex
+@misc{pglib_opf,
+  title        = {{PGLib-OPF}: {IEEE PES} Power Grid Library, Optimal Power Flow},
+  author       = {{IEEE PES Task Force on Benchmarks for Validation of Emerging Power System Algorithms}},
+  howpublished = {GitHub repository},
+  url          = {https://github.com/power-grid-lib/pglib-opf},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{zimmerman2011matpower,
+  author  = {Zimmerman, Ray D. and Murillo-S{\'a}nchez, Carlos E. and Thomas, Robert J.},
+  title   = {{MATPOWER}: Steady-State Operations, Planning, and Analysis Tools for Power Systems Research and Education},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {26},
+  number  = {1},
+  pages   = {12--19},
+  year    = {2011},
+  month   = feb,
+  doi     = {10.1109/TPWRS.2010.2051168}
+}
+```
+
+**Links**
+
+- [pglib-opf on GitHub](https://github.com/power-grid-lib/pglib-opf): The cases, with the README and the licence.
+- [The library's report on arXiv](https://arxiv.org/abs/1908.02788): Motivation, goals and the sources of the cases.
+- [Power Grid Lib site of the Task Force](https://power-grid-lib.github.io/): The Task Force's page.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The cases are set up for optimal power flow, not as operating points of the systems they come from: their dispatch, generator limits and line ratings are the library's, and the loaded (api) and angle-limited (sad) variants are stress cases. A power flow on a file is a power flow of that setup (the entries of the three bundled files say what it means for each).
+- TENSA does no optimal power flow, so the cost data of a file is not used.
+- The library is not static: the bundled files are from release v23.07.
+
+**Verification.** Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.
+
+### University of Washington Power Systems Test Case Archive { #uw_archive }
+
+The archive that made the IEEE 14, 30, 57, 118 and 300-bus power flow cases, the 17 and 50-generator dynamic cases and the IEEE Reliability Test System (1979 and 1996) available on the web, kept by Richard D. Christie. Its files are text in the IEEE Common Data Format, which ANDES does not read; the catalog's IEEE 30, 57, 118 and 300-bus cases are copies of the same data in MATPOWER's format.
+
+- **Id:** `uw_archive`
+- **Kind:** Steady state
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [None stated (the archive's disclaimer and content policy)](https://labs.ece.uw.edu/pstca/pg_tcaintro.htm). The archive names no licence. Its disclaimer says it is operated voluntarily as a public service with no guarantee of any kind, that the material is for research and education and not for commercial gain, and that material found to be copyrighted or proprietary is removed once it is called to the maintainer's attention. Its dynamic cases were provided by Professor Vijay Vittal and Roger Treinen of Iowa State University. Since nothing says the files may be passed on, TENSA bundles none.
+
+**Citations**
+
+- Power Systems Test Case Archive, University of Washington, Department of Electrical Engineering, maintained by R. D. Christie, https://labs.ece.uw.edu/pstca/ (accessed 2026-11-18). The archive's front page lists the power flow cases of 14, 30, 57, 118 and 300 buses, the dynamic cases, the Reliability Test System (1979 and 1996) and other material; its introduction (last updated August 1999) holds the disclaimer and content policy. [Link](https://labs.ece.uw.edu/pstca/)
+
+BibTeX:
+
+```bibtex
+@misc{uw_pstca,
+  title        = {Power Systems Test Case Archive},
+  author       = {Christie, Richard D.},
+  howpublished = {University of Washington, Department of Electrical Engineering},
+  url          = {https://labs.ece.uw.edu/pstca/},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [Power Systems Test Case Archive](https://labs.ece.uw.edu/pstca/): The front page, with every case.
+- [Introduction, disclaimer and content policy](https://labs.ece.uw.edu/pstca/pg_tcaintro.htm): The terms the archive states.
+- [IEEE Common Data Format](https://labs.ece.uw.edu/pstca/formats/cdf.txt): The format of the power flow files.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The files are IEEE Common Data Format text files (and the dynamic ones an EPRI format), which TENSA cannot open: a file of the archive that is wanted in TENSA is used through a copy in MATPOWER's format, as the catalog's IEEE 30, 57, 118 and 300-bus cases are, whose entries say what the copy changed.
+- The archive was last updated in August 1999, and says it makes no guarantee of the correctness of its material.
+
+**Verification.** Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.
+
+### Texas A&M Electric Grid Test Case Repository { #tamu_repository }
+
+The repository of synthetic grids of Texas A&M University: ACTIVSg200, 500, 2000, 10k, 25k and 70k, the UIUC 150-bus system, power flow cases of the literature (WSCC 9, IEEE 14, 24, 30, 39, 57, 118, 300 and the RTS-96), the small-signal stability benchmark systems and more, in PowerWorld, MATPOWER, PSS/E RAW and PSLF formats, several with the files of their dynamic models. The download of a case is behind a form that asks for an email address. This catalog has ACTIVSg200 and ACTIVSg2000 (networks only, from MATPOWER) and entries for their dynamic data.
+
+- **Id:** `tamu_repository`
+- **Kind:** Steady state
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [Texas A&M University: free for commercial or non-commercial use (no licence named)](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/). The pages of the cases say the datasets are synthetic and provided by Texas A&M University researchers free for commercial or non-commercial use, and encourage users to fill in the feedback form and to cite the appropriate papers, which the references page lists (the paper of the algorithms for any synthetic case, and the others it names for costs, dynamics and time series). They do not say whether the files may be passed on.
+
+**Citations**
+
+- References, Electric Grid Test Case Repository, Texas A&M University, https://electricgrids.engr.tamu.edu/references/ (accessed 2026-11-18). The page lists the papers of the synthetic cases and says which to cite: [1], Birchfield et al. 2017, for the algorithms that create the cases, and [5] and [10], Xu et al., for the generator dynamic models. [Link](https://electricgrids.engr.tamu.edu/references/)
+- A. B. Birchfield, T. Xu, K. M. Gegner, K. S. Shetye and T. J. Overbye, "Grid Structural Characteristics as Validation Criteria for Synthetic Networks," IEEE Transactions on Power Systems, vol. 32, no. 4, pp. 3258-3265, July 2017, doi:10.1109/TPWRS.2016.2616385. The paper the file's header asks that publications based on the data cite, which describes how the synthetic networks are made. The DOI resolves to the paper's IEEE Xplore page and Crossref gives its title and pages; its text was not read. [DOI](https://doi.org/10.1109/TPWRS.2016.2616385)
+
+BibTeX:
+
+```bibtex
+@misc{tamu_references,
+  title        = {References},
+  howpublished = {Electric Grid Test Case Repository, Texas A\&M University},
+  url          = {https://electricgrids.engr.tamu.edu/references/},
+  urldate      = {2026-11-18}
+}
+```
+
+```bibtex
+@article{birchfield2017grid,
+  author  = {Birchfield, Adam B. and Xu, Ti and Gegner, Kathleen M. and Shetye, Komal S. and Overbye, Thomas J.},
+  title   = {Grid Structural Characteristics as Validation Criteria for Synthetic Networks},
+  journal = {IEEE Transactions on Power Systems},
+  volume  = {32},
+  number  = {4},
+  pages   = {3258--3265},
+  year    = {2017},
+  month   = jul,
+  doi     = {10.1109/TPWRS.2016.2616385}
+}
+```
+
+**Links**
+
+- [Electric Grid Test Case Repository](https://electricgrids.engr.tamu.edu/): The home page, with the list of cases.
+- [The cases](https://electricgrids.engr.tamu.edu/electric-grid-test-cases/): One page per case; the download is behind a form.
+- [References](https://electricgrids.engr.tamu.edu/references/): The papers to cite.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The download of a case is behind a form with an email address, a name and an organisation, which TENSA's checks do not submit; the files of this repository were therefore not downloaded from it (the ACTIVSg2000 test used a copy in another repository, see its entry).
+- The synthetic cases bear no relation to the actual grid in their location. The MATPOWER copies of ACTIVSg200 and ACTIVSg2000 in this catalog carry a CC BY 4.0 licence in their headers, which the repository's own pages do not state.
+
+**Verification.** Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.
+
+### Edinburgh GB network and test case archive { #edinburgh_gb }
+
+The Power Systems Test Case Archive of the School of Mathematics of the University of Edinburgh, which offers the transmission network of Great Britain (2224 nodes, 3207 branches, 394 generators, from public data of National Grid) as a MATPOWER file, with a reduced GB network, the Iceland network, a European network and others. ANDES carries a copy of the GB network (andes/cases/GBnetwork) with dynamic data its README says is randomly generated; it is not in this catalog.
+
+- **Id:** `edinburgh_gb`
+- **Kind:** Steady state
+- **Size:** -
+- **Analyses:** -
+
+**Source.** TENSA holds no file of this case; the links below say where to get it.
+
+**Licence.** [None stated (the archive's disclaimer: research and educational purposes, no guarantees)](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/introduction.html). The archive names no licence. Its introduction says the data comes from open material on the web, that the source of each dataset is given on its page and in its file headers, and that the contents are for research and educational purposes with no guarantee of correctness, quality or fitness for an application; it asks users to cite the report named in the citation above. Since nothing says the files may be passed on, TENSA bundles none.
+
+**Citations**
+
+- Power Systems Test Case Archive, GB Network, School of Mathematics, University of Edinburgh, maintained by W. Bukhsh, https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/ (accessed 2026-11-18; the archive's older address, www.maths.ed.ac.uk/optenergy/NetworkData/, redirects there). The page says the data is a detailed model of the transmission network of Great Britain with 2224 nodes, 3207 branches and 394 generators, obtained from public data on the website of National Grid, and offers it as GBnetwork.m. The archive asks that users cite W. A. Bukhsh and K. McKinnon, "Network data of real transmission networks," April 2013; that report was not found and is not cited here. [Link](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/)
+
+BibTeX:
+
+```bibtex
+@misc{edinburgh_gb,
+  title        = {Power Systems Test Case Archive: {GB} Network},
+  author       = {Bukhsh, Waqquas A.},
+  howpublished = {School of Mathematics, University of Edinburgh},
+  url          = {https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/},
+  urldate      = {2026-11-18}
+}
+```
+
+**Links**
+
+- [GB network page](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/fullGB/): The case file GBnetwork.m and a diagram.
+- [The archive](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/): The list of every case.
+- [Introduction and disclaimer](https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/introduction.html): The terms the archive states.
+
+**Changes to the data.** None.
+
+**Caveats**
+
+- The archive was last updated in March 2013. The GB network is described there as obtained from public data on National Grid's website.
+- The files are MATPOWER cases: only a power flow is possible, and ANDES 2.0.0's MATPOWER reader drops the phase shift of a branch whose tap ratio is 0 (see the MATPOWER library entry). TENSA has not been run on the GB network.
+
+**Verification.** Nothing was run: this entry is a pointer to a collection, not a case, so there is nothing to verify. Each case of it that TENSA bundles has an entry of its own with its checks.

@@ -319,8 +319,9 @@ def test_the_gallery_has_the_two_renewable_cases_and_the_118_bus_case_and_none_i
         assert all(check.passed for check in example.verification.checks), example_id
         # Every case says where its data comes from: a source for the system and one for ANDES.
         assert example.citations and example.licence.name == "GPL-3.0-or-later"
-    # The steady-state cases are what the dialog's second group holds, the smallest first.
-    assert [e.id for e in catalog.examples if e.category == "steady-state"] == [
+    # The steady-state cases that have a file are what the dialog's second group holds, the
+    # smallest first (the link-only entries are a group of their own).
+    assert [e.id for e in catalog.examples if e.category == "steady-state" and e.has_file] == [
         "rts24",
         "ieee30",
         "ieee57",
@@ -701,7 +702,8 @@ def test_the_gallery_has_the_pegase_and_activsg_2000_cases_and_none_is_seeded() 
         # A case with no time-domain run has no baseline, and the entry says nothing rests on TENSA's own output.
         assert "nothing in it is a regression baseline" in example.verification.summary
     # The one that has the fewest buses and the ones with the most close the steady-state group.
-    assert [e.id for e in catalog.examples if e.category == "steady-state"][-2:] == [
+    cases = [e.id for e in catalog.examples if e.category == "steady-state" and e.has_file]
+    assert cases[-2:] == [
         "pegase1354",
         "activsg2000",
     ]
@@ -961,8 +963,6 @@ def test_git_leaves_the_bundled_case_files_byte_for_byte_as_they_came() -> None:
 def test_the_notice_carries_every_licence_the_catalog_uses() -> None:
     notice = (examples_dir() / "NOTICE.md").read_text(encoding="utf-8")
     for example in load_catalog().examples:
-        if not example.has_file:
-            continue
         assert example.licence.name in notice, example.id
         if example.licence.url:
             assert example.licence.url in notice, example.id
@@ -1003,3 +1003,95 @@ def test_a_loaded_catalog_is_not_changed_by_a_caller() -> None:
     assert load_catalog() is first
     with pytest.raises(ValueError, match="frozen"):
         first.examples[0].title = "changed"  # type: ignore[misc]
+
+
+LINK_ONLY = [
+    "activsg200_dyn",
+    "activsg2000_dyn",
+    "wecc240",
+    "pes_benchmarks",
+    "nordic",
+    "uw_dynamic",
+    "matpower_library",
+    "pglib_opf_library",
+    "uw_archive",
+    "tamu_repository",
+    "edinburgh_gb",
+]
+
+
+def test_the_link_only_entries_close_the_catalog_and_hold_no_file_and_none_is_seeded() -> None:
+    catalog = load_catalog()
+    assert [e.id for e in catalog.examples if not e.has_file] == LINK_ONLY
+    assert [e.id for e in catalog.examples][-len(LINK_ONLY) :] == LINK_ONLY
+    for entry in catalog.examples:
+        if entry.id in LINK_ONLY:
+            assert not entry.default and entry.files() == [] and entry.extra_files == []
+            assert entry.provenance.path is None and entry.provenance.sha256 is None
+
+
+def test_every_link_only_entry_says_where_the_data_is_who_to_cite_and_what_was_tried() -> None:
+    for example_id in LINK_ONLY:
+        entry = load_catalog().get(example_id)
+        assert entry is not None
+        assert entry.links and all(link.url.startswith(("http://", "https://")) for link in entry.links)
+        assert len({link.url for link in entry.links}) == len(entry.links), example_id
+        assert entry.citations, example_id
+        for citation in entry.citations:
+            assert citation.text.strip() and citation.bibtex.startswith("@"), example_id
+            assert citation.doi or citation.url, example_id
+        assert entry.licence.url and entry.licence.attribution, example_id
+        # The words of the verification are the entry's own: what was run or that nothing was.
+        assert entry.verification is not None and entry.verification.summary.strip(), example_id
+        assert entry.caveats, example_id
+
+
+def test_a_link_only_entry_claims_only_checks_against_a_reference_that_is_not_tensas_own() -> None:
+    """These entries were tried once, by a script, and no baseline of TENSA's own output is
+    kept for them: a check is an independent solver's or the solution a file stores."""
+    for example_id in LINK_ONLY:
+        entry = load_catalog().get(example_id)
+        assert entry is not None and entry.verification is not None
+        for check in entry.verification.checks:
+            assert check.kind in {"independent-solver", "stored-solution"}, example_id
+        if not entry.verification.checks:
+            assert "nothing is verified" in entry.verification.summary.lower() or (
+                "nothing was run" in entry.verification.summary.lower()
+            ), example_id
+
+
+def test_what_a_link_only_entry_could_not_run_is_not_listed_among_its_analyses() -> None:
+    """The cards show the analyses as badges: only what ran counts. The two dynamic datasets
+    whose 10 s run does not start offer a power flow and no time-domain run."""
+    catalog = load_catalog()
+    for example_id in ("wecc240", "activsg2000_dyn"):
+        entry = catalog.get(example_id)
+        assert entry is not None
+        assert entry.analyses == ["pf"], example_id
+        assert any("does not start" in c for c in entry.caveats), example_id
+        assert entry.verification is not None
+        assert "time-domain" in entry.verification.summary
+    for example_id in LINK_ONLY:
+        entry = catalog.get(example_id)
+        assert entry is not None and "tds" not in entry.analyses and "eig" not in entry.analyses
+
+
+def test_a_check_that_failed_is_recorded_as_failed_with_its_reason() -> None:
+    """The stored state of ACTIVSg2000's RAW file is not reproduced; the entry says so in its
+    checks and its summary, and does not quietly drop the check."""
+    entry = load_catalog().get("activsg2000_dyn")
+    assert entry is not None and entry.verification is not None
+    failed = [c for c in entry.verification.checks if not c.passed]
+    assert [c.kind for c in failed] == ["stored-solution", "stored-solution"]
+    assert all("outside the bound" in c.result for c in failed)
+    assert "recorded as failed" in entry.verification.summary
+    passed = [c for c in entry.verification.checks if c.passed]
+    assert passed and all(c.kind == "independent-solver" for c in passed)
+
+
+def test_the_datasets_that_could_not_be_downloaded_say_why_and_have_no_result() -> None:
+    entry = load_catalog().get("activsg200_dyn")
+    assert entry is not None and entry.verification is not None
+    assert entry.verification.checks == []
+    assert any("form" in c and "email" in c for c in entry.caveats)
+    assert entry.analyses == []

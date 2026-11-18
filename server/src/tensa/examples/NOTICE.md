@@ -199,6 +199,65 @@ Changes: TENSA made none.
 
 No warranty: the data is provided as is, as section 5 of the licence says.
 
+## Entries that are only links
+
+The catalog's entries of kind `external` hold no file: TENSA ships nothing of them and copies
+nothing into a workspace. Each links to where its data is and records the terms the source
+states, which are repeated here so that this file names every licence the catalog uses. Only
+two of the sources, PGLib-OPF (CC BY 4.0) and the SPS-L repository (Apache License 2.0), say
+their files may be passed on, and the only files TENSA bundles from them are the three
+PGLib-OPF ones described above.
+
+Texas A&M University, for ACTIVSg200 and ACTIVSg2000 with dynamic data and for the Electric Grid Test Case Repository.
+
+> Texas A&M University: free for commercial or non-commercial use (no licence named)
+
+The pages are https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg200/ and https://electricgrids.engr.tamu.edu/electric-grid-test-cases/activsg2000/. They ask users to cite the appropriate papers, which the repository's references page lists.
+
+The National Laboratory of the Rockies (NLR, formerly NREL), for the reduced 240-bus WECC system.
+
+> NREL disclaimer (as in the NLR download)
+
+The notice comes in the download, and the page is https://www.nlr.gov/grid/test-case-repository.html. It grants the right to use or copy the data without a fee provided that its entire notice appears in all copies, and asks users to credit DOE/NREL/ALLIANCE in any publication that results from its use.
+
+The IEEE PES Task Force on Benchmark Systems for Stability Controls, for the small-signal benchmark systems.
+
+> None stated (the page calls the material working papers and gives no support)
+
+The page is https://cmte.ieee.org/pes-psdp/benchmark-systems-2/. It asks that any citation of the reports mention them as working papers.
+
+The IEEE PES Task Force on Test Systems for Voltage Stability Analysis and Security Assessment, for the Nordic test system.
+
+> None stated by the IEEE PES page; Apache License 2.0 for the SPS-L repository
+
+The licence is at https://github.com/SPS-L/stepss-IEEE-Nordic-Test-system/blob/main/LICENSE. The SPS-L repository, whose files are in RAMSES format, is under the Apache License 2.0; the page of the Task Force states no terms.
+
+The University of Washington Power Systems Test Case Archive, for its dynamic cases and the archive itself.
+
+> None stated (the archive's disclaimer and content policy)
+
+The terms are at https://labs.ece.uw.edu/pstca/pg_tcaintro.htm. The archive says its material is for research and education and not for commercial gain.
+
+MATPOWER, for its case library.
+
+> 3-clause BSD for MATPOWER's code; the case files are not covered by it
+
+The licence is at https://github.com/MATPOWER/matpower/blob/master/LICENSE. Each case file has its own terms in its header.
+
+The IEEE PES Power Grid Library (PGLib-OPF), for the library.
+
+> CC BY 4.0 (the case files); MIT (the software)
+
+The licence is at https://creativecommons.org/licenses/by/4.0/. The three PGLib-OPF files TENSA does bundle are described above.
+
+The School of Mathematics of the University of Edinburgh, for its network archive.
+
+> None stated (the archive's disclaimer: research and educational purposes, no guarantees)
+
+The terms are at https://webhomes.maths.ed.ac.uk/OptEnergy/NetworkData/introduction.html.
+
+Copies of some of these files exist elsewhere, in the Sienna test data repository (https://github.com/Sienna-Platform/PowerSystemsTestData), which states no licence; the catalog says which entries were tried on such a copy.
+
 ## Cases written by TENSA
 
 WSCC 9-bus, with classical machines.

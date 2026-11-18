@@ -280,9 +280,7 @@ async def test_a_case_the_installed_andes_does_not_hold_is_a_404(
     assert "kundur/kundur_full.xlsx" in resp.json()["detail"]
     listed = {e["id"]: e["available"] for e in (await client.get("/api/examples")).json()["examples"]}
     # What the user's ANDES must hold is what is missing; a case TENSA carries is still there.
-    assert listed == {
-        e.id: e.provenance.kind == "bundled" for e in load_catalog().examples if e.has_file
-    }
+    assert listed == {e.id: e.provenance.kind == "bundled" for e in load_catalog().examples}
     assert listed["wscc9"] is True and listed["ieee14"] is False and listed["pjm5bus"] is False
     assert _names(ws) == []
 
