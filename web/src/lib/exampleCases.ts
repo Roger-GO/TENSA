@@ -38,6 +38,42 @@ export function isLinkOnly(example: ExampleListEntry): boolean {
   return example.provenance.kind === 'external';
 }
 
+/**
+ * The group of the entries that are only links, shown after the two of the cases: they have
+ * a category (a dynamic dataset, a steady-state library) but nothing to add or open, so under
+ * "Dynamic cases" they would promise machine models TENSA does not give.
+ */
+export const LINK_ONLY_GROUP = {
+  value: 'links',
+  heading: 'Data to get elsewhere',
+  blurb:
+    'TENSA holds no file of these. Each card links to the data, gives its terms, and says what happened when TENSA was tried on it.',
+} as const;
+
+/** The cases of a category that have a file: what its group holds. */
+export function casesOfCategory(
+  examples: readonly ExampleListEntry[],
+  category: ExampleListEntry['category'],
+): ExampleListEntry[] {
+  return examples.filter((example) => example.category === category && !isLinkOnly(example));
+}
+
+/**
+ * What the count beside the filter says: how many of the entries match what is typed, or,
+ * with nothing typed, how many cases there are and how many entries are only links.
+ */
+export function countText(
+  examples: readonly ExampleListEntry[],
+  shown: number,
+  filtering: boolean,
+): string {
+  if (filtering) return `${shown} of ${examples.length}`;
+  const links = examples.filter(isLinkOnly).length;
+  const cases = examples.length - links;
+  const text = `${cases} ${cases === 1 ? 'case' : 'cases'}`;
+  return links === 0 ? text : `${text}, ${links} ${links === 1 ? 'link' : 'links'}`;
+}
+
 /** The file name the case takes in the workspace, which is the file that is opened. */
 export function primaryFileName(example: ExampleListEntry): string | null {
   const path = example.provenance.path;

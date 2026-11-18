@@ -382,7 +382,9 @@ export function ExampleCard({
             ) : null}
             {example.verification ? (
               <div>
-                <p className="text-foreground font-medium">How it was checked</p>
+                <p className="text-foreground font-medium">
+                  {linkOnly ? 'What was tried with TENSA' : 'How it was checked'}
+                </p>
                 <p>{example.verification.summary}</p>
               </div>
             ) : null}

@@ -97,6 +97,29 @@ test('the Project tab opens the example cases, with their sources, licences and 
   ]) {
     await expect(steady.getByTestId(`example-card-${id}`)).toBeVisible();
   }
+  // The entries that are only links are a group of their own after the cases, with nothing to
+  // add or open, and the count says how many of each there are.
+  const links = dialog.getByTestId('example-group-links');
+  await expect(links).toBeVisible();
+  await expect(links.getByTestId(/^example-card-/)).toHaveCount(11);
+  for (const id of [
+    'activsg200_dyn',
+    'activsg2000_dyn',
+    'wecc240',
+    'pes_benchmarks',
+    'nordic',
+    'uw_dynamic',
+    'matpower_library',
+    'pglib_opf_library',
+    'uw_archive',
+    'tamu_repository',
+    'edinburgh_gb',
+  ]) {
+    await expect(links.getByTestId(`example-card-${id}`)).toBeVisible();
+    await expect(dialog.getByTestId(`example-add-${id}`)).toHaveCount(0);
+  }
+  await expect(dialog.getByTestId('example-link-wecc240-0')).toHaveAttribute('href', /nlr\.gov/);
+  await expect(dialog.getByTestId('example-cases-count')).toHaveText('21 cases, 11 links');
   for (const id of ['ieee14', 'kundur', 'wscc9', 'ieee39', 'npcc']) {
     await expect(dialog.getByTestId(`example-card-${id}`)).toBeVisible();
     await expect(dialog.getByTestId(`example-added-${id}`)).toHaveText('Added');

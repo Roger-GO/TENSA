@@ -150,11 +150,17 @@ describe('the Example cases dialog', () => {
     await openDialog();
     const dynamic = within(screen.getByTestId('example-group-dynamic'));
     const steady = within(screen.getByTestId('example-group-steady-state'));
+    const links = within(screen.getByTestId('example-group-links'));
     expect(dynamic.getByRole('heading', { name: 'Dynamic cases' })).toBeInTheDocument();
     expect(steady.getByRole('heading', { name: 'Steady-state cases' })).toBeInTheDocument();
+    expect(links.getByRole('heading', { name: 'Data to get elsewhere' })).toBeInTheDocument();
     expect(dynamic.getByTestId('example-card-ieee14')).toBeInTheDocument();
-    expect(dynamic.getByTestId('example-card-texas-dynamic')).toBeInTheDocument();
     expect(steady.getByTestId('example-card-wscc9')).toBeInTheDocument();
+    // An entry that is only links is not among the dynamic cases whatever its category: under
+    // that heading it would promise machine models TENSA does not give.
+    expect(links.getByTestId('example-card-texas-dynamic')).toBeInTheDocument();
+    expect(dynamic.queryByTestId('example-card-texas-dynamic')).not.toBeInTheDocument();
+    expect(links.queryByTestId('example-card-ieee14')).not.toBeInTheDocument();
 
     expect(screen.getByTestId('example-size-ieee14')).toHaveTextContent('14 buses, 5 generators');
     for (const analysis of ['pf', 'tds', 'eig']) {
@@ -163,7 +169,7 @@ describe('the Example cases dialog', () => {
     expect(screen.getByTestId('example-analysis-wscc9-pf')).toHaveTextContent('Power flow');
     expect(screen.queryByTestId('example-analysis-wscc9-tds')).not.toBeInTheDocument();
     expect(card('ieee14').getByText(/IEEE 14-bus system with machines/)).toBeInTheDocument();
-    expect(screen.getByTestId('example-cases-count')).toHaveTextContent('3 cases');
+    expect(screen.getByTestId('example-cases-count')).toHaveTextContent('2 cases, 1 link');
   });
 
   it('links the source and the licence in a new tab, without handing over the window', async () => {
@@ -194,6 +200,29 @@ describe('the Example cases dialog', () => {
     expect(texas.queryByRole('button', { name: /Add to workspace/ })).not.toBeInTheDocument();
     expect(texas.queryByRole('button', { name: /^Open/ })).not.toBeInTheDocument();
     expect(texas.queryByRole('button', { name: /^Cite/ })).not.toBeInTheDocument();
+  });
+
+  it('says what was tried with TENSA for an entry that is only links, and how a case was checked for the rest', async () => {
+    server.examples = [
+      makeExample({
+        id: 'texas-dynamic',
+        provenance: { kind: 'external' },
+        size: null,
+        analyses: [],
+        default: false,
+        available: false,
+        caveats: ['The files are behind a form.'],
+        verification: { summary: 'Nothing was run.', checks: [] },
+        links: [{ title: 'Repository', url: 'https://electricgrids.engr.tamu.edu/' }],
+      }),
+      makeExample({ verification: { summary: 'Compared with pandapower.', checks: [] } }),
+    ];
+    await openDialog();
+    const texas = card('texas-dynamic');
+    expect(texas.getByText('What was tried with TENSA')).toBeInTheDocument();
+    expect(texas.getByText('Nothing was run.')).toBeInTheDocument();
+    expect(texas.queryByText('How it was checked')).not.toBeInTheDocument();
+    expect(card('ieee14').getByText('How it was checked')).toBeInTheDocument();
   });
 
   it('names the file a case is in the workspace as, with the files it is opened with', async () => {
@@ -720,6 +749,7 @@ describe('the filter and the states of the list', () => {
     expect(screen.getByTestId('example-cases-count')).toHaveTextContent('1 of 3');
     // A group with nothing left in it is not an empty heading.
     expect(screen.getByTestId('example-group-dynamic')).not.toBeVisible();
+    expect(screen.getByTestId('example-group-links')).not.toBeVisible();
     expect(screen.getByTestId('example-group-steady-state')).toBeVisible();
     // What is hidden is not in the reading order or the tab order either.
     expect(screen.queryByRole('button', { name: /^Cite: IEEE 14-bus/ })).toBeNull();

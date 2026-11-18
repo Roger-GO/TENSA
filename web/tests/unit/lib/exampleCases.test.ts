@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest';
 import {
   ANALYSIS_LABELS,
   CASE_CATEGORIES,
+  LINK_ONLY_GROUP,
+  casesOfCategory,
   citationsText,
+  countText,
   differsFromShipped,
   differsNote,
   companionFileNames,
@@ -66,6 +69,27 @@ describe('how a case is described', () => {
 
   it('groups the dynamic cases before the steady-state ones', () => {
     expect(CASE_CATEGORIES.map((c) => c.value)).toEqual(['dynamic', 'steady-state']);
+  });
+
+  it('keeps the entries that are only links out of the groups of cases and in a group of their own', () => {
+    const catalog = makeCatalog();
+    expect(casesOfCategory(catalog, 'dynamic').map((e) => e.id)).toEqual(['ieee14']);
+    expect(casesOfCategory(catalog, 'steady-state').map((e) => e.id)).toEqual(['wscc9']);
+    expect(catalog.filter(isLinkOnly).map((e) => e.id)).toEqual(['texas-dynamic']);
+    expect(LINK_ONLY_GROUP.value).toBe('links');
+    // The heading says it is data to go and get, and the blurb that TENSA holds none of it.
+    expect(LINK_ONLY_GROUP.heading).toBe('Data to get elsewhere');
+    expect(LINK_ONLY_GROUP.blurb).toMatch(/holds no file/);
+  });
+
+  it('counts the cases and the links apart, and the matches of a filter against all of them', () => {
+    const catalog = makeCatalog();
+    expect(countText(catalog, 3, false)).toBe('2 cases, 1 link');
+    expect(countText(catalog.slice(0, 2), 2, false)).toBe('2 cases');
+    expect(countText(catalog.slice(0, 1), 1, false)).toBe('1 case');
+    const many = [...catalog, makeExample({ id: 'b', provenance: { kind: 'external' } })];
+    expect(countText(many, 4, false)).toBe('2 cases, 2 links');
+    expect(countText(catalog, 1, true)).toBe('1 of 3');
   });
 
   it('follows only http and https addresses', () => {

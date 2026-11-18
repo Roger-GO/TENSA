@@ -14,7 +14,11 @@ import {
 import { Input } from '@/components/ui/Input';
 import {
   CASE_CATEGORIES,
+  LINK_ONLY_GROUP,
+  casesOfCategory,
   companionFileNames,
+  countText,
+  isLinkOnly,
   matchesFilter,
   primaryFileName,
   workspaceNote,
@@ -32,7 +36,8 @@ import { ExampleCard } from './ExampleCard';
  * Opened from the Project tab, the empty states and the command palette (all through
  * `useExampleCasesStore`). The catalog is read from the server each time it opens, since
  * the workspace may have changed, and the cards are grouped by what the case supports:
- * dynamic cases (with machine models) and steady-state ones (a network, for power flow).
+ * dynamic cases (with machine models) and steady-state ones (a network, for power flow), and
+ * then the entries that are only links to data TENSA does not hold.
  * A filter narrows them by name, size or analysis, and a line under it says how many are in
  * the workspace already (a new workspace starts with the default set, so most cards open as
  * Added, and the first-time user is told why and what to press). Adding a case copies its file into the
@@ -142,6 +147,16 @@ function Body() {
   // opened in it (its references, its notes) is still there when the filter lets it back.
   const shownIds = new Set(shown.map((example) => example.id));
   const note = workspaceNote(examples);
+  // The cases of each category, and after them the entries that are only links.
+  const groups = [
+    ...CASE_CATEGORIES.map((category) => ({
+      value: category.value,
+      heading: category.heading,
+      blurb: category.blurb,
+      members: casesOfCategory(examples, category.value),
+    })),
+    { ...LINK_ONLY_GROUP, members: examples.filter(isLinkOnly) },
+  ];
 
   return (
     <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
@@ -160,11 +175,7 @@ function Body() {
           data-testid="example-cases-count"
           className="text-muted-foreground shrink-0 text-xs"
         >
-          {list.data === undefined
-            ? ''
-            : filter.trim() === ''
-              ? `${examples.length} ${examples.length === 1 ? 'case' : 'cases'}`
-              : `${shown.length} of ${examples.length}`}
+          {list.data === undefined ? '' : countText(examples, shown.length, filter.trim() !== '')}
         </p>
       </div>
 
@@ -221,30 +232,27 @@ function Body() {
               </div>
             ) : null}
             <div hidden={shown.length === 0} className="flex flex-col gap-5">
-              {CASE_CATEGORIES.map((category) => {
-                const inCategory = examples.filter(
-                  (example) => example.category === category.value,
-                );
-                if (inCategory.length === 0) return null;
+              {groups.map((group) => {
+                if (group.members.length === 0) return null;
                 return (
                   <section
-                    key={category.value}
-                    hidden={!inCategory.some((example) => shownIds.has(example.id))}
-                    aria-labelledby={`example-group-${category.value}`}
-                    data-testid={`example-group-${category.value}`}
+                    key={group.value}
+                    hidden={!group.members.some((example) => shownIds.has(example.id))}
+                    aria-labelledby={`example-group-${group.value}`}
+                    data-testid={`example-group-${group.value}`}
                     className="flex flex-col gap-2"
                   >
                     <div>
                       <h3
-                        id={`example-group-${category.value}`}
+                        id={`example-group-${group.value}`}
                         className="text-foreground text-sm font-semibold"
                       >
-                        {category.heading}
+                        {group.heading}
                       </h3>
-                      <p className="text-muted-foreground text-xs">{category.blurb}</p>
+                      <p className="text-muted-foreground text-xs">{group.blurb}</p>
                     </div>
                     <ul className="flex flex-col gap-2" role="list">
-                      {inCategory.map((example) => (
+                      {group.members.map((example) => (
                         <li key={example.id} hidden={!shownIds.has(example.id)}>
                           <ExampleCard
                             example={example}
