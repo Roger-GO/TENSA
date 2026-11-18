@@ -1241,7 +1241,7 @@ describe('useMenuCommands: what repeats or changes a result is greyed out until 
     const again = commandOf('run.active-routine');
     expect(again.label).toBe('Run again: Power flow (PF)');
     expect(again.unavailable).toBe(
-      'Power flow (PF) has not been run in this session, so there is nothing to run again. Start it from the Run menu or the top bar first.',
+      'Power flow (PF) has not been run in this session, so there is nothing to run again. Start it from the Run menu first.',
     );
     // A greyed command has no key: Ctrl+Enter is bound from the registry.
     const registry = renderHook(() => useCommandRegistry(), { wrapper }).result.current;

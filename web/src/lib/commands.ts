@@ -1370,7 +1370,7 @@ function useCommandSets(): CommandSets {
       // and the analyze sub-mode + drawer tab align after the dispatch.
       // There is always SOME active routine (defaults to PFlow), but "again"
       // is of a run: until the routine has run it is greyed out and says so,
-      // and the Run menu and the top bar start it the first time.
+      // and the Run menu (which lists every routine) starts it the first time.
       {
         id: 'run.active-routine',
         label: `Run again: ${ROUTINE_NAME[activeRoutine]}`,
@@ -1591,10 +1591,10 @@ export const EIG_VIEW_NEEDS_A_RESULT =
 
 /**
  * Why Run again is greyed out until the routine the Run menu has ticked has run: it repeats a
- * run, and the first one is started from the Run menu or the top bar.
+ * run, and the first one is started from the Run menu, which lists every routine.
  */
 function runAgainNeedsARun(routine: RunRoutine): string {
-  return `${ROUTINE_NAME[routine]} has not been run in this session, so there is nothing to run again. Start it from the Run menu or the top bar first.`;
+  return `${ROUTINE_NAME[routine]} has not been run in this session, so there is nothing to run again. Start it from the Run menu first.`;
 }
 
 /** The hover text of each: what choosing it does, and where the result shows. */
