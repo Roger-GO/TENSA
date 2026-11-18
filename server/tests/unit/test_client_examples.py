@@ -796,3 +796,38 @@ def test_the_api_type_script_starts_the_tensa_it_is_given_by_either_name() -> No
     assert resolved(TENSA_BIN="/new/tensa") == "/new/tensa"
     assert resolved(ANDES_APP="/old/tensa") == "/old/tensa"
     assert resolved(TENSA_BIN="/new/tensa", ANDES_APP="/old/tensa") == "/new/tensa"
+
+
+def test_the_mcp_server_reports_the_version_of_tensa_and_not_the_one_of_the_mcp_library() -> None:
+    """A client shows ``serverInfo.version`` as the version of the server it talks to. FastMCP
+    takes none, and the library fills in its own, which was 1.30.0 where this was found. The
+    handshake is made over the server's real standard input and output."""
+    pytest.importorskip("mcp.server.fastmcp")
+    import importlib.metadata
+
+    import tensa
+
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    done = subprocess.run(
+        [sys.executable, "-m", "tensa", "mcp", "--url", "http://127.0.0.1:9"],
+        input=json.dumps(initialize) + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.stdout.strip(), done.stderr
+    server_info = json.loads(done.stdout.splitlines()[0])["result"]["serverInfo"]
+    assert server_info["name"] == "tensa"
+    assert server_info["version"] == tensa.__version__
+    assert server_info["version"] != importlib.metadata.version("mcp")

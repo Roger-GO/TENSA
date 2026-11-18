@@ -24,6 +24,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from tensa import __version__
+
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -72,6 +74,9 @@ mcp = FastMCP(
         "disturbances or elements."
     ),
 )
+# FastMCP takes no version, and the server under it answers an MCP client's handshake with
+# the version of the ``mcp`` library when it has none, so a client was shown that as TENSA's.
+mcp._mcp_server.version = __version__
 
 
 @mcp.tool()
