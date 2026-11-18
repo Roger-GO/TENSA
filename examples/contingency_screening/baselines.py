@@ -5,7 +5,7 @@ as the LLM agent, then submit the pairs they actually measured, ranked by
 measured severity. Submissions are written in the shared format scored by
 ``score.py``:
 
-    {"agent": ..., "validated": [[a, b], ...], "ranking": [[a, b], ...]}
+    {"agent": ..., "versions": {...}, "validated": [[a, b], ...], "ranking": [[a, b], ...]}
 
 - ``random``: uniform sample of the candidate list (seeded).
 - ``greedy_stress``: rank candidates by the sum of the two branches' base
@@ -24,6 +24,7 @@ def run_agent(name: str, chosen: list[tuple[str, str]], task: dict) -> None:
     t = Tensa()
     measured: list[tuple[tuple[str, str], float | None]] = []
     try:
+        versions = t.versions()
         t.load_case()
         for pair in chosen[: task["budget"]]:
             obs = t.validate_pair(pair)
@@ -35,6 +36,7 @@ def run_agent(name: str, chosen: list[tuple[str, str]], task: dict) -> None:
     ranked = sorted(measured, key=lambda r: (0, 0.0) if r[1] is None else (1, -r[1]))
     submission = {
         "agent": name,
+        "versions": versions,
         "validated": [list(p) for p, _ in measured],
         "ranking": [list(p) for p, _ in ranked[: task["report_k"]]],
     }

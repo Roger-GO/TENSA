@@ -2,7 +2,7 @@
 
 This example evaluates how well an agent can find the most severe N-2
 branch-outage contingencies through TENSA's public HTTP API, following
-the task protocol of PowerAgentBench-SS (Zhang et al., arXiv:2606.18789):
+the task protocol of PowerAgentBench-SS (Mylonas et al., arXiv:2606.18789):
 budgeted validation, evidence-backed ranked submission, hidden oracle.
 
 One honesty note up front: this is a **PowerAgentBench-style protocol
@@ -13,8 +13,9 @@ to numbers in their paper.
 
 ## Task
 
-- Case: the stock ANDES `ieee39.xlsx` (39 buses, 46 branches). The case
-  ships no thermal ratings, so ratings are synthesized by quantizing
+- Case: the stock ANDES `ieee39.xlsx` (39 buses, 46 branches; the file of ANDES
+  2.0.0, SHA-256 `09929dc99f081e0ae4ae7fd8de6303acd1ed29015aea4a32c4467136a225af25`).
+  The case ships no thermal ratings, so ratings are synthesized by quantizing
   base-case flows upward (`rate = max(100, 50 * ceil(1.3 * S_base / 50))`
   MVA) and published to the agent. Quantization leaves each branch a
   different headroom, which is what gives screening a signal.
@@ -32,10 +33,10 @@ to numbers in their paper.
 
 ## Agents
 
-- `random` — scripted: validates a uniform sample, submits what it saw.
-- `greedy_stress` — scripted: validates the 40 pairs with the highest
+- `random`: scripted. Validates a uniform sample, submits what it saw.
+- `greedy_stress`: scripted. Validates the 40 pairs with the highest
   combined base loading, submits by measured severity.
-- `claude_opus_4.8` — an LLM agent (Claude Opus 4.8) driving the same API
+- `claude_opus_4.8`: an LLM agent (Claude Opus 4.8) driving the same API
   interactively: 12 validations to isolate single-outage contributions
   (each suspect paired with a mild remote partner), then combinations of
   the strongest contributors, adapting to observed overloads. The full
@@ -67,16 +68,44 @@ stressed pairs; both beat random by 2.5x.
 
 ## Reproduce
 
-```bash
-# serve TENSA with ieee39.xlsx in the workspace
-tensa serve --workspace <dir-with-ieee39.xlsx> --port 18800
+You need TENSA, ANDES (which TENSA installs) and `httpx`, the HTTP client the
+scripts use and TENSA does not install:
 
+```bash
+pip install tensa httpx
+```
+
+The study loads the IEEE 39-bus case that ships inside ANDES. Copy it into a
+workspace of its own and serve that:
+
+```bash
+mkdir study-workspace
+python -c "import andes, pathlib, shutil; shutil.copy(pathlib.Path(andes.__file__).parent / 'cases' / 'ieee39' / 'ieee39.xlsx', 'study-workspace')"
+tensa serve --workspace study-workspace --port 18800
+```
+
+Then, from this folder in another terminal (the scripts import each other by
+name, so run them here):
+
+```bash
 python build_task.py    # public task data (results/task.json)
 python baselines.py     # scripted agents
 python validate_cli.py Line_a,Line_b ...   # interactive/LLM agent turns
 python oracle.py        # exhaustive ground truth (~3 min, 562 AC PFs)
 python score.py         # metrics for every submission_*.json
 ```
+
+The scripts look for the server at `http://127.0.0.1:18800`. To use another
+port or host, set `TENSA_URL` to the address `tensa serve` prints, for example
+`TENSA_URL=http://127.0.0.1:8000`. They write into `results/`, over the files
+committed there, so copy this folder first to keep those.
+
+A run records the TENSA and ANDES versions it used, under `versions`, in
+`task.json`, `oracle.json` and the submissions of `baselines.py`. The files
+committed in `results/` come from before that was recorded, so they carry no
+versions. Running the scripts again with TENSA 0.5.0 and ANDES 2.0.0 gives the
+same task, oracle, scripted submissions and scores as the committed files, apart
+from `versions`. The oracle took 162 s on a workstation.
 
 The oracle itself is a byproduct worth noting: 562 independent
 outage->solve->restore cycles through the HTTP API complete in a few

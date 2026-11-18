@@ -12,7 +12,7 @@ For each ``results/submission_*.json``:
                              submitted or not.
 - ``budget_used``          — validations consumed.
 
-Metric names follow the PowerAgentBench-SS definitions [Zhang et al.];
+Metric names follow the PowerAgentBench-SS definitions [Mylonas et al.];
 the environment here is AC (ANDES via TENSA) with published synthesized
 ratings, so numbers are NOT comparable to that paper's DC results.
 """

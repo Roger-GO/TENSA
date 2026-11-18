@@ -126,7 +126,7 @@ The whole app is driven by a documented HTTP and WebSocket API. Anything the UI 
 - The OpenAPI schema is at `GET /openapi.json`, with interactive docs at `/docs` (Swagger) and `/redoc`.
 - The [API guide](https://roger-go.github.io/TENSA/api/) explains the routes, the errors and the streaming protocol, and the [route reference](https://roger-go.github.io/TENSA/reference/api/) lists every one of them.
 - [llms.txt](./llms.txt) is a condensed API map written for LLM consumption: endpoints, workflow ordering, enums, and the gotchas worth knowing.
-- [examples/](./examples/) has a curl walkthrough (a bash script) and a self-contained Python client.
+- [examples/](./examples/) has a curl walkthrough (a bash script) and a self-contained Python client, and [`examples/contingency_screening/`](./examples/contingency_screening/) holds a study that drives the API with scripted and LLM agents to screen N-2 contingencies on IEEE 39-bus, scored against an exhaustive oracle. It needs `httpx`, and its README lists the steps.
 - The MCP server exposes sessions, case loading, power flow, time-domain simulation and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant like Claude can run simulations directly ([Agents and MCP](https://roger-go.github.io/TENSA/agents/) shows how to connect one):
   ```bash
   pip install "tensa[mcp]"
@@ -182,7 +182,7 @@ Each session gets its own `andes.System` in a separate subprocess. The API proce
 |---|---|
 | [`server/`](./server) | Python backend. FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, and the `tensa` CLI. |
 | [`web/`](./web) | React 19 and TypeScript UI. Interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand. |
-| [`examples/`](./examples) | curl and Python client walkthroughs for the API. |
+| [`examples/`](./examples) | curl and Python client walkthroughs for the API, and the N-2 contingency screening study. |
 | [`llms.txt`](./llms.txt) | API map written for LLMs. |
 | [`docs/`](./docs) | The source of the [documentation site](https://roger-go.github.io/TENSA/) (MkDocs, configured in [`mkdocs.yml`](./mkdocs.yml)), and the images and the demo video this README uses. |
 

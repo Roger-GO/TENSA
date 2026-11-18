@@ -26,6 +26,7 @@ def main() -> None:
     rows = []
     t0 = time.time()
     try:
+        versions = t.versions()
         t.load_case()
         for n, pair in enumerate(candidates, 1):
             obs = t.validate_pair(pair)
@@ -52,7 +53,7 @@ def main() -> None:
     n_viol = sum(1 for r in rows if r["severity"] not in (None, 0.0))
     save_json(
         "oracle.json",
-        {"rows": rows, "top_k": top, "report_k": REPORT_K},
+        {"rows": rows, "top_k": top, "report_k": REPORT_K, "versions": versions},
     )
     print(
         f"oracle.json written: {len(rows)} candidates in {time.time() - t0:.0f}s, "

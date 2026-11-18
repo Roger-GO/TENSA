@@ -1,8 +1,8 @@
 """Shared plumbing for the PowerAgentBench-style N-2 screening study.
 
-Everything here talks to a running TENSA server through the public HTTP
-API only — the same surface the UI and the MCP server use. A "validation"
-of one N-2 candidate is:
+Everything here talks to a running TENSA server (``TENSA_URL``, by default
+``http://127.0.0.1:18800``) through the public HTTP API only, the same
+surface the UI and the MCP server use. A "validation" of one N-2 candidate is:
 
     reload case -> PUT u=0 on both branches -> POST /pflow -> read flows
 
@@ -22,13 +22,16 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-BASE_URL = "http://127.0.0.1:18800/api"
+# Where the server is: ``TENSA_URL``, the address ``tensa serve`` prints, without ``/api``.
+SERVER_URL = (os.environ.get("TENSA_URL") or "http://127.0.0.1:18800").rstrip("/")
+BASE_URL = f"{SERVER_URL.removesuffix('/api')}/api"
 CASE = "ieee39.xlsx"
 HERE = Path(__file__).parent
 RESULTS = HERE / "results"
@@ -46,6 +49,12 @@ class Tensa:
     def __init__(self, base_url: str = BASE_URL) -> None:
         self._c = httpx.Client(base_url=base_url, timeout=180)
         self.sid = self._c.post("/sessions").json()["session_id"]
+
+    def versions(self) -> dict[str, str]:
+        """The TENSA and ANDES versions the server runs, kept beside what it computed."""
+        r = self._c.get("/version")
+        r.raise_for_status()
+        return {"tensa": r.json()["tensa"], "andes": r.json()["andes"]}
 
     def load_case(self, path: str = CASE) -> None:
         r = self._c.post(f"/sessions/{self.sid}/case", json={"primary_path": path})

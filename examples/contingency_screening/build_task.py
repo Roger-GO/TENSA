@@ -5,7 +5,7 @@ branch topology, base-case AC flows, synthesized ratings, the candidate
 list, the validation budget, and the report size. No post-contingency
 information is included.
 
-Run (server on :18800 with ieee39.xlsx in the workspace):
+Run (server on :18800, or at ``TENSA_URL``, with ieee39.xlsx in the workspace):
 
     python build_task.py
 """
@@ -38,6 +38,7 @@ def main() -> None:
         candidates = enumerate_candidates(endpoints)
         task = {
             "case": CASE,
+            "versions": t.versions(),
             "branches": {
                 idx: {
                     "bus1": endpoints[idx][0],
