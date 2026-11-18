@@ -80,6 +80,15 @@ test('an entry of the Run menu starts its routine, or says why it cannot', async
   const row = page.getByTestId('command-palette-item-run.eig');
   await expect(row).toHaveAttribute('aria-disabled', 'true');
   await expect(row).toContainText('Run a power flow first');
+  // What repeats a run, or changes the plot of a result, waits for one and says so.
+  await page.getByTestId('command-palette-input').fill('run again');
+  const again = page.getByTestId('command-palette-item-run.active-routine');
+  await expect(again).toHaveAttribute('aria-disabled', 'true');
+  await expect(again).toContainText('has not been run in this session');
+  await page.getByTestId('command-palette-input').fill('EIG zoom');
+  const zoom = page.getByTestId('command-palette-item-navigation.eig-reset-zoom');
+  await expect(zoom).toHaveAttribute('aria-disabled', 'true');
+  await expect(zoom).toContainText('Run the eigenvalue analysis first');
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('command-palette')).toBeHidden();
 
@@ -101,6 +110,15 @@ test('an entry of the Run menu starts its routine, or says why it cannot', async
   );
 
   // ---- The palette runs too, and gives the keyboard focus back ---------------
+  // The power flow has run, so there is one to run again.
+  await page.keyboard.press('Control+k');
+  await page.getByTestId('command-palette-input').fill('run again');
+  await expect(page.getByTestId('command-palette-item-run.active-routine')).not.toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('command-palette')).toBeHidden();
   const tab = page.getByRole('tab', { name: 'Components' });
   await tab.focus();
   await page.keyboard.press('Control+k');

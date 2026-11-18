@@ -33,7 +33,7 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useThemeStore } from '@/store/theme';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { EditStep, TopologySummary, PflowResult } from '@/api/types';
+import type { EditStep, EigResult, TopologySummary, PflowResult } from '@/api/types';
 
 // Undo and Redo send a request each; stand-ins show which key sent which.
 let MOCK_TOPOLOGY: TopologySummary | null = null;
@@ -48,6 +48,17 @@ vi.mock('@/api/queries', async () => {
     useRedoEdit: () => ({ mutateAsync: redoMutate, isPending: false }),
   };
 });
+
+/** What the eigenvalue analysis leaves in the analyze store, for a test that needs a result. */
+const AN_EIG_RESULT: EigResult = {
+  eigenvalues: [],
+  damping_ratios: [],
+  frequencies_hz: [],
+  mode_count: 0,
+  state_count: 0,
+  state_names: [],
+  tds_initialized: false,
+};
 
 function emptyTopology(): TopologySummary {
   return {
@@ -204,12 +215,13 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
     expect(useThemeStore.getState().themePreference).toBe('light');
   });
 
-  it('runs the active routine when ⌘Enter is pressed', () => {
+  it('runs the active routine again when ⌘Enter is pressed, once it has run', () => {
     // The default active routine is `pflow`. After ⌘Enter, the
     // run.active-routine command's `action` calls `handleSelectRoutine`
     // which delegates to the analyze + layout stores for non-pflow
     // routines. Switch to `eig` so the test has an observable side
-    // effect.
+    // effect. The command repeats a run, so the eigenvalue analysis has
+    // one (see the test below for a key pressed before that).
     const setSubMode = vi.fn();
     const setActiveBottomDrawerTab = vi.fn();
     const setActiveAnalysisSubTab = vi.fn();
@@ -223,6 +235,7 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
         setActiveAnalysisSubTab,
       });
       useRunModeStore.setState({ activeRoutine: 'eig' });
+      useAnalyzeStore.setState({ eigResult: AN_EIG_RESULT });
     });
     try {
       render(withProviders(<GlobalShortcuts />));
@@ -241,12 +254,40 @@ describe('<GlobalShortcuts /> — single-key bindings', () => {
       expect(setActiveAnalysisSubTab).toHaveBeenCalledWith('eig');
     } finally {
       act(() => {
-        useAnalyzeStore.setState({ setSubMode: origSetSubMode });
+        useAnalyzeStore.setState({ setSubMode: origSetSubMode, eigResult: null });
         useLayoutStore.setState({
           setActiveBottomDrawerTab: origSetActiveBottomDrawerTab,
           setActiveAnalysisSubTab: origSetActiveAnalysisSubTab,
         });
       });
+    }
+  });
+});
+
+describe('<GlobalShortcuts /> — ⌘Enter before a run', () => {
+  it('does nothing while the ticked routine has not run: there is nothing to run again', () => {
+    const setSubMode = vi.fn();
+    const origSetSubMode = useAnalyzeStore.getState().setSubMode;
+    act(() => {
+      useAnalyzeStore.setState({ setSubMode, eigResult: null });
+      useRunModeStore.setState({ activeRoutine: 'eig', runRequest: null });
+    });
+    try {
+      render(withProviders(<GlobalShortcuts />));
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => {
+        document.dispatchEvent(event);
+      });
+      expect(setSubMode).not.toHaveBeenCalled();
+      expect(useRunModeStore.getState().runRequest).toBeNull();
+    } finally {
+      act(() => useAnalyzeStore.setState({ setSubMode: origSetSubMode }));
     }
   });
 });

@@ -48,6 +48,7 @@ import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { useRunModeStore } from '@/store/runMode';
 import { useRunsStore } from '@/store/runs';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useSweepStore } from '@/store/sweep';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useExampleCasesStore } from '@/store/exampleCases';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
@@ -225,6 +226,19 @@ function useCommandSets(): CommandSets {
   const hasEigResult = useAnalyzeStore((s) => s.eigResult !== null);
   const hasReportContent = lastPfRun !== null || hasPflowHistory || hasRuns || hasEigResult;
   const activeRoutine = useRunModeStore((s) => s.activeRoutine);
+  // Whether the routine the Run menu has ticked has been run in this session, which is what
+  // "again" repeats. Booleans, like the ones above.
+  const hasCpfResult = useAnalyzeStore((s) => s.cpfResult !== null);
+  const hasSeResult = useAnalyzeStore((s) => s.seResult !== null);
+  const hasSweep = useSweepStore((s) => Object.keys(s.sweeps).length > 0);
+  const activeRoutineHasRun = {
+    pflow: isPfRunning || lastPfRun !== null,
+    tds: hasRuns,
+    eig: hasEigResult,
+    cpf: hasCpfResult,
+    se: hasSeResult,
+    sweep: hasSweep,
+  }[activeRoutine];
 
   // ---- store actions referenced from `action` closures ------------------
   const openAddPanel = useCaseStore((s) => s.openAddPanel);
@@ -1325,10 +1339,10 @@ function useCommandSets(): CommandSets {
       },
       // Unit 15 — EIG scatter view controls. The action posts to the
       // ``eigViewBus`` micro-bus; ``EIGScatter`` subscribes once on
-      // mount and reacts. When the EIG sub-mode isn't mounted the
-      // commands fire a no-op, which is fine — they're discoverable
-      // from the palette regardless. They sit in the navigation
-      // bucket because the equivalent "view" group would be a
+      // mount and reacts. They change the plot of an eigenvalue result, so
+      // they are greyed out with the way to get one until there is one. When
+      // the EIG sub-mode isn't mounted the commands fire a no-op. They sit in
+      // the navigation bucket because the equivalent "view" group would be a
       // single-member section in the palette.
       {
         id: 'navigation.eig-reset-zoom',
@@ -1336,6 +1350,8 @@ function useCommandSets(): CommandSets {
         group: 'navigation',
         keywords: ['eig', 'eigenvalue', 'zoom', 'reset', 'view', 'scatter'],
         action: requestEigViewReset,
+        when: () => hasEigResult,
+        unavailableReason: () => EIG_VIEW_NEEDS_A_RESULT,
       },
       {
         id: 'navigation.eig-toggle-log',
@@ -1343,6 +1359,8 @@ function useCommandSets(): CommandSets {
         group: 'navigation',
         keywords: ['eig', 'eigenvalue', 'log', 'scale', 'axis', 'scatter'],
         action: requestEigLogToggle,
+        when: () => hasEigResult,
+        unavailableReason: () => EIG_VIEW_NEEDS_A_RESULT,
       },
 
       // ---- run controls --------------------------------------------------
@@ -1350,8 +1368,9 @@ function useCommandSets(): CommandSets {
       // marked active in the Run menu. Re-uses the same path that the
       // per-routine commands do (`runRoutine`), so it starts the routine
       // and the analyze sub-mode + drawer tab align after the dispatch.
-      // Always surfaced — there is always SOME active routine (defaults
-      // to PFlow).
+      // There is always SOME active routine (defaults to PFlow), but "again"
+      // is of a run: until the routine has run it is greyed out and says so,
+      // and the Run menu and the top bar start it the first time.
       {
         id: 'run.active-routine',
         label: `Run again: ${ROUTINE_NAME[activeRoutine]}`,
@@ -1367,6 +1386,8 @@ function useCommandSets(): CommandSets {
           }
           runRoutine(activeRoutine);
         },
+        when: () => activeRoutineHasRun,
+        unavailableReason: () => runAgainNeedsARun(activeRoutine),
         shortcut: 'meta+enter, ctrl+enter',
       },
 
@@ -1488,6 +1509,8 @@ function useCommandSets(): CommandSets {
     eigBlocked,
     hasPflowHistory,
     hasReportContent,
+    hasEigResult,
+    activeRoutineHasRun,
     abortableRun,
     abortMutation,
     diagramVisible,
@@ -1558,6 +1581,21 @@ export const EIG_NEEDS_A_POWER_FLOW =
   'Run a power flow first: eigenvalues are of the solved operating point.';
 export const EIG_NEEDS_DYNAMIC_DATA =
   'Needs dynamic-model data, and this case has none. Open it with a .dyr file, or add a GENROU or GENCLS generator.';
+
+/**
+ * Why Reset EIG zoom and Toggle EIG log scale are greyed out until the eigenvalue analysis has
+ * run: they change the plot of its eigenvalues.
+ */
+export const EIG_VIEW_NEEDS_A_RESULT =
+  'Run the eigenvalue analysis first: these change the plot of its eigenvalues, and there is none yet.';
+
+/**
+ * Why Run again is greyed out until the routine the Run menu has ticked has run: it repeats a
+ * run, and the first one is started from the Run menu or the top bar.
+ */
+function runAgainNeedsARun(routine: RunRoutine): string {
+  return `${ROUTINE_NAME[routine]} has not been run in this session, so there is nothing to run again. Start it from the Run menu or the top bar first.`;
+}
 
 /** The hover text of each: what choosing it does, and where the result shows. */
 const ROUTINE_COMMAND_HINT: Record<RunRoutine, string> = {

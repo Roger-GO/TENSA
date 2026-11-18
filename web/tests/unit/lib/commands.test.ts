@@ -25,6 +25,7 @@ import {
   EIG_NEEDS_A_CASE,
   EIG_NEEDS_A_POWER_FLOW,
   EIG_NEEDS_DYNAMIC_DATA,
+  EIG_VIEW_NEEDS_A_RESULT,
   useCommandRegistry,
   useMenuCommands,
   subscribePaletteDialog,
@@ -45,10 +46,11 @@ import { usePflowStore } from '@/store/pflow';
 import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useSweepStore } from '@/store/sweep';
 import { useRunModeStore } from '@/store/runMode';
 import { DEFAULT_LAYOUT, useLayoutStore } from '@/store/layout';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { EditStep, TopologySummary, PflowResult } from '@/api/types';
+import type { EditStep, EigResult, TopologySummary, PflowResult } from '@/api/types';
 import { toast } from '@/lib/toast';
 
 // The report itself is built by a module loaded on demand; the registry only
@@ -598,15 +600,16 @@ describe('useCommandRegistry — group ordering', () => {
 });
 
 describe('useCommandRegistry — Unit 15 EIG view commands', () => {
-  it('exposes navigation.eig-reset-zoom and navigation.eig-toggle-log', () => {
-    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+  // Listed always, ready once the eigenvalue analysis has a result (below).
+  it('lists navigation.eig-reset-zoom and navigation.eig-toggle-log', () => {
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
     const ids = result.current.map((c) => c.id);
     expect(ids).toContain('navigation.eig-reset-zoom');
     expect(ids).toContain('navigation.eig-toggle-log');
   });
 
   it('eig view commands carry the eig keyword for fuzzy search', () => {
-    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const { result } = renderHook(() => useMenuCommands(), { wrapper });
     const reset = result.current.find((c) => c.id === 'navigation.eig-reset-zoom');
     const toggle = result.current.find((c) => c.id === 'navigation.eig-toggle-log');
     expect(reset?.keywords).toContain('eig');
@@ -1171,12 +1174,135 @@ describe('useCommandRegistry: the Run commands run', () => {
 
   it('Run again starts the routine that was chosen last', () => {
     convergedPf();
+    useAnalyzeStore.setState({ eigResult: AN_EIG_RESULT });
     useRunModeStore.setState({ activeRoutine: 'eig' });
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
     const again = result.current.find((c) => c.id === 'run.active-routine');
     expect(again?.label).toBe('Run again: Eigenvalue analysis (EIG)');
     act(() => again!.action());
     expect(useRunModeStore.getState().runRequest).toEqual({ routine: 'eig' });
+  });
+});
+
+/** What the eigenvalue analysis leaves in the analyze store, for a test that needs a result. */
+const AN_EIG_RESULT: EigResult = {
+  eigenvalues: [],
+  damping_ratios: [],
+  frequencies_hz: [],
+  mode_count: 0,
+  state_count: 0,
+  state_names: [],
+  tds_initialized: false,
+};
+
+describe('useMenuCommands: what repeats or changes a result is greyed out until there is one', () => {
+  // The palette offered "Run again: Power flow (PF)", "Reset EIG zoom" and "Toggle EIG log
+  // scale" as ready before anything had been run, which a first-time user took for commands
+  // that had something to act on.
+  const menu = () => renderHook(() => useMenuCommands(), { wrapper }).result.current;
+  const commandOf = (id: string) => {
+    const cmd = menu().find((c) => c.id === id);
+    expect(cmd, `${id} is listed`).toBeDefined();
+    return cmd!;
+  };
+
+  beforeEach(() => {
+    MOCK_TOPOLOGY = dynamicTopology();
+    useRunModeStore.setState({ activeRoutine: 'pflow', runRequest: null });
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useRunsStore.getState().clearRuns();
+    useAnalyzeStore.setState({ eigResult: null, cpfResult: null, seResult: null });
+    useSweepStore.setState({ sweeps: {}, activeSweepId: null });
+  });
+
+  it('keeps the EIG plot commands listed, with the way to get a result, until one exists', () => {
+    for (const id of ['navigation.eig-reset-zoom', 'navigation.eig-toggle-log']) {
+      expect(commandOf(id).unavailable, id).toBe(EIG_VIEW_NEEDS_A_RESULT);
+      expect(commandOf(id).when?.(), id).toBe(false);
+    }
+    expect(EIG_VIEW_NEEDS_A_RESULT).toMatch(/Run the eigenvalue analysis first/);
+    const registry = renderHook(() => useCommandRegistry(), { wrapper }).result.current;
+    expect(registry.map((c) => c.id)).not.toContain('navigation.eig-reset-zoom');
+    expect(registry.map((c) => c.id)).not.toContain('navigation.eig-toggle-log');
+  });
+
+  it('offers the EIG plot commands once the eigenvalue analysis has a result', () => {
+    act(() => useAnalyzeStore.setState({ eigResult: AN_EIG_RESULT }));
+    for (const id of ['navigation.eig-reset-zoom', 'navigation.eig-toggle-log']) {
+      expect(commandOf(id).unavailable, id).toBeNull();
+      expect(commandOf(id).when?.(), id).toBe(true);
+    }
+    const registry = renderHook(() => useCommandRegistry(), { wrapper }).result.current;
+    expect(registry.map((c) => c.id)).toContain('navigation.eig-reset-zoom');
+    expect(registry.map((c) => c.id)).toContain('navigation.eig-toggle-log');
+  });
+
+  it('says there is nothing to run again before the ticked routine has run', () => {
+    const again = commandOf('run.active-routine');
+    expect(again.label).toBe('Run again: Power flow (PF)');
+    expect(again.unavailable).toBe(
+      'Power flow (PF) has not been run in this session, so there is nothing to run again. Start it from the Run menu or the top bar first.',
+    );
+    // A greyed command has no key: Ctrl+Enter is bound from the registry.
+    const registry = renderHook(() => useCommandRegistry(), { wrapper }).result.current;
+    expect(registry.map((c) => c.id)).not.toContain('run.active-routine');
+  });
+
+  it('offers Run again once a power flow has run, converged or not', () => {
+    for (const converged of [true, false]) {
+      act(() =>
+        usePflowStore.setState({
+          lastRun: { converged, iterations: 4, buses: [] } as unknown as PflowResult,
+        }),
+      );
+      expect(commandOf('run.active-routine').unavailable, String(converged)).toBeNull();
+    }
+    act(() => usePflowStore.setState({ lastRun: null, isRunning: true }));
+    expect(commandOf('run.active-routine').unavailable, 'running').toBeNull();
+  });
+
+  it('asks of the routine that is ticked, not of any run', () => {
+    // A power flow has run, and the ticked routine is another one.
+    act(() =>
+      usePflowStore.setState({
+        lastRun: { converged: true, iterations: 4, buses: [] } as unknown as PflowResult,
+      }),
+    );
+    const ran: Record<string, () => void> = {
+      tds: () =>
+        useRunsStore.setState({
+          runs: { r1: { runId: 'r1' } } as unknown as ReturnType<
+            typeof useRunsStore.getState
+          >['runs'],
+        }),
+      eig: () => useAnalyzeStore.setState({ eigResult: AN_EIG_RESULT }),
+      cpf: () =>
+        useAnalyzeStore.setState({
+          cpfResult: { converged: true } as unknown as NonNullable<
+            ReturnType<typeof useAnalyzeStore.getState>['cpfResult']
+          >,
+        }),
+      se: () =>
+        useAnalyzeStore.setState({
+          seResult: { converged: true } as unknown as NonNullable<
+            ReturnType<typeof useAnalyzeStore.getState>['seResult']
+          >,
+        }),
+      sweep: () =>
+        useSweepStore.setState({
+          sweeps: { s1: { sweepId: 's1' } } as unknown as ReturnType<
+            typeof useSweepStore.getState
+          >['sweeps'],
+        }),
+    };
+    for (const [routine, markRun] of Object.entries(ran)) {
+      act(() => useRunModeStore.setState({ activeRoutine: routine as 'tds' }));
+      expect(commandOf('run.active-routine').unavailable, `${routine} before`).toMatch(
+        /has not been run in this session/,
+      );
+      act(markRun);
+      expect(commandOf('run.active-routine').unavailable, `${routine} after`).toBeNull();
+    }
   });
 });
 

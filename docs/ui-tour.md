@@ -190,7 +190,7 @@ Press `?` for the full list, which also has the mouse and keyboard gestures for 
 | `Delete`, `Backspace` | Delete the draft that has the focus on the diagram |
 | `Esc` | Abort a running time-domain simulation |
 | `r` then `p`, `t`, `e`, `c`, `s`, `w` | Run the routine: PF, TDS, EIG, CPF, SE; `w` opens the sweep dialog |
-| `Ctrl+Enter` | Run again: the routine that was run last |
+| `Ctrl+Enter` | Run again: the routine that was run last, once it has been run (until then the command is greyed out) |
 | `g` then `h`, `s` | Open the run history, save a snapshot |
 
 On a Mac, `Cmd` replaces `Ctrl`.
