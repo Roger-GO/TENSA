@@ -10,7 +10,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 ## Pinned versions
 
 - **Python**: 3.12+ (development on 3.12; CI runs 3.12 and 3.13 on Linux, macOS arm64, and Windows)
-- **FastAPI**: `>=0.133,<0.143`. FastAPI can break callers in a minor release, so the cap is the next minor after the newest one the suite ran against; raising it means running the whole suite in an environment that holds the new release.
+- **FastAPI**: `>=0.162,<0.166`. FastAPI can break callers in a minor release, so the cap is the next minor after the newest one the suite ran against; raising it means running the whole suite in an environment that holds the new release. The floor is 0.162 because 0.147 to 0.161 read a boolean form field the client leaves out as false whatever its default, which turned the bundle import's two true defaults (`use_bundle_case`, `accept_version_mismatch`) to false; `tests/integration/test_bundle_import_api.py` holds that default.
 - **Starlette**: `>=1.3.1,<2`, declared directly. FastAPI no longer caps it, and the floor is what keeps the published advisories (the `FileResponse` range DoS, the Windows `StaticFiles` path lookup, Host header and form limits) out of a fresh install.
 - **ANDES**: `>=2.0,<3.0` (2.0.0 is the verified-against version; `server/ANDES_VERSIONS.md` tracks the fourteen API contracts the substrate depends on)
 - **pyarrow**: latest stable (pinned in pyproject.toml at install time)

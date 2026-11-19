@@ -332,6 +332,35 @@ async def test_import_bundle_force_resolve_keep_workspace_writes_sibling(
     assert any("preserved" in w for w in body["warnings"])
 
 
+@pytest.mark.integration
+async def test_import_bundle_force_resolve_without_a_choice_uses_the_bundle_case(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """``use_bundle_case`` defaults to true, and a client that leaves it out
+    of the form gets that default. FastAPI 0.147 to 0.161 read a boolean
+    form field that is not in the body as false whatever its default, so
+    this request kept the workspace copy there."""
+    sid_a = await _create_session_and_load(
+        client, primary="ieee14.raw", addfile=None
+    )
+    bundle_bytes = await _export_bundle(client, sid_a)
+    bundle_sha = hashlib.sha256(
+        (workspace / "ieee14.raw").read_bytes()
+    ).hexdigest()
+    (workspace / "ieee14.raw").write_bytes(b"--- different content ---")
+
+    sid_b = await _create_session(client)
+    resp = await _post_bundle(client, sid_b, bundle_bytes, force_resolve=True)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "committed"
+    new_sha = hashlib.sha256(
+        (workspace / "ieee14.raw").read_bytes()
+    ).hexdigest()
+    assert new_sha == bundle_sha
+    assert not (workspace / "ieee14.raw.from-bundle").exists()
+
+
 # ---- error paths -----------------------------------------------------------
 
 

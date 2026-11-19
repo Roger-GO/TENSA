@@ -51,8 +51,9 @@ _RUNTIME_FLOORS = {
         "serves the UI through StaticFiles; every release below 1.3.1 has an advisory",
     ),
     # FastAPI caps Starlette below 1.0 until 0.133.0, so a lower FastAPI floor
-    # would make the Starlette floor unsatisfiable on a fresh install.
-    "fastapi": ("0.133", "the first release that allows Starlette 1.x"),
+    # would make the Starlette floor unsatisfiable on a fresh install. The bundle
+    # import's use_bundle_case and accept_version_mismatch default to true.
+    "fastapi": ("0.162", "0.147 to 0.161 read a boolean form field left out as false"),
     "python-multipart": ("0.0.31", "parses the bundle and profile upload bodies"),
 }
 

@@ -34,11 +34,14 @@ classifiers = [
 # without re-running the curl walkthrough in CI.
 dependencies = [
     # FastAPI can break callers in a minor release, so it is capped at the next
-    # minor after the newest one the suite passed on (0.142), and 0.133 is the
-    # oldest that allows Starlette 1.x. Starlette is declared here because
-    # FastAPI no longer caps it and every release below 1.3.1 has a published
-    # advisory (the UI is served through StaticFiles).
-    "fastapi>=0.133,<0.143",
+    # minor after the newest one the suite passed on (0.165). The floor is 0.162:
+    # 0.147 to 0.161 read a boolean form field the client leaves out as false
+    # whatever its default, which turns the bundle import's use_bundle_case and
+    # accept_version_mismatch (both true by default) to false, and 0.162 gives
+    # them their defaults again. Starlette is declared here because FastAPI no
+    # longer caps it and every release below 1.3.1 has a published advisory (the
+    # UI is served through StaticFiles).
+    "fastapi>=0.162,<0.166",
     "starlette>=1.3.1,<2",
     "uvicorn[standard]>=0.30",
     "pyarrow>=17",
@@ -90,7 +93,7 @@ dev = [
     "httpx>=0.27",
     # Capped at the next minor: [tool.ruff.lint] runs in preview mode, whose
     # behavior may change between ruff releases.
-    "ruff>=0.6,<0.17",
+    "ruff>=0.6,<0.18",
     "mypy>=1.11",
     "websockets>=13",
     # The MCP tests (tests/unit/test_client_examples.py, tests/integration/test_examples_api.py)
