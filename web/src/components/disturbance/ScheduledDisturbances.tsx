@@ -108,9 +108,7 @@ type Row =
   | { kind: 'own'; time: number; disturbance: DisturbanceLocal };
 
 type DialogState =
-  | { mode: 'closed' }
-  | { mode: 'add' }
-  | { mode: 'edit'; id: string; spec: DisturbanceSpec };
+  { mode: 'closed' } | { mode: 'add' } | { mode: 'edit'; id: string; spec: DisturbanceSpec };
 
 export interface ScheduledDisturbancesProps {
   className?: string;
@@ -132,12 +130,17 @@ export function ScheduledDisturbances({ className }: ScheduledDisturbancesProps)
   const events = topology?.events;
   // Time order, the case's events first where one ties with the user's own.
   const rows = useMemo<Row[]>(() => {
-    const own = sortedDisturbances(disturbances).map(
-      (d): Row => ({ kind: 'own', time: disturbanceTime(d.spec), disturbance: d }),
-    );
-    const fromCase = (events ?? []).map(
-      (event, index): Row => ({ kind: 'event', time: event.t, event, index }),
-    );
+    const own = sortedDisturbances(disturbances).map((d): Row => ({
+      kind: 'own',
+      time: disturbanceTime(d.spec),
+      disturbance: d,
+    }));
+    const fromCase = (events ?? []).map((event, index): Row => ({
+      kind: 'event',
+      time: event.t,
+      event,
+      index,
+    }));
     return [...fromCase, ...own].sort((a, b) => a.time - b.time);
   }, [disturbances, events]);
 

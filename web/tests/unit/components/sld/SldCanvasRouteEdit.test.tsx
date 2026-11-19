@@ -443,7 +443,12 @@ describe('picking a line', () => {
     gone();
 
     pick('line-L14');
-    act(() => drawn.onNodeClick?.({}, drawn.nodes.find((n) => n.id === '2')!));
+    act(() =>
+      drawn.onNodeClick?.(
+        {},
+        drawn.nodes.find((n) => n.id === '2')!,
+      ),
+    );
     gone();
   });
 

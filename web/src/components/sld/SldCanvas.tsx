@@ -1042,8 +1042,7 @@ function SldCanvasInner({
             // Back where the route it keeps was made for, a branch is drawn
             // along that one again.
             const kept = edge.data?.bendAnchors as
-              | NonNullable<RouteOverrides[string]>['anchors']
-              | undefined;
+              NonNullable<RouteOverrides[string]>['anchors'] | undefined;
             // A route that was drawn by hand is brought along from where it
             // was drawn at every move, so that what the drag shows is what
             // the drop gives.

@@ -109,11 +109,10 @@ describe('App scaffold', () => {
     useReloadedCaseStore.setState({ closed: { primaryPath: 'kundur_full.xlsx', addfiles: [] } });
     try {
       render(<App />);
-      const page = await waitFor(
-        () =>
-          screen
-            .getAllByTestId('empty-state')
-            .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-case-loading')!,
+      const page = await waitFor(() =>
+        screen
+          .getAllByTestId('empty-state')
+          .find((el) => el.getAttribute('data-empty-state-key') === 'app-shell-case-loading')!,
       );
       expect(page).toHaveTextContent('Loading kundur_full.xlsx');
       expect(page).toHaveTextContent(

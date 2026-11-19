@@ -31,7 +31,7 @@ const IEND = chunk('IEND', []);
 function chunksOf(png: Uint8Array): { type: string; data: number[]; crcOk: boolean }[] {
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   const out: { type: string; data: number[]; crcOk: boolean }[] = [];
-  for (let at = 8; at < png.length; ) {
+  for (let at = 8; at < png.length;) {
     const length = view.getUint32(at);
     const type = String.fromCharCode(...png.subarray(at + 4, at + 8));
     out.push({

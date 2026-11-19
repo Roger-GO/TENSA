@@ -1312,8 +1312,8 @@ describe('buildGraph: a device and what stands around its bus', () => {
     // In the way: its box over the place the generator takes with nothing there.
     const placed = new Map([['PQ|L', { x: alone.position.x, y: 70 }]]);
     const { nodes } = buildGraph(topology, coords, { nonBusCoords: placed, applyPushOut: false });
-    const [generator, hung] = ['generator-G', 'load-L'].map(
-      (id) => nodes.find((n) => n.id === id)!,
+    const [generator, hung] = ['generator-G', 'load-L'].map((id) =>
+      nodes.find((n) => n.id === id)!,
     );
     expect(hung!.position).toEqual({ x: alone.position.x, y: 70 });
     // Still over its own bar, and a gap clear of the load beside it.

@@ -1827,8 +1827,7 @@ describe('labels that keep out of the way', () => {
     await draw();
     const labelAt = (id: string) =>
       drawn.nodes.find((n) => n.id === id)!.data.labelAt as
-        | { offset: number; side: string }
-        | undefined;
+        { offset: number; side: string } | undefined;
     // Bus 3 has one line, onto the top of its bar: its label hangs under the middle.
     expect(labelAt('3')).toEqual({ offset: 46, side: 'below' });
     // Bus 1 has lines leaving under its bar: its label is moved along, clear of them.

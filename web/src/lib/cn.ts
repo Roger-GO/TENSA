@@ -10,13 +10,7 @@
  * clsx that the component library actually uses.
  */
 export type ClassValue =
-  | string
-  | number
-  | null
-  | false
-  | undefined
-  | ClassValue[]
-  | { [key: string]: unknown };
+  string | number | null | false | undefined | ClassValue[] | { [key: string]: unknown };
 
 export function cn(...inputs: ClassValue[]): string {
   const out: string[] = [];

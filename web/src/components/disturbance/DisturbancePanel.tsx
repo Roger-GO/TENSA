@@ -39,9 +39,7 @@ export function DisturbancePanel({ className }: DisturbancePanelProps) {
 
   // Dialog state — closed | adding | editing-{id}.
   type DialogState =
-    | { mode: 'closed' }
-    | { mode: 'add' }
-    | { mode: 'edit'; id: string; spec: DisturbanceSpec };
+    { mode: 'closed' } | { mode: 'add' } | { mode: 'edit'; id: string; spec: DisturbanceSpec };
   const [dialog, setDialog] = useState<DialogState>({ mode: 'closed' });
 
   const sorted = sortedDisturbances(disturbances);

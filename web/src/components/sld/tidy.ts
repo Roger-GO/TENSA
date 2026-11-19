@@ -463,7 +463,7 @@ function axisOf(wanted: { at: number; kind: LineKind }[]): Axis {
 /** The first line of `axis` at or after `v`. */
 function lineFrom(axis: Axis, v: number): number {
   let first = 0;
-  for (let last = axis.at.length; first < last; ) {
+  for (let last = axis.at.length; first < last;) {
     const middle = (first + last) >> 1;
     if (axis.at[middle]! < v - 1e-9) first = middle + 1;
     else last = middle;
@@ -936,7 +936,7 @@ export function tidyRoutes(
     const high = sorted.reduce((most, span) => Math.max(most, span[1]), -Infinity) + margin;
     const lines: { at: number; kind: LineKind }[] = [];
     let next = -Infinity;
-    for (let i = 0; i < sorted.length; ) {
+    for (let i = 0; i < sorted.length;) {
       // The stretch this span and the ones that follow it closely make up.
       const from = Math.max(low, sorted[i]![0] - GRID_REACH);
       let to = sorted[i]![1] + GRID_REACH;
@@ -1838,7 +1838,7 @@ export function tidyRoutes(
       const [fromX, fromY] = [xs[n % nC]!, ys[(n / nC) | 0]!];
       // How long the run is that ends at `to`.
       let run = Math.abs(x - fromX) + Math.abs(y - fromY);
-      for (let at = state; run < TRANSFORMER_SYMBOL_SIZE && (at & 1) === md; ) {
+      for (let at = state; run < TRANSFORMER_SYMBOL_SIZE && (at & 1) === md;) {
         const from = cameFrom[at]!;
         const here = nodeOf(at);
         if (from < 0) {
@@ -1873,7 +1873,7 @@ export function tidyRoutes(
     const kinks = (state: number): boolean => {
       const d = state & 1;
       let run = 0;
-      for (let at = state; run < MIN_RUN; ) {
+      for (let at = state; run < MIN_RUN;) {
         const from = cameFrom[at]!;
         // The run out of the bar is long enough by itself.
         if (from < 0) return false;
@@ -2510,7 +2510,7 @@ export function alignToGrid(
   const snapped = (axis: 'x' | 'y'): Map<string, number> => {
     const sorted = [...ids].sort((p, q) => coords[p]![axis] - coords[q]![axis] || (p < q ? -1 : 1));
     const out = new Map<string, number>();
-    for (let from = 0; from < sorted.length; ) {
+    for (let from = 0; from < sorted.length;) {
       let to = from + 1;
       const first = coords[sorted[from]!]![axis];
       while (to < sorted.length && coords[sorted[to]!]![axis] - first <= ALIGN_TOLERANCE) to += 1;

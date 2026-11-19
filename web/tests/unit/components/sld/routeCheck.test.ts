@@ -85,7 +85,12 @@ const EDGES: ConnectionEdge[] = [
 
 function checkerFor(id: string) {
   const picture = pictureOf(NODES, EDGES, { values: false });
-  return routeChecker(NODES, picture, EDGES.find((edge) => edge.id === id)!, { values: false });
+  return routeChecker(
+    NODES,
+    picture,
+    EDGES.find((edge) => edge.id === id)!,
+    { values: false },
+  );
 }
 
 describe('routeChecker', () => {

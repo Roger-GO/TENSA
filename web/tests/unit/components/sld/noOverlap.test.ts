@@ -233,8 +233,8 @@ describe('nothing overlaps on the example cases', { timeout: 60_000 }, () => {
 
     // Kundur: one generator on another.
     const kundur = await opened(KUNDUR);
-    const [g3, g4] = ['generator-3', 'generator-4'].map(
-      (id) => kundur.nodes.find((n) => n.id === id)!,
+    const [g3, g4] = ['generator-3', 'generator-4'].map((id) =>
+      kundur.nodes.find((n) => n.id === id)!,
     );
     const stacked = dragged(
       kundur,

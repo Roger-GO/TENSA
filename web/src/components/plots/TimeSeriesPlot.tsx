@@ -221,11 +221,10 @@ function plannedSeries(
 function axesOptions(plan: GroupAxes): uPlot.Axis[] {
   return [
     { label: 't (s)' },
-    ...plan.axes.map(
-      (axis): uPlot.Axis =>
-        axis.side === 'left'
-          ? { scale: axis.scale, label: axis.label }
-          : { scale: axis.scale, label: axis.label, side: 1, grid: { show: false } },
+    ...plan.axes.map((axis): uPlot.Axis =>
+      axis.side === 'left'
+        ? { scale: axis.scale, label: axis.label }
+        : { scale: axis.scale, label: axis.label, side: 1, grid: { show: false } },
     ),
   ];
 }

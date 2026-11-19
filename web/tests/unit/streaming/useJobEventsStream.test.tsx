@@ -43,8 +43,7 @@ import { useJobsStore } from '@/store/jobs';
 function setSession(id: string | null): void {
   useSessionStore.setState({
     sessionId: id as
-      | Parameters<ReturnType<typeof useSessionStore.getState>['setSessionId']>[0]
-      | null,
+      Parameters<ReturnType<typeof useSessionStore.getState>['setSessionId']>[0] | null,
   });
 }
 

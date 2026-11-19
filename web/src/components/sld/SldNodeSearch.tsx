@@ -182,8 +182,7 @@ export const SldNodeSearch = forwardRef<SldNodeSearchHandle>(function SldNodeSea
       // diagram is where it is found.
       if (n.type === DRAFT_NODE_TYPE) continue;
       const data = n.data as
-        | { idx?: string; name?: string; kind?: string; unit?: UnitNodeData }
-        | undefined;
+        { idx?: string; name?: string; kind?: string; unit?: UnitNodeData } | undefined;
       const idx = String(data?.idx ?? n.id);
       const name = data?.name ?? '';
       const model = data?.kind ?? '';

@@ -80,9 +80,7 @@ export function DisturbancesAccordion({ className }: DisturbancesAccordionProps)
   const removeDisturbance = useDisturbanceStore((s) => s.removeDisturbance);
 
   type DialogState =
-    | { mode: 'closed' }
-    | { mode: 'add' }
-    | { mode: 'edit'; id: string; spec: DisturbanceSpec };
+    { mode: 'closed' } | { mode: 'add' } | { mode: 'edit'; id: string; spec: DisturbanceSpec };
   const [dialog, setDialog] = useState<DialogState>({ mode: 'closed' });
 
   const filtered = useMemo<DisturbanceLocal[]>(() => {

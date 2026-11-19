@@ -30,8 +30,7 @@ import { baseName, extensionOf } from '@/lib/paths';
 export type SaveInPlaceFormat = 'xlsx' | 'json';
 
 export type SaveInPlaceTarget =
-  | { ok: true; filename: string; format: SaveInPlaceFormat }
-  | { ok: false; reason: string };
+  { ok: true; filename: string; format: SaveInPlaceFormat } | { ok: false; reason: string };
 
 /** What the system's state means for a save, besides the case selection. */
 export interface SaveInPlaceState {

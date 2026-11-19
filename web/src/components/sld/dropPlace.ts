@@ -185,13 +185,7 @@ export interface DropOptions<N extends ConnectionNode = ConnectionNode> {
  * would have no way that is clear of everything else (`no-way`).
  */
 export type DropObstacle =
-  | 'symbol-symbol'
-  | 'symbol-bar'
-  | 'bar-bar'
-  | 'connector'
-  | 'bar-between'
-  | 'line'
-  | 'no-way';
+  'symbol-symbol' | 'symbol-bar' | 'bar-bar' | 'connector' | 'bar-between' | 'line' | 'no-way';
 
 /** Where what was dropped comes to stand, as a shift from where it was dropped. */
 export interface DropShift {

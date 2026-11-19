@@ -23,13 +23,7 @@
  */
 
 export type ControllerSubKind =
-  | 'exciter'
-  | 'governor'
-  | 'pss'
-  | 'renewable'
-  | 'measurement'
-  | 'profile'
-  | 'other';
+  'exciter' | 'governor' | 'pss' | 'renewable' | 'measurement' | 'profile' | 'other';
 
 // Synchronous-machine AVR / exciter classes (ANDES ``Exciter`` group).
 const EXCITER_CLASSES: ReadonlySet<string> = new Set([

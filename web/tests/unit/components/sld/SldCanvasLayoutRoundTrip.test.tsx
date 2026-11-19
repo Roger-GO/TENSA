@@ -363,8 +363,7 @@ describe('place, save, reload', () => {
       const edge = made.edges.find((e) => e.id === 'line-L23');
       const points = made.connections.routes.get('line-L23')?.points;
       const anchors = edge?.data?.bendAnchors as
-        | { source: { x: number; y: number }; target: { x: number; y: number } }
-        | undefined;
+        { source: { x: number; y: number }; target: { x: number; y: number } } | undefined;
       if (points === undefined || anchors === undefined || made.changed.has('line-L23')) {
         return made;
       }

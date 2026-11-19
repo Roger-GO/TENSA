@@ -2111,8 +2111,7 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
 
       expect(useUiStore.getState().tdsControllerResults).toEqual([did]);
       const said = toastInfoMock.mock.calls.find(([title]) => title === 'Frequency control') as
-        | [string, { description: string }]
-        | undefined;
+        [string, { description: string }] | undefined;
       expect(said?.[1].description).toContain(
         'Droop on ESD1 1 acted from t = 1.1 s, peaked at 15.9 MW, 15.5 MW at the end.',
       );

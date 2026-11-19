@@ -1345,7 +1345,7 @@ function layoutPass(
     const top = Math.min(from, to) - SLIDE_CLEARANCE;
     const bottom = Math.max(from, to) + SLIDE_CLEARANCE;
     let first = 0;
-    for (let last = barsByHeight.length; first < last; ) {
+    for (let last = barsByHeight.length; first < last;) {
       const middle = (first + last) >> 1;
       if (barsByHeight[middle]!.cy <= top) first = middle + 1;
       else last = middle;
@@ -1542,7 +1542,7 @@ function layoutPass(
         const [top, bottom] = [Math.min(...ys), Math.max(...ys)];
         // The first that reaches as far right as where the connector starts.
         let first = 0;
-        for (let last = list.length; first < last; ) {
+        for (let last = list.length; first < last;) {
           const middle = (first + last) >> 1;
           if (list[middle]!.body.cx < left - widest) first = middle + 1;
           else last = middle;
@@ -2058,7 +2058,7 @@ function layoutPass(
     // The two put together by the place each asks for: a connection of one
     // face never crosses one of the other.
     const merged: Request[] = [];
-    for (let n = 0, m = 0; n < north.length || m < south.length; ) {
+    for (let n = 0, m = 0; n < north.length || m < south.length;) {
       const [above, below] = [north[n], south[m]];
       const northFirst =
         below === undefined ||
