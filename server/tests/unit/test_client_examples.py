@@ -17,6 +17,7 @@ import http.server
 import io
 import json
 import os
+import queue
 import re
 import shutil
 import socket
@@ -41,10 +42,11 @@ _JSON = "application/json"
 
 @contextlib.contextmanager
 def _stand_in_server(
-    answer: Callable[[str, str], bytes],
+    answer: Callable[[str, str], bytes | tuple[int, bytes]],
 ) -> Iterator[tuple[str, list[dict[str, Any]]]]:
     """A local server that records each request it gets and answers it with
-    ``answer(method, path)``, the bytes of a JSON body."""
+    ``answer(method, path)``, the bytes of a JSON body, sent with 200 unless it
+    comes with a status of its own."""
     seen: list[dict[str, Any]] = []
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -58,8 +60,9 @@ def _stand_in_server(
                     "body": self.rfile.read(length) if length else b"",
                 }
             )
-            payload = answer(self.command, self.path)
-            self.send_response(200)
+            answered = answer(self.command, self.path)
+            status, payload = answered if isinstance(answered, tuple) else (200, answered)
+            self.send_response(status)
             self.send_header("Content-Type", _JSON)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -112,7 +115,7 @@ def test_the_example_client_sends_a_json_body_as_json(
 def test_the_mcp_helper_sends_a_json_body_as_json(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -133,7 +136,7 @@ def test_the_mcp_helper_sends_a_json_body_as_json(
 def test_the_mcp_power_flow_tool_sends_only_the_settings_it_was_given(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -267,7 +270,7 @@ def test_the_example_client_uploads_a_case_file_as_its_own_bytes(
 def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -286,7 +289,7 @@ def test_the_mcp_tds_tool_sends_the_variables_it_was_asked_to_record(
 def test_the_mcp_tds_tool_sends_its_controllers_and_lists_what_they_can_command(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -307,7 +310,7 @@ def test_the_mcp_tds_tool_sends_its_controllers_and_lists_what_they_can_command(
 def test_the_mcp_add_example_tool_posts_to_the_route_and_escapes_the_id(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -325,7 +328,7 @@ def test_the_mcp_add_example_tool_posts_to_the_route_and_escapes_the_id(
 def test_the_mcp_list_examples_tool_shortens_the_catalog_and_gives_one_entry_in_full(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     full = {
@@ -362,7 +365,7 @@ def test_the_mcp_list_examples_tool_shortens_the_catalog_and_gives_one_entry_in_
 def test_the_mcp_messages_tool_asks_for_warnings_unless_told_otherwise(
     recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     base, seen = recorder
@@ -379,7 +382,7 @@ def test_the_mcp_messages_tool_asks_for_warnings_unless_told_otherwise(
 def test_the_mcp_metrics_tool_runs_the_simulation_and_returns_only_the_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     calls: list[tuple[str, str, dict[str, Any] | None]] = []
@@ -429,14 +432,15 @@ def test_the_mcp_metrics_tool_refuses_what_the_metrics_would_before_it_runs_anyt
     monkeypatch: pytest.MonkeyPatch, dae_vars: list[str], refusal: str
 ) -> None:
     """With no variable the run records nothing and ``traces`` is null; with more
-    than the metrics take, the whole run was made to be answered 422."""
-    pytest.importorskip("mcp.server.fastmcp")
+    than the metrics take, the whole run was made to be answered 422. The refusal is
+    the SDK's tool error, the one exception whose text mcp 2 shows the agent."""
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     calls: list[str] = []
     monkeypatch.setattr(mcp_server, "_api", lambda _m, path, _b=None: calls.append(path))
 
-    with pytest.raises(ValueError, match=refusal):
+    with pytest.raises(mcp_server._ToolError, match=refusal):
         mcp_server.get_response_metrics("abc", 3.0, dae_vars)
     assert calls == []
 
@@ -444,7 +448,7 @@ def test_the_mcp_metrics_tool_refuses_what_the_metrics_would_before_it_runs_anyt
 def test_the_mcp_metrics_tool_counts_a_name_given_twice_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
     from tensa.api.schemas import MAX_METRIC_SERIES
 
@@ -471,7 +475,7 @@ def test_the_mcp_metrics_tool_counts_a_name_given_twice_once(
 def test_the_mcp_metrics_tool_says_so_when_the_run_recorded_nothing(
     monkeypatch: pytest.MonkeyPatch, traces: Any
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     calls: list[str] = []
@@ -496,7 +500,7 @@ def test_the_mcp_metrics_tool_says_so_when_the_run_recorded_nothing(
 def test_the_mcp_metrics_tool_thins_a_run_with_more_samples_than_the_metrics_take(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
     from tensa.api.schemas import MAX_METRIC_SAMPLES
 
@@ -544,7 +548,7 @@ def test_the_mcp_metrics_tool_thins_a_run_with_more_samples_than_the_metrics_tak
 def test_thinning_keeps_the_first_sample_and_the_last(
     samples: int, every: int, kept: list[int]
 ) -> None:
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     assert list(mcp_server._thinned(samples, every)) == kept
@@ -555,7 +559,7 @@ def test_importing_the_mcp_server_imports_nothing_else_of_the_package() -> None:
     server's, in a module that brings the wrapper, numpy and pyarrow with it, so
     the tool reads them when it is called. In a fresh interpreter, where nothing
     has imported them yet."""
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     script = textwrap.dedent(
         """
         import json, sys
@@ -864,10 +868,11 @@ def test_the_api_type_script_stops_when_the_server_it_started_stops(tmp_path: Pa
 
 
 def test_the_mcp_server_reports_the_version_of_tensa_and_not_the_one_of_the_mcp_library() -> None:
-    """A client shows ``serverInfo.version`` as the version of the server it talks to. FastMCP
-    takes none, and the library fills in its own, which was 1.30.0 where this was found. The
-    handshake is made over the server's real standard input and output."""
-    pytest.importorskip("mcp.server.fastmcp")
+    """A client shows ``serverInfo.version`` as the version of the server it talks to. On mcp
+    1.x the server takes none, and the library fills in its own, which was 1.30.0 where this
+    was found; on 2.x it is empty unless the server is given one. The handshake is made over
+    the server's real standard input and output."""
+    pytest.importorskip("mcp")
     import importlib.metadata
 
     import tensa
@@ -896,3 +901,151 @@ def test_the_mcp_server_reports_the_version_of_tensa_and_not_the_one_of_the_mcp_
     assert server_info["name"] == "tensa"
     assert server_info["version"] == tensa.__version__
     assert server_info["version"] != importlib.metadata.version("mcp")
+
+
+def _mcp_conversation(base: str, requests: list[dict[str, Any]], log: Path) -> list[dict[str, Any]]:
+    """Start ``tensa mcp --url base``, make the handshake an MCP client makes, then send each
+    request over its standard input, waiting for the answer to one before the next, and
+    return the answers. What the server logs goes to ``log``."""
+    with log.open("w", encoding="utf-8") as stderr:
+        server = subprocess.Popen(
+            [sys.executable, "-m", "tensa", "mcp", "--url", base],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            env=_clean_environment(),
+            text=True,
+            encoding="utf-8",
+        )
+    assert server.stdin is not None and server.stdout is not None
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(
+        target=lambda: [lines.put(line) for line in server.stdout], daemon=True
+    ).start()
+
+    def ask(request_id: int, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        assert server.stdin is not None
+        message = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        try:
+            server.stdin.write(json.dumps(message) + "\n")
+            server.stdin.flush()
+        except OSError:
+            raise AssertionError(f"tensa mcp stopped: {log.read_text('utf-8')}") from None
+        while True:
+            try:
+                answer: dict[str, Any] = json.loads(lines.get(timeout=120))
+            except queue.Empty:
+                raise AssertionError(f"no answer to {method}: {log.read_text('utf-8')}") from None
+            if answer.get("id") == request_id:
+                return answer
+
+    try:
+        ask(
+            0,
+            "initialize",
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"},
+            },
+        )
+        server.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        server.stdin.write("\n")
+        return [ask(i, r["method"], r.get("params", {})) for i, r in enumerate(requests, 1)]
+    finally:
+        server.stdin.close()
+        try:
+            server.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+
+
+def test_the_mcp_server_answers_its_tools_and_passes_on_what_the_api_refused(
+    tmp_path: Path,
+) -> None:
+    """As an MCP client drives it, over its real standard input and output: every tool is
+    listed, a call answers with what the HTTP API answered, and a refusal of the API reaches
+    the agent with its detail and its recovery. mcp 2 shows the agent the text of its tool
+    error only, and answers any other exception with the tool's name alone."""
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    files = {"files": [{"path": "ieee14.raw"}]}
+    refusal = {"title": "Conflict", "detail": "no power flow", "recovery": {"kind": "run-pflow"}}
+
+    def answer(_method: str, path: str) -> bytes | tuple[int, bytes]:
+        if path == "/api/workspace/files":
+            return json.dumps(files).encode()
+        return 409, json.dumps(refusal).encode()
+
+    def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return {"method": "tools/call", "params": {"name": name, "arguments": arguments}}
+
+    with _stand_in_server(answer) as (base, seen):
+        listed, listing, refused = _mcp_conversation(
+            base,
+            [
+                {"method": "tools/list"},
+                call("list_workspace_files", {}),
+                call("run_eig", {"session_id": "abc"}),
+            ],
+            tmp_path / "mcp.log",
+        )
+
+    source = Path(mcp_server.__file__).read_text(encoding="utf-8")
+    declared = set(re.findall(r"^@mcp\.tool\(\)\ndef (\w+)", source, flags=re.MULTILINE))
+    assert len(declared) > 10, "the pattern above stopped finding the tools"
+    assert {tool["name"] for tool in listed["result"]["tools"]} == declared
+    assert listing["result"]["isError"] is False
+    assert json.loads(listing["result"]["content"][0]["text"]) == files
+    assert refused["result"]["isError"] is True
+    text = refused["result"]["content"][0]["text"]
+    assert "Conflict (409): no power flow Recovery: run-pflow." in text
+    assert [request["path"] for request in seen] == [
+        "/api/workspace/files",
+        "/api/sessions/abc/eig",
+    ]
+
+
+def test_the_mcp_helper_says_so_when_the_server_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A TENSA that is not running is a failure for the agent to read too, not a crash
+    whose text mcp 2 keeps in the server's log."""
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        base = f"http://127.0.0.1:{probe.getsockname()[1]}"
+    # Nothing listens on the port once the socket is closed.
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+    with pytest.raises(mcp_server._ToolError, match=f"TENSA at {base} did not answer"):
+        mcp_server._api("GET", "/workspace/files")
+
+
+@pytest.mark.parametrize(
+    ("missing", "said", "not_said"),
+    [
+        ("mcp", "pip install 'tensa[mcp]'", "Traceback"),
+        ("anyio", "anyio", "tensa[mcp]"),
+    ],
+)
+def test_the_mcp_server_names_what_it_cannot_import(missing: str, said: str, not_said: str) -> None:
+    """Without the SDK it asks for the extra. With the SDK, a module the SDK needs and cannot
+    find is named as itself: an import error of any kind was once reported as a missing
+    extra, which is how mcp 2, where the class TENSA imported was gone, looked like no SDK."""
+    pytest.importorskip("mcp")
+    script = f"import sys; sys.modules[{missing!r}] = None; import tensa.mcp_server"
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode != 0
+    assert said in done.stderr
+    assert not_said not in done.stderr

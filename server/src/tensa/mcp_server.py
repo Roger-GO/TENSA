@@ -8,7 +8,8 @@ power-system simulations natively. Two modes:
   serve`` child on an ephemeral loopback port for the lifetime of the MCP
   process (the usual mode when an MCP client launches this as a stdio server).
 
-Requires the optional ``mcp`` extra: ``pip install 'tensa[mcp]'``.
+Requires the optional ``mcp`` extra: ``pip install 'tensa[mcp]'``. It runs on
+version 2 of the ``mcp`` SDK and on 1.x (see :func:`_new_server`).
 """
 
 from __future__ import annotations
@@ -22,23 +23,19 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tensa import __version__
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError as exc:  # pragma: no cover - exercised only without the extra
-    raise SystemExit(
-        "The MCP server needs the optional 'mcp' dependency.\n"
-        "Install it with: pip install 'tensa[mcp]'"
-    ) from exc
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
 
 _BASE_URL = "http://127.0.0.1:8000"
 
 
 def _api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
-    """Call the TENSA HTTP API; raise a readable error on ProblemDetails."""
+    """Call the TENSA HTTP API; raise a readable error on ProblemDetails, and when the
+    server does not answer."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         f"{_BASE_URL}/api{path}",
@@ -57,26 +54,62 @@ def _api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
             problem = {"title": e.reason}
         recovery = (problem.get("recovery") or {}).get("kind")
         hint = f" Recovery: {recovery}." if recovery else ""
-        raise RuntimeError(
+        raise _ToolError(
             f"{problem.get('title', 'API error')} ({e.code}): {problem.get('detail', '')}{hint}"
+        ) from None
+    except OSError as e:
+        # Refused, reset, or no answer within the timeout.
+        raise _ToolError(
+            f"TENSA at {_BASE_URL} did not answer: {getattr(e, 'reason', e)}"
         ) from None
 
 
-mcp = FastMCP(
-    "tensa",
-    instructions=(
-        "Tools for the ANDES power-system simulator. Typical flow: "
-        "list_workspace_files (list_examples and add_example put a ready-made case "
-        "in the workspace first) -> create_session -> load_case -> "
-        "add_fault/add_toggle/add_alter (optional, pre-setup only) -> run_pflow "
-        "-> run_tds -> get_operating_point -> close_session. After the first "
-        "run the session is 'setup'; call reload_case before adding more "
-        "disturbances or elements."
-    ),
+_INSTRUCTIONS = (
+    "Tools for the ANDES power-system simulator. Typical flow: "
+    "list_workspace_files (list_examples and add_example put a ready-made case "
+    "in the workspace first) -> create_session -> load_case -> "
+    "add_fault/add_toggle/add_alter (optional, pre-setup only) -> run_pflow "
+    "-> run_tds -> get_operating_point -> close_session. After the first "
+    "run the session is 'setup'; call reload_case before adding more "
+    "disturbances or elements."
 )
-# FastMCP takes no version, and the server under it answers an MCP client's handshake with
-# the version of the ``mcp`` library when it has none, so a client was shown that as TENSA's.
-mcp._mcp_server.version = __version__
+
+
+def _new_server() -> tuple[MCPServer, type[Exception]]:
+    """The MCP server named ``tensa``, and the exception a tool raises for the agent to
+    read, on whichever major of the ``mcp`` SDK is installed.
+
+    2.x calls the class ``MCPServer`` and takes the server's version. It shows the agent
+    the text of its ``ToolError`` only; any other exception is answered with the tool's
+    name alone. 1.x, which upstream still patches and another tool in the same
+    environment may hold, calls it ``FastMCP`` and takes no version, and the server under
+    it then answers a client's handshake with the version of the library, which a client
+    shows as TENSA's. A module the SDK needs and cannot find is named as itself, not
+    reported as a missing extra.
+    """
+    try:
+        from mcp.server.mcpserver import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
+    except ModuleNotFoundError as missing:
+        if missing.name in {"mcp", "mcp.server"}:
+            raise SystemExit(
+                "The MCP server needs the optional 'mcp' dependency.\n"
+                "Install it with: pip install 'tensa[mcp]'"
+            ) from missing
+        if missing.name != "mcp.server.mcpserver":
+            raise
+    else:
+        return MCPServer("tensa", instructions=_INSTRUCTIONS, version=__version__), ToolError
+    # mypy reads 2.x, whose ``mcp.server.fastmcp`` only raises an error naming the new class.
+    from mcp.server.fastmcp import FastMCP  # type: ignore[attr-defined, unused-ignore]
+    from mcp.server.fastmcp.exceptions import ToolError as FastMCPToolError
+
+    server = FastMCP("tensa", instructions=_INSTRUCTIONS)
+    server._mcp_server.version = __version__
+    return server, FastMCPToolError
+
+
+mcp, _ToolError = _new_server()
 
 
 @mcp.tool()
@@ -110,7 +143,7 @@ def list_examples(example_id: str | None = None) -> Any:
             if entry["id"] == example_id:
                 return entry
         known = ", ".join(entry["id"] for entry in entries)
-        raise RuntimeError(f"no example case {example_id!r}; the cases are: {known}")
+        raise _ToolError(f"no example case {example_id!r}; the cases are: {known}")
     return [
         {
             **{key: entry[key] for key in _EXAMPLE_BRIEF},
@@ -343,12 +376,12 @@ def get_response_metrics(
     # What the metrics would refuse is refused here, before the run is made for it.
     named = len(dict.fromkeys(dae_vars))
     if named == 0:
-        raise ValueError(
+        raise _ToolError(
             "dae_vars names no variable: give at least one ANDES variable to describe "
             "(list_dae_variables lists them)."
         )
     if named > MAX_METRIC_SERIES:
-        raise ValueError(
+        raise _ToolError(
             f"dae_vars names {named} variables; the metrics describe at most "
             f"{MAX_METRIC_SERIES} in one call."
         )

@@ -129,7 +129,7 @@ async def test_what_the_mcp_listing_reads_of_each_entry_is_in_the_answer(
     client_workspace: tuple[httpx.AsyncClient, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``list_examples`` shortens each entry to the keys it names; they are all there."""
-    pytest.importorskip("mcp.server.fastmcp")
+    pytest.importorskip("mcp")
     from tensa import mcp_server
 
     client, _ = client_workspace
@@ -141,7 +141,7 @@ async def test_what_the_mcp_listing_reads_of_each_entry_is_in_the_answer(
         brief[0]
     )
     assert mcp_server.list_examples("kundur")["id"] == "kundur"
-    with pytest.raises(RuntimeError, match="the cases are"):
+    with pytest.raises(mcp_server._ToolError, match="the cases are"):
         mcp_server.list_examples("nope")
 
 

@@ -250,6 +250,17 @@ def test_the_acceptance_job_runs_the_acceptance_suite() -> None:
     assert "placeholder" not in names
 
 
+def test_one_job_runs_the_mcp_server_on_the_older_major_of_the_sdk() -> None:
+    """The ``mcp`` extra takes 1.x and 2.x, and ``[dev]`` installs the newest, so every other
+    job only ever sees 2.x. This one installs 1.x and runs the type check and the tests that
+    import the MCP server or start it."""
+    run = _run_text(_workflow()["jobs"]["mcp-1x"])
+    assert 'pip install -e "./server[dev]" "mcp<2"' in run
+    assert "mypy --strict src" in run
+    assert "tests/unit/test_client_examples.py" in run
+    assert "tests/integration/test_examples_api.py" in run
+
+
 def test_the_acceptance_stage_selects_the_acceptance_marker() -> None:
     if not _SCRIPT.is_file():
         pytest.skip("scripts/ci-matrix.sh is not next to the tests")

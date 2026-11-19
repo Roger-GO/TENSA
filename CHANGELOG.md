@@ -4,6 +4,12 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+- The MCP server runs on version 2 of the MCP SDK as well as on 1.x, and `pip install "tensa[mcp]"` installs 2.x. SDK 2.0 renamed the server class TENSA imported (`FastMCP`, now `MCPServer`), which is why the extra had been held below 2.0; an environment that keeps 1.x for another tool keeps it, since upstream still patches that line. The extra is `mcp>=1.30,!=2.0.*,!=2.1.*,<3`: every release below 1.30.0, and 2.0 and 2.1, has a published advisory. SDK 2 shows the agent the message of a tool's error only when the tool raises the SDK's `ToolError`, and answers any other exception with the tool's name alone, so the tools now raise it for a refusal of the HTTP API (with its recovery), an example case the catalog does not have and a metrics request they refuse, and the agent reads the same messages on either SDK. A TENSA that does not answer is reported as such (`TENSA at http://127.0.0.1:8000 did not answer: ...`), and `tensa mcp` names a module the SDK needs and cannot find where it used to say, whatever the import error was, that the extra was not installed.
+
+### Development
+- The MCP tests skipped when `mcp.server.fastmcp` could not be imported, which on SDK 2 is always, so they now skip only without the SDK. A new job, `mcp-1x` in `.github/workflows/server.yml`, runs the type check and the MCP tests on SDK 1.x, since `[dev]` installs 2.x. New tests drive `tensa mcp` over its standard input and output as a client does (the tools it lists, a call, a refusal of the API) and check what it says when the server does not answer and when it cannot import the SDK or a module the SDK needs.
+
 ## [0.6.0] - 2026-11-18
 
 ### Highlights

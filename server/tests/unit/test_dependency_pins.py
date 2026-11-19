@@ -69,16 +69,19 @@ def test_starlette_stays_below_the_next_major() -> None:
     assert not _requirements()["starlette"].specifier.contains("2.0.0")
 
 
-def test_mcp_extra_excludes_the_incompatible_major_and_the_advisories() -> None:
-    """``mcp`` 2.x renamed ``FastMCP`` to ``MCPServer``, and ``tensa mcp`` imports the old name.
-
-    With ``mcp>=1.2`` a fresh ``pip install 'tensa[mcp]'`` resolved to 2.x, where
-    ``tensa mcp`` exited claiming the extra was not installed. Releases before
-    1.28.1 also carry advisories.
+def test_mcp_extra_takes_both_majors_of_the_sdk_past_their_advisories() -> None:
+    """``tensa mcp`` runs on ``mcp`` 2.x, where the server class is ``MCPServer``, and on
+    1.x, where it is ``FastMCP``, which upstream still patches, so an environment that
+    holds 1.x for another tool keeps it. Every release below 1.30.0, and 2.0 and 2.1,
+    carry advisories, and 3.x is a major nothing has been checked against.
     """
     requirement = _requirements("mcp")["mcp"]
-    assert not requirement.specifier.contains("2.0.0")
-    assert _floor(requirement) >= Version("1.28.1")
+    assert _floor(requirement) >= Version("1.30.0")
+    for advised in ("2.0.1", "2.1.1"):
+        assert not requirement.specifier.contains(advised), advised
+    assert not requirement.specifier.contains("3.0.0")
+    # Both majors, whatever their floors become.
+    assert requirement.specifier.contains("1.999") and requirement.specifier.contains("2.999")
 
 
 def test_dev_extra_installs_mcp_in_the_range_of_the_mcp_extra() -> None:

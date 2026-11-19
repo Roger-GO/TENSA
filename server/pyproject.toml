@@ -65,10 +65,13 @@ dependencies = [
 
 [project.optional-dependencies]
 # MCP (Model Context Protocol) stdio server for LLM agents: `tensa mcp`.
-# mcp 2.x renamed FastMCP, which tensa.mcp_server imports, and releases before
-# 1.28.1 have published advisories.
+# tensa.mcp_server runs on both majors of the SDK, and CI checks both: 2.x, where
+# the server class is MCPServer, and 1.x, where it is FastMCP, which upstream still
+# patches, so an environment that holds 1.x for another tool keeps it. Every
+# release below 1.30.0, and 2.0 and 2.1, has a published advisory. The cap is the
+# next major.
 mcp = [
-    "mcp>=1.28.1,<2",
+    "mcp>=1.30,!=2.0.*,!=2.1.*,<3",
 ]
 # A native window for the UI: `tensa desktop`. pywebview 5 is the first release with
 # ``webview.settings``, which the window uses to allow file downloads; the cap is the
@@ -92,7 +95,7 @@ dev = [
     "websockets>=13",
     # The MCP tests (tests/unit/test_client_examples.py, tests/integration/test_examples_api.py)
     # skip without it, and a skip is easy to read as a pass. The range is the ``mcp`` extra's.
-    "mcp>=1.28.1,<2",
+    "mcp>=1.30,!=2.0.*,!=2.1.*,<3",
     # tests/unit/test_packaging.py and tests/integration/test_packaging.py drive
     # the build hook and the build backend directly (``editables`` is what the
     # backend needs to build an editable wheel).
@@ -187,8 +190,10 @@ files = ["src"]
 # stubs (the clone-on-write xlsx writer + the profiles route both import it),
 # and neither does pyarrow (the Arrow streaming encoder).
 # ``mcp`` is an OPTIONAL extra (the MCP server module, which ``[dev]`` installs for its
-# tests) and so is ``webview`` (pywebview, for ``tensa desktop``), which ``[dev]`` does
-# not install, so its import is unresolved under the default CI type-check.
+# tests), and the module imports from whichever of its majors is installed, so the
+# modules of the other one are always unresolved. ``webview`` (pywebview, for ``tensa
+# desktop``) is optional too, and ``[dev]`` does not install it, so its import is
+# unresolved under the default CI type-check.
 module = [
     "andes",
     "andes.*",
@@ -206,10 +211,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # mcp_server.py is optional glue: without the ``[mcp]`` extra installed, the
-# FastMCP tool decorators resolve to ``Any``, which --strict flags as untyped
+# server's tool decorators resolve to ``Any``, which --strict flags as untyped
 # decorators. It is a thin, exercised wrapper over the HTTP API, so relax only
 # this one check for this one module, and the type check answers the same with or
-# without the extra.
+# without the extra, and on either major of it.
 module = ["tensa.mcp_server"]
 disallow_untyped_decorators = false
 

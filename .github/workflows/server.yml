@@ -93,6 +93,35 @@ jobs:
         working-directory: server
         run: PYTHONPATH=src python ../scripts/check_gui_parity.py
 
+  # The mcp extra takes both majors of the SDK, and [dev] installs the newest, 2.x.
+  # This job holds the MCP server to 1.x as well, which upstream still patches and a
+  # user's environment may keep for another tool: the type check, and the tests that
+  # import the server or start it.
+  mcp-1x:
+    name: MCP server on mcp 1.x
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      - name: Install tensa with dev dependencies and mcp 1.x
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./server[dev]" "mcp<2"
+
+      - name: mypy and the MCP tests
+        working-directory: server
+        run: |
+          mypy --strict src
+          pytest -m "not acceptance" tests/unit/test_client_examples.py tests/integration/test_examples_api.py
+
   # Linux runs the whole unit + integration suite. macOS (Apple silicon) and
   # Windows run the unit tests plus the smoke test (real `tensa serve`, real
   # worker, IEEE 14 PF and a short TDS), which is the path where the operating
