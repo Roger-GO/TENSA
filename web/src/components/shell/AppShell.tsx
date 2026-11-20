@@ -206,16 +206,100 @@ export function AppShell({
     [toggleCheatsheet],
   );
 
-  // Layout state — driven by useLayoutStore (NOT useUiStore) per F-FEAS-1.
-  const leftSidebarCollapsed = useLayoutStore((s) => s.leftSidebarCollapsed);
-  const bottomDrawerCollapsed = useLayoutStore((s) => s.bottomDrawerCollapsed);
-  const bottomDrawerHeightPct = useLayoutStore((s) => s.bottomDrawerHeightPct);
-  const rightInspectorCollapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
-  const setBottomDrawerHeightPct = useLayoutStore((s) => s.setBottomDrawerHeightPct);
-  const setBottomDrawerCollapsed = useLayoutStore((s) => s.setBottomDrawerCollapsed);
   // v3.1 — full-space results view. When active we render a single
   // results region in place of the canvas/inspector/drawer chassis.
   const resultsViewActive = useLayoutStore((s) => s.resultsViewActive);
+
+  return (
+    <div
+      className={cn(
+        'flex h-screen w-screen flex-col',
+        'bg-background text-foreground',
+        'relative overflow-hidden',
+      )}
+    >
+      <TopBar left={topBarLeft} center={topBarCenter} right={topBarRight} />
+
+      {resultsViewActive ? (
+        /* v3.1 full-space results view — a top-level conditional render
+           (NOT an imperative panel collapse) per the plan: simpler than
+           driving the fragile inspectorVisible/syncPanel logic to size=0,
+           and it guarantees the diagram + parameters are fully unmounted
+           ("hide the system and its parameters"). The TopBar above + the
+           modal/overlay/Toaster/palette below stay mounted in both
+           branches so global affordances keep working. */
+        <main
+          aria-label="Results"
+          data-testid="app-shell-results-view"
+          className="bg-background flex min-h-0 flex-1 flex-col"
+        >
+          {resultsView}
+        </main>
+      ) : (
+        <ShellPanels
+          leftSidebar={leftSidebar}
+          canvas={canvas}
+          rightInspector={rightInspector}
+          bottomDrawer={bottomDrawer}
+          dockOverlay={dockOverlay}
+        />
+      )}
+
+      {modal}
+
+      {/* Global toast surface (v2.0 polish Unit 3). */}
+      <Toaster />
+
+      {/* Global command palette (v2.0 polish Unit 9) and keyboard-shortcut
+          cheatsheet (v2.0 polish Unit 10). */}
+      <GlobalOverlays />
+
+      {/* Per-command shortcut registrar (v2.0 polish Unit 10). */}
+      <GlobalShortcuts />
+
+      {/* First-run coach (v2.0 polish Unit 13). */}
+      <FirstRunCoach />
+    </div>
+  );
+}
+
+/** The ids of the shell's panels, by which the layouts of their groups are keyed. */
+const PANEL = {
+  sidebar: 'app-shell-left-sidebar-panel',
+  rightSide: 'app-shell-right-side-panel',
+  topRow: 'app-shell-top-row-panel',
+  canvas: 'app-shell-canvas-panel',
+  inspector: 'app-shell-right-inspector-panel',
+  drawer: 'app-shell-bottom-drawer-panel',
+} as const;
+
+type ShellPanelsProps = Pick<
+  AppShellProps,
+  'leftSidebar' | 'canvas' | 'rightInspector' | 'bottomDrawer' | 'dockOverlay'
+>;
+
+/**
+ * The chassis: the sidebar, the diagram, the inspector and the drawer in
+ * their three groups of panels, and the overlay over them. The results view
+ * takes their place, and they are mounted again when it is left, so they
+ * start each time from the layout store as it is then: a drawer dragged
+ * higher, a sidebar hidden from the results view, are drawn as they now are.
+ */
+function ShellPanels({
+  leftSidebar,
+  canvas,
+  rightInspector,
+  bottomDrawer,
+  dockOverlay,
+}: ShellPanelsProps) {
+  // Layout state — driven by useLayoutStore (NOT useUiStore) per F-FEAS-1.
+  const leftSidebarCollapsed = useLayoutStore((s) => s.leftSidebarCollapsed);
+  const bottomDrawerCollapsed = useLayoutStore((s) => s.bottomDrawerCollapsed);
+  const rightInspectorCollapsed = useLayoutStore((s) => s.rightInspectorCollapsed);
+  const setBottomDrawerHeightPct = useLayoutStore((s) => s.setBottomDrawerHeightPct);
+  const setBottomDrawerCollapsed = useLayoutStore((s) => s.setBottomDrawerCollapsed);
+  const setLeftSidebarWidthPct = useLayoutStore((s) => s.setLeftSidebarWidthPct);
+  const setRightInspectorWidthPct = useLayoutStore((s) => s.setRightInspectorWidthPct);
 
   // Selection state drives inspector visibility per F-DESIGN-2.
   const selectedNodeId = useSldStore((s) => s.selectedNodeId);
@@ -238,18 +322,27 @@ export function AppShell({
     id: 'tensa:layout-v1:top-row',
     storage: panelLayoutStorage,
   });
-  // What the panels open at, for a group the library keeps no layout of.
-  // Taken once: a panel whose size props change is registered with its
-  // group again, and the drawer's height changes on every step of a drag.
-  // The drawer starts at the height the store keeps, or at its tab strip.
+  // What the groups start from, taken when the panels mount: a panel whose
+  // size props change is registered with its group again, and the drawer's
+  // height changes on every step of a drag. Each panel is open or shut as
+  // the store has it, which the results view may have changed while the
+  // panels were not drawn. Open, the sidebar and the inspector are as wide
+  // as the library kept them, or, when it kept them shut, as they were last
+  // open; the drawer is as high as the store keeps it, or at its tab strip.
   const [initial] = useState(() => {
+    const { leftSidebarWidthPct, rightInspectorWidthPct, bottomDrawerHeightPct } =
+      useLayoutStore.getState();
+    const sidebar = leftSidebarCollapsed
+      ? 0
+      : openWidth(outerLayout.defaultLayout?.[PANEL.sidebar], leftSidebarWidthPct);
+    const inspector = inspectorVisible
+      ? openWidth(topRowLayout.defaultLayout?.[PANEL.inspector], rightInspectorWidthPct)
+      : 0;
     const drawer = bottomDrawerCollapsed ? bottomDrawerSizes(0).strip : bottomDrawerHeightPct;
     return {
-      inspector: inspectorVisible ? 25 : 0,
-      rightSide: {
-        'app-shell-top-row-panel': 100 - drawer,
-        'app-shell-bottom-drawer-panel': drawer,
-      } satisfies Layout,
+      outer: { [PANEL.sidebar]: sidebar, [PANEL.rightSide]: 100 - sidebar } satisfies Layout,
+      topRow: { [PANEL.canvas]: 100 - inspector, [PANEL.inspector]: inspector } satisfies Layout,
+      rightSide: { [PANEL.topRow]: 100 - drawer, [PANEL.drawer]: drawer } satisfies Layout,
     };
   });
 
@@ -283,39 +376,54 @@ export function AppShell({
 
   // First-mount guard. The groups pick up their layouts on first paint,
   // which already reflect the persisted state (the library's, and the
-  // drawer's from the layout store). Calling the imperative API on first
-  // mount would throw (the lib has no layout for a group it has not
-  // measured yet) AND would do redundant work. Subsequent store-driven
-  // updates do need the imperative call so toggle buttons can flip the
-  // panel without mounting the group again (which would lose the user's
-  // post-mount drag adjustments).
+  // layout store's). Calling the imperative API on first mount would throw
+  // (the lib has no layout for a group it has not measured yet) AND would
+  // do redundant work. Subsequent store-driven updates do need the
+  // imperative call so toggle buttons can flip the panel without mounting
+  // the group again (which would lose the user's post-mount drag
+  // adjustments).
   const firstMountRef = useRef(true);
 
-  // Keep the LeftSidebar panel in sync with the store on store change.
+  // Keep the LeftSidebar panel in sync with the store on store change. It
+  // opens to the width it was last open at, which the library forgets with
+  // the page.
   useEffect(() => {
     if (firstMountRef.current) return;
-    syncPanel(leftSidebarPanelRef.current, leftSidebarCollapsed);
+    syncPanel(
+      leftSidebarPanelRef.current,
+      leftSidebarCollapsed,
+      useLayoutStore.getState().leftSidebarWidthPct,
+    );
   }, [leftSidebarCollapsed]);
 
   // Keep the BottomDrawer panel in sync with the store on store change. A
-  // drawer that is opened shows its content: one that was dragged shut, or
-  // nearly, opens to the height it has by default.
+  // drawer that is opened opens to the height the store keeps, and shows
+  // its content: one that was dragged shut, or nearly, opens to the height
+  // it has by default.
   useEffect(() => {
     if (firstMountRef.current) return;
-    syncPanel(bottomDrawerPanelRef.current, bottomDrawerCollapsed);
+    syncPanel(
+      bottomDrawerPanelRef.current,
+      bottomDrawerCollapsed,
+      useLayoutStore.getState().bottomDrawerHeightPct,
+    );
     if (!bottomDrawerCollapsed) openEnough(bottomDrawerPanelRef.current, drawerSizesRef.current);
   }, [bottomDrawerCollapsed]);
 
   // Keep the RightInspector panel in sync with the visibility predicate.
   // Per spike finding (a): expand() then resize() in the same tick
-  // works without a setTimeout workaround; we expand to a width derived
-  // from the persisted px preference (translated to a % of the top-row
-  // horizontal group at hydrate time).
+  // works without a setTimeout workaround; we expand to the width it was
+  // last open at, kept in the store as a % of the top-row horizontal
+  // group.
   useEffect(() => {
     if (firstMountRef.current) return;
     // inspectorVisible === true means we want the panel expanded, so
     // pass collapsed=!visible to the helper.
-    syncPanel(rightInspectorPanelRef.current, !inspectorVisible);
+    syncPanel(
+      rightInspectorPanelRef.current,
+      !inspectorVisible,
+      useLayoutStore.getState().rightInspectorWidthPct,
+    );
   }, [inspectorVisible]);
 
   // Flip the first-mount guard after the initial paint completes. The
@@ -326,245 +434,222 @@ export function AppShell({
   }, []);
 
   return (
-    <div
-      className={cn(
-        'flex h-screen w-screen flex-col',
-        'bg-background text-foreground',
-        'relative overflow-hidden',
-      )}
-    >
-      <TopBar left={topBarLeft} center={topBarCenter} right={topBarRight} />
-
-      {resultsViewActive ? (
-        /* v3.1 full-space results view — a top-level conditional render
-           (NOT an imperative panel collapse) per the plan: simpler than
-           driving the fragile inspectorVisible/syncPanel logic to size=0,
-           and it guarantees the diagram + parameters are fully unmounted
-           ("hide the system and its parameters"). The TopBar above + the
-           modal/overlay/Toaster/palette below stay mounted in both
-           branches so global affordances keep working. */
-        <main
-          aria-label="Results"
-          data-testid="app-shell-results-view"
-          className="bg-background flex min-h-0 flex-1 flex-col"
+    <div className="relative flex min-h-0 flex-1">
+      {/* Outer horizontal split: LeftSidebar | RightSide */}
+      <Group
+        orientation="horizontal"
+        defaultLayout={initial.outer}
+        onLayoutChanged={(layout, meta) => {
+          outerLayout.onLayoutChanged(layout, meta);
+          // The width the sidebar opens to again. Shut, it has none.
+          const sidebar = layout[PANEL.sidebar];
+          if (sidebar !== undefined && sidebar > 0) setLeftSidebarWidthPct(sidebar);
+        }}
+        className="flex h-full w-full"
+      >
+        <Panel
+          panelRef={leftSidebarPanelRef}
+          id={PANEL.sidebar}
+          collapsible
+          defaultSize="20%"
+          collapsedSize="0%"
+          minSize="15%"
+          maxSize="40%"
+          className="flex min-w-0 flex-col"
         >
-          {resultsView}
-        </main>
-      ) : (
-        <div className="relative flex min-h-0 flex-1">
-          {/* Outer horizontal split: LeftSidebar | RightSide */}
+          <aside
+            aria-label="Case navigation"
+            data-testid="app-shell-left-sidebar"
+            data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
+            className={cn(
+              'flex h-full min-h-0 min-w-0 flex-col',
+              'border-border bg-background border-r',
+            )}
+          >
+            {/* Children only render when expanded — spike finding (b):
+              the lib does NOT auto-unmount panel children at
+              size=0, so a focus trap would form against any
+              interactive element inside. Gating by collapsed
+              prevents that. */}
+            {!leftSidebarCollapsed ? leftSidebar : null}
+          </aside>
+        </Panel>
+
+        <ResizeHandle direction="horizontal" label="Resize left sidebar" />
+
+        <Panel
+          id={PANEL.rightSide}
+          defaultSize="80%"
+          minSize="60%"
+          className="flex min-w-0 flex-col"
+        >
+          {/* Right-side vertical split: TopRow | BottomDrawer */}
           <Group
-            orientation="horizontal"
-            defaultLayout={outerLayout.defaultLayout}
-            onLayoutChanged={outerLayout.onLayoutChanged}
+            orientation="vertical"
+            defaultLayout={initial.rightSide}
             className="flex h-full w-full"
+            onLayoutChange={(layout) => {
+              // Persist the drawer's size whenever the user drags. The
+              // persist middleware batches writes so this is safe
+              // per-pointer-move.
+              const drawerPct = layout[PANEL.drawer];
+              if (typeof drawerPct !== 'number') return;
+              // Collapsed is what the drawer is while it is down at its
+              // tab strip, however it got there: dragged down (it snaps
+              // there from under the least height it has open) as well
+              // as toggled. Only the strip is drawn then, and a click on
+              // a tab opens it again; dragged up from there it is open,
+              // and shows its content. The strip is no height to come
+              // back to, so it is not kept as one.
+              // Read as they are now, not as they were when this was
+              // handed over: the drawer is sized again as soon as the
+              // height of its strip in percent changes, before the
+              // panels have this callback of the same render.
+              const atStrip = drawerPct <= drawerSizesRef.current.strip + 0.5;
+              if (atStrip !== useLayoutStore.getState().bottomDrawerCollapsed) {
+                setBottomDrawerCollapsed(atStrip);
+              }
+              if (!atStrip) setBottomDrawerHeightPct(drawerPct);
+            }}
           >
             <Panel
-              panelRef={leftSidebarPanelRef}
-              id="app-shell-left-sidebar-panel"
-              collapsible
-              defaultSize="20%"
-              collapsedSize="0%"
-              minSize="15%"
-              maxSize="40%"
+              id={PANEL.topRow}
+              // The diagram keeps a height it can be used at, in pixels
+              // (`CANVAS_MIN_PX`), whatever the drawer was left at.
+              minSize={`${drawerSizes.canvasMin}%`}
               className="flex min-w-0 flex-col"
             >
-              <aside
-                aria-label="Case navigation"
-                data-testid="app-shell-left-sidebar"
-                data-collapsed={leftSidebarCollapsed ? 'true' : 'false'}
-                className={cn(
-                  'flex h-full min-h-0 min-w-0 flex-col',
-                  'border-border bg-background border-r',
-                )}
-              >
-                {/* Children only render when expanded — spike finding (b):
-                  the lib does NOT auto-unmount panel children at
-                  size=0, so a focus trap would form against any
-                  interactive element inside. Gating by collapsed
-                  prevents that. */}
-                {!leftSidebarCollapsed ? leftSidebar : null}
-              </aside>
-            </Panel>
-
-            <ResizeHandle direction="horizontal" label="Resize left sidebar" />
-
-            <Panel
-              id="app-shell-right-side-panel"
-              defaultSize="80%"
-              minSize="60%"
-              className="flex min-w-0 flex-col"
-            >
-              {/* Right-side vertical split: TopRow | BottomDrawer */}
+              {/* Top-row horizontal split: Canvas | RightInspector */}
               <Group
-                orientation="vertical"
-                defaultLayout={initial.rightSide}
-                className="flex h-full w-full"
-                onLayoutChange={(layout) => {
-                  // Persist the drawer's size whenever the user drags. The
-                  // persist middleware batches writes so this is safe
-                  // per-pointer-move.
-                  const drawerPct = layout['app-shell-bottom-drawer-panel'];
-                  if (typeof drawerPct !== 'number') return;
-                  // Collapsed is what the drawer is while it is down at its
-                  // tab strip, however it got there: dragged down (it snaps
-                  // there from under the least height it has open) as well
-                  // as toggled. Only the strip is drawn then, and a click on
-                  // a tab opens it again; dragged up from there it is open,
-                  // and shows its content. The strip is no height to come
-                  // back to, so it is not kept as one.
-                  // Read as they are now, not as they were when this was
-                  // handed over: the drawer is sized again as soon as the
-                  // height of its strip in percent changes, before the
-                  // panels have this callback of the same render.
-                  const atStrip = drawerPct <= drawerSizesRef.current.strip + 0.5;
-                  if (atStrip !== useLayoutStore.getState().bottomDrawerCollapsed) {
-                    setBottomDrawerCollapsed(atStrip);
+                orientation="horizontal"
+                defaultLayout={initial.topRow}
+                onLayoutChanged={(layout, meta) => {
+                  topRowLayout.onLayoutChanged(layout, meta);
+                  // The width the inspector opens to again, as for the sidebar.
+                  const inspector = layout[PANEL.inspector];
+                  if (inspector !== undefined && inspector > 0) {
+                    setRightInspectorWidthPct(inspector);
                   }
-                  if (!atStrip) setBottomDrawerHeightPct(drawerPct);
                 }}
+                className="flex h-full w-full"
               >
                 <Panel
-                  id="app-shell-top-row-panel"
-                  // The diagram keeps a height it can be used at, in pixels
-                  // (`CANVAS_MIN_PX`), whatever the drawer was left at.
-                  minSize={`${drawerSizes.canvasMin}%`}
+                  id={PANEL.canvas}
+                  defaultSize="75%"
+                  minSize="30%"
                   className="flex min-w-0 flex-col"
                 >
-                  {/* Top-row horizontal split: Canvas | RightInspector */}
-                  <Group
-                    orientation="horizontal"
-                    defaultLayout={topRowLayout.defaultLayout}
-                    onLayoutChanged={topRowLayout.onLayoutChanged}
-                    className="flex h-full w-full"
+                  <main
+                    aria-label="Single-line diagram"
+                    data-testid="app-shell-canvas"
+                    className="bg-background flex h-full min-h-0 min-w-0 flex-1 flex-col"
                   >
-                    <Panel
-                      id="app-shell-canvas-panel"
-                      defaultSize="75%"
-                      minSize="30%"
-                      className="flex min-w-0 flex-col"
-                    >
-                      <main
-                        aria-label="Single-line diagram"
-                        data-testid="app-shell-canvas"
-                        className="bg-background flex h-full min-h-0 min-w-0 flex-1 flex-col"
-                      >
-                        {canvas}
-                      </main>
-                    </Panel>
-
-                    <ResizeHandle direction="horizontal" label="Resize canvas and inspector" />
-
-                    <Panel
-                      panelRef={rightInspectorPanelRef}
-                      id="app-shell-right-inspector-panel"
-                      collapsible
-                      defaultSize={`${initial.inspector}%`}
-                      collapsedSize="0%"
-                      minSize="18%"
-                      maxSize="45%"
-                      className="flex min-w-0 flex-col"
-                    >
-                      <aside
-                        aria-label="Inspector"
-                        data-testid="app-shell-right-inspector"
-                        data-collapsed={inspectorVisible ? 'false' : 'true'}
-                        className={cn(
-                          'flex h-full min-h-0 min-w-0 flex-col',
-                          'border-border bg-background border-l',
-                        )}
-                      >
-                        {/* Per spike finding (b), gate children behind the
-                          visibility predicate. When inspectorVisible is
-                          true but no rightInspector content was supplied
-                          AND no element is selected, render an
-                          EmptyState (the F-DESIGN-2 "manually opened
-                          with no selection" case). */}
-                        {inspectorVisible
-                          ? (rightInspector ?? (
-                              <EmptyState
-                                icon={<CursorIcon />}
-                                title="Nothing selected"
-                                description="Select an element on the canvas or a row in the data grid to inspect its properties."
-                                emptyStateKey="app-shell-right-inspector"
-                              />
-                            ))
-                          : null}
-                      </aside>
-                    </Panel>
-                  </Group>
+                    {canvas}
+                  </main>
                 </Panel>
 
-                <ResizeHandle direction="vertical" label="Resize bottom drawer" />
+                <ResizeHandle direction="horizontal" label="Resize canvas and inspector" />
 
                 <Panel
-                  panelRef={bottomDrawerPanelRef}
-                  id="app-shell-bottom-drawer-panel"
+                  panelRef={rightInspectorPanelRef}
+                  id={PANEL.inspector}
                   collapsible
-                  // Collapsed, it is as high as its tab strip (KTD-7: a
-                  // 32px collapsed bar), whatever that is in percent of
-                  // the column at the height the window has.
-                  collapsedSize={`${drawerSizes.strip}%`}
-                  // Open, it is never lower than a table needs for its
-                  // bar, its heading and a row or two: dragged below
-                  // that it snaps down to its tab strip.
-                  minSize={`${drawerSizes.openMin}%`}
-                  // No higher than leaves the diagram its least height.
-                  maxSize={`${Math.min(75, 100 - drawerSizes.canvasMin)}%`}
+                  defaultSize={`${initial.topRow[PANEL.inspector]}%`}
+                  collapsedSize="0%"
+                  minSize="18%"
+                  maxSize="45%"
                   className="flex min-w-0 flex-col"
                 >
-                  <section
-                    ref={setDrawerSection}
-                    aria-label="Bottom drawer"
-                    data-testid="app-shell-bottom-drawer"
-                    data-collapsed={bottomDrawerCollapsed ? 'true' : 'false'}
+                  <aside
+                    aria-label="Inspector"
+                    data-testid="app-shell-right-inspector"
+                    data-collapsed={inspectorVisible ? 'false' : 'true'}
                     className={cn(
                       'flex h-full min-h-0 min-w-0 flex-col',
-                      'border-border bg-background border-t',
+                      'border-border bg-background border-l',
                     )}
                   >
-                    {bottomDrawer}
-                  </section>
+                    {/* Per spike finding (b), gate children behind the
+                      visibility predicate. When inspectorVisible is
+                      true but no rightInspector content was supplied
+                      AND no element is selected, render an
+                      EmptyState (the F-DESIGN-2 "manually opened
+                      with no selection" case). */}
+                    {inspectorVisible
+                      ? (rightInspector ?? (
+                          <EmptyState
+                            icon={<CursorIcon />}
+                            title="Nothing selected"
+                            description="Select an element on the canvas or a row in the data grid to inspect its properties."
+                            emptyStateKey="app-shell-right-inspector"
+                          />
+                        ))
+                      : null}
+                  </aside>
                 </Panel>
               </Group>
             </Panel>
-          </Group>
 
-          {/* dockOverlay slot — absolutely positioned over the canvas +
-            inspector + drawer column. The wrapper is
-            ``pointer-events-none`` so it never intercepts clicks on the
-            chassis surfaces below; each overlay child (AddElementPanel,
-            ConvergenceErrorPanel, NumericalErrorBanner) is responsible
-            for adding ``pointer-events-auto`` on its own visible panel
-            when it actually renders content. Children that return null
-            when inactive contribute zero hit-testing surface. */}
-          {dockOverlay ? (
-            <div
-              data-testid="app-shell-dock-overlay"
-              className="pointer-events-none absolute inset-0"
+            <ResizeHandle direction="vertical" label="Resize bottom drawer" />
+
+            <Panel
+              panelRef={bottomDrawerPanelRef}
+              id={PANEL.drawer}
+              collapsible
+              // Collapsed, it is as high as its tab strip (KTD-7: a
+              // 32px collapsed bar), whatever that is in percent of
+              // the column at the height the window has.
+              collapsedSize={`${drawerSizes.strip}%`}
+              // Open, it is never lower than a table needs for its
+              // bar, its heading and a row or two: dragged below
+              // that it snaps down to its tab strip.
+              minSize={`${drawerSizes.openMin}%`}
+              // No higher than leaves the diagram its least height.
+              maxSize={`${Math.min(75, 100 - drawerSizes.canvasMin)}%`}
+              className="flex min-w-0 flex-col"
             >
-              {dockOverlay}
-            </div>
-          ) : null}
+              <section
+                ref={setDrawerSection}
+                aria-label="Bottom drawer"
+                data-testid="app-shell-bottom-drawer"
+                data-collapsed={bottomDrawerCollapsed ? 'true' : 'false'}
+                className={cn(
+                  'flex h-full min-h-0 min-w-0 flex-col',
+                  'border-border bg-background border-t',
+                )}
+              >
+                {bottomDrawer}
+              </section>
+            </Panel>
+          </Group>
+        </Panel>
+      </Group>
+
+      {/* dockOverlay slot — absolutely positioned over the canvas +
+        inspector + drawer column. The wrapper is
+        ``pointer-events-none`` so it never intercepts clicks on the
+        chassis surfaces below; each overlay child (AddElementPanel,
+        ConvergenceErrorPanel, NumericalErrorBanner) is responsible
+        for adding ``pointer-events-auto`` on its own visible panel
+        when it actually renders content. Children that return null
+        when inactive contribute zero hit-testing surface. */}
+      {dockOverlay ? (
+        <div data-testid="app-shell-dock-overlay" className="pointer-events-none absolute inset-0">
+          {dockOverlay}
         </div>
-      )}
-
-      {modal}
-
-      {/* Global toast surface (v2.0 polish Unit 3). */}
-      <Toaster />
-
-      {/* Global command palette (v2.0 polish Unit 9) and keyboard-shortcut
-          cheatsheet (v2.0 polish Unit 10). */}
-      <GlobalOverlays />
-
-      {/* Per-command shortcut registrar (v2.0 polish Unit 10). */}
-      <GlobalShortcuts />
-
-      {/* First-run coach (v2.0 polish Unit 13). */}
-      <FirstRunCoach />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * The width a panel the store has open starts at: the width the library
+ * kept for it, or the width it was last open at where the library kept
+ * none, or kept the panel shut (it was shown from the results view, while
+ * its group was not drawn).
+ */
+function openWidth(kept: number | undefined, lastOpen: number): number {
+  return kept !== undefined && kept > 0 ? kept : lastOpen;
 }
 
 /**
@@ -593,15 +678,23 @@ function GlobalOverlays() {
  * Imperatively collapse/expand a panel handle, swallowing the throw the
  * lib raises when called before its group has a layout (it has none
  * until it has been measured). That race happens in jsdom (where layout
- * never resolves) and on the very first mount tick in production.
+ * never resolves) and on the very first mount tick in production. A
+ * panel that is expanded is resized to `openTo`, in percent of its group:
+ * the size it was last open at. The lib keeps that only while the group is
+ * mounted, and expands a panel it has not seen open to its ``minSize``.
  */
-function syncPanel(panel: PanelImperativeHandle | null, shouldBeCollapsed: boolean): void {
+function syncPanel(
+  panel: PanelImperativeHandle | null,
+  shouldBeCollapsed: boolean,
+  openTo: number,
+): void {
   if (!panel) return;
   try {
     if (shouldBeCollapsed && !panel.isCollapsed()) {
       panel.collapse();
     } else if (!shouldBeCollapsed && panel.isCollapsed()) {
       panel.expand();
+      panel.resize(`${openTo}%`);
     }
   } catch {
     // Pre-layout call. The group picks up its layout on first paint,

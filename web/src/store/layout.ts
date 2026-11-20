@@ -142,6 +142,16 @@ export interface LayoutState {
   toggleLeftSidebar: () => void;
 
   /**
+   * The width the left sidebar was last open at, as % of the outer group of
+   * panels: what it opens to again. The library keeps the layout of the
+   * group, which says nothing of it while the sidebar is shut, and the size
+   * it would open to only until the page is left. Updated on the group's
+   * ``onLayoutChanged`` while the sidebar is open.
+   */
+  leftSidebarWidthPct: number;
+  setLeftSidebarWidthPct: (pct: number) => void;
+
+  /**
    * The tab the left sidebar shows. A preference of the user, kept across
    * reloads: someone building a system leaves it on Components, someone
    * running studies on Project.
@@ -176,9 +186,13 @@ export interface LayoutState {
   setRightInspectorCollapsed: (collapsed: boolean) => void;
   toggleRightInspector: () => void;
 
-  /** Right inspector expanded width in CSS pixels. Default 320. */
-  rightInspectorWidthPx: number;
-  setRightInspectorWidthPx: (px: number) => void;
+  /**
+   * The width the right inspector was last open at, as % of the top-row
+   * group of panels: what it opens to again, as ``leftSidebarWidthPct``
+   * is for the sidebar.
+   */
+  rightInspectorWidthPct: number;
+  setRightInspectorWidthPct: (pct: number) => void;
 
   /** Active outer tab in the BottomDrawer tab strip. */
   activeBottomDrawerTab: BottomDrawerTab;
@@ -275,11 +289,12 @@ export interface LayoutState {
 export const DEFAULT_LAYOUT: Pick<
   LayoutState,
   | 'leftSidebarCollapsed'
+  | 'leftSidebarWidthPct'
   | 'leftSidebarTab'
   | 'bottomDrawerCollapsed'
   | 'bottomDrawerHeightPct'
   | 'rightInspectorCollapsed'
-  | 'rightInspectorWidthPx'
+  | 'rightInspectorWidthPct'
   | 'activeBottomDrawerTab'
   | 'activeAnalysisSubTab'
   | 'drawerHasUnreadResults'
@@ -292,12 +307,15 @@ export const DEFAULT_LAYOUT: Pick<
   | 'drawerLoweredForDiagram'
 > = {
   leftSidebarCollapsed: false,
+  // The widths the shell gives the sidebar and the inspector (this and
+  // `rightInspectorWidthPct`) until they have been open at others.
+  leftSidebarWidthPct: 20,
   // Project first: a first-time user opens a case before adding to one.
   leftSidebarTab: 'project',
   bottomDrawerCollapsed: false,
   bottomDrawerHeightPct: 35,
   rightInspectorCollapsed: false,
-  rightInspectorWidthPx: 320,
+  rightInspectorWidthPct: 25,
   activeBottomDrawerTab: 'buses',
   // Default to the Plot sub-tab: after a TDS run (the most common reason a
   // user opens Results), the time-series plots are what they came for —
@@ -323,6 +341,7 @@ export const useLayoutStore = create<LayoutState>()(
       setLeftSidebarCollapsed: (collapsed) => set({ leftSidebarCollapsed: collapsed }),
       toggleLeftSidebar: () =>
         set((state) => ({ leftSidebarCollapsed: !state.leftSidebarCollapsed })),
+      setLeftSidebarWidthPct: (pct) => set({ leftSidebarWidthPct: pct }),
 
       setLeftSidebarTab: (tab) => set({ leftSidebarTab: tab }),
       showLeftSidebarTab: (tab) => set({ leftSidebarTab: tab, leftSidebarCollapsed: false }),
@@ -337,7 +356,7 @@ export const useLayoutStore = create<LayoutState>()(
       toggleRightInspector: () =>
         set((state) => ({ rightInspectorCollapsed: !state.rightInspectorCollapsed })),
 
-      setRightInspectorWidthPx: (px) => set({ rightInspectorWidthPx: px }),
+      setRightInspectorWidthPct: (pct) => set({ rightInspectorWidthPct: pct }),
 
       setActiveBottomDrawerTab: (tab) => set({ activeBottomDrawerTab: tab }),
       setActiveAnalysisSubTab: (sub) => set({ activeAnalysisSubTab: sub }),
@@ -372,11 +391,12 @@ export const useLayoutStore = create<LayoutState>()(
       // bit that should not survive a reload).
       partialize: (state) => ({
         leftSidebarCollapsed: state.leftSidebarCollapsed,
+        leftSidebarWidthPct: state.leftSidebarWidthPct,
         leftSidebarTab: state.leftSidebarTab,
         bottomDrawerCollapsed: state.bottomDrawerCollapsed,
         bottomDrawerHeightPct: state.bottomDrawerHeightPct,
         rightInspectorCollapsed: state.rightInspectorCollapsed,
-        rightInspectorWidthPx: state.rightInspectorWidthPx,
+        rightInspectorWidthPct: state.rightInspectorWidthPct,
         activeBottomDrawerTab: state.activeBottomDrawerTab,
         activeAnalysisSubTab: state.activeAnalysisSubTab,
         drawerHasUnreadResults: state.drawerHasUnreadResults,

@@ -49,11 +49,12 @@ describe('useLayoutStore — defaults', () => {
   it('exposes the v3 defaults out of the box', () => {
     const state = useLayoutStore.getState();
     expect(state.leftSidebarCollapsed).toBe(false);
+    expect(state.leftSidebarWidthPct).toBe(20);
     expect(state.leftSidebarTab).toBe('project');
     expect(state.bottomDrawerCollapsed).toBe(false);
     expect(state.bottomDrawerHeightPct).toBe(35);
     expect(state.rightInspectorCollapsed).toBe(false);
-    expect(state.rightInspectorWidthPx).toBe(320);
+    expect(state.rightInspectorWidthPct).toBe(25);
     expect(state.activeBottomDrawerTab).toBe('buses');
     expect(state.activeAnalysisSubTab).toBe('plot');
     expect(state.drawerHasUnreadResults).toBe(false);
@@ -162,9 +163,14 @@ describe('useLayoutStore — actions', () => {
     expect(useLayoutStore.getState().rightInspectorCollapsed).toBe(false);
   });
 
-  it('setRightInspectorWidthPx writes through', () => {
-    useLayoutStore.getState().setRightInspectorWidthPx(420);
-    expect(useLayoutStore.getState().rightInspectorWidthPx).toBe(420);
+  it('setLeftSidebarWidthPct writes through', () => {
+    useLayoutStore.getState().setLeftSidebarWidthPct(28.5);
+    expect(useLayoutStore.getState().leftSidebarWidthPct).toBe(28.5);
+  });
+
+  it('setRightInspectorWidthPct writes through', () => {
+    useLayoutStore.getState().setRightInspectorWidthPct(32);
+    expect(useLayoutStore.getState().rightInspectorWidthPct).toBe(32);
   });
 
   it('setActiveBottomDrawerTab swaps the active tab', () => {
@@ -249,6 +255,18 @@ describe('useLayoutStore — persistence', () => {
     expect(parsed.state.leftSidebarCollapsed).toBe(true);
     expect(parsed.state.bottomDrawerHeightPct).toBe(50);
     expect(parsed.state.activeBottomDrawerTab).toBe('analysis');
+  });
+
+  it('persists the widths the sidebar and the inspector were last open at', async () => {
+    // What they open to again after a reload: the library keeps no size
+    // for a panel that was shut.
+    useLayoutStore.getState().setLeftSidebarWidthPct(31.5);
+    useLayoutStore.getState().setRightInspectorWidthPct(27);
+    await Promise.resolve();
+    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> };
+    expect(parsed.state.leftSidebarWidthPct).toBe(31.5);
+    expect(parsed.state.rightInspectorWidthPct).toBe(27);
   });
 
   it('persists resultsViewActive to localStorage', async () => {

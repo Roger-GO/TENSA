@@ -1,5 +1,6 @@
 import {
   act,
+  fireEvent,
   render as rtlRender,
   screen,
   within,
@@ -363,6 +364,184 @@ describe('AppShell — layout state persistence', () => {
     );
     render(<AppShell />);
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('buses');
+  });
+});
+
+/**
+ * Gives each panel a size, so that the library lays out its groups as it
+ * does in a browser: jsdom lays nothing out, and the library puts off a
+ * group it cannot measure, whose panels then show the layout they were
+ * given while their handles and dividers do nothing. What a panel reports
+ * need not follow its share: the library sizes the panels in percent of
+ * what they add up to. The dividers report the same, so that the library,
+ * which orders a group's children by where they are and then by their
+ * size, finds them in the order they are in the document.
+ */
+function layOutPanels(): void {
+  const size = (element: Element): number =>
+    element.hasAttribute('data-panel') || element.hasAttribute('data-separator') ? 500 : 0;
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return size(this);
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return size(this);
+  });
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    return new DOMRect(0, 0, size(this), size(this));
+  });
+}
+
+/** How much of its group the panel `id` takes, in percent, as its flex-grow says it. */
+function shareOf(id: string): number {
+  return Number(document.getElementById(id)?.style.flexGrow);
+}
+
+/** Leaves the panels for the results view and comes back to them. */
+function throughResultsView(): void {
+  act(() => useLayoutStore.getState().setResultsViewActive(true));
+  expect(screen.queryByTestId('app-shell-bottom-drawer')).not.toBeInTheDocument();
+  act(() => useLayoutStore.getState().setResultsViewActive(false));
+}
+
+/** Moves the divider called `name` by one step of the keyboard, `key` an arrow. */
+function step(name: string, key: string): void {
+  fireEvent.keyDown(screen.getByRole('separator', { name }), { key });
+}
+
+describe('AppShell — the panels after the results view', () => {
+  it('opens the drawer at the height it was dragged to', () => {
+    layOutPanels();
+    useLayoutStore.setState({ bottomDrawerHeightPct: 30 });
+    render(<AppShell />);
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(30);
+    // Dragged up two steps of the keyboard, which the store keeps.
+    step('Resize bottom drawer', 'ArrowUp');
+    step('Resize bottom drawer', 'ArrowUp');
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(40);
+    expect(useLayoutStore.getState().bottomDrawerHeightPct).toBe(40);
+
+    throughResultsView();
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(40);
+    expect(useLayoutStore.getState().bottomDrawerHeightPct).toBe(40);
+  });
+
+  it('opens a drawer that was opened after the page loaded, and does not shut it again', () => {
+    layOutPanels();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true, bottomDrawerHeightPct: 45 });
+    render(<AppShell />);
+    act(() => useLayoutStore.getState().toggleBottomDrawer());
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(45);
+
+    throughResultsView();
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(45);
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(false);
+    expect(screen.getByTestId('app-shell-bottom-drawer').dataset.collapsed).toBe('false');
+  });
+
+  it('opens the drawer at its tab strip when it was shut in the results view', () => {
+    layOutPanels();
+    render(<AppShell />);
+    act(() => useLayoutStore.getState().setResultsViewActive(true));
+    act(() => useLayoutStore.getState().toggleBottomDrawer());
+    act(() => useLayoutStore.getState().setResultsViewActive(false));
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(bottomDrawerSizes(0).strip);
+    expect(useLayoutStore.getState().bottomDrawerCollapsed).toBe(true);
+  });
+
+  it('hides the sidebar and the inspector that were hidden in the results view', () => {
+    layOutPanels();
+    render(<AppShell leftSidebar={<span>case-nav</span>} />);
+    act(() => useLayoutStore.getState().setResultsViewActive(true));
+    act(() => {
+      useLayoutStore.getState().toggleLeftSidebar();
+      useLayoutStore.getState().toggleRightInspector();
+    });
+    act(() => useLayoutStore.getState().setResultsViewActive(false));
+    expect(shareOf('app-shell-right-side-panel')).toBe(100);
+    expect(shareOf('app-shell-canvas-panel')).toBe(100);
+    expect(screen.getByTestId('app-shell-left-sidebar').dataset.collapsed).toBe('true');
+    expect(screen.getByTestId('app-shell-right-inspector').dataset.collapsed).toBe('true');
+  });
+
+  it('shows the sidebar and the inspector that were shown in the results view, at their widths', () => {
+    layOutPanels();
+    useLayoutStore.setState({
+      leftSidebarCollapsed: true,
+      leftSidebarWidthPct: 30,
+      rightInspectorCollapsed: true,
+      rightInspectorWidthPct: 35,
+    });
+    render(<AppShell leftSidebar={<span>case-nav</span>} />);
+    act(() => useLayoutStore.getState().setResultsViewActive(true));
+    act(() => {
+      useLayoutStore.getState().toggleLeftSidebar();
+      useLayoutStore.getState().toggleRightInspector();
+    });
+    act(() => useLayoutStore.getState().setResultsViewActive(false));
+    expect(shareOf('app-shell-left-sidebar-panel')).toBe(30);
+    expect(shareOf('app-shell-right-inspector-panel')).toBe(35);
+    expect(screen.getByText('case-nav')).toBeInTheDocument();
+    expect(screen.getByText('Nothing selected')).toBeInTheDocument();
+  });
+});
+
+describe('AppShell — the width a hidden panel opens to', () => {
+  it('keeps the width the sidebar and the inspector were last open at', () => {
+    layOutPanels();
+    render(<AppShell />);
+    step('Resize left sidebar', 'ArrowRight');
+    step('Resize canvas and inspector', 'ArrowLeft');
+    expect(useLayoutStore.getState().leftSidebarWidthPct).toBe(25);
+    expect(useLayoutStore.getState().rightInspectorWidthPct).toBe(30);
+    // Hidden, they are no width to come back to.
+    act(() => {
+      useLayoutStore.getState().toggleLeftSidebar();
+      useLayoutStore.getState().toggleRightInspector();
+    });
+    expect(shareOf('app-shell-right-side-panel')).toBe(100);
+    expect(useLayoutStore.getState().leftSidebarWidthPct).toBe(25);
+    expect(useLayoutStore.getState().rightInspectorWidthPct).toBe(30);
+  });
+
+  it('opens a sidebar and an inspector hidden before a reload at the width they were open at', () => {
+    layOutPanels();
+    // As the library keeps the layouts of their groups: with each panel shut.
+    window.localStorage.setItem(
+      'react-resizable-panels:tensa:layout-v1:outer',
+      JSON.stringify({ 'app-shell-left-sidebar-panel': 0, 'app-shell-right-side-panel': 100 }),
+    );
+    window.localStorage.setItem(
+      'react-resizable-panels:tensa:layout-v1:top-row',
+      JSON.stringify({ 'app-shell-canvas-panel': 100, 'app-shell-right-inspector-panel': 0 }),
+    );
+    useLayoutStore.setState({
+      leftSidebarCollapsed: true,
+      leftSidebarWidthPct: 32.5,
+      rightInspectorCollapsed: true,
+      rightInspectorWidthPct: 27.5,
+    });
+    render(<AppShell />);
+    expect(shareOf('app-shell-right-side-panel')).toBe(100);
+    expect(shareOf('app-shell-canvas-panel')).toBe(100);
+    act(() => {
+      useLayoutStore.getState().toggleLeftSidebar();
+      useLayoutStore.getState().toggleRightInspector();
+    });
+    expect(shareOf('app-shell-left-sidebar-panel')).toBe(32.5);
+    expect(shareOf('app-shell-right-inspector-panel')).toBe(27.5);
+  });
+
+  it('opens a drawer shut before a reload at the height it was open at', () => {
+    layOutPanels();
+    useLayoutStore.setState({ bottomDrawerCollapsed: true, bottomDrawerHeightPct: 50 });
+    render(<AppShell />);
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(bottomDrawerSizes(0).strip);
+    act(() => useLayoutStore.getState().toggleBottomDrawer());
+    expect(shareOf('app-shell-bottom-drawer-panel')).toBe(50);
   });
 });
 
