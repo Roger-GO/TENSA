@@ -5,8 +5,9 @@
  * What this checks, against the real bundle served by a real `tensa serve`:
  *
  * - the first load fetches the entry chunk, the chunk of what it shares with
- *   the panels that come later, and React, and none of those panels (the
- *   diagram, the Analysis tab, the Arrow decoder, the command palette);
+ *   the panels that come later, React and the library the shell lays its
+ *   panels out with, and none of those panels (the diagram, the Analysis tab,
+ *   the Arrow decoder, the command palette);
  * - the diagram's chunk arrives when a case is loaded, with the chunk of the
  *   library it draws with (React Flow), and the Analysis tab's
  *   when that tab is opened, and the views inside the tab (EIG, CPF, SE) wait
@@ -81,7 +82,9 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   await expect(caseRow).toBeVisible();
 
   // ---- first load: the shell and React, nothing that comes later -----------
-  expect([...assets.keys()]).toEqual(expect.arrayContaining(['index', 'shared', 'vendor-react']));
+  expect([...assets.keys()]).toEqual(
+    expect.arrayContaining(['index', 'shared', 'vendor-react', 'vendor-panels']),
+  );
   for (const later of [
     'SldCanvas',
     'vendor-flow',
@@ -150,6 +153,7 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
     'index',
     'shared',
     'vendor-react',
+    'vendor-panels',
     'SldCanvas',
     'vendor-flow',
     'AnalysisTab',

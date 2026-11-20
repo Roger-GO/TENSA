@@ -158,9 +158,10 @@ export interface LayoutState {
 
   /**
    * Bottom drawer expanded height as % of the right-side vertical
-   * PanelGroup. Persisted so a user who drags it to 50% sees 50% on
-   * reload. Updated on PanelGroup ``onLayout`` (debounce handled by the
-   * persist middleware's natural batching).
+   * group of panels. Persisted so a user who drags it to 50% sees 50% on
+   * reload: the group opens at it. Updated on the group's
+   * ``onLayoutChange`` (debounce handled by the persist middleware's
+   * natural batching).
    */
   bottomDrawerHeightPct: number;
   setBottomDrawerHeightPct: (pct: number) => void;

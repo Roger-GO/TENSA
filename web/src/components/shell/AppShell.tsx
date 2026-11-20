@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { ImperativePanelHandle } from 'react-resizable-panels';
+import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
+import type { Layout, PanelImperativeHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/cn';
 import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
 import { bottomDrawerSizes, type DrawerSizes } from './drawerSizes';
+import { panelLayoutStorage } from './panelLayoutStorage';
 import { FirstRunCoach } from './FirstRunCoach';
 import { TopBar } from './TopBar';
 import { Toaster } from '@/components/ui/Toaster';
@@ -46,14 +47,19 @@ const ShortcutCheatsheet = lazyNamed(
  *
  * Implementation notes:
  *
- * - Three nested ``PanelGroup``s per the v3 plan KTD-1: outer horizontal
- *   (LeftSidebar | RightSide); right-side vertical (TopRow | BottomDrawer);
- *   top-row horizontal (Canvas | RightInspector).
+ * - Three nested ``Group``s of ``react-resizable-panels`` per the v3 plan
+ *   KTD-1: outer horizontal (LeftSidebar | RightSide); right-side vertical
+ *   (TopRow | BottomDrawer); top-row horizontal (Canvas | RightInspector).
+ *   Sizes are given in percent of the group (``"20%"``): a bare number is
+ *   pixels to the library.
  * - Layout state (collapse + sizes + active tabs) lives on
  *   ``useLayoutStore`` (NOT ``useUiStore``, per F-FEAS-1 resolution) and
  *   persists to localStorage via the persist middleware. Each panel's
  *   imperative handle is wired by effect to the store value so the
- *   layout state IS the source of truth.
+ *   layout state IS the source of truth. The widths of the sidebar and
+ *   the inspector the user dragged to are kept by the library
+ *   (``useDefaultLayout``, under the keys they always had); the height of
+ *   the drawer is the store's, which the drawer's group starts from.
  * - Inspector visibility model: per the F-DESIGN-2 resolution, the
  *   inspector panel collapses to size=0 when no element is selected AND
  *   the user explicitly toggled it closed. The user can manually open
@@ -74,7 +80,8 @@ const ShortcutCheatsheet = lazyNamed(
  *
  * Per the F-DESIGN-3 resolution, the chassis was first wired with simple
  * placeholder content to exercise four edge cases against
- * ``react-resizable-panels``. Findings:
+ * ``react-resizable-panels``. Findings (on version 2 of it, whose
+ * ``PanelGroup`` is ``Group`` in version 4; they still hold):
  *
  *  (a) Imperative resize collision (``panelRef.expand()`` immediately
  *      followed by ``panelRef.resize(40)`` in the same tick): the
@@ -216,9 +223,35 @@ export function AppShell({
   // explicitly opened the panel via the (Unit 2) toggle.
   const inspectorVisible = selectedNodeId !== null || !rightInspectorCollapsed;
 
-  const leftSidebarPanelRef = useRef<ImperativePanelHandle>(null);
-  const rightInspectorPanelRef = useRef<ImperativePanelHandle>(null);
-  const bottomDrawerPanelRef = useRef<ImperativePanelHandle>(null);
+  const leftSidebarPanelRef = useRef<PanelImperativeHandle>(null);
+  const rightInspectorPanelRef = useRef<PanelImperativeHandle>(null);
+  const bottomDrawerPanelRef = useRef<PanelImperativeHandle>(null);
+
+  // The widths the sidebar and the inspector were dragged to, as the
+  // library keeps them, under the keys of the groups' ``autoSaveId`` of
+  // version 2 of it, whose layouts it reads.
+  const outerLayout = useDefaultLayout({
+    id: 'tensa:layout-v1:outer',
+    storage: panelLayoutStorage,
+  });
+  const topRowLayout = useDefaultLayout({
+    id: 'tensa:layout-v1:top-row',
+    storage: panelLayoutStorage,
+  });
+  // What the panels open at, for a group the library keeps no layout of.
+  // Taken once: a panel whose size props change is registered with its
+  // group again, and the drawer's height changes on every step of a drag.
+  // The drawer starts at the height the store keeps, or at its tab strip.
+  const [initial] = useState(() => {
+    const drawer = bottomDrawerCollapsed ? bottomDrawerSizes(0).strip : bottomDrawerHeightPct;
+    return {
+      inspector: inspectorVisible ? 25 : 0,
+      rightSide: {
+        'app-shell-top-row-panel': 100 - drawer,
+        'app-shell-bottom-drawer-panel': drawer,
+      } satisfies Layout,
+    };
+  });
 
   // The column the drawer shares with the diagram, measured: the group of
   // panels the drawer is in. The panels are sized in percent of it, and the
@@ -233,7 +266,7 @@ export function AppShell({
   // the drawer again (below).
   const drawerSizesRef = useRef<DrawerSizes>(bottomDrawerSizes(0));
   useLayoutEffect(() => {
-    const column = drawerSection?.closest<HTMLElement>('[data-panel-group]');
+    const column = drawerSection?.closest<HTMLElement>('[data-group]');
     if (!column) return;
     const measure = (): void => {
       const height = column.clientHeight;
@@ -248,14 +281,13 @@ export function AppShell({
   }, [drawerSection]);
   const drawerSizes = useMemo(() => bottomDrawerSizes(columnHeight), [columnHeight]);
 
-  // First-mount guard. The PanelGroup picks up ``defaultSize`` on first
-  // paint, which already reflects the persisted state via the
-  // ``defaultSize`` prop derived from the layout store. Calling the
-  // imperative API on first mount would throw "Panel size not found"
-  // (the lib registers panels async) AND would do redundant work.
-  // Subsequent store-driven updates do need the imperative call so
-  // toggle buttons can flip the panel without re-rendering the
-  // PanelGroup with a new ``defaultSize`` (which would lose the user's
+  // First-mount guard. The groups pick up their layouts on first paint,
+  // which already reflect the persisted state (the library's, and the
+  // drawer's from the layout store). Calling the imperative API on first
+  // mount would throw (the lib has no layout for a group it has not
+  // measured yet) AND would do redundant work. Subsequent store-driven
+  // updates do need the imperative call so toggle buttons can flip the
+  // panel without mounting the group again (which would lose the user's
   // post-mount drag adjustments).
   const firstMountRef = useRef(true);
 
@@ -278,7 +310,7 @@ export function AppShell({
   // Per spike finding (a): expand() then resize() in the same tick
   // works without a setTimeout workaround; we expand to a width derived
   // from the persisted px preference (translated to a % of the top-row
-  // horizontal PanelGroup at hydrate time).
+  // horizontal group at hydrate time).
   useEffect(() => {
     if (firstMountRef.current) return;
     // inspectorVisible === true means we want the panel expanded, so
@@ -321,20 +353,20 @@ export function AppShell({
       ) : (
         <div className="relative flex min-h-0 flex-1">
           {/* Outer horizontal split: LeftSidebar | RightSide */}
-          <PanelGroup
-            direction="horizontal"
-            autoSaveId="tensa:layout-v1:outer"
+          <Group
+            orientation="horizontal"
+            defaultLayout={outerLayout.defaultLayout}
+            onLayoutChanged={outerLayout.onLayoutChanged}
             className="flex h-full w-full"
           >
             <Panel
-              ref={leftSidebarPanelRef}
+              panelRef={leftSidebarPanelRef}
               id="app-shell-left-sidebar-panel"
-              order={1}
               collapsible
-              defaultSize={20}
-              collapsedSize={0}
-              minSize={15}
-              maxSize={40}
+              defaultSize="20%"
+              collapsedSize="0%"
+              minSize="15%"
+              maxSize="40%"
               className="flex min-w-0 flex-col"
             >
               <aside
@@ -359,21 +391,20 @@ export function AppShell({
 
             <Panel
               id="app-shell-right-side-panel"
-              order={2}
-              defaultSize={80}
-              minSize={60}
+              defaultSize="80%"
+              minSize="60%"
               className="flex min-w-0 flex-col"
             >
               {/* Right-side vertical split: TopRow | BottomDrawer */}
-              <PanelGroup
-                direction="vertical"
-                autoSaveId="tensa:layout-v1:right-side"
+              <Group
+                orientation="vertical"
+                defaultLayout={initial.rightSide}
                 className="flex h-full w-full"
-                onLayout={(sizes) => {
-                  // The drawer is the second panel (index 1). Persist its
-                  // size whenever the user drags. The persist middleware
-                  // batches writes so this is safe per-pointer-move.
-                  const drawerPct = sizes[1];
+                onLayoutChange={(layout) => {
+                  // Persist the drawer's size whenever the user drags. The
+                  // persist middleware batches writes so this is safe
+                  // per-pointer-move.
+                  const drawerPct = layout['app-shell-bottom-drawer-panel'];
                   if (typeof drawerPct !== 'number') return;
                   // Collapsed is what the drawer is while it is down at its
                   // tab strip, however it got there: dragged down (it snaps
@@ -395,24 +426,22 @@ export function AppShell({
               >
                 <Panel
                   id="app-shell-top-row-panel"
-                  order={1}
-                  defaultSize={100 - bottomDrawerHeightPct}
                   // The diagram keeps a height it can be used at, in pixels
                   // (`CANVAS_MIN_PX`), whatever the drawer was left at.
-                  minSize={drawerSizes.canvasMin}
+                  minSize={`${drawerSizes.canvasMin}%`}
                   className="flex min-w-0 flex-col"
                 >
                   {/* Top-row horizontal split: Canvas | RightInspector */}
-                  <PanelGroup
-                    direction="horizontal"
-                    autoSaveId="tensa:layout-v1:top-row"
+                  <Group
+                    orientation="horizontal"
+                    defaultLayout={topRowLayout.defaultLayout}
+                    onLayoutChanged={topRowLayout.onLayoutChanged}
                     className="flex h-full w-full"
                   >
                     <Panel
                       id="app-shell-canvas-panel"
-                      order={1}
-                      defaultSize={75}
-                      minSize={30}
+                      defaultSize="75%"
+                      minSize="30%"
                       className="flex min-w-0 flex-col"
                     >
                       <main
@@ -427,14 +456,13 @@ export function AppShell({
                     <ResizeHandle direction="horizontal" label="Resize canvas and inspector" />
 
                     <Panel
-                      ref={rightInspectorPanelRef}
+                      panelRef={rightInspectorPanelRef}
                       id="app-shell-right-inspector-panel"
-                      order={2}
                       collapsible
-                      defaultSize={inspectorVisible ? 25 : 0}
-                      collapsedSize={0}
-                      minSize={18}
-                      maxSize={45}
+                      defaultSize={`${initial.inspector}%`}
+                      collapsedSize="0%"
+                      minSize="18%"
+                      maxSize="45%"
                       className="flex min-w-0 flex-col"
                     >
                       <aside
@@ -464,27 +492,25 @@ export function AppShell({
                           : null}
                       </aside>
                     </Panel>
-                  </PanelGroup>
+                  </Group>
                 </Panel>
 
                 <ResizeHandle direction="vertical" label="Resize bottom drawer" />
 
                 <Panel
-                  ref={bottomDrawerPanelRef}
+                  panelRef={bottomDrawerPanelRef}
                   id="app-shell-bottom-drawer-panel"
-                  order={2}
                   collapsible
-                  defaultSize={bottomDrawerHeightPct}
                   // Collapsed, it is as high as its tab strip (KTD-7: a
                   // 32px collapsed bar), whatever that is in percent of
                   // the column at the height the window has.
-                  collapsedSize={drawerSizes.strip}
+                  collapsedSize={`${drawerSizes.strip}%`}
                   // Open, it is never lower than a table needs for its
                   // bar, its heading and a row or two: dragged below
                   // that it snaps down to its tab strip.
-                  minSize={drawerSizes.openMin}
+                  minSize={`${drawerSizes.openMin}%`}
                   // No higher than leaves the diagram its least height.
-                  maxSize={Math.min(75, 100 - drawerSizes.canvasMin)}
+                  maxSize={`${Math.min(75, 100 - drawerSizes.canvasMin)}%`}
                   className="flex min-w-0 flex-col"
                 >
                   <section
@@ -500,9 +526,9 @@ export function AppShell({
                     {bottomDrawer}
                   </section>
                 </Panel>
-              </PanelGroup>
+              </Group>
             </Panel>
-          </PanelGroup>
+          </Group>
 
           {/* dockOverlay slot — absolutely positioned over the canvas +
             inspector + drawer column. The wrapper is
@@ -564,24 +590,23 @@ function GlobalOverlays() {
 }
 
 /**
- * Imperatively collapse/expand a panel handle, swallowing the
- * "Panel size not found" throw the lib raises when called before the
- * panel registers with its PanelGroup. That race happens in jsdom (where
- * layout never resolves) and on the very first mount tick in production.
+ * Imperatively collapse/expand a panel handle, swallowing the throw the
+ * lib raises when called before its group has a layout (it has none
+ * until it has been measured). That race happens in jsdom (where layout
+ * never resolves) and on the very first mount tick in production.
  */
-function syncPanel(panel: ImperativePanelHandle | null, shouldBeCollapsed: boolean): void {
+function syncPanel(panel: PanelImperativeHandle | null, shouldBeCollapsed: boolean): void {
   if (!panel) return;
   try {
-    if (shouldBeCollapsed && panel.isExpanded()) {
+    if (shouldBeCollapsed && !panel.isCollapsed()) {
       panel.collapse();
     } else if (!shouldBeCollapsed && panel.isCollapsed()) {
       panel.expand();
     }
   } catch {
-    // Pre-registration call. The PanelGroup will pick up defaultSize on
-    // first paint, which already matches the persisted state via the
-    // ``defaultSize`` prop derived from the layout store. Subsequent
-    // store updates re-fire this effect once the panel is registered.
+    // Pre-layout call. The group picks up its layout on first paint,
+    // which already matches the persisted state. Subsequent store
+    // updates re-fire this effect once the group has a layout.
   }
 }
 
@@ -590,10 +615,10 @@ function syncPanel(panel: ImperativePanelHandle | null, shouldBeCollapsed: boole
  * can have: a drawer that was dragged down to its tab strip has no height
  * to come back to, and opens to about a third of its column.
  */
-function openEnough(panel: ImperativePanelHandle | null, sizes: DrawerSizes): void {
+function openEnough(panel: PanelImperativeHandle | null, sizes: DrawerSizes): void {
   if (!panel) return;
   try {
-    if (panel.getSize() <= sizes.openMin + 0.5) panel.resize(sizes.open);
+    if (panel.getSize().asPercentage <= sizes.openMin + 0.5) panel.resize(`${sizes.open}%`);
   } catch {
     // Not registered yet: see `syncPanel`.
   }
@@ -609,16 +634,22 @@ function ResizeHandle({ direction, label }: ResizeHandleProps) {
   // Mirrors the styling pattern from the v2 AppShell handles so the
   // new chassis reads as the same visual family. (The v2 RightDock
   // wrapper that originally seeded this style was retired in v3 Unit
-  // 15; the visual contract lives on here.)
+  // 15; the visual contract lives on here.) The lib takes the pointer a
+  // few pixels either side of the bar as well, and says so in
+  // ``data-separator`` (``hover``, then ``active`` while it is dragged).
+  // A double-click would set the panel beside it to its default size,
+  // past the store, which says whether the panel is open: it does
+  // nothing, as before.
   return (
-    <PanelResizeHandle
+    <Separator
       aria-label={label}
+      disableDoubleClick
       className={cn(
         'group relative flex shrink-0 items-center justify-center',
         direction === 'horizontal' ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize',
-        'bg-border hover:bg-primary/70',
+        'bg-border hover:bg-primary/70 data-[separator=hover]:bg-primary/70',
         'transition-colors duration-[var(--duration-fast)]',
-        'data-[resize-handle-state=drag]:bg-primary',
+        'data-[separator=active]:bg-primary',
         'focus-visible:bg-primary focus-visible:outline-none',
       )}
     >
@@ -629,13 +660,14 @@ function ResizeHandle({ direction, label }: ResizeHandleProps) {
           // Hover/drag grow the inner pill so the handle "lifts" toward
           // the user — the bar itself remains 4px so layout doesn't shift.
           direction === 'horizontal'
-            ? 'h-8 w-[2px] group-hover:h-12'
-            : 'h-[2px] w-8 group-hover:w-12',
+            ? 'h-8 w-[2px] group-hover:h-12 group-data-[separator=hover]:h-12'
+            : 'h-[2px] w-8 group-hover:w-12 group-data-[separator=hover]:w-12',
           'bg-muted-foreground/30 group-hover:bg-primary-foreground/90',
-          'group-data-[resize-handle-state=drag]:bg-primary-foreground',
+          'group-data-[separator=hover]:bg-primary-foreground/90',
+          'group-data-[separator=active]:bg-primary-foreground',
           'transition-all duration-[var(--duration-fast)]',
         )}
       />
-    </PanelResizeHandle>
+    </Separator>
   );
 }

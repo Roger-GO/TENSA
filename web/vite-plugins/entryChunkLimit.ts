@@ -15,8 +15,9 @@
  * puts what the first screen shares with a lazily loaded part in a chunk of
  * its own, and that chunk is as much a part of the first load as the entry.
  * A chunk the configuration splits apart to keep it cached across releases
- * (React's) is left out of the count: the limit is on the app and the
- * libraries that come and go with it.
+ * (React's, and that of the library the shell lays its panels out with) is
+ * left out of the count: the limit is on the app and the libraries that come
+ * and go with it.
  *
  * So the limit is a build error. When it trips, move the part that grew behind
  * a dynamic import (see `src/lib/lazyNamed.ts` and its uses in `src/App.tsx`);

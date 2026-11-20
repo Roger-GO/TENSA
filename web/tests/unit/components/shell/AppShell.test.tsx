@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { bottomDrawerSizes } from '@/components/shell/drawerSizes';
 import { DEFAULT_LAYOUT, LAYOUT_STORAGE_KEY, useLayoutStore } from '@/store/layout';
 import { useSldStore } from '@/store/sld';
 import { useCommandPaletteStore } from '@/store/commandPalette';
@@ -270,10 +271,61 @@ describe('AppShell — bottom drawer collapse', () => {
 describe('AppShell — layout state persistence', () => {
   it('hydrates default sizes from the layout store', () => {
     render(<AppShell />);
-    // The PanelGroups all carry the v1-namespaced autoSaveIds so
-    // post-Unit-1 dragging persists per-group.
-    const groups = document.querySelectorAll('[data-panel-group]');
+    // The three groups of panels: outer, right side and top row.
+    const groups = document.querySelectorAll('[data-group]');
     expect(groups.length).toBeGreaterThanOrEqual(3);
+  });
+
+  /** How much of its group the panel `id` takes, as its flex-grow says it in percent. */
+  function share(id: string): number {
+    return Number(document.getElementById(id)?.style.flexGrow);
+  }
+
+  it('opens the sidebar at the width it was dragged to, kept as version 2 of the library kept it', () => {
+    window.localStorage.setItem(
+      'react-resizable-panels:tensa:layout-v1:outer',
+      JSON.stringify({
+        'app-shell-left-sidebar-panel,app-shell-right-side-panel': {
+          expandToSizes: {},
+          layout: [30, 70],
+        },
+      }),
+    );
+    render(<AppShell />);
+    expect(share('app-shell-left-sidebar-panel')).toBe(30);
+    expect(share('app-shell-right-side-panel')).toBe(70);
+  });
+
+  it('opens the drawer at the height the layout store keeps, not one the library kept', () => {
+    // Version 2 of the library kept this group too, with the panels in the
+    // order of their names: read as version 4 reads it, the drawer would
+    // open at the diagram's height.
+    window.localStorage.setItem(
+      'react-resizable-panels:tensa:layout-v1:right-side',
+      JSON.stringify({
+        'app-shell-bottom-drawer-panel,app-shell-top-row-panel': {
+          expandToSizes: {},
+          layout: [80, 20],
+        },
+      }),
+    );
+    useLayoutStore.setState({ bottomDrawerHeightPct: 40, bottomDrawerCollapsed: false });
+    render(<AppShell />);
+    expect(share('app-shell-bottom-drawer-panel')).toBe(40);
+    expect(share('app-shell-top-row-panel')).toBe(60);
+  });
+
+  it('opens a drawer the store keeps shut at its tab strip', () => {
+    useLayoutStore.setState({ bottomDrawerHeightPct: 40, bottomDrawerCollapsed: true });
+    render(<AppShell />);
+    expect(share('app-shell-bottom-drawer-panel')).toBe(bottomDrawerSizes(0).strip);
+  });
+
+  it('is drawn when a layout the library kept is not JSON', () => {
+    window.localStorage.setItem('react-resizable-panels:tensa:layout-v1:top-row', 'not-json{');
+    window.localStorage.setItem('react-resizable-panels:tensa:layout-v1:outer', 'null');
+    render(<AppShell canvas={<span>canvas-content</span>} />);
+    expect(screen.getByText('canvas-content')).toBeInTheDocument();
   });
 
   it('rehydrates from a persisted localStorage payload', async () => {
@@ -311,6 +363,24 @@ describe('AppShell — layout state persistence', () => {
     );
     render(<AppShell />);
     expect(useLayoutStore.getState().activeBottomDrawerTab).toBe('buses');
+  });
+});
+
+describe('AppShell — dividers between the panels', () => {
+  it('can each be reached by the keyboard, and say what they resize and which way', () => {
+    render(<AppShell />);
+    const dividers = screen.getAllByRole('separator');
+    expect(dividers.map((d) => d.getAttribute('aria-label'))).toEqual([
+      'Resize left sidebar',
+      'Resize canvas and inspector',
+      'Resize bottom drawer',
+    ]);
+    expect(dividers.map((d) => d.getAttribute('aria-orientation'))).toEqual([
+      'vertical',
+      'vertical',
+      'horizontal',
+    ]);
+    for (const divider of dividers) expect(divider.tabIndex).toBe(0);
   });
 });
 

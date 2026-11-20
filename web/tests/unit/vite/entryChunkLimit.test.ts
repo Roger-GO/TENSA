@@ -214,19 +214,26 @@ describe('vite.config.ts', () => {
 
   // Everything above, and a build of today's bundle, passes with the plugin
   // left out of the configuration, so this reads the plugins a build runs.
-  it('holds the first load of a build to the limit, React apart', async () => {
+  it('holds the first load of a build to the limit, React and the panels apart', async () => {
     const config = await resolved();
     const wired = config.plugins.filter((plugin) => plugin.name === entryChunkLimit().name);
     expect(wired).toHaveLength(1);
     const plugin = wired[0]!;
-    // The name of React's chunk is the name of the group that takes React.
+    // The name of React's chunk is the name of the group that takes React,
+    // and so for the panels.
     const react = groupFor(groupsOf(config), moduleIn('react', 'index.js'));
     expect(react).toBeDefined();
+    const panels = groupFor(
+      groupsOf(config),
+      moduleIn('react-resizable-panels', 'dist/react-resizable-panels.js'),
+    );
+    expect(panels).toBeDefined();
     const bundle = (sharedBytes: number): Record<string, BundlePart> => ({
       entry: chunk('assets/index-abc.js', 300_000, true, {
-        imports: ['assets/react-abc.js', 'assets/shared-abc.js'],
+        imports: ['assets/react-abc.js', 'assets/panels-abc.js', 'assets/shared-abc.js'],
       }),
       react: chunk('assets/react-abc.js', 200_000, false, { name: react! }),
+      panels: chunk('assets/panels-abc.js', 50_000, false, { name: panels! }),
       shared: chunk('assets/shared-abc.js', sharedBytes, false, { name: 'shared' }),
     });
     expect(() => writeBundle(plugin, bundle(200_001))).toThrow(/over the limit of 500 kB/);
@@ -236,7 +243,7 @@ describe('vite.config.ts', () => {
   // Every group also takes the dependencies of the modules it matches. React
   // is a dependency of React Flow, so React's group must come first, or React
   // goes into React Flow's chunk and the first load fetches all of React Flow.
-  it('splits React, React Flow and html-to-image each into a chunk of its own, React first', async () => {
+  it('splits React, the panels, React Flow and html-to-image each into a chunk of its own, React first', async () => {
     const groups = groupsOf(await resolved());
     for (const windows of [false, true]) {
       for (const [pkg, file] of [
@@ -262,6 +269,12 @@ describe('vite.config.ts', () => {
       expect(groupFor(groups, moduleIn('html-to-image', 'es/index.js', windows))).toBe(
         'html-to-image',
       );
+      expect(
+        groupFor(
+          groups,
+          moduleIn('react-resizable-panels', 'dist/react-resizable-panels.js', windows),
+        ),
+      ).toBe('vendor-panels');
       // React Flow's stylesheet stays with the diagram's.
       expect(
         groupFor(groups, moduleIn('@xyflow/react', 'dist/style.css', windows)),

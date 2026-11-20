@@ -13,10 +13,16 @@ const ANDES_TARGET = `http://${ANDES_HOST}:${ANDES_PORT}`;
 // The chunk React is split into, which every visit loads and a release that
 // leaves React alone keeps cached; the first load's limit leaves it out.
 const REACT_CHUNK = 'vendor-react';
+// The same for the library the shell lays its panels out with.
+const PANELS_CHUNK = 'vendor-panels';
 
 export default defineConfig({
   // The last one fails the build when the first load outgrows its limit.
-  plugins: [react(), tailwindcss(), entryChunkLimit(ENTRY_CHUNK_LIMIT_KB, [REACT_CHUNK])],
+  plugins: [
+    react(),
+    tailwindcss(),
+    entryChunkLimit(ENTRY_CHUNK_LIMIT_KB, [REACT_CHUNK, PANELS_CHUNK]),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
@@ -84,13 +90,25 @@ export default defineConfig({
             // less often than the app, so it gets a chunk of its own: the
             // server hands out hashed assets with a year-long cache lifetime,
             // and a release that only touches the app leaves this one cached.
-            // React is the only first load library named here: a catch-all
-            // vendor chunk would pull the libraries that the lazily loaded
-            // panels own (React Flow, uPlot, Arrow) into the first load.
+            // React and the panels of the shell are the only first load
+            // libraries named here: a catch-all vendor chunk would pull the
+            // libraries that the lazily loaded panels own (React Flow, uPlot,
+            // Arrow) into the first load.
             {
               name: REACT_CHUNK,
               test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
               priority: 4,
+            },
+            // react-resizable-panels lays out the shell (the sidebar, the
+            // diagram, the Inspector and the drawer), so it is on the first
+            // screen and cannot wait, and it changes no more often than
+            // React: a chunk of its own stays cached across releases. Version
+            // 4 of it is twice the size of version 2 (50 kB), which counted
+            // with the app would have taken all the room the first load had.
+            {
+              name: PANELS_CHUNK,
+              test: /[\\/]node_modules[\\/]react-resizable-panels[\\/]/,
+              priority: 3,
             },
             // React Flow, with the d3 modules it pans, zooms and drags by, is
             // a third of what the diagram loads and changes as seldom as
