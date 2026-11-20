@@ -559,6 +559,25 @@ def test_dependabot_leaves_andes_minor_and_major_upgrades_to_a_person() -> None:
     }
 
 
+def test_the_node_types_stay_on_the_major_of_the_oldest_supported_node() -> None:
+    """``@types/node`` describes one major of Node's API. On a newer one than the oldest
+    Node the UI supports (``engines``, the one CI runs), a configuration or a test that
+    calls what that Node lacks type-checks and fails on CI, so the types follow
+    ``engines`` and Dependabot does not propose their next major."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    (npm,) = [u for u in updates if u["package-ecosystem"] == "npm"]
+    (types,) = [i for i in npm.get("ignore", []) if i["dependency-name"] == "@types/node"]
+    assert types["update-types"] == ["version-update:semver-major"]
+    package = REPO_ROOT / "web" / "package.json"
+    if not package.is_file():
+        pytest.skip("web/ is not next to the tests")
+    declared = json.loads(package.read_text(encoding="utf-8"))
+    floor = re.fullmatch(r">=(\d+)(?:\.\d+){0,2}", declared["engines"]["node"])
+    typed = re.fullmatch(r"\^(\d+)\.\d+\.\d+", declared["devDependencies"]["@types/node"])
+    assert floor is not None and typed is not None, declared["engines"]
+    assert typed.group(1) == floor.group(1)
+
+
 def test_audit_workflow_checks_both_halves_on_a_schedule() -> None:
     """Advisories appear without a commit, so the audit also runs weekly and on demand."""
     workflow = _load_required(_WORKFLOWS / "audit.yml")

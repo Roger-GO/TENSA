@@ -45,6 +45,14 @@ updates:
       web:
         patterns:
           - "*"
+    ignore:
+      # @types/node describes the API of one major of Node, and it follows the
+      # oldest Node the UI supports (engines in web/package.json, the one CI
+      # runs), so that a configuration or a test calling what that Node lacks
+      # does not type-check. Its next major comes with that floor, by hand.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
