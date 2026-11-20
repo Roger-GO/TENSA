@@ -1947,11 +1947,15 @@ describe('SldCanvas', () => {
     expect(await screen.findByTestId('sld-context-menu')).toBeInTheDocument();
   });
 
-  /** Press on `el` the way a finger or a pen does, and hold past Radix's long-press delay. */
-  function longPress(el: Element, pointerType: 'touch' | 'pen') {
+  /**
+   * Press on `el` the way a finger or a pen does, and hold past Radix's long-press
+   * delay. `pressed` looks at the page between the press and the end of the hold.
+   */
+  function longPress(el: Element, pointerType: 'touch' | 'pen', pressed?: () => void) {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       fireEvent.pointerDown(el, { pointerType, clientX: 20, clientY: 20 });
+      pressed?.();
       act(() => {
         vi.advanceTimersByTime(800);
       });
@@ -2000,7 +2004,7 @@ describe('SldCanvas', () => {
     },
   );
 
-  it('a touch that dismisses the open menu does not change what the menu offers as it goes', async () => {
+  it('a touch that dismisses the open menu closes it at once, and held, opens the menu of what it pressed', async () => {
     loadSavedCase();
     await renderLoaded();
     longPress(
@@ -2008,15 +2012,13 @@ describe('SldCanvas', () => {
       'touch',
     );
     expect(await menuTitle()).toContain('Bus b1');
-    // Radix closes a menu on a touch outside it at the click that follows, so the
-    // menu is still up when the press lands; its items must not turn into the
-    // canvas's under the finger.
-    fireEvent.pointerDown(screen.getByTestId('sld-canvas-surface'), {
-      pointerType: 'touch',
-      clientX: 400,
-      clientY: 400,
+    // Radix closes the open menu at a touch on the diagram, in the event of the
+    // press, and times a long press from it: the menu the press opens, held, is
+    // the canvas's, not the bus's again.
+    longPress(screen.getByTestId('sld-canvas-surface'), 'touch', () => {
+      expect(screen.queryByTestId('sld-context-menu')).toBeNull();
     });
-    expect(screen.getByTestId('sld-context-menu-title')).toHaveTextContent('Bus b1');
+    expect(await menuTitle()).toBe('Diagram');
   });
 
   it('the canvas menu runs Fit view', async () => {

@@ -20,7 +20,7 @@ afterEach(() => {
 describe('<UnitsToggle />', () => {
   it('shows per unit as pressed by default', () => {
     render(<UnitsToggle />);
-    expect(screen.getByRole('group', { name: 'Display units' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Display units' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Per unit' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Actual units' })).not.toBeChecked();
   });

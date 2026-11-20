@@ -3979,17 +3979,16 @@ function SldCanvasInner({
   //
   // Touch and pen open the menu from a long press instead, which iOS reports with
   // no ``contextmenu`` event, so a press on the diagram sets the target from what
-  // was pressed. Not while the menu is open: a press that dismisses it would
-  // change its items as it fades out.
+  // was pressed. So does a press while the menu is open: Radix closes the menu at
+  // that press, in the same event, and times a long press from it, so the menu
+  // that opens if the press is held is for what it landed on. The closing menu
+  // never shows those items: it has no animation out, so it is taken out before
+  // the browser paints again.
   const [contextTarget, setContextTarget] = useState<SldContextTarget>({ kind: 'canvas' });
-  const contextMenuOpenRef = useRef(false);
   const editedEdgeRef = useRef<Edge | null>(null);
   useEffect(() => {
     editedEdgeRef.current = editedEdge;
   }, [editedEdge]);
-  const onContextMenuOpenChange = useCallback((open: boolean) => {
-    contextMenuOpenRef.current = open;
-  }, []);
   const onSurfaceContextMenuCapture = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // React events bubble through portals, so a right-click in the node search's
     // popover arrives here though it is not on the diagram. Stopped in the capture
@@ -4009,7 +4008,7 @@ function SldCanvasInner({
   }, []);
   const onSurfacePointerDownCapture = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === 'mouse' || contextMenuOpenRef.current) return;
+      if (e.pointerType === 'mouse') return;
       if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
       const next = contextTargetAt(e.target, nodesWithSelection, routedEdges);
       setContextTarget((held) => (sameContextTarget(held, next) ? held : next));
@@ -4122,7 +4121,7 @@ function SldCanvasInner({
       ) : null}
       {/* ``modal={false}``: Fault here and Trip line open a dialog from a menu
           item, and a modal menu would leave the page unclickable after it. */}
-      <ContextMenu modal={false} onOpenChange={onContextMenuOpenChange}>
+      <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             ref={canvasRef}

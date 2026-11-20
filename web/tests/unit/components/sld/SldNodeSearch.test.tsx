@@ -20,7 +20,7 @@
  *    look for a kind the diagram has none of is told so.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { act, render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 
@@ -106,8 +106,11 @@ describe('<SldNodeSearch /> trigger tooltip', () => {
 async function openPopover(user: ReturnType<typeof userEvent.setup>) {
   const trigger = screen.getByTestId('sld-node-search-trigger');
   await user.click(trigger);
-  // Wait for the input to mount (Radix portals + auto-focus rAF).
+  // Wait for the input to mount (Radix portals), and for the frame in which
+  // the popover focuses it and selects its text: a test that typed before
+  // that frame, on a loaded machine, had its first letter typed over.
   await screen.findByTestId('sld-node-search-input');
+  await act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
 }
 
 describe('SldNodeSearch — happy path (14 buses)', () => {
