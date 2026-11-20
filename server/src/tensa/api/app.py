@@ -89,7 +89,9 @@ _REVALIDATE_CACHE_CONTROL = "no-cache"
 # round trip through the compressor cost more than they save.
 _GZIP_MINIMUM_SIZE = 1024
 # zlib's default. Level 9 (Starlette's default) is markedly slower for a percent
-# or two less, and the first load compresses the 400 KB entry chunk.
+# or two less, and the first load compresses some 750 kB of scripts (the entry
+# chunk, the chunk it shares with the lazily loaded parts, React's and the
+# panels').
 _GZIP_LEVEL = 6
 
 

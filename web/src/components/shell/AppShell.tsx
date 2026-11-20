@@ -86,8 +86,9 @@ const ShortcutCheatsheet = lazyNamed(
  *  (a) Imperative resize collision (``panelRef.expand()`` immediately
  *      followed by ``panelRef.resize(40)`` in the same tick): the
  *      ``resize()`` call wins. The lib reconciles in a single
- *      synchronous pass; no setTimeout-0 workaround needed. Persistence
- *      via ``onLayout`` writes the post-resize value, so localStorage
+ *      synchronous pass; no setTimeout-0 workaround needed. The group's
+ *      ``onLayoutChanged`` (``onLayout`` in version 2) then reports the
+ *      post-resize layout, which is what gets persisted, so localStorage
  *      stays consistent.
  *
  *  (b) Focus trap in size=0 panel (a ``<button>`` inside a panel with
@@ -118,9 +119,10 @@ const ShortcutCheatsheet = lazyNamed(
  *      respects the 0. Implication: the right-inspector panel uses
  *      ``collapsible=true`` + ``collapsedSize=0`` + ``defaultSize=0``
  *      (NOT a positive ``minSize`` with no ``collapsedSize``) so the
- *      first-paint state matches the persisted preference. Expand
- *      target comes from ``rightInspectorWidthPx`` translated to a
- *      percentage in the effect that calls ``panelRef.expand()``.
+ *      first-paint state matches the persisted preference. The expand
+ *      target is ``rightInspectorWidthPct``, the percent of the top row the
+ *      inspector was last open at, which the effect that calls
+ *      ``panelRef.expand()`` hands to ``resize()`` (``syncPanel``).
  *
  * Conventions to follow (from `web/AGENTS.md`):
  *

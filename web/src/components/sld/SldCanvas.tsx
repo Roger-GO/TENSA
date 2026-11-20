@@ -175,7 +175,7 @@ import { ROUTE_FOCUS_ATTR, routeEndsOf } from './routeEdit';
 import { SldRouteEditor } from './SldRouteEditor';
 import { DROP_PICTURES, clearDrop, type DropObstacle } from './dropPlace';
 import { valueLabelWidths } from './valueWidths';
-import { valuesLeftOff, type LeftOffValue } from './valuesLeftOff';
+import { sameValuesLeftOff, valuesLeftOff, type LeftOffValue } from './valuesLeftOff';
 import type { FigureSource } from './figure/drawFigure';
 import {
   figureSettingsEntries,
@@ -526,11 +526,12 @@ function SldCanvasInner({
     [],
   );
   const [coords, setCoords] = useState<CoordsByIdx | null>(null);
-  // The topology `coords` was composed for, and the layout. A new topology
-  // arrives a render before its coords do, and so does another layout (a
-  // snapshot that is restored, a layout that is reset): the graph built in
-  // between pairs the new elements, or the routes of the new layout, with
-  // the old positions. Nothing is saved from that one, and no route is kept
+  // The topology `coords` was composed for, and the layout. The coords are
+  // composed while rendering, in the render a new topology or another layout
+  // (a snapshot that is restored, a layout that is reset) arrives, unless the
+  // automatic layout has to be worked out for it first: until it is, the
+  // graph pairs the new elements, or the routes of the new layout, with the
+  // old positions. Nothing is saved from such a graph, and no route is kept
   // from it.
   const [coordsTopology, setCoordsTopology] = useState<TopologySummary | null>(null);
   const [coordsSource, setCoordsSource] = useState<{
@@ -3848,7 +3849,9 @@ function SldCanvasInner({
   // The values of the power flow the diagram has no clear place for, which
   // it leaves off and counts over its corner (`SldValuesLeftOff`). While a
   // node is dragged the labels are placed the quick way, and the list is the
-  // one of the diagram at rest.
+  // one of the diagram at rest. That list is kept only when it says something
+  // else: the list is made afresh with every change of the diagram, and
+  // keeping each one would draw the diagram twice for every change at rest.
   const leftOffNow = useMemo(() => {
     if (dragging) return null;
     return valuesShown
@@ -3856,7 +3859,9 @@ function SldCanvasInner({
       : NONE_LEFT_OFF;
   }, [dragging, valuesShown, nodes, edges, picture, pflowResult, unitMode]);
   const [leftOffAtRest, setLeftOffAtRest] = useState<LeftOffValue[]>(NONE_LEFT_OFF);
-  if (leftOffNow !== null && leftOffNow !== leftOffAtRest) setLeftOffAtRest(leftOffNow);
+  if (leftOffNow !== null && !sameValuesLeftOff(leftOffNow, leftOffAtRest)) {
+    setLeftOffAtRest(leftOffNow);
+  }
   const leftOff = leftOffNow ?? leftOffAtRest;
   // A pick in that list: the element is selected, as by a click on it, and
   // the view goes to it, at a size it can be read at. A line is picked as a

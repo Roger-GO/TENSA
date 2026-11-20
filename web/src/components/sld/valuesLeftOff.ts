@@ -133,6 +133,24 @@ export function valuesLeftOff(
   return [...flows, ...readouts, ...buses];
 }
 
+/** Whether two lists of values left off say the same, row for row. */
+export function sameValuesLeftOff(a: readonly LeftOffValue[], b: readonly LeftOffValue[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((row, i) => {
+      const other = b[i];
+      return (
+        other !== undefined &&
+        row.id === other.id &&
+        row.kind === other.kind &&
+        row.name === other.name &&
+        row.values.length === other.values.length &&
+        row.values.every((value, j) => value === other.values[j])
+      );
+    })
+  );
+}
+
 /** `count` values, in words: `1 value`, `12 values`. */
 export function valuesCount(count: number): string {
   return `${count} ${count === 1 ? 'value' : 'values'}`;

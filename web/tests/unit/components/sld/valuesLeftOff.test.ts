@@ -14,7 +14,13 @@ import type { PflowResult, TopologySummary } from '@/api/types';
 import type { ConnectionEdge, LabelPlace } from '@/components/sld/connections';
 import type { BusLabel, ReadoutPlace } from '@/components/sld/labels';
 import { valueLabelWidths } from '@/components/sld/valueWidths';
-import { valuesCount, valuesLeftOff, type PlacesOfValues } from '@/components/sld/valuesLeftOff';
+import {
+  sameValuesLeftOff,
+  valuesCount,
+  valuesLeftOff,
+  type LeftOffValue,
+  type PlacesOfValues,
+} from '@/components/sld/valuesLeftOff';
 import { CASE118 } from '../../helpers/case118';
 import { drawn, opened } from '../../helpers/diagramStates';
 import { lineFlow } from '../../helpers/lineFlow';
@@ -195,6 +201,43 @@ describe('valuesLeftOff', () => {
   it('counts in words', () => {
     expect(valuesCount(1)).toBe('1 value');
     expect(valuesCount(12)).toBe('12 values');
+  });
+});
+
+describe('sameValuesLeftOff', () => {
+  const row = (over: Partial<LeftOffValue> = {}): LeftOffValue => ({
+    id: 'e1',
+    kind: 'flow',
+    name: 'line 1',
+    values: ['→ 25.97 MW'],
+    ...over,
+  });
+
+  it('takes two lists made apart that say the same for the same', () => {
+    expect(
+      sameValuesLeftOff(
+        [row(), row({ id: 'n2', kind: 'bus' })],
+        [row(), row({ id: 'n2', kind: 'bus' })],
+      ),
+    ).toBe(true);
+    expect(sameValuesLeftOff([], [])).toBe(true);
+  });
+
+  it('tells lists apart by their length, their order or anything a row says', () => {
+    const base = [row(), row({ id: 'e2' })];
+    expect(sameValuesLeftOff(base, [row()])).toBe(false);
+    expect(sameValuesLeftOff(base, [row({ id: 'e2' }), row()])).toBe(false);
+    for (const changed of [
+      row({ id: 'e9' }),
+      row({ kind: 'readout' }),
+      row({ name: 'line 9' }),
+      row({ values: ['→ 25.98 MW'] }),
+      row({ values: ['→ 25.97 MW', '1.02 pu'] }),
+    ]) {
+      expect(sameValuesLeftOff(base, [changed, row({ id: 'e2' })]), JSON.stringify(changed)).toBe(
+        false,
+      );
+    }
   });
 });
 
