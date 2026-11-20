@@ -1,7 +1,8 @@
 import js from '@eslint/js';
+import { defineConfig, globalIgnores } from 'eslint/config';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
-import reactRefresh from 'eslint-plugin-react-refresh';
+import { reactRefresh } from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 import noDestructiveToken from './eslint-rules/no-destructive-token.js';
 
@@ -13,12 +14,10 @@ const andesPlugin = {
   },
 };
 
-export default tseslint.config(
+export default defineConfig(
+  globalIgnores(['dist', 'node_modules', 'src/api/generated.ts', 'coverage']),
   {
-    ignores: ['dist', 'node_modules', 'src/api/generated.ts', 'coverage'],
-  },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,
@@ -29,7 +28,7 @@ export default tseslint.config(
     },
     plugins: {
       'react-hooks': reactHooks,
-      'react-refresh': reactRefresh,
+      'react-refresh': reactRefresh.plugin,
       andes: andesPlugin,
     },
     rules: {

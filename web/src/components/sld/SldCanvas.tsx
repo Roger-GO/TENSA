@@ -844,6 +844,7 @@ function SldCanvasInner({
     // push-out so we don't tag them either. Read and written while the
     // graph is built: the transition has to be on the node in the render
     // that moves it, or the move is not animated.
+    /* eslint-disable react-hooks/refs -- the positions of the graph before, which nothing draws */
     const prior = priorPositionsRef.current;
     const relocated = relocatedIdsRef.current;
     const ANIMATION_THRESHOLD_PX = 0.5;
@@ -886,6 +887,7 @@ function SldCanvasInner({
       nextPrior.set(n.id, { x: n.position.x, y: n.position.y });
     }
     priorPositionsRef.current = nextPrior;
+    /* eslint-enable react-hooks/refs */
     return { nodes: animatedNodes, edges: built.edges };
   }, [
     topology,
@@ -972,8 +974,10 @@ function SldCanvasInner({
     if (!baseGraph) return;
     nodesRef.current = baseGraph.nodes;
     baseGraphRef.current = baseGraph;
+    /* eslint-disable react-hooks/set-state-in-effect -- that order, which a seed while rendering would change */
     setNodes(baseGraph.nodes);
     setEdges(baseGraph.edges);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [baseGraph]);
 
   // How device connectors are drawn: what was chosen in this visit, else what
@@ -1057,6 +1061,7 @@ function SldCanvasInner({
     // The routes the picture of the move before made: read and added to as
     // each move is drawn, which spares a large diagram a search for every
     // line at every move, and let go of once the drag ends.
+    /* eslint-disable react-hooks/refs -- the routes of the move before, which nothing draws */
     const carried = dragRoutesRef.current;
     const at = new Map(nodes.map((n) => [n.id, n.position]));
     const sits = (id: string, then: { x: number; y: number } | undefined): boolean => {
@@ -1104,6 +1109,7 @@ function SldCanvasInner({
     const made = pictureOf(nodes, drawn, { ...options, dragging });
     if (dragging) for (const [id, route] of made.changed) carried.set(id, route);
     else carried.clear();
+    /* eslint-enable react-hooks/refs */
     // What of it is kept once the diagram is at rest: the routes that are
     // the diagram's own, and the ways round the drafts.
     const settled = dragging
@@ -2307,6 +2313,7 @@ function SldCanvasInner({
   const routedEdgesRef = useRef<Map<string, RoutedEdgeEntry>>(new Map());
   const routedEdges = useMemo(() => {
     const next = new Map<string, RoutedEdgeEntry>();
+    /* eslint-disable react-hooks/refs -- the edges of the render before, which an edge that did not change is given again */
     const out = edges.map((edge) => {
       const route = connections.routes.get(edge.id);
       if (!route) return edge;
@@ -2327,6 +2334,7 @@ function SldCanvasInner({
       return entry.edge;
     });
     routedEdgesRef.current = next;
+    /* eslint-enable react-hooks/refs */
     return out;
   }, [edges, connections, activeDeviceIds, labelPlaces, pickedDraftId]);
 
