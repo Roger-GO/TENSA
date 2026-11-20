@@ -390,6 +390,43 @@ describe('<CommandPalette /> hands the keyboard focus back when it closes', () =
     await waitFor(() => expect(screen.getByTestId('was-focused')).toHaveFocus());
   });
 
+  it('gives it back to what had it when the close of an earlier opening is told late', async () => {
+    const user = userEvent.setup();
+    // The More menu takes the focus when the palette has lost what had it.
+    render(
+      page(
+        <button type="button" data-testid="topbar-menu-more-trigger">
+          More
+        </button>,
+      ),
+    );
+    screen.getByTestId('was-focused').focus();
+    await open();
+    // Radix tells a close a timer after the palette has left the page, and on
+    // a busy page that can come after the key press that opens it again. The
+    // timer is held here until the palette is open again.
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      act(() => {
+        useCommandPaletteStore.getState().closePalette();
+      });
+      expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument();
+      screen.getByTestId('was-focused').focus();
+      act(() => {
+        useCommandPaletteStore.getState().openPalette();
+      });
+      expect(screen.getByTestId('command-palette-input')).toHaveFocus();
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.getByTestId('command-palette-input')).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.getByTestId('was-focused')).toHaveFocus());
+  });
+
   it('gives it to the tab a sidebar command opened, not back to where it was', async () => {
     const user = userEvent.setup();
     render(

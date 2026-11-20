@@ -114,6 +114,13 @@ export function CommandPalette() {
   const focusOnClose = useCallback((event: Event) => {
     // Not Radix's own answer, which is the trigger the palette does not have.
     event.preventDefault();
+    // The close of an earlier opening, told late. Radix tells a close a timer
+    // after the palette has left the page, and on a busy page that can come
+    // after the key press that opens the palette again. The focus is then the
+    // open palette's, and what it goes back to is what this opening found:
+    // taken as a close, it would forget that and leave the focus on the More
+    // menu.
+    if (useCommandPaletteStore.getState().open) return;
     const [ran, opener] = [ranRef.current, openerRef.current];
     ranRef.current = null;
     openerRef.current = null;
