@@ -6,7 +6,7 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "engines": {
-    "node": ">=22.22.2",
+    "node": "^22.22.2 || >=24.15.0",
     "pnpm": ">=11"
   },
   "packageManager": "pnpm@11.0.8",

@@ -7,8 +7,8 @@ release is in the [CHANGELOG](../CHANGELOG.md).
 
 ## Prerequisites
 
-- Node 22 LTS, 22.22.2 or newer (jsdom, which the unit tests run in, needs
-  it). Install via [`nvm`](https://github.com/nvm-sh/nvm) or your platform
+- Node 22 LTS, 22.22.2 or newer, or 24.15 or newer on Node 24 (jsdom, which
+  the unit tests run in, needs it). Install via [`nvm`](https://github.com/nvm-sh/nvm) or your platform
   package manager. CI runs the checks on Node 22, which
   `.nvmrc` names: `nvm use` in this directory selects it. A newer Node works
   for development, but the two do not give a test the same globals (on Node 22

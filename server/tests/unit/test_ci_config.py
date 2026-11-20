@@ -339,7 +339,9 @@ def test_the_node_version_is_the_same_wherever_it_is_named() -> None:
     what CI runs, and ``engines`` in ``web/package.json`` the oldest that is supported. A
     test that passes on a newer Node can fail on the one CI runs (the two expose different
     globals), so the local default must be CI's, and both the major of the oldest supported,
-    whose floor is the minor and patch release of it that the tools need."""
+    whose floor is the minor and patch release of it that the tools need. A newer major may
+    need a later release of its own (jsdom asks for 24.15 on Node 24), which ``engines``
+    names after it."""
     nvmrc = REPO_ROOT / "web" / ".nvmrc"
     package = REPO_ROOT / "web" / "package.json"
     if not nvmrc.is_file() or not package.is_file():
@@ -357,7 +359,11 @@ def test_the_node_version_is_the_same_wherever_it_is_named() -> None:
     assert set(used) == {local}, f"web/.nvmrc says {local}, the workflows use {used}"
 
     engines = json.loads(package.read_text(encoding="utf-8"))["engines"]["node"]
-    assert re.fullmatch(rf">={local}(\.\d+){{0,2}}", engines), engines
+    oldest, *newer = (part.strip() for part in engines.split("||"))
+    assert re.fullmatch(rf"(\^|>=){local}\.\d+\.\d+", oldest), engines
+    for later in newer:
+        floor = re.fullmatch(r">=(\d+)\.\d+\.\d+", later)
+        assert floor is not None and int(floor.group(1)) > int(local), engines
 
 
 def test_no_e2e_file_depends_on_the_removed_auth_token() -> None:
@@ -572,7 +578,7 @@ def test_the_node_types_stay_on_the_major_of_the_oldest_supported_node() -> None
     if not package.is_file():
         pytest.skip("web/ is not next to the tests")
     declared = json.loads(package.read_text(encoding="utf-8"))
-    floor = re.fullmatch(r">=(\d+)(?:\.\d+){0,2}", declared["engines"]["node"])
+    floor = re.match(r"(?:\^|>=)(\d+)\.", declared["engines"]["node"])
     typed = re.fullmatch(r"\^(\d+)\.\d+\.\d+", declared["devDependencies"]["@types/node"])
     assert floor is not None and typed is not None, declared["engines"]
     assert typed.group(1) == floor.group(1)

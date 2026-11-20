@@ -102,7 +102,7 @@ After an upgrade of ANDES itself, ANDES regenerates its code for the new version
 
 ## Install from source
 
-Use a source checkout to develop TENSA, or to build the UI yourself. You need Python 3.12 or newer and, to build the UI once, Node 22.22.2 or newer and [pnpm](https://pnpm.io/) 11.
+Use a source checkout to develop TENSA, or to build the UI yourself. You need Python 3.12 or newer and, to build the UI once, Node 22.22.2 or newer (24.15 or newer on Node 24) and [pnpm](https://pnpm.io/) 11.
 
 === "Linux and macOS"
 

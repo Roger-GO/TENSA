@@ -16,7 +16,7 @@ The virtual environment you installed into is not active in this terminal. Activ
 
 ### The UI is missing from a source install
 
-`tensa serve` logs `No SPA bundle found` and `GET /` answers 404, while `/docs` and the API work. A source checkout does not carry the built UI. Run `pnpm install` and `pnpm build` in `web/` once (Node 22.22.2 or newer and pnpm 11), or install the package with `pip install tensa`, which ships it.
+`tensa serve` logs `No SPA bundle found` and `GET /` answers 404, while `/docs` and the API work. A source checkout does not carry the built UI. Run `pnpm install` and `pnpm build` in `web/` once (Node 22.22.2 or newer, 24.15 or newer on Node 24, and pnpm 11), or install the package with `pip install tensa`, which ships it.
 
 ## Starting the server
 
