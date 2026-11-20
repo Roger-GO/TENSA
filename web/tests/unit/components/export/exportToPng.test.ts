@@ -122,9 +122,10 @@ describe('elementToPng', () => {
       return new Blob(['x'], { type: 'image/png' });
     });
     await elementToPng(el);
-    // While the picture is taken: the stylesheet's paint is inline, the node's
-    // own inline style is kept, and left-out nodes are not touched.
-    expect(during).toEqual(['red', 'pointer', '3px', null]);
+    // While the picture is taken: the stylesheet's paint is inline (as its
+    // computed value, which names a colour by its channels), the node's own
+    // inline style is kept, and left-out nodes are not touched.
+    expect(during).toEqual(['rgb(255, 0, 0)', 'pointer', '3px', null]);
     // Afterwards: each node's own `style` attribute is back as it was.
     expect(styled!.getAttribute('style')).toBe('cursor: pointer');
     expect(plain!.hasAttribute('style')).toBe(false);

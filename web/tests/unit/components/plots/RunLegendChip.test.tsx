@@ -408,7 +408,8 @@ describe('RunLegendChip — swatch picker (Unit 20)', () => {
     render(<RunLegendChip runId="r1" />);
     const swatch = screen.getByTestId('run-legend-swatch-r1');
     const style = swatch.getAttribute('style') ?? '';
-    // Either flat fill or repeating-linear-gradient with the colour.
-    expect(style.toLowerCase()).toContain('#ff00aa');
+    // Either flat fill or repeating-linear-gradient with the colour, which the
+    // style writes by its channels, as a browser does.
+    expect(style).toContain('rgb(255, 0, 170)');
   });
 });

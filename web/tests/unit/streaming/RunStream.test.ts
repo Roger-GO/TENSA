@@ -9,6 +9,7 @@
 // gives the imports an ``any`` shape that we narrow at the use sites.
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { RunStream, loadArrowDecoder } from '@/streaming/RunStream';
 import { useRunsStore, DEFAULT_MEMORY_BUDGET_BYTES } from '@/store/runs';
 import { arrowFrame } from '../helpers/frames';
@@ -773,10 +774,7 @@ describe('RunStream — edge cases', () => {
       'of a System that has already taken time-domain steps, in a run or in a snapshot taken ' +
       `after one; reload the case to recover (POST /api/sessions/${SESSION_ID}/reload, or Reload from file in the Edit menu)`;
 
-    function startRefused(
-      onError: ReturnType<typeof vi.fn>,
-      sendErrorFrame: boolean,
-    ): { done: () => Promise<void> } {
+    function startRefused(onError: Mock, sendErrorFrame: boolean): { done: () => Promise<void> } {
       server.on('connection', (socket) => {
         socket.send(JSON.stringify({ type: 'ready' }));
         socket.on('message', (raw: unknown) => {

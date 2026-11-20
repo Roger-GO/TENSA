@@ -12,6 +12,7 @@
  * isolate cache state.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -67,7 +68,7 @@ function makeWrapper() {
 }
 
 describe('queries hooks', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
@@ -1466,7 +1467,7 @@ describe('queries hooks', () => {
 });
 
 describe('useUploadWorkspaceFile', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

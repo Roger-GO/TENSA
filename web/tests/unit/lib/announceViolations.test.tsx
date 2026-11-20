@@ -5,6 +5,7 @@
  * through `useRunPflow`, so the last test runs that hook end to end.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -112,7 +113,7 @@ describe('showViolations', () => {
 });
 
 describe('useRunPflow', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

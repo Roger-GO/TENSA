@@ -6,6 +6,7 @@
  * outcomes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import {
   andesClient,
   NetworkError,
@@ -22,7 +23,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 }
 
 describe('andesClient', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     // Cast through unknown so the spy signature stays type-clean.

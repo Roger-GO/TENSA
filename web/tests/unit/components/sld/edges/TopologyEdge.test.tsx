@@ -208,7 +208,7 @@ describe('<TopologyEdge /> the line', () => {
     );
     cleanup();
     expect(beside('right', 95, 40).getByTestId('line-flow-label-edge-1').style.transform).toBe(
-      'translate(0, -50%) translate(95px, 40px)',
+      'translate(0px, -50%) translate(95px, 40px)',
     );
     cleanup();
     expect(beside('above', 121, 97).getByTestId('line-flow-label-edge-1').style.transform).toBe(
@@ -216,7 +216,7 @@ describe('<TopologyEdge /> the line', () => {
     );
     cleanup();
     expect(beside('below', 121, 109).getByTestId('line-flow-label-edge-1').style.transform).toBe(
-      'translate(-50%, 0) translate(121px, 109px)',
+      'translate(-50%) translate(121px, 109px)',
     );
     cleanup();
     // On the line it is hung by its middle, and says nothing of a side.

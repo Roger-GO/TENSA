@@ -391,8 +391,10 @@ describe('<EIGScatter />', () => {
       fireEvent.pointerMove(svg, { clientX: 10 + 2 * cx, clientY: 10 + 2 * cy, pointerId: 1 });
       const tip = screen.getByTestId('eig-scatter-tooltip');
       expect(tip).toHaveAttribute('data-mode-idx', '0');
-      expect(parseFloat(tip.style.left)).toBeCloseTo(2 * cx + 12, 6);
-      expect(parseFloat(tip.style.top)).toBeCloseTo(2 * cy + 12, 6);
+      // A style keeps a length to six significant digits, as a browser does,
+      // so the place is checked to a hundredth of a pixel.
+      expect(parseFloat(tip.style.left)).toBeCloseTo(2 * cx + 12, 2);
+      expect(parseFloat(tip.style.top)).toBeCloseTo(2 * cy + 12, 2);
     });
 
     it('hides the tooltip when the pointer leaves the chart', () => {

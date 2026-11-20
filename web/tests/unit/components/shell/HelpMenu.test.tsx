@@ -3,6 +3,7 @@
  * the documentation links, and the versions the server runs.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -12,7 +13,7 @@ import { HelpMenu } from '@/components/shell/HelpMenu';
 import { HELP_LINKS, REPO_URL } from '@/lib/helpLinks';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: MockInstance<typeof fetch>;
 
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

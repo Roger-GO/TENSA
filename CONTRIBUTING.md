@@ -7,7 +7,7 @@ Thanks for your interest in improving TENSA! This guide covers everything you ne
 The repo holds two independent packages:
 
 - `server/`: Python 3.12+ FastAPI substrate (src layout, hatchling)
-- `web/`: React 19 + TypeScript SPA (Vite 6, pnpm 11+)
+- `web/`: React 19 + TypeScript SPA (Vite 8, pnpm 11+)
 
 ```bash
 # Server

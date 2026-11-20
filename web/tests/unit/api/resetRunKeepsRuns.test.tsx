@@ -6,6 +6,7 @@
  * same.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -61,7 +62,7 @@ function seedFinishedRuns(): void {
 }
 
 describe('Reset run keeps the runs', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     useRunsStore.getState().clearRuns();
@@ -73,7 +74,7 @@ describe('Reset run keeps the runs', () => {
     useDisturbanceStore.setState({ committed: true, dirty: false });
     fetchSpy = vi
       .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
-      .mockImplementation(async () => jsonResponse(TOPOLOGY)) as ReturnType<typeof vi.spyOn>;
+      .mockImplementation(async () => jsonResponse(TOPOLOGY));
   });
 
   afterEach(() => {
@@ -162,7 +163,7 @@ describe('Reset run keeps the runs', () => {
 });
 
 describe('Bundle import keeps the runs too', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     useRunsStore.getState().clearRuns();
@@ -172,7 +173,7 @@ describe('Bundle import keeps the runs too', () => {
       .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
       .mockImplementation(async () =>
         jsonResponse({ status: 'committed', warnings: [], conflicts: [] }),
-      ) as ReturnType<typeof vi.spyOn>;
+      );
   });
 
   afterEach(() => {

@@ -81,6 +81,13 @@ afterEach(() => {
   resetResultStores();
 });
 
+/**
+ * How long the page may take to load the Analysis tab's chunk. The module is
+ * transformed on its first import, which on a busy machine takes longer than
+ * the second `findBy` waits by default (see `LazyAnalysisTab.test.tsx`).
+ */
+const COLD_LOAD_MS = 15_000;
+
 describe('<ResultsView />', () => {
   it('renders the header + exit affordance', () => {
     render(<ResultsView />, { wrapper });
@@ -121,7 +128,9 @@ describe('<ResultsView />', () => {
     });
     render(<ResultsView />, { wrapper });
     // The tab is a lazily loaded chunk: a placeholder shows until it arrives.
-    expect(await screen.findByTestId('analysis-tab')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('analysis-tab', undefined, { timeout: COLD_LOAD_MS }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('No results yet')).not.toBeInTheDocument();
   });
 
@@ -132,7 +141,9 @@ describe('<ResultsView />', () => {
     });
     render(<ResultsView />, { wrapper });
     // EIG sub-tab content mounts (stubbed) since eig is the active sub-tab.
-    expect(await screen.findByTestId('analyze-eig-stub')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('analyze-eig-stub', undefined, { timeout: COLD_LOAD_MS }),
+    ).toBeInTheDocument();
   });
 
   it('Exit button calls setResultsViewActive(false)', async () => {

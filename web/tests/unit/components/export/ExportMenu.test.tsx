@@ -15,6 +15,7 @@
  * the full sonner provider.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -41,8 +42,8 @@ import { NetworkError, ProblemDetailsError } from '@/api/client';
 const originalCreate = URL.createObjectURL;
 const originalRevoke = URL.revokeObjectURL;
 
-let createObjectUrlMock: ReturnType<typeof vi.fn>;
-let revokeObjectUrlMock: ReturnType<typeof vi.fn>;
+let createObjectUrlMock: Mock;
+let revokeObjectUrlMock: Mock;
 
 beforeEach(() => {
   createObjectUrlMock = vi.fn(() => 'blob:fake-url');

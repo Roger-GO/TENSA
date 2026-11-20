@@ -4,6 +4,7 @@
  * journal cannot replay change its state accordingly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { UseMutationResult } from '@tanstack/react-query';
@@ -88,7 +89,7 @@ function journalOps(): unknown[] {
 }
 
 describe('edit journal recording', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     useCaseStore.setState({
@@ -98,7 +99,7 @@ describe('edit journal recording', () => {
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
     fetchSpy = vi
       .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
-      .mockImplementation(async () => jsonResponse({})) as ReturnType<typeof vi.spyOn>;
+      .mockImplementation(async () => jsonResponse({}));
   });
 
   afterEach(() => {

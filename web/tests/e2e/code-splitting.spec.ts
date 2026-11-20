@@ -4,9 +4,9 @@
  *
  * What this checks, against the real bundle served by a real `tensa serve`:
  *
- * - the first load fetches the entry chunk and React, and none of the panels
- *   that come later (the diagram, the Analysis tab, the Arrow decoder, the
- *   command palette);
+ * - the first load fetches the entry chunk, the chunk of what it shares with
+ *   the panels that come later, and React, and none of those panels (the
+ *   diagram, the Analysis tab, the Arrow decoder, the command palette);
  * - the diagram's chunk arrives when a case is loaded, with the chunk of the
  *   library it draws with (React Flow), and the Analysis tab's
  *   when that tab is opened, and the views inside the tab (EIG, CPF, SE) wait
@@ -81,7 +81,7 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
   await expect(caseRow).toBeVisible();
 
   // ---- first load: the shell and React, nothing that comes later -----------
-  expect([...assets.keys()]).toEqual(expect.arrayContaining(['index', 'vendor-react']));
+  expect([...assets.keys()]).toEqual(expect.arrayContaining(['index', 'shared', 'vendor-react']));
   for (const later of [
     'SldCanvas',
     'vendor-flow',
@@ -146,7 +146,14 @@ test('the first load fetches the entry chunks; the diagram and the Analysis tab 
       'public, max-age=31536000, immutable',
     );
   }
-  for (const name of ['index', 'vendor-react', 'SldCanvas', 'vendor-flow', 'AnalysisTab']) {
+  for (const name of [
+    'index',
+    'shared',
+    'vendor-react',
+    'SldCanvas',
+    'vendor-flow',
+    'AnalysisTab',
+  ]) {
     expect(assets.get(name)?.contentEncoding, `${name} content-encoding`).toBe('gzip');
   }
 

@@ -1,2 +1,5 @@
-allowBuilds:
-  esbuild: true
+# pnpm settings for web/. pnpm 11 reads the packages allowed to run an install
+# script from `allowBuilds` here, and from nowhere else; none of today's
+# dependencies has one (esbuild left with Vite 8). A new dependency that needs
+# its script makes `pnpm install` stop with ERR_PNPM_IGNORED_BUILDS: name it
+# under `allowBuilds:` with the value `true`.

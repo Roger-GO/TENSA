@@ -7,6 +7,7 @@
  * check what it was asked to write.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -62,7 +63,7 @@ const COLUMNS: ColumnConfig<Row>[] = [
 
 interface Harness {
   editing: GridEditing<Row>;
-  commit: ReturnType<typeof vi.fn>;
+  commit: Mock;
 }
 
 function makeEditing(overrides: Partial<GridEditing<Row>> = {}): Harness {

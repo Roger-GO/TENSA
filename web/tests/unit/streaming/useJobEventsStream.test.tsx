@@ -9,6 +9,7 @@
  *  - unmount disposes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { renderHook } from '@testing-library/react';
 
 import type { JobStreamOptions } from '@/streaming/JobStream';
@@ -17,8 +18,8 @@ import type { JobStreamOptions } from '@/streaming/JobStream';
 
 interface MockInstance {
   opts: JobStreamOptions;
-  start: ReturnType<typeof vi.fn>;
-  dispose: ReturnType<typeof vi.fn>;
+  start: Mock;
+  dispose: Mock;
 }
 
 const instances: MockInstance[] = [];

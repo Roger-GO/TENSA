@@ -9,6 +9,7 @@
  * a stand-in for the mutation: sent while the canvas unmounts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { render, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useCallback, useEffect, type ReactNode } from 'react';
@@ -83,7 +84,7 @@ function restoreResponse(layout: SidecarLayout | null): Response {
 }
 
 describe('the layout travels with what is saved', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

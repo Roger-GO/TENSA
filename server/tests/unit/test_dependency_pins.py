@@ -137,18 +137,23 @@ def test_pnpm_engine_matches_the_package_manager() -> None:
     assert package["engines"]["pnpm"] == f">={match.group(1)}"
 
 
-def test_pnpm_build_permissions_are_declared_once() -> None:
+def test_pnpm_build_permissions_are_declared_once_and_only_for_installed_packages() -> None:
     """pnpm 11 reads ``allowBuilds`` from ``pnpm-workspace.yaml`` only.
 
     A ``pnpm.onlyBuiltDependencies`` list in ``package.json`` is ignored there, so
-    keeping both leaves a copy that looks authoritative and does nothing. With the
-    workspace file alone, ``pnpm install --frozen-lockfile`` runs esbuild's
-    install script; with ``package.json`` alone it stops with
-    ``ERR_PNPM_IGNORED_BUILDS``.
+    keeping both leaves a copy that looks authoritative and does nothing; a
+    dependency whose install script is not allowed stops ``pnpm install`` with
+    ``ERR_PNPM_IGNORED_BUILDS``. A permission for a package the lockfile does not
+    install outlives it the same way: esbuild's stayed after Vite 8 dropped it.
     """
     yaml = pytest.importorskip("yaml")
     assert "pnpm" not in _package_json()
     workspace = WEB_DIR / "pnpm-workspace.yaml"
+    lockfile = WEB_DIR / "pnpm-lock.yaml"
     assert workspace.is_file(), "web/pnpm-workspace.yaml is missing"
-    settings = yaml.safe_load(workspace.read_text(encoding="utf-8"))
-    assert settings["allowBuilds"]["esbuild"] is True
+    assert lockfile.is_file(), "web/pnpm-lock.yaml is missing"
+    settings = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
+    packages = yaml.safe_load(lockfile.read_text(encoding="utf-8"))["packages"]
+    installed = {key.rsplit("@", 1)[0] for key in packages}
+    for name in settings.get("allowBuilds") or {}:
+        assert name in installed, f"allowBuilds names {name}, which the lockfile does not install"

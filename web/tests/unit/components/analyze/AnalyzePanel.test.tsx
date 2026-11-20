@@ -8,6 +8,7 @@
  * behaviour is covered by EIGScatter.test / EIGParticipationTable.test.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -354,7 +355,7 @@ describe('<AnalyzePanel />', () => {
   // the user back to the PF view.
 
   describe('routine error surfaces', () => {
-    let fetchSpy: ReturnType<typeof vi.spyOn>;
+    let fetchSpy: MockInstance<typeof fetch>;
 
     beforeEach(() => {
       fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
@@ -756,7 +757,7 @@ describe('<AnalyzePanel />', () => {
   // ---- Unit 14: SE noise_seed pass-through + inline validation ---------
 
   describe('SE noise_seed (Unit 14)', () => {
-    let fetchSpy: ReturnType<typeof vi.spyOn>;
+    let fetchSpy: MockInstance<typeof fetch>;
 
     beforeEach(() => {
       fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

@@ -1,14 +1,15 @@
 # tensa web
 
-Vite 6 + React 19 + TypeScript + Tailwind v4 + Radix Primitives. Talks to the
+Vite 8 + React 19 + TypeScript + Tailwind v4 + Radix Primitives. Talks to the
 `tensa` substrate over HTTP (`/api/*`) and WebSocket (`/api/ws/*`). What the UI
 does is described in the [root README](../README.md); what changed in each
 release is in the [CHANGELOG](../CHANGELOG.md).
 
 ## Prerequisites
 
-- Node 22 LTS or newer. Install via [`nvm`](https://github.com/nvm-sh/nvm) or
-  your platform package manager. CI runs the checks on Node 22, which
+- Node 22 LTS, 22.22.2 or newer (jsdom, which the unit tests run in, needs
+  it). Install via [`nvm`](https://github.com/nvm-sh/nvm) or your platform
+  package manager. CI runs the checks on Node 22, which
   `.nvmrc` names: `nvm use` in this directory selects it. A newer Node works
   for development, but the two do not give a test the same globals (on Node 22
   `Response.blob()` answers with Node's own `Blob`, not jsdom's), so run

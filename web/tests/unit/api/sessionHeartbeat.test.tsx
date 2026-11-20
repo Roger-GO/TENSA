@@ -6,6 +6,7 @@
  * routes a 404 into the recovery cycle.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -53,7 +54,7 @@ function setTabVisibility(state: 'visible' | 'hidden'): void {
 }
 
 describe('useSessionHeartbeat', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -66,9 +67,7 @@ describe('useSessionHeartbeat', () => {
     });
     fetchSpy = vi
       .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
-      .mockImplementation(async () =>
-        jsonResponse({ session_id: 'sess-abc', state: 'live' }),
-      ) as ReturnType<typeof vi.spyOn>;
+      .mockImplementation(async () => jsonResponse({ session_id: 'sess-abc', state: 'live' }));
   });
 
   afterEach(() => {

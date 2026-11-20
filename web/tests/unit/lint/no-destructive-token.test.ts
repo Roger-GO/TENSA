@@ -15,8 +15,13 @@ import { describe, it } from 'vitest';
 // import in eslint.config.js).
 import rule from '../../../eslint-rules/no-destructive-token.js';
 
-// RuleTester's `run` throws on the first failing assertion, which surfaces as a
-// failed test. We wrap each scenario in its own `it` for readable output.
+// `run` declares a suite with a test per case, through these. It is called
+// while the file is collected, in a `describe` and never in an `it`: a suite
+// declared inside a test is never collected, so its cases would not run.
+RuleTester.describe = describe;
+RuleTester.it = it;
+RuleTester.itOnly = it.only;
+
 const ruleTester = new RuleTester({
   languageOptions: {
     ecmaVersion: 2022,
@@ -25,7 +30,7 @@ const ruleTester = new RuleTester({
 });
 
 describe('andes/no-destructive-token', () => {
-  it('flags a className containing bg-destructive', () => {
+  describe('flags a className containing bg-destructive', () => {
     ruleTester.run('no-destructive-token', rule, {
       valid: [],
       invalid: [
@@ -37,7 +42,7 @@ describe('andes/no-destructive-token', () => {
     });
   });
 
-  it('flags every dead utility prefix and the foreground variant', () => {
+  describe('flags every dead utility prefix and the foreground variant', () => {
     ruleTester.run('no-destructive-token', rule, {
       valid: [],
       invalid: [
@@ -58,7 +63,7 @@ describe('andes/no-destructive-token', () => {
     });
   });
 
-  it('allows bg-danger and other danger utilities', () => {
+  describe('allows bg-danger and other danger utilities', () => {
     ruleTester.run('no-destructive-token', rule, {
       valid: [
         { code: 'const c = "bg-danger text-danger-foreground";' },
@@ -69,7 +74,7 @@ describe('andes/no-destructive-token', () => {
     });
   });
 
-  it('does not false-positive on the word "destructive" in comments or identifiers', () => {
+  describe('does not false-positive on the word "destructive" in comments or identifiers', () => {
     ruleTester.run('no-destructive-token', rule, {
       valid: [
         // Doc-comment that legitimately names the rule.

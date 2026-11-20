@@ -6,6 +6,7 @@
  * session, whenever a job starts or ends, and on a timer while one is in flight.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import {
   MESSAGES_PAGE_SIZE,
@@ -71,13 +72,13 @@ function resetStores(): void {
   useMessagesStore.setState({ shownLevels: DEFAULT_SHOWN_LEVELS, query: '' });
 }
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: MockInstance<typeof fetch>;
 
 beforeEach(() => {
   resetStores();
   fetchSpy = vi
     .spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch')
-    .mockImplementation(async () => json(pageOf([]))) as ReturnType<typeof vi.spyOn>;
+    .mockImplementation(async () => json(pageOf([])));
 });
 
 afterEach(() => {

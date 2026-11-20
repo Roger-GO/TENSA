@@ -5,6 +5,7 @@
  * back, and the edit journal lists every request that was answered.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
@@ -41,7 +42,7 @@ function journalOps(): unknown[] {
 }
 
 describe('useEditElements', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let client: QueryClient;
 
   /** Run the change and answer how it ended. */

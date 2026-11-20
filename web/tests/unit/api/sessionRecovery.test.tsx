@@ -17,6 +17,7 @@
  * effect is exercised by the WorkspaceFilePicker test.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -179,7 +180,7 @@ describe('handleGlobalRecoveryError', () => {
 });
 
 describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
@@ -365,7 +366,7 @@ describe('cross-slice cascade — session-clear during recovery', () => {
 // app. These tests exercise the auto-create + post-DELETE re-create
 // behaviours the picker and CaseNav previously each owned (and raced).
 describe('useSessionRecovery — auto-create + post-delete re-create', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();
@@ -799,7 +800,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
 // and the user always gets a recovery affordance when the substrate is
 // unreachable.
 describe('useSessionRecovery — stuck-detection + transition telemetry', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     __resetRecoveryDebounceForTests();

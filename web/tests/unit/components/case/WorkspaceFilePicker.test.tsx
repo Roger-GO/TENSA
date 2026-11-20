@@ -17,6 +17,7 @@
  * store or stubs the create-session response.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -64,7 +65,7 @@ const FILES = [
 ];
 
 /** Stub the fetch sequence the picker fires on mount. */
-function stubInitialFetches(fetchSpy: ReturnType<typeof vi.spyOn>, files = FILES) {
+function stubInitialFetches(fetchSpy: MockInstance<typeof fetch>, files = FILES) {
   fetchSpy.mockImplementation((input) => {
     const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
     if (url.endsWith('/api/workspace/files')) {
@@ -78,7 +79,7 @@ function stubInitialFetches(fetchSpy: ReturnType<typeof vi.spyOn>, files = FILES
 }
 
 describe('<WorkspaceFilePicker />', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

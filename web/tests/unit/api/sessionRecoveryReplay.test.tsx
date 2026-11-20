@@ -55,7 +55,7 @@ function record(...ops: JournalOp[]): void {
 }
 
 describe('useSessionRecovery rebuilds edits from the journal', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let calls: string[];
   let bodies: Record<string, unknown>;
   /** Overrides for one `METHOD path`; anything else is answered by `defaultAnswer`. */
@@ -105,7 +105,7 @@ describe('useSessionRecovery rebuilds edits from the journal', () => {
         calls.push(key);
         if (typeof init?.body === 'string') bodies[key] = JSON.parse(init.body);
         return (answers[key] ?? (() => defaultAnswer(key)))();
-      }) as ReturnType<typeof vi.spyOn>;
+      });
     successSpy = vi.spyOn(toast, 'success');
     warningSpy = vi.spyOn(toast, 'warning');
     errorSpy = vi.spyOn(toast, 'error');

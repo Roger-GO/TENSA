@@ -338,7 +338,8 @@ def test_the_node_version_is_the_same_wherever_it_is_named() -> None:
     """``web/.nvmrc`` is what ``nvm use`` gives a developer, the workflows' ``node-version``
     what CI runs, and ``engines`` in ``web/package.json`` the oldest that is supported. A
     test that passes on a newer Node can fail on the one CI runs (the two expose different
-    globals), so the local default must be CI's, and both the oldest supported."""
+    globals), so the local default must be CI's, and both the major of the oldest supported,
+    whose floor is the minor and patch release of it that the tools need."""
     nvmrc = REPO_ROOT / "web" / ".nvmrc"
     package = REPO_ROOT / "web" / "package.json"
     if not nvmrc.is_file() or not package.is_file():
@@ -356,7 +357,7 @@ def test_the_node_version_is_the_same_wherever_it_is_named() -> None:
     assert set(used) == {local}, f"web/.nvmrc says {local}, the workflows use {used}"
 
     engines = json.loads(package.read_text(encoding="utf-8"))["engines"]["node"]
-    assert engines == f">={local}"
+    assert re.fullmatch(rf">={local}(\.\d+){{0,2}}", engines), engines
 
 
 def test_no_e2e_file_depends_on_the_removed_auth_token() -> None:

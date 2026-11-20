@@ -3,6 +3,7 @@
  * the endpoints that made them.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { ProblemDetailsError } from '@/api/client';
 import { replayJournal, retryWhileBusy } from '@/api/replayJournal';
 import { parseSessionId } from '@/api/types';
@@ -28,7 +29,7 @@ interface Sent {
 }
 
 describe('replayJournal', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let sent: Sent[];
   let respond: (call: Sent) => Response;
 
@@ -45,7 +46,7 @@ describe('replayJournal', () => {
         };
         sent.push(call);
         return respond(call);
-      }) as ReturnType<typeof vi.spyOn>;
+      });
   });
 
   afterEach(() => {
@@ -202,7 +203,7 @@ const BUSY = {
 };
 
 describe('replayJournal with a session that is busy', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let attempts: number;
 
   beforeEach(() => {

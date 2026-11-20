@@ -12,6 +12,7 @@
  */
 import { Server as MockServer, WebSocket as MockWebSocket } from 'mock-socket';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 
 import { JobStream } from '@/streaming/JobStream';
 import { useJobsStore, type JobEventEnvelope } from '@/store/jobs';
@@ -206,8 +207,8 @@ describe('JobStream — close codes + frame errors', () => {
   });
 
   async function runWithClose(closeCode: number): Promise<{
-    onError: ReturnType<typeof vi.fn>;
-    fetchJobs: ReturnType<typeof vi.fn>;
+    onError: Mock;
+    fetchJobs: Mock;
     stream: JobStream;
   }> {
     server.on('connection', (socket) => {

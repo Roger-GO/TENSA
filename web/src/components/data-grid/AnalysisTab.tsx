@@ -345,9 +345,11 @@ function PlotSection({
           'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
         )}
       >
+        {/* The space stands outside the inner span: some computations of an
+            accessible name (Testing Library's) drop a space at the edge of an
+            inline element. */}
         <span>
-          {title}
-          <span className="font-normal"> · {detail}</span>
+          {title} <span className="font-normal">· {detail}</span>
         </span>
         <svg
           aria-hidden="true"

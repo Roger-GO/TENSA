@@ -8,6 +8,7 @@
  * HTTP endpoints, and assert on the visible UI states + store mutations.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -201,7 +202,7 @@ function topologyBody(state: 'pre-setup' | 'committed') {
  * operating-point read open until the handle's ``releaseOperatingPoint``.
  */
 function fakeCommittedSubstrate(
-  fetchSpy: ReturnType<typeof vi.spyOn>,
+  fetchSpy: MockInstance<typeof fetch>,
   calls: string[],
   opts: {
     reloadFails?: boolean;
@@ -340,7 +341,7 @@ function restoreWebSocket() {
 }
 
 describe('<RunButton /> v0.2 — disabled / enabled', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
@@ -545,7 +546,7 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
 });
 
 describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
@@ -702,7 +703,7 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
 });
 
 describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let server: MockServerHandle;
 
   beforeEach(() => {
@@ -1886,7 +1887,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 });
 
 describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let server: MockServerHandle;
 
   /**
@@ -2237,7 +2238,7 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
 });
 
 describe('<RunButton /> v0.2 — abort + reset', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let server: MockServerHandle;
 
   beforeEach(() => {

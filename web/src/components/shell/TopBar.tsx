@@ -116,7 +116,7 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         // Scrollbar hidden so the bar still reads as a clean strip; every
         // control stays reachable by scroll. Dropdowns/dialogs portal out,
         // so this scroll container doesn't clip them.
-        'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        '[scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden',
         className,
       )}
       {...props}

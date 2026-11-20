@@ -7,6 +7,7 @@
  * and that its Run PF button sends the options the form holds.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -38,7 +39,7 @@ const CONVERGED = {
   line_flows: {},
 };
 
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: MockInstance<typeof fetch>;
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<

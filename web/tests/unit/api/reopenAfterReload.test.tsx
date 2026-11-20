@@ -99,7 +99,7 @@ function underWay(): { answer: () => Promise<Response>; end: () => void } {
 const settled = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
 
 describe('useReopenAfterReload', () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance<typeof fetch>;
   let calls: string[];
   let bodies: Record<string, unknown>;
   let answers: Record<string, () => Response | Promise<Response>>;
@@ -137,7 +137,7 @@ describe('useReopenAfterReload', () => {
         if (key.endsWith('/blank')) return jsonResponse({ topology: TOPOLOGY }, 201);
         if (key.endsWith('/case')) return jsonResponse(TOPOLOGY);
         return jsonResponse({});
-      }) as ReturnType<typeof vi.spyOn>;
+      });
     success = vi.spyOn(toast, 'success');
     warning = vi.spyOn(toast, 'warning');
     error = vi.spyOn(toast, 'error');

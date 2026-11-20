@@ -97,8 +97,10 @@ function ExternalLink({
       )}
     >
       {children}
-      <ExternalGlyph />
-      <span className="sr-only"> (opens in a new tab)</span>
+      {/* The space before the hidden words stands outside their span: some
+          computations of an accessible name (Testing Library's) drop a space
+          at the edge of an inline element. */}
+      <ExternalGlyph /> <span className="sr-only">(opens in a new tab)</span>
     </a>
   );
 }
@@ -381,7 +383,12 @@ export function ExampleCard({
               <span>
                 <ExternalLink href={link.url} testId={`example-link-${example.id}-${index}`}>
                   {all.length === 1 ? 'Open source page' : link.title}
-                  {all.length === 1 ? <span className="sr-only"> for {link.title}</span> : null}
+                  {all.length === 1 ? (
+                    <>
+                      {' '}
+                      <span className="sr-only">for {link.title}</span>
+                    </>
+                  ) : null}
                 </ExternalLink>
               </span>
               {link.note !== null && link.note !== undefined ? (

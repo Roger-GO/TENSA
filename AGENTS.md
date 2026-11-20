@@ -4,7 +4,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 
 ## Project shape
 
-- **Layout**: `server/` is the Python substrate package (PEP 621 + src layout, hatchling build backend). `web/` is the v0.1+ React UI (Vite 6 + React 19 + TS + Tailwind v4 + Radix; pnpm). The two are independent packages with their own CI workflows.
+- **Layout**: `server/` is the Python substrate package (PEP 621 + src layout, hatchling build backend). `web/` is the v0.1+ React UI (Vite 8 + React 19 + TS + Tailwind v4 + Radix; pnpm). The two are independent packages with their own CI workflows.
 - **All file paths in commits, plans, and reviews are repo-relative.** Never use absolute paths in code, docs, or commit messages.
 
 ## Pinned versions
@@ -59,7 +59,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 ## web/ conventions
 
 - **Package manager**: pnpm 11+. Install with `npm install -g pnpm` or `corepack enable`. The lockfile is checked in; `pnpm install --frozen-lockfile` runs in CI.
-- **Node**: 22.13 minimum, which ESLint 10 needs (newer versions also work).
+- **Node**: 22.22.2 minimum, or 24.15 on Node 24, which jsdom 31 (the DOM the unit tests run in) needs; ESLint 10 needs 22.13 and Vite 8 22.12. Newer versions also work. `@types/node` stays on the major of that minimum, so a configuration or a test that calls what Node 22 lacks does not type-check.
 - **TypeScript**: `tsc` is TypeScript 7, the native compiler (`@typescript/native` in `web/package.json`). 7.0 has no compiler API, so the package named `typescript` is TypeScript 6.0 (`@typescript/typescript6`), which typescript-eslint and `openapi-typescript` import: the side-by-side install the TypeScript team recommends for tools that need the API.
 - **Render stays pure** (eslint-plugin-react-hooks 7 checks it): no ref is read or written while rendering, and an effect does not set state at once. State that follows a prop or other state is set while rendering, in the render that sees the change (`useDepsChanged` in `src/lib/useDepsChanged.ts`, or a check of the state itself), and a value that an effect or a library's callback reads without starting again on it comes from `useLatest` (`src/lib/useLatest.ts`). A comment that turns one of these rules off says why beside it; the few there are, in `SldCanvas.tsx`, are for caches of the diagram and for how it hands a new graph to React Flow.
 - **Component conventions**: 2-space indent, single quotes, trailing commas (Prettier-enforced). Named exports only — no default exports for components. Components in `src/components/<scope>/<Name>.tsx`; tests at `tests/unit/components/<scope>/<Name>.test.tsx`.
