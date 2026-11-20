@@ -74,7 +74,7 @@ def test_mcp_extra_takes_both_majors_of_the_sdk_past_their_advisories() -> None:
     """``tensa mcp`` runs on ``mcp`` 2.x, where the server class is ``MCPServer``, and on
     1.x, where it is ``FastMCP``, which upstream still patches, so an environment that
     holds 1.x for another tool keeps it. Every release below 1.30.0, and 2.0 and 2.1,
-    carry advisories, and 3.x is a major nothing has been checked against.
+    has a published advisory, and 3.x is a major nothing has been checked against.
     """
     requirement = _requirements("mcp")["mcp"]
     assert _floor(requirement) >= Version("1.30.0")

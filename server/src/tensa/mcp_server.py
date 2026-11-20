@@ -15,6 +15,7 @@ version 2 of the ``mcp`` SDK and on 1.x (see :func:`_new_server`).
 from __future__ import annotations
 
 import atexit
+import http.client
 import json
 import socket
 import subprocess
@@ -46,7 +47,6 @@ def _api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
     try:
         with urllib.request.urlopen(req, timeout=330) as resp:
             raw = resp.read()
-            return json.loads(raw) if raw else {"status": "ok"}
     except urllib.error.HTTPError as e:
         try:
             problem = json.loads(e.read())
@@ -61,6 +61,15 @@ def _api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         # Refused, reset, or no answer within the timeout.
         raise _ToolError(
             f"TENSA at {_BASE_URL} did not answer: {getattr(e, 'reason', e)}"
+        ) from None
+    except http.client.HTTPException as e:
+        # An answer cut short (``IncompleteRead``), or one that is not HTTP.
+        raise _ToolError(f"TENSA at {_BASE_URL} did not answer in full: {e!r}") from None
+    try:
+        return json.loads(raw) if raw else {"status": "ok"}
+    except ValueError:
+        raise _ToolError(
+            f"TENSA at {_BASE_URL} answered {method} /api{path} with a body that is not JSON"
         ) from None
 
 

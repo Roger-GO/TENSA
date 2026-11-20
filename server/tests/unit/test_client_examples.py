@@ -919,9 +919,10 @@ def _mcp_conversation(base: str, requests: list[dict[str, Any]], log: Path) -> l
         )
     assert server.stdin is not None and server.stdout is not None
     lines: queue.Queue[str] = queue.Queue()
-    threading.Thread(
+    reader = threading.Thread(
         target=lambda: [lines.put(line) for line in server.stdout], daemon=True
-    ).start()
+    )
+    reader.start()
 
     def ask(request_id: int, method: str, params: dict[str, Any]) -> dict[str, Any]:
         assert server.stdin is not None
@@ -959,6 +960,9 @@ def _mcp_conversation(base: str, requests: list[dict[str, Any]], log: Path) -> l
         except subprocess.TimeoutExpired:
             server.kill()
             server.wait()
+        # The child is gone, so the reader comes to the end of its output.
+        reader.join(timeout=30)
+        server.stdout.close()
 
 
 def test_the_mcp_server_answers_its_tools_and_passes_on_what_the_api_refused(
@@ -1023,6 +1027,50 @@ def test_the_mcp_helper_says_so_when_the_server_does_not_answer(
     monkeypatch.setattr(mcp_server, "_BASE_URL", base)
     with pytest.raises(mcp_server._ToolError, match=f"TENSA at {base} did not answer"):
         mcp_server._api("GET", "/workspace/files")
+
+
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        (b"<html>not json</html>", "answered GET /api/workspace/files with a body that is not JSON"),
+        (None, "did not answer in full: IncompleteRead"),
+    ],
+    ids=["not JSON", "cut short"],
+)
+def test_the_mcp_helper_says_so_when_an_answer_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, body: bytes | None, said: str
+) -> None:
+    """A 200 whose body is not JSON, or one that stops before the length it announced, is
+    a failure for the agent to read as well, not an exception mcp 2 answers with the tool's
+    name alone."""
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            payload = body if body is not None else b'{"files": ['
+            self.send_response(200)
+            self.send_header("Content-Type", _JSON)
+            # Cut short: the length announced is more than what is sent.
+            self.send_header("Content-Length", str(len(payload) + (100 if body is None else 0)))
+            self.end_headers()
+            self.wfile.write(payload)
+            self.close_connection = True
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setattr(mcp_server, "_BASE_URL", f"http://127.0.0.1:{server.server_address[1]}")
+        with pytest.raises(mcp_server._ToolError, match=re.escape(said)):
+            mcp_server._api("GET", "/workspace/files")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @pytest.mark.parametrize(

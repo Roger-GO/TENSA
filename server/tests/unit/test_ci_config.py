@@ -587,8 +587,12 @@ def test_audit_workflow_checks_both_halves_on_a_schedule() -> None:
     jobs = workflow["jobs"]
     assert "pip-audit" in _run_text(jobs["python"])
     assert "pnpm audit --prod" in _run_text(jobs["web"])
-    # The audited packages are what a user installs, so the mcp extra is in.
-    assert '"./server[mcp]"' in _run_text(jobs["python"])
+    # The audited packages are what a user installs, so the mcp extra is in,
+    # on both majors of the SDK it allows.
+    python = _run_text(jobs["python"])
+    assert '"./server[mcp]"' in python
+    assert '"./server[mcp]" "mcp<2"' in python
+    assert python.count("pip-audit --path") == 2
 
 
 # Windows caps one environment variable, name and value together, at 32767

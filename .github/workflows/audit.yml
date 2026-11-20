@@ -65,6 +65,16 @@ jobs:
           site="$("$RUNNER_TEMP/target/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
           pip-audit --path "$site" --skip-editable --desc
 
+      # The mcp extra takes both majors of the SDK. A fresh install resolves to
+      # 2.x, and an environment that holds 1.x for another tool keeps it, so the
+      # newest 1.x the extra allows is audited too.
+      - name: pip-audit with mcp 1.x
+        continue-on-error: true
+        run: |
+          "$RUNNER_TEMP/target/bin/python" -m pip install -e "./server[mcp]" "mcp<2"
+          site="$("$RUNNER_TEMP/target/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+          pip-audit --path "$site" --skip-editable --desc
+
   web:
     name: pnpm audit (production dependencies)
     runs-on: ubuntu-latest
