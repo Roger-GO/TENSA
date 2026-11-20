@@ -222,9 +222,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
 
   // Reset the local "aborting" flag once the WS has emitted the terminal
   // ``done`` (the run state flips to ``aborted`` / ``done`` / ``error``).
-  useEffect(() => {
-    if (isTdsTerminal && aborting) setAborting(false);
-  }, [isTdsTerminal, aborting]);
+  // Reset while rendering, which React follows at once with a render of the
+  // reset flag, so no render with a run that ended says "Aborting…".
+  if (isTdsTerminal && aborting) setAborting(false);
 
   // When the WS done arrives with ``abortedLocally === true``, flip the
   // run state from ``done`` to ``aborted`` so the badge + banner can read
@@ -572,7 +572,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   let primaryLabel: string;
   let primaryDisabled = false;
   let primaryShowSpinner = false;
-  let primaryTestId = 'run-button';
+  let primaryTestId: string;
   let primaryVariant: 'primary' | 'outline' | 'danger' = 'primary';
   let primaryTitle: string | undefined;
 

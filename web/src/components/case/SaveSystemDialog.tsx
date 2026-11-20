@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -92,18 +92,23 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
   const { openCase } = useOpenCase();
   const [filename, setFilename] = useState(() => suggestedCopyName(selection));
   const filenameInput = useRef<HTMLInputElement>(null);
-  // Each opening starts on the name made from the case open now. Set while
-  // rendering, not in an effect, so the first frame of the modal already holds
-  // it and the name can be selected as the focus arrives.
-  const [wasOpen, setWasOpen] = useState(modalOpen);
-  if (modalOpen !== wasOpen) {
-    setWasOpen(modalOpen);
-    if (modalOpen) setFilename(suggestedCopyName(selection));
-  }
   const [format, setFormat] = useState<Format>('xlsx');
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Each opening starts on the name made from the case open now, and without
+  // the last opening's error or "saved" line, which stay while the modal fades
+  // out. Set while rendering, not in an effect, so the first frame of the modal
+  // already holds it and the name can be selected as the focus arrives.
+  const [wasOpen, setWasOpen] = useState(modalOpen);
+  if (modalOpen !== wasOpen) {
+    setWasOpen(modalOpen);
+    if (modalOpen) {
+      setFilename(suggestedCopyName(selection));
+      setError(null);
+      setSuccess(null);
+    }
+  }
 
   // This component stays mounted while the modal opens and closes, so the
   // unmount cleanup of ``useSafeTimeout`` alone would not stop the auto-close
@@ -124,15 +129,11 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
     onOpenChange(next);
   };
   // The owner opens and closes the modal too, not only the buttons below, so
-  // each flip of ``open`` ends the last opening's beat and bumps the epoch, and
-  // an opening starts without the last one's error or "saved" line. They stay
-  // while the modal fades out.
-  useEffect(() => {
+  // each flip of ``open`` ends the last opening's beat and bumps the epoch. As
+  // the flip is committed, so that a save of the last opening that answers
+  // after the render that cleared its lines cannot write them again.
+  useLayoutEffect(() => {
     resetBeat();
-    if (modalOpen) {
-      setError(null);
-      setSuccess(null);
-    }
   }, [modalOpen]);
 
   // The notice of a copy says "you are still editing", which stops being so

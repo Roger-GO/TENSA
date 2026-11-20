@@ -1,7 +1,8 @@
-import { Suspense, createContext, useContext, useEffect, useRef, useState } from 'react';
+import { Suspense, createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { toast } from '@/lib/toast';
+import { useLatest } from '@/lib/useLatest';
 
 /**
  * Pieces for code that loads on demand (see ``lazyNamed`` in
@@ -59,15 +60,14 @@ const LazyMountContext = createContext<LazyMountState | null>(null);
 export function LazyLoadFailedQuietly(): null {
   const mount = useContext(LazyMountContext);
   const asked = mount?.when ?? true;
-  const onLoadFailed = useRef(mount?.onLoadFailed);
-  onLoadFailed.current = mount?.onLoadFailed;
+  const onLoadFailed = useLatest(mount?.onLoadFailed);
   useEffect(() => {
     if (!asked) return;
     toast.error('Part of the app could not be loaded', {
       description: 'The page may be out of date. Reload it and try again.',
     });
     onLoadFailed.current?.();
-  }, [asked]);
+  }, [asked, onLoadFailed]);
   return null;
 }
 

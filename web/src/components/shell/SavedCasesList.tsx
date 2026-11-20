@@ -112,7 +112,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
    * success card is dialog-scoped — out of place inside the sidebar).
    */
   const handleRestoreSnapshot = useCallback(
-    async (name: string) => {
+    async function restore(name: string): Promise<void> {
       if (!sessionId) return;
       markRestorePending();
       try {
@@ -138,7 +138,7 @@ export function SavedCasesList({ className }: SavedCasesListProps) {
         const message = `Restore failed: ${detail}`;
         markRestoreError(message);
         toast.error(message, {
-          action: { label: 'Retry', onClick: () => void handleRestoreSnapshot(name) },
+          action: { label: 'Retry', onClick: () => void restore(name) },
         });
       }
     },

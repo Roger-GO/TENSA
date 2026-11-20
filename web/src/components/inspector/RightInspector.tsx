@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { CursorIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
@@ -268,15 +268,11 @@ export function RightInspector({ className }: RightInspectorProps) {
   // so switching from bus → generator picks up that kind's persisted set.
   const kind = selectedElement?.kind ?? null;
   const [openByKind, setOpenByKind] = useState<Record<string, SectionId[]>>(() => ({}));
-
-  useEffect(() => {
-    if (!kind) return;
-    if (openByKind[kind] !== undefined) return;
-    const persisted = readPersistedOpen(kind);
-    setOpenByKind((curr) => ({ ...curr, [kind]: persisted }));
-  }, [kind, openByKind]);
-
   const open = kind ? (openByKind[kind] ?? readPersistedOpen(kind)) : [...DEFAULT_OPEN];
+  // Kept once read (while rendering), so it is not read again at every render.
+  if (kind && openByKind[kind] === undefined) {
+    setOpenByKind((curr) => ({ ...curr, [kind]: open }));
+  }
 
   const handleValueChange = (next: string[]) => {
     if (!kind) return;

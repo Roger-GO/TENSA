@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
 import { EditElementButton } from '@/components/elements/EditElementButton';
@@ -22,6 +22,7 @@ import type { SelectedElement } from '@/store/case';
 import { findTopologyEntry } from '@/lib/topology';
 import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { entryBaseKv, formatDisplayed, unratedBusIdx, voltageDisplay } from '@/lib/units';
 import { systemBaseEquivalent } from '@/components/elements/elementHelp';
 import { runLockNotice } from '@/lib/runLock';
@@ -114,16 +115,13 @@ function CloneEditField({ model, idx, param, value, streamingLock, diff }: Clone
   // reset / a topology re-fetch) and no commit is in flight, so the input
   // reflects the current clone-file value rather than a stale local draft.
   // Without this, an undo reverts the substrate but the field keeps showing
-  // the just-undone value.
-  useEffect(() => {
-    if (!inFlight) {
-      setCommitted(value);
-      setDraft(String(value));
-    }
-    // `inFlight` intentionally excluded — only re-sync on an upstream value
-    // change, not when a commit toggles the pending flag.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  // the just-undone value. Only on an upstream value change, not when a
+  // commit toggles the pending flag; and while rendering, so no render
+  // shows the value of before.
+  if (useDepsChanged([value]) && !inFlight) {
+    setCommitted(value);
+    setDraft(String(value));
+  }
 
   const commit = () => {
     if (disabled || inFlight) return;

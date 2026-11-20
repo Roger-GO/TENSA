@@ -328,17 +328,17 @@ export function DeleteElementButton({
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent data-testid="delete-element-dialog">
-          {renderDialogBody({
-            mode,
-            model,
-            kind,
-            idx,
-            timeline,
-            isPending: deleteMutation.isPending,
-            onSubmit: submit,
-            onCancel: () => handleOpenChange(false),
-            onDependentClick,
-          })}
+          <DeleteDialogBody
+            mode={mode}
+            model={model}
+            kind={kind}
+            idx={idx}
+            timeline={timeline}
+            isPending={deleteMutation.isPending}
+            onSubmit={submit}
+            onCancel={() => handleOpenChange(false)}
+            onDependentClick={onDependentClick}
+          />
         </DialogContent>
       </Dialog>
     </>
@@ -381,7 +381,7 @@ const LIST_ROW = cn(
   'border-border bg-background border px-2 py-1 text-left text-xs',
 );
 
-function renderDialogBody({
+function DeleteDialogBody({
   mode,
   model,
   kind,

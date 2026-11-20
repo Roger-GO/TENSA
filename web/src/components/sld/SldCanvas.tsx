@@ -67,6 +67,8 @@ import { runLockNotice } from '@/lib/runLock';
 import { UNDO } from '@/lib/undoWording';
 import { requestResetRun } from '@/lib/resetRunRequest';
 import { useReloadDiscardsEdits } from '@/lib/useResetRunAction';
+import { useDepsChanged } from '@/lib/useDepsChanged';
+import { useLatest } from '@/lib/useLatest';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { LazyMount } from '@/components/ui/Lazy';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -321,6 +323,19 @@ const DROP_PICTURES_LARGE = 3;
 /** The node types of the devices of the system that hang off a bus by a connector. */
 const HUNG_TYPES: ReadonlySet<string> = new Set(['generator', 'load', 'shunt']);
 
+/** The bus each device hung off when the devices of a topology were last looked at. */
+interface HungDevices {
+  caseKey: string | null;
+  topology: TopologySummary | null;
+  revision: number;
+  on: ReadonlyMap<string, string>;
+}
+
+const NO_HUNG_DEVICES: HungDevices = { caseKey: null, topology: null, revision: 0, on: new Map() };
+
+/** No value of the power flow left off the diagram: one list, so that it is the same at every render. */
+const NONE_LEFT_OFF: LeftOffValue[] = [];
+
 /** What a command that arranges the diagram says, and does not do, while the lock is on. */
 const LOCKED_NOTICE =
   'The diagram is locked. Unlock it with the padlock at its bottom left to change its layout.';
@@ -560,9 +575,17 @@ function SldCanvasInner({
   } = useAutoLayout(topology, baseSidecar);
 
   // Compose the final coordinate map once auto-layout resolves (at once
-  // when it is not needed).
-  useEffect(() => {
-    if (autoLayoutNeeded && autoCoords === null) return;
+  // when it is not needed). Composed while rendering, so the graph below is
+  // built from it in the same render.
+  const coordsChanged = useDepsChanged([
+    autoCoords,
+    autoLayoutNeeded,
+    baseSidecar,
+    storedSidecar,
+    curated,
+    topology,
+  ]);
+  if (coordsChanged && !(autoLayoutNeeded && autoCoords === null)) {
     const merged = mergeWithDrift(baseSidecar, topology, autoCoords ?? {});
     setCoords(merged.coords);
     setCoordsTopology(topology);
@@ -575,7 +598,7 @@ function SldCanvasInner({
       curated === null &&
       storedSidecar === null;
     setShowLargeBanner(isLarge);
-  }, [autoCoords, autoLayoutNeeded, baseSidecar, storedSidecar, curated, topology]);
+  }
 
   // React Flow's controlled state. Maintained in `nodes`/`edges` so we
   // can mutate node positions on drag without losing other props.
@@ -713,8 +736,16 @@ function SldCanvasInner({
         : JSON.stringify(draftGraph(drafts, { schema, topology, busPositions: NO_BUS_POSITIONS })),
     [drafts, schema, topology],
   );
-  const draftsRef = useRef(drafts);
-  draftsRef.current = drafts;
+  // The drafts as they were when what is drawn of them last changed, which
+  // the graph is built from; a handler reads them as they are now.
+  const drawnDrafts = useMemo(
+    () => drafts,
+    // `draftsDrawn` stands for `drafts` here: a key typed into the form of a
+    // draft changes the draft, and changes nothing the graph is built from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draftsDrawn],
+  );
+  const draftsRef = useLatest(drafts);
   // Whether the list of drafts over the diagram is open.
   const [draftsListOpen, setDraftsListOpen] = useState(false);
   // Drafts that were kept from an earlier visit turn up dashed on a case
@@ -776,7 +807,7 @@ function SldCanvasInner({
     const drafted =
       draftsDrawn === ''
         ? null
-        : draftGraph(draftsRef.current, {
+        : draftGraph(drawnDrafts, {
             schema,
             topology,
             busPositions,
@@ -810,7 +841,9 @@ function SldCanvasInner({
     // render and add them to the sticky `relocatedIdsRef` set. Drag
     // overrides clear the sticky bit so subsequent drags don't carry
     // the lingering transition style. Bus nodes never participate in
-    // push-out so we don't tag them either.
+    // push-out so we don't tag them either. Read and written while the
+    // graph is built: the transition has to be on the node in the render
+    // that moves it, or the move is not animated.
     const prior = priorPositionsRef.current;
     const relocated = relocatedIdsRef.current;
     const ANIMATION_THRESHOLD_PX = 0.5;
@@ -864,6 +897,7 @@ function SldCanvasInner({
     nonBusCoordsMap,
     barLengths,
     draftsDrawn,
+    drawnDrafts,
     schema,
     routeOverrides,
     placed,
@@ -930,6 +964,10 @@ function SldCanvasInner({
   // connection pass below needs the real box and not the size hint.
   const [sizes, setSizes] = useState<ReadonlyMap<string, NodeSize>>(NO_SIZES);
 
+  // React Flow is given the nodes and edges of a graph a render after the
+  // graph is built, with the refs the handlers build on set beside them. The
+  // effects below that keep routes and move devices are written around that
+  // order: they wait for `nodes` and `edges` to be the graph's own.
   useEffect(() => {
     if (!baseGraph) return;
     nodesRef.current = baseGraph.nodes;
@@ -1016,6 +1054,9 @@ function SldCanvasInner({
     given: givenEdges,
     settled,
   } = useMemo(() => {
+    // The routes the picture of the move before made: read and added to as
+    // each move is drawn, which spares a large diagram a search for every
+    // line at every move, and let go of once the drag ends.
     const carried = dragRoutesRef.current;
     const at = new Map(nodes.map((n) => [n.id, n.position]));
     const sits = (id: string, then: { x: number; y: number } | undefined): boolean => {
@@ -1180,7 +1221,7 @@ function SldCanvasInner({
   // seconds is easily missed, and "already tidy" changes nothing else that
   // could be seen.
   const [tidyNote, setTidyNote] = useState<string | null>(null);
-  useEffect(() => setTidyNote(null), [topology]);
+  if (useDepsChanged([topology])) setTidyNote(null);
   // Delete a draft of this diagram; the notice names it and offers to put it back.
   const removeDraft = useCallback(
     (id: string) => {
@@ -1276,7 +1317,7 @@ function SldCanvasInner({
       if (bus === null || 'refused' in attachDraft('', fields, draft.values, bus)) return null;
       return { id: node.id, bus };
     },
-    [schema],
+    [schema, draftsRef],
   );
 
   const onNodeDragStart: OnNodeDrag = useCallback((_event, _node, dragged) => {
@@ -1527,25 +1568,17 @@ function SldCanvasInner({
   // that picture routes round the connector are no routes to keep: the
   // connector is gone with the next one.
   const movedRef = useRef<Map<string, string>>(new Map());
-  const hungRef = useRef<{
-    caseKey: string | null;
-    topology: TopologySummary | null;
-    revision: number;
-    on: ReadonlyMap<string, string>;
-  }>({ caseKey: null, topology: null, revision: 0, on: new Map() });
-  // Counted each time the devices were looked at, so that `inTransit` is
-  // worked out again from what `hungRef` then holds.
-  const [hungSeen, setHungSeen] = useState(0);
+  const hungRef = useRef<HungDevices>(NO_HUNG_DEVICES);
+  // The same, for the render: set each time the devices were looked at, so
+  // that `inTransit` is worked out again from it.
+  const [hungSeen, setHungSeen] = useState<HungDevices>(NO_HUNG_DEVICES);
   const inTransit = useMemo(() => {
-    const last = hungRef.current;
-    if (last.caseKey !== caseKey) return false;
+    if (hungSeen.caseKey !== caseKey) return false;
     return nodes.some((n) => {
       if (!HUNG_TYPES.has(n.type ?? '')) return false;
-      const before = last.on.get(n.id);
+      const before = hungSeen.on.get(n.id);
       return before !== undefined && before !== (n.data as { parentBus?: unknown }).parentBus;
     });
-    // `hungSeen` stands for `hungRef`, which the effect writes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, caseKey, hungSeen]);
   // Not from a graph whose positions are a render behind its layout (a
   // snapshot that was just restored, a layout that was just reset and whose
@@ -1887,8 +1920,9 @@ function SldCanvasInner({
         });
       }
     }
-    hungRef.current = { caseKey, topology, revision, on };
-    setHungSeen((seen) => seen + 1);
+    const looked: HungDevices = { caseKey, topology, revision, on };
+    hungRef.current = looked;
+    setHungSeen(looked);
     if (Object.keys(moves).length > 0) {
       setDragOverrides({ ...useCaseStore.getState().dragOverrides, ...moves });
     }
@@ -2472,7 +2506,7 @@ function SldCanvasInner({
       if (typeof parentBus !== 'string') return;
       setWiring({ kind: 'move', nodeId, name: wiredName(node), bus: parentBus });
     },
-    [locked, tidying, schema, moveBlocked, sayBlocked],
+    [locked, tidying, schema, moveBlocked, sayBlocked, draftsRef],
   );
   const { mutate: sendEdits } = editElements;
   // Put the device or draft drawn as `nodeId` on the bus `bus`. A draft
@@ -2557,18 +2591,16 @@ function SldCanvasInner({
   }, [wiring]);
   // A bus is picked on a diagram that can be changed, with one thing in
   // hand: not while it is locked or tidied, and not the route of a line too.
-  useEffect(() => {
-    if (wiring === null) return;
+  // These are let go of while rendering, so no render draws both.
+  if (useDepsChanged([wiring, locked, tidying]) && wiring !== null) {
     if (locked || tidying) setWiring(null);
     else setRouteEditId(null);
-  }, [wiring, locked, tidying]);
+  }
   // The node that is being connected went (its draft was deleted, its case closed).
   const movedNodeId = wiring?.kind === 'move' ? wiring.nodeId : null;
-  useEffect(() => {
-    if (movedNodeId !== null && baseGraph !== null && !nodes.some((n) => n.id === movedNodeId)) {
-      setWiring(null);
-    }
-  }, [movedNodeId, baseGraph, nodes]);
+  if (movedNodeId !== null && baseGraph !== null && !nodes.some((n) => n.id === movedNodeId)) {
+    setWiring(null);
+  }
   // The bars of the buses as they are drawn: what a drop is aimed at.
   const bars = useMemo(() => busBars(nodes, connections), [nodes, connections]);
   // The end of the connector of the device that is selected, or of the draft
@@ -2820,9 +2852,7 @@ function SldCanvasInner({
   // A drag of a row that ends anywhere (dropped elsewhere, or given up with
   // Esc over the diagram) leaves no bus marked.
   const paletteDragKind = useSldStore((s) => s.paletteDragKind);
-  useEffect(() => {
-    if (paletteDragKind === null) setDropTarget(null);
-  }, [paletteDragKind]);
+  if (useDepsChanged([paletteDragKind]) && paletteDragKind === null) setDropTarget(null);
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       setDropTarget(null);
@@ -3177,13 +3207,13 @@ function SldCanvasInner({
   );
   // Nothing is picked while nothing can be moved, while several nodes are
   // picked together (their bar takes the place of this one), or once the
-  // line is gone.
-  useEffect(() => {
-    if (routeEditId === null) return;
-    if (locked || tidying || pickedSet !== null || (baseGraph !== null && editedEdge === null)) {
-      setRouteEditId(null);
-    }
-  }, [routeEditId, locked, tidying, pickedSet, baseGraph, editedEdge]);
+  // line is gone. Let go of while rendering, so no render draws it picked.
+  if (
+    routeEditId !== null &&
+    (locked || tidying || pickedSet !== null || (baseGraph !== null && editedEdge === null))
+  ) {
+    setRouteEditId(null);
+  }
   const commitRoute = useCallback(
     (edgeId: string, points: Point[], what: string, coalesce: string | null): string | null => {
       const graph = baseGraphRef.current;
@@ -3811,15 +3841,15 @@ function SldCanvasInner({
   // it leaves off and counts over its corner (`SldValuesLeftOff`). While a
   // node is dragged the labels are placed the quick way, and the list is the
   // one of the diagram at rest.
-  const leftOffAtRestRef = useRef<LeftOffValue[]>([]);
-  const leftOff = useMemo(() => {
-    if (dragging) return leftOffAtRestRef.current;
-    const found = valuesShown
+  const leftOffNow = useMemo(() => {
+    if (dragging) return null;
+    return valuesShown
       ? valuesLeftOff(nodes, edges as ConnectionEdge[], picture, pflowResult, unitMode)
-      : [];
-    leftOffAtRestRef.current = found;
-    return found;
+      : NONE_LEFT_OFF;
   }, [dragging, valuesShown, nodes, edges, picture, pflowResult, unitMode]);
+  const [leftOffAtRest, setLeftOffAtRest] = useState<LeftOffValue[]>(NONE_LEFT_OFF);
+  if (leftOffNow !== null && leftOffNow !== leftOffAtRest) setLeftOffAtRest(leftOffNow);
+  const leftOff = leftOffNow ?? leftOffAtRest;
   // A pick in that list: the element is selected, as by a click on it, and
   // the view goes to it, at a size it can be read at. A line is picked as a
   // click on it picks it, so its handles show which line it is, and moving
@@ -4865,9 +4895,7 @@ export function SldCanvas() {
     (tooLargeToOffer(topology.buses.length) || (askedFor !== selection && drawnFor !== selection));
   const diagramOnScreen =
     selection !== null && topology !== null && topology.buses.length > 0 && !diagramHeld;
-  useEffect(() => {
-    if (diagramOnScreen) setDrawnFor(selection);
-  }, [diagramOnScreen, selection]);
+  if (useDepsChanged([diagramOnScreen, selection]) && diagramOnScreen) setDrawnFor(selection);
   const setDiagramHeld = useSldStore((s) => s.setDiagramHeld);
   useEffect(() => {
     setDiagramHeld(diagramHeld);

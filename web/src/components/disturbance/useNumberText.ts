@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 /** The number a field's text stands for: an empty field is ``NaN`` ("not entered"). */
 function numberOf(text: string): number {
@@ -29,8 +29,12 @@ function sameNumber(a: number, b: number): boolean {
  */
 export function useNumberText(value: number): [string, (text: string) => void] {
   const [text, setText] = useState(textOf(value));
-  useEffect(() => {
-    setText((current) => (sameNumber(numberOf(current), value) ? current : textOf(value)));
-  }, [value]);
+  // The number the text last followed: it follows again, while rendering, when
+  // the spec holds another.
+  const [followed, setFollowed] = useState(value);
+  if (!sameNumber(followed, value)) {
+    setFollowed(value);
+    if (!sameNumber(numberOf(text), value)) setText(textOf(value));
+  }
   return [text, setText];
 }

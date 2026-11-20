@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/cn';
+import { useLatest } from '@/lib/useLatest';
 import { Button } from '@/components/ui/button';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -99,8 +100,7 @@ export function CpfQLimitsSwitch({ idPrefix, thenRun, className }: CpfQLimitsSwi
   // generator past a limit. One that failed, or still leaves one past a
   // limit, ends the chain, and its own notice says what happened.
   const chain = useRef<{ from: PflowResult | null; started: boolean } | null>(null);
-  const after = useRef(thenRun?.run);
-  after.current = thenRun?.run;
+  const after = useLatest(thenRun?.run);
   useEffect(() => {
     const held = chain.current;
     if (held === null) return;
@@ -113,7 +113,7 @@ export function CpfQLimitsSwitch({ idPrefix, thenRun, className }: CpfQLimitsSwi
     if (lastPf !== held.from && generatorsPastLimits(lastPf).length === 0 && lastPf?.converged) {
       after.current?.();
     }
-  }, [pfRunning, lastPf]);
+  }, [pfRunning, lastPf, after]);
 
   const id = `${idPrefix}-enforce-q-limits`;
   const checked = shownSwitch(choice, caseOwn);

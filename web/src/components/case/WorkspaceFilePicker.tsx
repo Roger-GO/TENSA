@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -149,29 +149,12 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
   const dyrFiles = useMemo(() => (data?.files ?? []).filter(isDyr), [data]);
 
   // Clear addfile selection when the primary changes away from a `.raw`
-  // (or to a different primary entirely) to avoid stale pairings.
-  useEffect(() => {
-    if (!selectedPrimary) {
-      setSelectedAddfile(null);
-      return;
-    }
-    const file = (data?.files ?? []).find((f) => f.name === selectedPrimary);
-    if (!file || file.format !== 'raw') {
-      setSelectedAddfile(null);
-    }
-  }, [selectedPrimary, data]);
-
-  // ---- error surface mapping (R8) ----------------------------------------
-  useEffect(() => {
-    if (loadCase.error) {
-      setBannerError(loadCase.error);
-      // Clear the offending selection so the user can pick again — per
-      // interaction-states.md "Parse error" cell ("selection of the
-      // offending file is unset").
-      setSelectedPrimary(null);
-      setSelectedAddfile(null);
-    }
-  }, [loadCase.error]);
+  // (or to a different primary entirely) to avoid stale pairings. Cleared
+  // while rendering, so no render pairs the two.
+  const primaryIsRaw =
+    selectedPrimary !== null &&
+    (data?.files ?? []).find((f) => f.name === selectedPrimary)?.format === 'raw';
+  if (selectedAddfile !== null && !primaryIsRaw) setSelectedAddfile(null);
 
   const currentSelection = useCaseStore((s) => s.selection);
 
@@ -221,6 +204,15 @@ export function WorkspaceFilePicker({ className }: WorkspaceFilePickerProps) {
           // the picker (the only place that knows what the user picked).
           setCase({ primaryPath: primary, addfiles });
           setBannerError(null);
+        },
+        // ---- error surface mapping (R8) ------------------------------------
+        onError: (err) => {
+          setBannerError(err);
+          // Clear the offending selection so the user can pick again — per
+          // interaction-states.md "Parse error" cell ("selection of the
+          // offending file is unset").
+          setSelectedPrimary(null);
+          setSelectedAddfile(null);
         },
       },
     );

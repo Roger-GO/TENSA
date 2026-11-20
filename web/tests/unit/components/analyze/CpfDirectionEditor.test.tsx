@@ -3,7 +3,7 @@
  * direction. The component is controlled, so the tests hold its value in a
  * small harness and read what a change hands back.
  */
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -30,7 +30,9 @@ function Harness({
   generators?: typeof GENERATORS;
 }) {
   const [value, setValue] = useState<CustomDirection>(EMPTY_CUSTOM_DIRECTION);
-  latest = value;
+  useLayoutEffect(() => {
+    latest = value;
+  });
   return (
     <CpfDirectionEditor loads={loads} generators={generators} value={value} onChange={setValue} />
   );

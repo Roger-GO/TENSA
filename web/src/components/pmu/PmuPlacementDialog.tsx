@@ -12,6 +12,7 @@ import { useSessionStore } from '@/store/session';
 import { usePmuStore } from '@/store/pmu';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 
 /**
  * PmuPlacementDialog — modal dialog for placing PMUs at user-selected
@@ -69,17 +70,18 @@ export function PmuPlacementDialog({ open, onOpenChange }: PmuPlacementDialogPro
   const [serverError, setServerError] = useState<string | null>(null);
 
   // Reset draft each time the dialog opens. Stale state from a prior
-  // open shouldn't leak into the next session.
+  // open shouldn't leak into the next session. Reset while rendering, so
+  // the first frame of an opening is already empty.
+  if (useDepsChanged([open]) && open) {
+    setChecked(new Set());
+    setTa('0.05');
+    setTv('0.05');
+    setServerError(null);
+  }
   useEffect(() => {
-    if (open) {
-      setChecked(new Set());
-      setTa('0.05');
-      setTv('0.05');
-      setServerError(null);
-      // Trigger a fresh list fetch on open in case the substrate's
-      // PMU set drifted (e.g., another tab placed one).
-      void list.refetch();
-    }
+    // Trigger a fresh list fetch on open in case the substrate's
+    // PMU set drifted (e.g., another tab placed one).
+    if (open) void list.refetch();
     // ``list`` reference changes on each render; we deliberately
     // exclude it from deps so this only fires on open transition.
     // eslint-disable-next-line react-hooks/exhaustive-deps

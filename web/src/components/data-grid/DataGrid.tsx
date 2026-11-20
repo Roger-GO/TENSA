@@ -54,7 +54,6 @@ import {
   useMemo,
   useState,
   useCallback,
-  useEffect,
   useRef,
   type ClipboardEvent,
   type CSSProperties,
@@ -64,6 +63,7 @@ import {
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 import { clamp } from '@/lib/clamp';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { toast } from '@/lib/toast';
 import { isEditableTarget, useHotkeys } from '@/lib/useHotkeys';
 import { Button } from '@/components/ui/button';
@@ -490,18 +490,18 @@ export function DataGrid<Row>({
 
   // Clamp the cursor to the current row range. Without this, a row
   // count drop (case reload, filter narrowing) could leave the cursor
-  // pointing past the end of the array.
-  useEffect(() => {
+  // pointing past the end of the array. Clamped while rendering, when the
+  // counts change, so no render draws it there.
+  if (useDepsChanged([sortedRows.length])) {
     setFocusedRowIndex((prev) => {
       if (sortedRows.length === 0) return 0;
       if (prev >= sortedRows.length) return sortedRows.length - 1;
       return prev;
     });
-  }, [sortedRows.length]);
-
-  useEffect(() => {
+  }
+  if (useDepsChanged([columns.length])) {
     setFocusedColIndex((prev) => clamp(prev, 0, Math.max(columns.length - 1, 0)));
-  }, [columns.length]);
+  }
 
   const onHeaderClick = useCallback((columnKey: string) => {
     setSort((prev) => nextSortState(prev, columnKey));

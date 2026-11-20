@@ -18,6 +18,7 @@ import { useSessionStore } from '@/store/session';
 import { useProfilesStore } from '@/store/profiles';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 
 /**
  * ProfileImportDialog — modal dialog for importing a CSV / XLSX
@@ -70,20 +71,21 @@ export function ProfileImportDialog({ open, onOpenChange }: ProfileImportDialogP
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Reset draft each time the dialog opens. Stale state from a prior
-  // open shouldn't leak into the next session.
+  // open shouldn't leak into the next session. Reset while rendering, so
+  // the first frame of an opening is already blank.
+  if (useDepsChanged([open]) && open) {
+    setUploadedPath(null);
+    setUploadedFilename(null);
+    setSheet('profile');
+    setFields('p0');
+    setDests('p0');
+    setTkey('t');
+    setModel('PQ');
+    setDev('');
+    setServerError(null);
+  }
   useEffect(() => {
-    if (open) {
-      setUploadedPath(null);
-      setUploadedFilename(null);
-      setSheet('profile');
-      setFields('p0');
-      setDests('p0');
-      setTkey('t');
-      setModel('PQ');
-      setDev('');
-      setServerError(null);
-      void list.refetch();
-    }
+    if (open) void list.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

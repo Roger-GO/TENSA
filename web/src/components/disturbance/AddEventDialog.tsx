@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import type { DisturbanceSpec } from '@/api/types';
 import { blankFaultSpec } from '@/store/disturbance';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { DisturbanceForm } from './DisturbanceForm';
 
 /**
@@ -60,13 +61,11 @@ export function AddEventDialog({
     () => initialSpec ?? seedSpec ?? blankFaultSpec(),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (open) {
-      setDraft(initialSpec ?? seedSpec ?? blankFaultSpec());
-      setErrors({});
-    }
-  }, [open, initialSpec, seedSpec]);
+  // Reset while rendering, so the first frame of an opening holds its own draft.
+  if (useDepsChanged([open, initialSpec, seedSpec]) && open) {
+    setDraft(initialSpec ?? seedSpec ?? blankFaultSpec());
+    setErrors({});
+  }
 
   const valid = Object.keys(errors).length === 0;
 

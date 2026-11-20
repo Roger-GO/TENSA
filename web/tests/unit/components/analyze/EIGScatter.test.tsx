@@ -368,6 +368,33 @@ describe('<EIGScatter />', () => {
       expect(tip.textContent).toMatch(/f\s*=/);
     });
 
+    it('puts the tooltip by the pointer when the chart is drawn at another scale', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      const { container } = render(<EIGScatter />);
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      // Twice the size of the viewBox, 10 px in from the corner of the page.
+      svg.getBoundingClientRect = () =>
+        ({
+          width: 640,
+          height: 480,
+          top: 10,
+          left: 10,
+          right: 650,
+          bottom: 490,
+          x: 10,
+          y: 10,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const circle = screen.getByTestId('eig-scatter-point-0');
+      const cx = Number(circle.getAttribute('cx'));
+      const cy = Number(circle.getAttribute('cy'));
+      fireEvent.pointerMove(svg, { clientX: 10 + 2 * cx, clientY: 10 + 2 * cy, pointerId: 1 });
+      const tip = screen.getByTestId('eig-scatter-tooltip');
+      expect(tip).toHaveAttribute('data-mode-idx', '0');
+      expect(parseFloat(tip.style.left)).toBeCloseTo(2 * cx + 12, 6);
+      expect(parseFloat(tip.style.top)).toBeCloseTo(2 * cy + 12, 6);
+    });
+
     it('hides the tooltip when the pointer leaves the chart', () => {
       useAnalyzeStore.getState().setEigResult(RESULT);
       const { container } = render(<EIGScatter />);

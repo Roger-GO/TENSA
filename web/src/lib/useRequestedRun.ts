@@ -12,7 +12,8 @@
  * mounted: at once when it already is, and when it comes on screen otherwise
  * (the Analysis tab of a drawer that was collapsed).
  */
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { useLatest } from '@/lib/useLatest';
 import type { RunRoutine } from '@/lib/useRunReadiness';
 import { useRunModeStore } from '@/store/runMode';
 
@@ -22,8 +23,7 @@ export function useRequestedRun(
 ): void {
   const request = useRunModeStore((s) => s.runRequest);
   // The handler of the render that is on screen: it reads the form as it stands.
-  const startRef = useRef(start);
-  startRef.current = start;
+  const startRef = useLatest(start);
   const routinesKey = routines.join(',');
   useEffect(() => {
     if (request === null) return;
@@ -31,5 +31,5 @@ export function useRequestedRun(
       .getState()
       .takeRunRequest(routinesKey.split(',') as RunRoutine[]);
     if (routine !== null) startRef.current(routine);
-  }, [request, routinesKey]);
+  }, [request, routinesKey, startRef]);
 }

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { useCurrentTopology, useTopologyRefetching, useTopologySchema } from '@/api/queries';
 import type { ParamValue, TopologyParamMeta, TopologySummary } from '@/api/types';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { BusIdxSelect } from './BusIdxSelect';
 import { GenIdxSelect } from './GenIdxSelect';
 import { SynIdxSelect } from './SynIdxSelect';
@@ -282,8 +283,10 @@ export function ElementForm({
   // Re-seed values when the model OR kindHint changes — kindHint
   // changes when the user picks a different option in the kind picker
   // (e.g., Bus → Line) so the form should reset rather than keep stale
-  // bus-form values.
-  useEffect(() => {
+  // bus-form values. Like the other values below that follow what changed,
+  // they are set while rendering (``useDepsChanged``), so no render shows
+  // the form of before.
+  if (useDepsChanged([params, model, kindHint])) {
     const fresh = seed(params, topology, defaultParams);
     setValues(fresh.values);
     setShowAdvanced(heldAdvanced(params));
@@ -292,8 +295,7 @@ export function ElementForm({
     setLinkNote(fresh.note);
     setSuggestedGen(fresh.suggested);
     setFocusRequest(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, model, kindHint]);
+  }
 
   // After the render that shows the errors (and opens the advanced fields when
   // the first of them is there), so the field exists and can take the cursor.
@@ -303,17 +305,21 @@ export function ElementForm({
   }, [focusRequest, baseId]);
 
   // A field asked for from outside goes the same way, once the form has its
-  // fields: one among the advanced ones has those opened first.
+  // fields: one among the advanced ones has those opened first. The caller is
+  // told once the form has taken it, after the render.
   const answered = useRef(onFieldFocused);
   useEffect(() => {
     answered.current = onFieldFocused;
   }, [onFieldFocused]);
+  const askedMeta =
+    focusField === null ? undefined : params.find((m) => m.name === focusField.name);
+  if (useDepsChanged([focusField, params]) && askedMeta !== undefined) {
+    if (!askedMeta.required) setShowAdvanced(true);
+    setFocusRequest({ name: askedMeta.name });
+  }
   useEffect(() => {
     if (focusField === null) return;
-    const meta = params.find((m) => m.name === focusField.name);
-    if (meta === undefined) return;
-    if (!meta.required) setShowAdvanced(true);
-    setFocusRequest({ name: meta.name });
+    if (!params.some((m) => m.name === focusField.name)) return;
     answered.current?.();
   }, [focusField, params]);
 
@@ -331,15 +337,14 @@ export function ElementForm({
   const nameTouched = touched.has('name');
   // By what it holds: the list is made anew with every render of the caller.
   const reservedKey = JSON.stringify(reservedIdxs ?? []);
-  useEffect(() => {
-    if (idxTouched) return;
+  if (useDepsChanged([model, topology, idxTouched, nameTouched, reservedKey]) && !idxTouched) {
     const proposed = nextAvailableIdx(model, topology, JSON.parse(reservedKey) as string[]);
     setValues((curr) => {
       if (!('idx' in curr) || curr.idx === proposed) return curr;
       const follows = namedAfterIdx(model) && 'name' in curr && !nameTouched;
       return follows ? { ...curr, idx: proposed, name: proposed } : { ...curr, idx: proposed };
     });
-  }, [model, topology, idxTouched, nameTouched, reservedKey]);
+  }
 
   // The same goes for the generator of the bus: a PV added for this device is
   // in the case a moment after the form that asked for it is back. A generator
@@ -351,35 +356,43 @@ export function ElementForm({
   const genTouched = touched.has('gen');
   const busValue = String(values.bus ?? '');
   const genValue = String(values.gen ?? '');
-  useEffect(() => {
-    if (!linksGen || genTouched || busValue === '') return;
+  const genFollows = useDepsChanged([
+    linksGen,
+    refetching,
+    genTouched,
+    busValue,
+    genValue,
+    suggestedGen,
+    staticGens,
+  ]);
+  if (genFollows && linksGen && !genTouched && busValue !== '') {
     if (genValue === '') {
-      if (refetching) return;
-      const linked = freeGeneratorOn(busValue, staticGens);
-      if (linked === null) return;
-      setValues((curr) => ({ ...curr, gen: linked.gen }));
-      setLinkNote(linked.note);
-      setSuggestedGen(linked.gen);
-      return;
+      const linked = refetching ? null : freeGeneratorOn(busValue, staticGens);
+      if (linked !== null) {
+        setValues((curr) => ({ ...curr, gen: linked.gen }));
+        setLinkNote(linked.note);
+        setSuggestedGen(linked.gen);
+      }
+    } else if (
+      genValue === suggestedGen &&
+      staticGens.some((g) => g.idx === genValue && g.takenBy.length > 0)
+    ) {
+      setValues((curr) => ({ ...curr, gen: '' }));
+      setLinkNote(null);
+      setSuggestedGen(null);
     }
-    if (genValue !== suggestedGen) return;
-    if (!staticGens.some((g) => g.idx === genValue && g.takenBy.length > 0)) return;
-    setValues((curr) => ({ ...curr, gen: '' }));
-    setLinkNote(null);
-    setSuggestedGen(null);
-  }, [linksGen, refetching, genTouched, busValue, genValue, suggestedGen, staticGens]);
+  }
 
   // The rated voltage goes with the bus until one is typed: picking another
   // bus, or the case gaining the rating of the one that is picked, sets it.
   const ratesFromBus = useMemo(() => ratedForBus(params), [params]);
   const vnTouched = touched.has('Vn');
   const busRating = ratesFromBus ? busRatedVoltage(topology, busValue) : null;
-  useEffect(() => {
-    if (vnTouched || busRating === null) return;
+  if (useDepsChanged([vnTouched, busRating]) && !vnTouched && busRating !== null) {
     setValues((curr) =>
       curr.Vn !== '' && Number(curr.Vn) === busRating ? curr : { ...curr, Vn: busRating },
     );
-  }, [vnTouched, busRating]);
+  }
   // Said under the field while the value there is the bus's and not the user's.
   const ratedNote =
     !vnTouched && busRating !== null && values.Vn !== '' && Number(values.Vn) === busRating

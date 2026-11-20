@@ -39,6 +39,7 @@ import { useReactFlow, useStore } from '@xyflow/react';
 
 import { ClampedText } from '@/components/ui/ClampedText';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import type { Point } from './connections';
 import {
   BRANCH_NOUN,
@@ -144,12 +145,12 @@ export function SldWiring({
   // Another thing to connect, or none: nothing of the one before carries over.
   const modeKey =
     mode === null ? '' : mode.kind === 'draw' ? `draw:${mode.model}` : `move:${mode.nodeId}`;
-  useEffect(() => {
+  if (useDepsChanged([modeKey])) {
     setNote(null);
-    if (modeKey === '') {
-      setPointer(null);
-      pressRef.current = null;
-    }
+    if (modeKey === '') setPointer(null);
+  }
+  useEffect(() => {
+    if (modeKey === '') pressRef.current = null;
   }, [modeKey]);
 
   const flowAt = useCallback(

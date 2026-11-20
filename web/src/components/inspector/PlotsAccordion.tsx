@@ -54,6 +54,15 @@ const SAMPLE_CAP = 200;
 // controller's signals plot under its parent device).
 type SelectedKind = SelectedElement['kind'];
 
+/** The last ``SAMPLE_CAP`` values a run holds of a column, or null when it has no such column. */
+function latestSamples(run: RunRecord | undefined, columnName: string): Float64Array | null {
+  const col = run?.columns[columnName];
+  if (!run || !col) return null;
+  const view = col.subarray(0, run.seqCount);
+  const start = view.length > SAMPLE_CAP ? view.length - SAMPLE_CAP : 0;
+  return view.slice(start);
+}
+
 /**
  * Subscribe to the active run's column slice with a frame throttle.
  * Returns the latest sliced ``Float64Array`` (or null when no run /
@@ -63,35 +72,32 @@ type SelectedKind = SelectedElement['kind'];
  */
 function useThrottledColumn(columnName: string | null): Float64Array | null {
   const activeRunId = useRunsStore((s) => s.activeRunId);
-  const [snapshot, setSnapshot] = useState<Float64Array | null>(null);
+  // Sampled once as the run or the column is picked, so the panel paints
+  // immediately on first selection without waiting for the next frame append;
+  // with the number of frames the run held then.
+  const picked = useMemo(() => {
+    if (!activeRunId || !columnName) return { samples: null, frames: 0 };
+    const run = useRunsStore.getState().runs[activeRunId];
+    return { samples: latestSamples(run, columnName), frames: run?.seqCount ?? 0 };
+  }, [activeRunId, columnName]);
+  // What the subscription below sampled since, with the pick it is of: the
+  // same run and column picked again later is sampled again.
+  const [snapshot, setSnapshot] = useState<{
+    of: typeof picked;
+    samples: Float64Array | null;
+  } | null>(null);
   const rafRef = useRef<number | null>(null);
   const pendingRef = useRef<Float64Array | null>(null);
 
   useEffect(() => {
-    if (!activeRunId || !columnName) {
-      setSnapshot(null);
-      return;
-    }
-    // Sample once on (re-)subscribe so the panel paints immediately on
-    // first selection without waiting for the next frame append.
-    const seedRun: RunRecord | undefined = useRunsStore.getState().runs[activeRunId];
-    if (seedRun) {
-      const col = seedRun.columns[columnName];
-      if (col) {
-        const view = col.subarray(0, seedRun.seqCount);
-        const start = view.length > SAMPLE_CAP ? view.length - SAMPLE_CAP : 0;
-        setSnapshot(view.slice(start));
-      } else {
-        setSnapshot(null);
-      }
-    }
+    if (!activeRunId || !columnName) return;
 
     const flush = () => {
       rafRef.current = null;
       const next = pendingRef.current;
       pendingRef.current = null;
       if (next === null) return;
-      setSnapshot(next);
+      setSnapshot({ of: picked, samples: next });
     };
 
     const schedule = (next: Float64Array) => {
@@ -103,18 +109,21 @@ function useThrottledColumn(columnName: string | null): Float64Array | null {
       rafRef.current = requestAnimationFrame(flush);
     };
 
+    // Frames appended between the render that sampled the column and this
+    // subscription are caught up with at the next frame.
+    const run = useRunsStore.getState().runs[activeRunId];
+    const now = run && run.seqCount !== picked.frames ? latestSamples(run, columnName) : null;
+    if (now !== null) schedule(now);
+
     const unsubscribe = useRunsStore.subscribe((state) => {
       const run: RunRecord | undefined = state.runs[activeRunId];
       if (!run) {
         if (pendingRef.current !== null) pendingRef.current = null;
-        setSnapshot(null);
+        setSnapshot({ of: picked, samples: null });
         return;
       }
-      const col = run.columns[columnName];
-      if (!col) return;
-      const view = col.subarray(0, run.seqCount);
-      const start = view.length > SAMPLE_CAP ? view.length - SAMPLE_CAP : 0;
-      schedule(view.slice(start));
+      const next = latestSamples(run, columnName);
+      if (next !== null) schedule(next);
     });
 
     return () => {
@@ -125,9 +134,9 @@ function useThrottledColumn(columnName: string | null): Float64Array | null {
       }
       pendingRef.current = null;
     };
-  }, [activeRunId, columnName]);
+  }, [activeRunId, columnName, picked]);
 
-  return snapshot;
+  return snapshot?.of === picked ? snapshot.samples : picked.samples;
 }
 
 /** The unit bases of the active run: what its streamed values convert to actual units with. */

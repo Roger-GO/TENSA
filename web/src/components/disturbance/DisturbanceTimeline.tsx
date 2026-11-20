@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DisturbanceLocal } from '@/store/disturbance';
 import { disturbanceTime, sortedDisturbances } from '@/store/disturbance';
 import { cn } from '@/lib/cn';
@@ -19,10 +19,11 @@ import { DisturbanceMarker } from './DisturbanceMarker';
  * honest in production.
  *
  * Layout uses inline px positioning under a measured container; the
- * container's width comes from a ``ResizeObserver`` ref. We deliberately
- * skip ``ResizeObserver`` in jsdom (where it's undefined) by falling
- * back to a fixed 600 px width — that's the test-mode width referenced
- * in the timeline tests.
+ * container's width is measured when the strip mounts and again by a
+ * ``ResizeObserver`` whenever it changes. Until it has a width (the first
+ * paint, and always in jsdom, which lays nothing out) the strip counts as
+ * a fixed 600 px wide; that's the test-mode width referenced in the
+ * timeline tests.
  */
 
 const TEST_MODE_WIDTH = 600;
@@ -44,6 +45,21 @@ export function DisturbanceTimeline({
   className,
 }: DisturbanceTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(TEST_MODE_WIDTH);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // A strip that is not laid out (hidden, or jsdom) keeps the width it had.
+    const measure = (): void => {
+      const measured = container.getBoundingClientRect().width;
+      if (measured > 0) setWidth(measured);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   // Effective tMax: extend if any disturbance lives past the requested
   // window. (Practical edge — keeps a marker visible if the user has
@@ -59,9 +75,6 @@ export function DisturbanceTimeline({
   // Build per-marker (x, yOffset) coords. Stack ties by insertion order
   // along the y axis so they don't overlap visually.
   const positioned = useMemo(() => {
-    // Width comes from the container ref at render time. Default to
-    // TEST_MODE_WIDTH if the ref isn't measured yet (first paint, jsdom).
-    const width = containerRef.current?.getBoundingClientRect().width ?? TEST_MODE_WIDTH;
     const seenT = new Map<number, number>();
     return sorted.map((d) => {
       const t = disturbanceTime(d.spec);
@@ -70,7 +83,7 @@ export function DisturbanceTimeline({
       const x = effectiveTMax === 0 ? 0 : (t / effectiveTMax) * width;
       return { d, x, yOffset: stackIdx * STACK_OFFSET_PX };
     });
-  }, [sorted, effectiveTMax]);
+  }, [sorted, effectiveTMax, width]);
 
   return (
     <div

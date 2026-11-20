@@ -227,10 +227,19 @@ export function AppShell({
   // (`bottomDrawerSizes`).
   const [drawerSection, setDrawerSection] = useState<HTMLElement | null>(null);
   const [columnHeight, setColumnHeight] = useState(0);
+  // The sizes for the height measured last, for what reads them outside a
+  // render. They are written where the column is measured, so they are the
+  // new ones before the render the measure starts, in which the panels size
+  // the drawer again (below).
+  const drawerSizesRef = useRef<DrawerSizes>(bottomDrawerSizes(0));
   useLayoutEffect(() => {
     const column = drawerSection?.closest<HTMLElement>('[data-panel-group]');
     if (!column) return;
-    const measure = (): void => setColumnHeight(column.clientHeight);
+    const measure = (): void => {
+      const height = column.clientHeight;
+      drawerSizesRef.current = bottomDrawerSizes(height);
+      setColumnHeight(height);
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
@@ -238,8 +247,6 @@ export function AppShell({
     return () => observer.disconnect();
   }, [drawerSection]);
   const drawerSizes = useMemo(() => bottomDrawerSizes(columnHeight), [columnHeight]);
-  const drawerSizesRef = useRef(drawerSizes);
-  drawerSizesRef.current = drawerSizes;
 
   // First-mount guard. The PanelGroup picks up ``defaultSize`` on first
   // paint, which already reflects the persisted state via the

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type uPlot from 'uplot';
 import { useShallow } from 'zustand/react/shallow';
@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { openRunHistory } from '@/lib/runHistory';
 import { openTdsPanel } from '@/lib/openTdsPanel';
 import { runIdToStrokeStyle } from '@/lib/runIdToColor';
+import { useLatest } from '@/lib/useLatest';
 import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
@@ -455,12 +456,13 @@ function EmptyPlotMessage({ message, children }: { message: string; children?: R
  * function every time, so leaving it out of the comparison hides nothing.
  */
 function useStableOptions(options: uPlot.Options): uPlot.Options {
-  const stable = useRef<{ key: string; options: uPlot.Options } | null>(null);
   const key = JSON.stringify(options);
-  if (stable.current === null || stable.current.key !== key) {
-    stable.current = { key, options };
-  }
-  return stable.current.options;
+  const [stable, setStable] = useState({ key, options });
+  if (stable.key === key) return stable.options;
+  // Another chart: kept from this render on (React renders again at once, before
+  // anything is committed, and that render returns the same object).
+  setStable({ key, options });
+  return options;
 }
 
 /**
@@ -503,8 +505,7 @@ function GroupChart({
   // ref when it draws or is clicked, so the cursors, the mode and the theme can
   // change without rebuilding the chart (``options`` must stay plain data for
   // ``useStableOptions``, and the plugin is functions).
-  const cursorSource = useRef({ cursors, armed: cursorsArmed, place: onPlaceCursor, theme });
-  cursorSource.current = { cursors, armed: cursorsArmed, place: onPlaceCursor, theme };
+  const cursorSource = useLatest({ cursors, armed: cursorsArmed, place: onPlaceCursor, theme });
   const withCursors = useMemo<uPlot.Options>(
     () => ({
       ...stableOptions,
@@ -517,7 +518,7 @@ function GroupChart({
         }),
       ],
     }),
-    [stableOptions],
+    [stableOptions, cursorSource],
   );
   // The lines are drawn by the plugin; a moved cursor needs one more draw. Not
   // when the chart has just been built: uPlot is still to make its first draw, and
@@ -572,7 +573,7 @@ function GroupChart({
     // jsdom: the underlying canvas has zero size, but our jsdom test
     // shim mocks uPlot entirely, so the call is captured by the spy
     // and never reaches the real implementation.
-    let left = 0;
+    let left: number;
     try {
       left = inst.valToPos(t, 'x');
     } catch {
@@ -680,15 +681,14 @@ export function TimeSeriesPlot({
   );
   // The runs as of the latest frame, for a time typed into a cursor's box to be
   // held to what they cover without the callback changing with every frame.
-  const runsRef = useRef(overlayRuns);
-  runsRef.current = overlayRuns;
+  const runsRef = useLatest(overlayRuns);
   const onSetCursor = useCallback(
     (which: keyof DeltaCursors, t: number | null) => {
       if (effectiveRunId) {
         setCursor(effectiveRunId, which, t === null ? null : clampToRuns(t, runsRef.current));
       }
     },
-    [effectiveRunId, setCursor],
+    [effectiveRunId, setCursor, runsRef],
   );
   const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);

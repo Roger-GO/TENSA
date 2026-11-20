@@ -5,6 +5,7 @@ import { ProblemDetailsError } from '@/api/client';
 import type { ParamValue, TopologyParamMeta } from '@/api/types';
 import { announceEdit } from '@/lib/announceEdit';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 
 /**
  * EditElementButton — pencil → input → save / cancel cycle for one
@@ -55,13 +56,12 @@ export function EditElementButton({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset draft each time the underlying value changes (e.g., topology
-  // refetch after another field's save).
-  useEffect(() => {
-    if (!editing) {
-      setDraft(String(value));
-      setError(null);
-    }
-  }, [value, editing]);
+  // refetch after another field's save). Reset while rendering, so no render
+  // shows the draft of the value before.
+  if (useDepsChanged([value, editing]) && !editing) {
+    setDraft(String(value));
+    setError(null);
+  }
 
   useEffect(() => {
     if (editing) {

@@ -18,13 +18,14 @@
  * already places every bus, since `mergeWithDrift` then never reads an
  * auto-layout coordinate.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BusCoord, TopologySummary, SidecarLayout } from '@/api/types';
 import { buildGraph, defaultBarLengths } from './graph';
 import { autoLayout, layoutSignature } from './layout';
 import type { RouteAnchors } from './routing';
 import { sidecarCoversBuses, type CoordsByIdx } from './sidecar';
 import { startTidy } from './tidyClient';
+import { useLatest } from '@/lib/useLatest';
 
 /** The diagram as it is arranged when no layout says otherwise. */
 export interface AutoArrangement {
@@ -114,8 +115,7 @@ export function useAutoLayout(
   const [resolved, setResolved] = useState<Resolved | null>(null);
   // The effect starts a layout for the render that changed `signature`;
   // later renders carry newer topology objects of the same shape.
-  const topologyRef = useRef(topology);
-  topologyRef.current = topology;
+  const topologyRef = useLatest(topology);
 
   useEffect(() => {
     if (!needed) return;
@@ -143,7 +143,7 @@ export function useAutoLayout(
       cancelled = true;
       cancelJob();
     };
-  }, [needed, whole, signature]);
+  }, [needed, whole, signature, topologyRef]);
 
   const current = needed && resolved?.signature === signature ? resolved : null;
   return {

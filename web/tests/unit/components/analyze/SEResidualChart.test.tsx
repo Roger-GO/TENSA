@@ -13,6 +13,7 @@
  *   dismisses it; re-running SE (new result identity) clears any open
  *   selection so stale indices don't bleed across runs.
  */
+import { Profiler } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { SEResidualChart, buildHistogram } from '@/components/analyze/SEResidualChart';
@@ -176,8 +177,8 @@ describe('<SEResidualChart />', () => {
     fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
     expect(screen.getByTestId('se-residual-detail-panel')).toBeInTheDocument();
 
-    // Hand a NEW SeResult object (fresh identity, same shape) — the
-    // useEffect keyed on ``result`` should reset the selection.
+    // Hand a NEW SeResult object (fresh identity, same shape) — a change
+    // of ``result`` resets the selection.
     const nextResult: SeResult = {
       ...SE_RESULT,
       // Tweak a field so the object identity is unambiguously different.
@@ -185,6 +186,23 @@ describe('<SEResidualChart />', () => {
     };
     rerender(<SEResidualChart result={nextResult} binCount={10} />);
 
+    expect(screen.queryByTestId('se-residual-detail-panel')).not.toBeInTheDocument();
+  });
+
+  it('a new result is never drawn with the bin picked in the last one', () => {
+    let commits = 0;
+    const chart = (result: SeResult) => (
+      <Profiler id="se" onRender={() => (commits += 1)}>
+        <SEResidualChart result={result} binCount={10} />
+      </Profiler>
+    );
+    const { rerender } = render(chart(SE_RESULT));
+    fireEvent.click(screen.getAllByTestId('se-residual-bar-flagged')[0]!);
+    commits = 0;
+    rerender(chart({ ...SE_RESULT, iterations: SE_RESULT.iterations + 1 }));
+    // One commit, without the panel: an effect that reset the pick would have
+    // committed the new result with the old bin open, and then closed it.
+    expect(commits).toBe(1);
     expect(screen.queryByTestId('se-residual-detail-panel')).not.toBeInTheDocument();
   });
 

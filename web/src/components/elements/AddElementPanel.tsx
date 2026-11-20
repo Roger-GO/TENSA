@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAddElement, useCurrentTopology, useTopologySchema } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
@@ -102,9 +102,7 @@ export function AddElementPanel({ className }: AddElementPanelProps) {
 
   // The confirmation is about this visit to the panel: the next time it opens,
   // the element it names was added a while ago.
-  useEffect(() => {
-    if (!open) setLastAdded(null);
-  }, [open]);
+  if (!open && lastAdded !== null) setLastAdded(null);
 
   if (!open) return null;
 

@@ -51,6 +51,7 @@ import { createPortal } from 'react-dom';
 import { useReactFlow, useStore } from '@xyflow/react';
 
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { routePath, runKind, type Point, type RunKind } from './connections';
 import type { RouteCheck } from './routeCheck';
 import {
@@ -257,12 +258,15 @@ export function SldRouteEditor({
   const dragRef = useRef<Drag | null>(null);
   // The part that takes the focus of the keys once its handle is drawn (below).
   const focusNext = useRef<Picked | null>(null);
-  // Another line: nothing of the one before carries over.
-  useEffect(() => {
+  // Another line: nothing of the one before carries over, not even for the
+  // render that first shows it.
+  if (useDepsChanged([edgeId])) {
     setSplits([]);
     setPicked(null);
     setNote(null);
     setShown(null);
+  }
+  useEffect(() => {
     dragRef.current = null;
     focusNext.current = null;
   }, [edgeId]);

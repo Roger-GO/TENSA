@@ -556,7 +556,7 @@ for (const plan of ARRANGEMENTS) {
         .getByRole('button', { name: new RegExp(`^End the ${what} at bus ${to} \\(`) })
         .click();
       await expect(toast(page, `Draft ${what} drawn from bus ${from} to bus ${to}`)).toBeVisible();
-      now = await expectClean(page);
+      await expectClean(page);
     }
 
     // A load of the system goes to another bus, and another is dragged about.

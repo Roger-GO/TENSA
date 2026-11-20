@@ -5,6 +5,7 @@
  *
  * The API client is stubbed, so each test reads the requests that went out.
  */
+import { useLayoutEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -60,8 +61,11 @@ const CONTROLLER_TARGET: GridEditTarget<Row> = { ...TARGET, controllers: true };
 let latest: GridEditing<Row>;
 
 function Harness({ target }: { target: GridEditTarget<Row> }) {
-  latest = useGridEditing(target);
-  return <>{latest.barExtra}</>;
+  const editing = useGridEditing(target);
+  useLayoutEffect(() => {
+    latest = editing;
+  });
+  return <>{editing.barExtra}</>;
 }
 
 function column(param: string, withEdit = true): ColumnConfig<Row> {

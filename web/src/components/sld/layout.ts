@@ -310,10 +310,9 @@ export async function autoLayout(
   };
 
   const bendPoints = new Map<string, [number, number][]>();
-  let pass2Coords: CoordsByIdx | null = null;
+  const pass2Coords: CoordsByIdx = {};
   try {
     const result = (await elkLayout(pass2Graph)) as ElkLayoutResult;
-    pass2Coords = {};
     for (const child of result.children ?? []) pass2Coords[child.id] = origin(child);
     // Edges may sit on root or on the deepest common parent's children.
     const allEdges: ElkResultEdge[] = [
@@ -343,7 +342,7 @@ export async function autoLayout(
   // sizes by zero so coords match pass 1 in practice, but using pass 2
   // keeps the bend-point polylines self-consistent with the bus
   // positions React Flow renders).
-  return { coords: pass2Coords ?? coords, bendPoints };
+  return { coords: pass2Coords, bendPoints };
 }
 
 /**

@@ -129,6 +129,16 @@ interface ViewRect {
 }
 
 /**
+ * Where the pointer is on the chart: in SVG-viewBox pixels, and in CSS pixels
+ * from the SVG's top left corner (``css``), where the tooltip is put.
+ */
+interface CursorPx {
+  x: number;
+  y: number;
+  css: { x: number; y: number };
+}
+
+/**
  * Produce a viewport bound that includes [-x_max, x_max] x [-y_max,
  * y_max] padded slightly so points don't render on the axis line.
  * When all points are at the origin, return a sensible default range.
@@ -278,7 +288,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
   const [xScale, setXScale] = useState<'linear' | 'log'>('linear');
   // Pixel coordinates of the hovered cursor (within the SVG container).
   // ``null`` when the pointer has left the chart.
-  const [cursorPx, setCursorPx] = useState<{ x: number; y: number } | null>(null);
+  const [cursorPx, setCursorPx] = useState<CursorPx | null>(null);
   // Index (into the visible ``points`` array) of the closest point under
   // the cursor; ``null`` when nothing is close enough to surface a tooltip.
   const [hoverPointIdx, setHoverPointIdx] = useState<number | null>(null);
@@ -424,18 +434,19 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
    * The SVG renders at ``preserveAspectRatio="xMidYMid meet"`` so we
    * compute the linear scale between the SVG's CSS pixels and its
    * viewBox-pixel space directly from the bounding rect — this stays
-   * correct regardless of the parent container's size.
+   * correct regardless of the parent container's size. The CSS pixels
+   * are kept as well, for the tooltip, which is put where the pointer
+   * was when it moved and does not measure the SVG while rendering.
    */
-  const eventToSvgPx = (
-    evt: ReactPointerEvent | ReactWheelEvent,
-  ): { x: number; y: number } | null => {
+  const eventToSvgPx = (evt: ReactPointerEvent | ReactWheelEvent): CursorPx | null => {
     const svg = svgRef.current;
     if (svg === null) return null;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
-    const x = ((evt.clientX - rect.left) / rect.width) * SVG_WIDTH;
-    const y = ((evt.clientY - rect.top) / rect.height) * SVG_HEIGHT;
-    return { x, y };
+    const css = { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+    const x = (css.x / rect.width) * SVG_WIDTH;
+    const y = (css.y / rect.height) * SVG_HEIGHT;
+    return { x, y, css };
   };
 
   const handleWheel = useCallback(
@@ -906,7 +917,7 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
         </g>
       </svg>
       {hoveredFields !== null && cursorPx !== null ? (
-        <Tooltip svg={svgRef.current} cursorPx={cursorPx} fields={hoveredFields} />
+        <Tooltip at={cursorPx.css} fields={hoveredFields} />
       ) : null}
     </div>
   );
@@ -921,26 +932,14 @@ interface TooltipFields {
 }
 
 /**
- * Hover tooltip — absolutely positioned near the cursor. Receives
- * SVG-viewBox pixel coordinates and converts them to container-relative
- * CSS pixels by reading the SVG's bounding rect; this keeps the tooltip
- * pinned correctly even when the SVG renders at non-1:1 scale.
+ * Hover tooltip — absolutely positioned near the cursor. Receives the
+ * cursor in CSS pixels from the SVG's top left corner (measured when the
+ * pointer moved, ``eventToSvgPx``), so it stays pinned correctly even when
+ * the SVG renders at non-1:1 scale.
  */
-function Tooltip({
-  svg,
-  cursorPx,
-  fields,
-}: {
-  svg: SVGSVGElement | null;
-  cursorPx: { x: number; y: number };
-  fields: TooltipFields;
-}) {
-  if (svg === null) return null;
-  const rect = svg.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return null;
-  // Convert viewBox pixels back to CSS pixels relative to the SVG.
-  const left = (cursorPx.x / SVG_WIDTH) * rect.width + 12;
-  const top = (cursorPx.y / SVG_HEIGHT) * rect.height + 12;
+function Tooltip({ at, fields }: { at: { x: number; y: number }; fields: TooltipFields }) {
+  const left = at.x + 12;
+  const top = at.y + 12;
   const realStr = formatNearZero(fields.real);
   const imagStr = formatNearZero(fields.imag);
   const sign = fields.imag < 0 ? '-' : '+';

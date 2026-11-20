@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
+import { useDepsChanged } from '@/lib/useDepsChanged';
 import { useAnalyzeStore } from '@/store/analyze';
 import { ExportMenu } from '@/components/export/ExportMenu';
 import { elementToPng } from '@/components/export/exportToPng';
@@ -180,9 +181,7 @@ export function SEResidualChart({
    * object), so stale bin indices don't survive across runs.
    */
   const [selectedBinIdx, setSelectedBinIdx] = useState<number | null>(null);
-  useEffect(() => {
-    setSelectedBinIdx(null);
-  }, [result]);
+  if (useDepsChanged([result])) setSelectedBinIdx(null);
 
   // CSV is every residual with its flag; PNG is the histogram card as drawn.
   const cardRef = useRef<HTMLDivElement | null>(null);
