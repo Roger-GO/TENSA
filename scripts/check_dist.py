@@ -11,7 +11,9 @@ checks are the ones a release must not skip:
 * with ``--tag``, that version is the one the git tag names (a leading ``v`` is
   ignored and the comparison is PEP 440, so ``v0.5.0-rc.1`` is ``0.5.0rc1``);
 * the wheel and the sdist carry the built web UI (``index.html`` and its
-  assets), so the package serves a page instead of a 404;
+  assets), so the package serves a page instead of a 404, and beside it
+  ``THIRD-PARTY-LICENSES.txt``, the licences and notices of the libraries the UI
+  bundles, which those licences ask to go with every copy;
 * both carry the example catalog and its ``NOTICE.md``, and every case file the
   catalog bundles (kind ``bundled``), so a case it offers is never missing, and
   beside the file of an entry whose licence carries a notice (the NREL agreement
@@ -45,6 +47,8 @@ from packaging.version import InvalidVersion, Version
 LICENSE_EXPRESSION = "GPL-3.0-or-later"
 WHEEL_UI = "tensa/static"
 SDIST_UI = "src/tensa/static"
+# What the build of the UI writes beside its index.html (web/vite-plugins/thirdPartyLicenses.ts).
+UI_LICENSES = "THIRD-PARTY-LICENSES.txt"
 WHEEL_EXAMPLES = "tensa/examples"
 SDIST_EXAMPLES = "src/tensa/examples"
 
@@ -72,8 +76,14 @@ def _ui_problems(kind: str, names: Iterable[str], ui_dir: str) -> list[str]:
     problems: list[str] = []
     if f"{ui_dir}/index.html" not in names:
         problems.append(f"{kind} has no {ui_dir}/index.html: the web UI is not bundled")
-    elif not any(n.startswith(f"{ui_dir}/assets/") for n in names):
-        problems.append(f"{kind} has {ui_dir}/index.html but no {ui_dir}/assets/")
+    else:
+        if not any(n.startswith(f"{ui_dir}/assets/") for n in names):
+            problems.append(f"{kind} has {ui_dir}/index.html but no {ui_dir}/assets/")
+        if f"{ui_dir}/{UI_LICENSES}" not in names:
+            problems.append(
+                f"{kind} has no {ui_dir}/{UI_LICENSES}: the licences of the libraries the UI "
+                "bundles are not shipped with it"
+            )
     maps = sorted(n for n in names if n.endswith(".map"))
     if maps:
         problems.append(f"{kind} ships source maps: {', '.join(maps)}")

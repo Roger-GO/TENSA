@@ -48,4 +48,4 @@ It runs five analyses, each with one click:
 - **It is local.** The server binds to loopback by default, there is no account, and nothing phones home. It has no authentication, so it trusts the user who runs it. [Concepts](concepts.md#trust-model) says what that means for case files and for network access.
 - **Versions.** These pages describe the version of TENSA in the repository they were built from. `tensa --version` prints the TENSA and ANDES versions you have installed.
 - **Help.** TENSA has one maintainer, so replies are best effort. [Support](support.md) says where to ask, how to report a bug or a vulnerability, and which versions are supported.
-- **License.** TENSA is released under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`), the same license as ANDES.
+- **License.** TENSA is released under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`), the same license as ANDES. The libraries the web UI is built with keep their own licenses, which the UI carries in `THIRD-PARTY-LICENSES.txt`: a running server serves it at `/THIRD-PARTY-LICENSES.txt`.

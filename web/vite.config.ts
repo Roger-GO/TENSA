@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
 import { ENTRY_CHUNK_LIMIT_KB, entryChunkLimit } from './vite-plugins/entryChunkLimit.ts';
+import { thirdPartyLicenses } from './vite-plugins/thirdPartyLicenses.ts';
 
 // Default substrate port. Override with VITE_ANDES_PORT env var when running
 // `tensa serve --port <N>` so dev proxy targets the right backend.
@@ -16,12 +17,18 @@ const REACT_CHUNK = 'vendor-react';
 // The same for the library the shell lays its panels out with.
 const PANELS_CHUNK = 'vendor-panels';
 
+// The licences of the packages the build bundles, written beside index.html.
+// Tailwind's base styles are part of the app's stylesheet without being a
+// module of a chunk, so it is named.
+const licenses = thirdPartyLicenses({ alsoBundled: ['tailwindcss'] });
+
 export default defineConfig({
-  // The last one fails the build when the first load outgrows its limit.
+  // `entryChunkLimit` fails the build when the first load outgrows its limit.
   plugins: [
     react(),
     tailwindcss(),
     entryChunkLimit(ENTRY_CHUNK_LIMIT_KB, [REACT_CHUNK, PANELS_CHUNK]),
+    licenses.plugin,
   ],
   resolve: {
     alias: {
@@ -57,6 +64,8 @@ export default defineConfig({
     },
   },
   worker: {
+    // A worker's bundle is built apart; elkjs is in the ELK worker's.
+    plugins: () => [licenses.worker()],
     rolldownOptions: {
       // The ELK worker's script is a CommonJS module, so its bundle returns
       // the module's exports, and Rolldown warns that nothing can reach them

@@ -35,6 +35,7 @@ pytestmark = pytest.mark.integration
 _UI = {
     "index.html": "<!doctype html><title>stub</title>",
     "favicon.svg": "<svg/>",
+    "THIRD-PARTY-LICENSES.txt": "Third-party software in the TENSA web UI\n",
     "assets/index-abc.js": "console.log('stub');\n//# sourceMappingURL=index-abc.js.map\n",
     "assets/index-abc.js.map": '{"version":3}',
 }
@@ -133,6 +134,7 @@ def test_the_wheel_built_from_the_sdist_serves_the_ui(built: Built) -> None:
     assert "tensa/static/index.html" in names
     assert "tensa/static/favicon.svg" in names
     assert "tensa/static/assets/index-abc.js" in names
+    assert "tensa/static/THIRD-PARTY-LICENSES.txt" in names
     assert "tensa/__init__.py" in names
 
 
@@ -148,6 +150,7 @@ def test_the_sdist_carries_the_ui_the_license_and_the_hook(built: Built) -> None
     assert {
         "src/tensa/static/index.html",
         "src/tensa/static/assets/index-abc.js",
+        "src/tensa/static/THIRD-PARTY-LICENSES.txt",
         "LICENSE",
         "hatch_build.py",
         "pyproject.toml",
@@ -200,6 +203,7 @@ def test_a_wheel_built_straight_from_the_repository_matches(tmp_path: Path) -> N
     names = _names(wheel)
     assert "tensa/static/index.html" in names
     assert "tensa/static/assets/index-abc.js" in names
+    assert "tensa/static/THIRD-PARTY-LICENSES.txt" in names
     assert not [n for n in names if n.endswith(".map")]
 
 

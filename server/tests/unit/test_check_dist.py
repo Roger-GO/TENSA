@@ -17,7 +17,7 @@ from types import ModuleType
 
 import pytest
 
-from tests._repo import SCRIPTS_DIR, load_module
+from tests._repo import SCRIPTS_DIR, WEB_DIR, load_module
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +39,7 @@ _WHEEL_FILES = {
     "tensa/__init__.py": "",
     "tensa/static/index.html": "<html></html>",
     "tensa/static/assets/index-abc.js": "//",
+    "tensa/static/THIRD-PARTY-LICENSES.txt": "licenses",
     "tensa/examples/catalog.json": _CATALOG,
     "tensa/examples/NOTICE.md": "notice",
     "tensa-{v}.dist-info/licenses/LICENSE": "license",
@@ -47,6 +48,7 @@ _SDIST_FILES = {
     "src/tensa/__init__.py": "",
     "src/tensa/static/index.html": "<html></html>",
     "src/tensa/static/assets/index-abc.js": "//",
+    "src/tensa/static/THIRD-PARTY-LICENSES.txt": "licenses",
     "src/tensa/examples/catalog.json": _CATALOG,
     "src/tensa/examples/NOTICE.md": "notice",
     "LICENSE": "license",
@@ -179,6 +181,31 @@ def test_an_sdist_that_cannot_be_rebuilt_is_refused(tmp_path: Path, missing: str
     _sdist(out, drop=(missing,))
     (problem,) = _script().check(out)
     assert missing in problem
+
+
+def test_an_archive_without_the_licences_of_what_the_ui_bundles_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The UI ships minified React, Radix, React Flow, Apache Arrow, elkjs and more, whose
+    licences ask for their notices to go with every copy: the build writes them beside it."""
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out, drop=("tensa/static/THIRD-PARTY-LICENSES.txt",))
+    _sdist(out, drop=("src/tensa/static/THIRD-PARTY-LICENSES.txt",))
+    problems = _script().check(out)
+    assert len(problems) == 2
+    assert any("tensa/static/THIRD-PARTY-LICENSES.txt" in p and ".whl" in p for p in problems)
+    assert any(
+        "src/tensa/static/THIRD-PARTY-LICENSES.txt" in p and ".tar.gz" in p for p in problems
+    )
+
+
+def test_the_licences_file_is_the_one_the_build_of_the_ui_writes() -> None:
+    plugin = WEB_DIR / "vite-plugins" / "thirdPartyLicenses.ts"
+    if not plugin.is_file():
+        pytest.skip("web/ is not next to the tests")
+    name = _script().UI_LICENSES
+    assert f"export const LICENSES_FILE = '{name}';" in plugin.read_text(encoding="utf-8")
 
 
 def test_source_maps_in_either_archive_are_refused(tmp_path: Path) -> None:

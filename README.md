@@ -201,3 +201,5 @@ PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for a source checkout,
 ## License
 
 TENSA is licensed under the [GNU General Public License v3.0 or later](./LICENSE) (SPDX identifier `GPL-3.0-or-later`), the same license as ANDES.
+
+The web UI is built with libraries that keep their own licenses: MIT for most of them (React, Radix, React Flow, uPlot and others), ISC and BSD-3-Clause for the d3 modules, Apache-2.0 for Apache Arrow, and EPL-2.0 or GPL-3.0-or-later for elkjs. The build writes the name, version, license and license text of each one, with the NOTICE of those that have one, into `THIRD-PARTY-LICENSES.txt` beside the UI. An installed package has it in `tensa/static/`, a checkout in `web/dist/` once the UI is built, and a running server serves it at `/THIRD-PARTY-LICENSES.txt`.
