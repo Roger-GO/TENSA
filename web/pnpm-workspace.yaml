@@ -2,4 +2,7 @@
 # script from `allowBuilds` here, and from nowhere else; none of today's
 # dependencies has one (esbuild left with Vite 8). A new dependency that needs
 # its script makes `pnpm install` stop with ERR_PNPM_IGNORED_BUILDS: name it
-# under `allowBuilds:` with the value `true`.
+# under `allowBuilds:` with the value `true`. The map stays even when empty: a
+# file of comments only parses as nothing, and Dependabot's pnpm parser then
+# fails on it.
+allowBuilds: {}

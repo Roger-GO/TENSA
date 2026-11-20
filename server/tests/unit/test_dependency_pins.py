@@ -152,7 +152,9 @@ def test_pnpm_build_permissions_are_declared_once_and_only_for_installed_package
     lockfile = WEB_DIR / "pnpm-lock.yaml"
     assert workspace.is_file(), "web/pnpm-workspace.yaml is missing"
     assert lockfile.is_file(), "web/pnpm-lock.yaml is missing"
-    settings = yaml.safe_load(workspace.read_text(encoding="utf-8")) or {}
+    settings = yaml.safe_load(workspace.read_text(encoding="utf-8"))
+    # A file of comments only loads as None, and Dependabot's pnpm parser fails on it.
+    assert isinstance(settings, dict), "web/pnpm-workspace.yaml must hold a mapping, even if empty"
     packages = yaml.safe_load(lockfile.read_text(encoding="utf-8"))["packages"]
     installed = {key.rsplit("@", 1)[0] for key in packages}
     for name in settings.get("allowBuilds") or {}:
