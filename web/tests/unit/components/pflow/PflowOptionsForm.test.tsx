@@ -42,9 +42,7 @@ const CONVERGED = {
 let fetchSpy: MockInstance<typeof fetch>;
 
 beforeEach(() => {
-  fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-    typeof vi.spyOn
-  >;
+  fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   usePflowOptionsStore.getState().resetForNewCase();
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   useSessionStore.setState({ sessionId: null });

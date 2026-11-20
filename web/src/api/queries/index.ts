@@ -23,6 +23,12 @@
  * the folder: tests mock `@/api/queries`, and a component that reached past it
  * would run the real hook. `jobGlue.ts` and `caseReady.ts` are shared by the
  * modules and are not re-exported, and neither is `snapshotsKey` of `keys.ts`.
+ *
+ * This file holds re-exports and nothing else. The production build takes it
+ * to be free of side effects (`treeshake.moduleSideEffects` in
+ * `vite.config.ts`), so that the first screen, which imports a few hooks from
+ * here, does not load the hooks of every panel: a statement of its own here
+ * would be dropped from that build without a warning, and a test refuses one.
  */
 export { queryKeys } from './keys';
 export type { ReportRoutine } from './keys';

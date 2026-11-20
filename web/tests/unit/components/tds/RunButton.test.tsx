@@ -344,9 +344,7 @@ describe('<RunButton /> v0.2 — disabled / enabled', () => {
   let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
       selection: null,
@@ -549,9 +547,7 @@ describe('<RunButton /> v0.2 — PF branch (legacy v0.1 flow still works)', () =
   let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     seedReady();
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
   });
@@ -708,9 +704,7 @@ describe('<RunButton /> v0.2 — TDS branch (happy path + error routing)', () =>
 
   beforeEach(() => {
     installMockWebSocket();
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useRunsStore.setState({
       runs: {},
       activeRunId: null,
@@ -1929,9 +1923,7 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
 
   beforeEach(async () => {
     installMockWebSocket();
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useRunsStore.setState({
       runs: {},
       activeRunId: null,
@@ -2243,9 +2235,7 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
 
   beforeEach(() => {
     installMockWebSocket();
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useRunsStore.setState({
       runs: {},
       activeRunId: null,

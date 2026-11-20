@@ -196,9 +196,7 @@ describe('wireGlobalErrorRecovery — cache subscriber integration', () => {
     useCaseStore.setState({
       selection: { primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] },
     });
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {
@@ -376,9 +374,7 @@ describe('useSessionRecovery — auto-create + post-delete re-create', () => {
       recoveryFailed: false,
       recoveryAttempts: [],
     });
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {
@@ -811,9 +807,7 @@ describe('useSessionRecovery — stuck-detection + transition telemetry', () => 
       recoveryAttempts: [],
       recoveryStuckSince: null,
     });
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {

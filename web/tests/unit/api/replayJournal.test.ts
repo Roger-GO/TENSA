@@ -208,9 +208,7 @@ describe('replayJournal with a session that is busy', () => {
 
   beforeEach(() => {
     attempts = 0;
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {

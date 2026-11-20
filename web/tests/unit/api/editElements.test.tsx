@@ -76,9 +76,7 @@ describe('useEditElements', () => {
     });
     useEditJournalStore.getState().reset();
     useJobsStore.setState({ jobs: {}, dismissedJobIds: [] });
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {

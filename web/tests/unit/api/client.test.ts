@@ -27,9 +27,7 @@ describe('andesClient', () => {
 
   beforeEach(() => {
     // Cast through unknown so the spy signature stays type-clean.
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   });
 
   afterEach(() => {

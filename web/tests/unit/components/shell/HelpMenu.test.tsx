@@ -35,9 +35,7 @@ function requestedPaths(): string[] {
 }
 
 beforeEach(() => {
-  fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-    typeof vi.spyOn
-  >;
+  fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   fetchSpy.mockImplementation(() =>
     Promise.resolve(jsonResponse({ tensa: '0.5.0', andes: '2.0.0' })),
   );

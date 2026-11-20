@@ -7,7 +7,7 @@
  *   3. Neither → EmptyState.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 
 import { useCaseStore } from '@/store/case';
 import { useRunsStore } from '@/store/runs';
@@ -134,6 +134,67 @@ describe('<PlotsAccordion />', () => {
     render(<PlotsAccordion />);
     expect(screen.getByTestId('inline-sparkline')).toBeInTheDocument();
     expect(screen.getByTestId('inline-sparkline-path')).toBeInTheDocument();
+  });
+
+  describe('a run that is still streaming', () => {
+    /** Appends a frame to the column of the run `seedRunWithColumn` made. */
+    function append(columnName: string, value: number) {
+      act(() => {
+        useRunsStore.setState((state) => {
+          const run = state.runs['run-test']!;
+          const col = new Float64Array([
+            ...run.columns[columnName]!.subarray(0, run.seqCount),
+            value,
+          ]);
+          return {
+            runs: {
+              ...state.runs,
+              'run-test': { ...run, seqCount: run.seqCount + 1, columns: { [columnName]: col } },
+            },
+          };
+        });
+      });
+    }
+
+    it('draws the frames that arrive after the column was picked', async () => {
+      seedLoadedCase();
+      seedRunWithColumn('Bus_5_v', [1.0, 1.01]);
+      useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+      render(<PlotsAccordion />);
+      expect(sparklines()).toEqual([{ label: 'Voltage (pu)', value: '1.0100' }]);
+      append('Bus_5_v', 0.97);
+      append('Bus_5_v', 0.96);
+      // Drawn at the next frame, once for both.
+      await waitFor(() =>
+        expect(sparklines()).toEqual([{ label: 'Voltage (pu)', value: '0.9600' }]),
+      );
+    });
+
+    it('draws nothing of a run that is removed', async () => {
+      seedLoadedCase();
+      seedRunWithColumn('Bus_5_v', [1.0, 1.01]);
+      useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+      render(<PlotsAccordion />);
+      expect(screen.getByTestId('inline-sparkline')).toBeInTheDocument();
+      act(() => useRunsStore.setState({ runs: {} }));
+      await waitFor(() => expect(screen.queryByTestId('inline-sparkline')).not.toBeInTheDocument());
+    });
+
+    it('draws a column picked again as it is now, not as it was when it was left', async () => {
+      seedLoadedCase();
+      seedRunWithColumn('Bus_5_v', [1.0, 1.01]);
+      useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } });
+      render(<PlotsAccordion />);
+      append('Bus_5_v', 0.97);
+      await waitFor(() =>
+        expect(sparklines()).toEqual([{ label: 'Voltage (pu)', value: '0.9700' }]),
+      );
+      act(() => useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '6' } }));
+      expect(screen.queryByTestId('inline-sparkline')).not.toBeInTheDocument();
+      append('Bus_5_v', 0.95);
+      act(() => useCaseStore.setState({ selectedElement: { kind: 'bus', idx: '5' } }));
+      expect(sparklines()).toEqual([{ label: 'Voltage (pu)', value: '0.9500' }]);
+    });
   });
 
   it('bus + only PF result (no TDS) → static V badge', () => {

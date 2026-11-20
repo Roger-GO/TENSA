@@ -75,9 +75,7 @@ describe('<RunButton />', () => {
   let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useSessionStore.setState({ sessionId: null });
     useCaseStore.setState({
       selection: null,

@@ -358,9 +358,7 @@ describe('<AnalyzePanel />', () => {
     let fetchSpy: MockInstance<typeof fetch>;
 
     beforeEach(() => {
-      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-        typeof vi.spyOn
-      >;
+      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
       // Seed a converged PF so the Run-readiness gate enables the button —
       // the 409 we inject simulates the substrate disagreeing post-click.
       usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
@@ -760,9 +758,7 @@ describe('<AnalyzePanel />', () => {
     let fetchSpy: MockInstance<typeof fetch>;
 
     beforeEach(() => {
-      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-        typeof vi.spyOn
-      >;
+      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
       // Converged PF so the Generate Measurements button is enabled.
       usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
       useAnalyzeStore.getState().setSubMode('se');

@@ -45,9 +45,7 @@ describe('<ConvergenceErrorPanel />', () => {
   let fetchSpy: MockInstance<typeof fetch>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
     usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
     usePflowOptionsStore.getState().resetForNewCase();
@@ -229,9 +227,7 @@ describe('<ConvergenceErrorPanel /> adjusted retries', () => {
   }
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch') as ReturnType<
-      typeof vi.spyOn
-    >;
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
     fetchSpy.mockImplementation(() => Promise.resolve(converged()));
     useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
     usePflowOptionsStore.getState().resetForNewCase();

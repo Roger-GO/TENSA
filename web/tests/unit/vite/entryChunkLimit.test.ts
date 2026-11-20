@@ -8,6 +8,7 @@
  *
  * @vitest-environment node
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { resolveConfig, type Plugin, type ResolvedConfig } from 'vite';
 import { describe, expect, it } from 'vitest';
@@ -238,6 +239,49 @@ describe('vite.config.ts', () => {
     });
     expect(() => writeBundle(plugin, bundle(200_001))).toThrow(/over the limit of 500 kB/);
     expect(() => writeBundle(plugin, bundle(200_000))).not.toThrow();
+  });
+
+  // The first screen imports a few hooks from `@/api/queries`, and the build
+  // would otherwise take every module the barrel re-exports with them.
+  it('takes the queries barrel, and nothing else of the app, to be free of side effects', async () => {
+    const treeshake = (await resolved()).build.rolldownOptions.treeshake;
+    const sideEffects =
+      typeof treeshake === 'object' && treeshake !== null ? treeshake.moduleSideEffects : undefined;
+    expect(typeof sideEffects).toBe('function');
+    const of = sideEffects as (id: string, external: boolean) => boolean | undefined;
+    for (const windows of [false, true]) {
+      const id = (file: string) => {
+        const posix = `/repo/web/${file}`;
+        return windows ? `C:${posix.replaceAll('/', '\\')}` : posix;
+      };
+      expect(of(id('src/api/queries/index.ts'), false), `windows: ${windows}`).toBe(false);
+      for (const file of [
+        'src/api/queries/session.ts',
+        'src/api/queries/index.tsx',
+        'src/main.tsx',
+        'src/styles/tokens.css',
+      ]) {
+        expect(of(id(file), false), `${file}, windows: ${windows}`).toBeUndefined();
+      }
+    }
+  });
+
+  // What the build drops of the barrel, as it is free of side effects, is
+  // anything that is not a re-export; Vitest does not tree-shake, so nothing
+  // else would notice.
+  it('finds nothing but re-exports in the queries barrel', () => {
+    const source = fs
+      .readFileSync(path.resolve(process.cwd(), 'src/api/queries/index.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    const statements = source
+      .split(';')
+      .map((statement) => statement.trim())
+      .filter((statement) => statement !== '');
+    expect(statements.length).toBeGreaterThan(10);
+    for (const statement of statements) {
+      expect(statement).toMatch(/^export\s+(type\s+)?(\*|\{[^}]*\})\s+from\s+'\.\/[\w.-]+'$/);
+    }
   });
 
   // Every group also takes the dependencies of the modules it matches. React
