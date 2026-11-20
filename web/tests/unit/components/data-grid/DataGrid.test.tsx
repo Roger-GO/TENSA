@@ -11,7 +11,7 @@
  *  - Virtualization kicks in only above 50 rows.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DataGrid, type ColumnConfig } from '@/components/data-grid/DataGrid';
@@ -439,6 +439,51 @@ describe('<DataGrid /> — virtualization threshold', () => {
       />,
     );
     expect(screen.getByTestId('dg-virtual')).toBeInTheDocument();
+  });
+
+  // A table of a 2,000-bus case: a window of its rows is drawn, and they are the
+  // table's rows, in a row group as the rows of a table that is not windowed are.
+  const MANY = Array.from({ length: 2000 }, (_, i) => ({
+    id: `b${i}`,
+    name: `Bus_${i}`,
+    v: i / 100,
+  }));
+
+  it('draws a window of the rows as rows of the table', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={MANY}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        ariaLabel="Buses"
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Buses' });
+    expect(within(table).queryByRole('list')).toBeNull();
+    const drawn = within(within(table).getByRole('rowgroup')).getAllByRole('row');
+    // 480 px of 28 px rows, and a few more past the end.
+    expect(drawn.length).toBeGreaterThan(17);
+    expect(drawn.length).toBeLessThan(30);
+    expect(drawn[0]).toHaveAttribute('data-testid', 'dg-row-b0');
+  });
+
+  it('draws the last rows when the list is scrolled to its end', () => {
+    render(
+      <DataGrid<FixtureRow>
+        columns={COLUMNS}
+        rows={MANY}
+        rowIdAccessor={(r) => r.id}
+        testId="dg"
+        ariaLabel="Buses"
+      />,
+    );
+    const list = within(screen.getByTestId('dg-virtual')).getByRole('rowgroup');
+    // jsdom lays nothing out: the list is told where it is scrolled to.
+    Object.defineProperty(list, 'scrollTop', { configurable: true, value: 2000 * 28 - 480 });
+    fireEvent.scroll(list);
+    expect(screen.getByTestId('dg-row-b1999')).toBeInTheDocument();
+    expect(screen.queryByTestId('dg-row-b0')).toBeNull();
   });
 });
 

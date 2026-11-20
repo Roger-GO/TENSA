@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { FixedSizeList, type ListChildComponentProps } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 import { cn } from '@/lib/cn';
 import { useEigParticipation } from '@/api/queries';
 import { useAnalyzeStore } from '@/store/analyze';
@@ -34,7 +34,7 @@ import type { ParticipationFactor } from '@/api/types';
  *   the analyze sub-mode is ``eig``, so we don't fight the SLD
  *   search-popover binding (which uses the same chord and is the
  *   right answer when the canvas is in focus).
- * - Virtualization (``react-window``'s ``FixedSizeList``) kicks in
+ * - Virtualization (``react-window``'s ``List``) kicks in
  *   above 50 rows. Below the threshold we render a regular ``<table>``
  *   for cleaner copy-paste / accessibility defaults.
  *
@@ -147,12 +147,17 @@ interface VirtualRowData {
   rows: ParticipationFactor[];
 }
 
-/** Render one virtualized row. Memoized indirectly via ``itemData``. */
-function VirtualRow({ index, style, data }: ListChildComponentProps<VirtualRowData>) {
-  const row = data.rows[index];
+/**
+ * Render one virtualized row. The list draws a row again when ``rows`` changes.
+ * The row is an item of the list, with its place in it (``ariaAttributes``), so
+ * a screen reader can say how many there are of the rows it does not draw.
+ */
+function VirtualRow({ index, style, rows, ariaAttributes }: RowComponentProps<VirtualRowData>) {
+  const row = rows[index];
   if (row === undefined) return null;
   return (
     <div
+      {...ariaAttributes}
       style={style}
       data-testid={`eig-participation-row-${index}`}
       className={cn('border-border/60 flex items-center border-t text-xs', 'hover:bg-muted/30')}
@@ -411,16 +416,17 @@ export function EIGParticipationTable({ className, rows }: EIGParticipationTable
               </span>
             </button>
           </div>
-          <FixedSizeList<VirtualRowData>
-            height={Math.min(VIRTUAL_VIEWPORT_HEIGHT, processed.sorted.length * ROW_HEIGHT)}
-            itemCount={processed.sorted.length}
-            itemSize={ROW_HEIGHT}
-            width="100%"
-            itemData={{ rows: processed.sorted }}
+          <List<VirtualRowData>
+            aria-label="Participation factors"
+            style={{
+              height: Math.min(VIRTUAL_VIEWPORT_HEIGHT, processed.sorted.length * ROW_HEIGHT),
+            }}
+            rowCount={processed.sorted.length}
+            rowHeight={ROW_HEIGHT}
+            rowProps={{ rows: processed.sorted }}
+            rowComponent={VirtualRow}
             overscanCount={4}
-          >
-            {VirtualRow}
-          </FixedSizeList>
+          />
         </>
       ) : (
         <div className="overflow-auto">

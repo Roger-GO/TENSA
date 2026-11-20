@@ -182,6 +182,19 @@ describe('<EIGParticipationTable /> virtualization', () => {
     expect(renderedRows.length).toBeGreaterThan(0);
   });
 
+  it('says how many rows there are, and where each drawn row is among them', () => {
+    const huge: ParticipationFactor[] = Array.from({ length: 334 }, (_, i) => ({
+      state_name: `s_${i}`,
+      factor: i,
+    }));
+    render(withQueryClient(<EIGParticipationTable rows={huge} />));
+    const list = screen.getByRole('list', { name: 'Participation factors' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items[0]).toHaveAttribute('data-testid', 'eig-participation-row-0');
+    expect(items[0]).toHaveAttribute('aria-posinset', '1');
+    expect(items[0]).toHaveAttribute('aria-setsize', '334');
+  });
+
   it('renders a regular table at or below the virtualization threshold', () => {
     const small: ParticipationFactor[] = Array.from({ length: 50 }, (_, i) => ({
       state_name: `s_${i}`,

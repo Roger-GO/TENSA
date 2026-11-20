@@ -9,7 +9,7 @@
  *
  *  - Click-to-sort header. Cycle ``none → asc → desc → none``. Glyph
  *    is ↑ / ↓ when active, ↕ (subtle) when inactive.
- *  - Virtualization via ``react-window``'s ``FixedSizeList`` only when
+ *  - Virtualization via ``react-window``'s ``List`` only when
  *    ``rows.length > 50`` (small grids render a normal table for
  *    cleaner copy-paste / a11y defaults).
  *  - Numeric cells: ``font-mono tabular-nums text-right``.
@@ -60,7 +60,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { FixedSizeList, type ListChildComponentProps } from 'react-window';
+import { List, type RowComponentProps } from 'react-window';
 import { clamp } from '@/lib/clamp';
 import { cn } from '@/lib/cn';
 import { useDepsChanged } from '@/lib/useDepsChanged';
@@ -400,10 +400,10 @@ function GridRow<Row>({ row, index, style, shared }: GridRowProps<Row>) {
   );
 }
 
-function VirtualRow<Row>({ index, style, data }: ListChildComponentProps<VirtualRowData<Row>>) {
-  const row = data.rows[index];
+function VirtualRow<Row>({ index, style, rows, shared }: RowComponentProps<VirtualRowData<Row>>) {
+  const row = rows[index];
   if (row === undefined) return null;
-  return <GridRow row={row} index={index} style={style} shared={data.shared} />;
+  return <GridRow row={row} index={index} style={style} shared={shared} />;
 }
 
 export function DataGrid<Row>({
@@ -1042,16 +1042,17 @@ export function DataGrid<Row>({
     frame(
       useVirtualization ? (
         <div data-testid={testId ? `${testId}-virtual` : undefined} className="min-h-0 flex-1">
-          <FixedSizeList<VirtualRowData<Row>>
-            height={Math.min(VIRTUAL_VIEWPORT_HEIGHT, sortedRows.length * ROW_HEIGHT)}
-            itemCount={sortedRows.length}
-            itemSize={ROW_HEIGHT}
-            width="100%"
-            itemData={{ rows: sortedRows, shared }}
+          {/* The list takes the role a list has by default: its rows are a
+              table's, as in the table that is not windowed. */}
+          <List<VirtualRowData<Row>>
+            role="rowgroup"
+            style={{ height: Math.min(VIRTUAL_VIEWPORT_HEIGHT, sortedRows.length * ROW_HEIGHT) }}
+            rowCount={sortedRows.length}
+            rowHeight={ROW_HEIGHT}
+            rowProps={{ rows: sortedRows, shared }}
+            rowComponent={VirtualRow}
             overscanCount={4}
-          >
-            {VirtualRow}
-          </FixedSizeList>
+          />
         </div>
       ) : (
         <div
