@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest';
+import { Blob as NodeBlob } from 'node:buffer';
 
 // jsdom does not implement ResizeObserver; Radix primitives that observe
 // element size (Slider, Tooltip popper, Select content sizing) need a stub.
@@ -92,4 +93,46 @@ if (typeof Element !== 'undefined') {
   if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = () => {};
   }
+}
+
+// Under the jsdom environment `Blob` and `File` are jsdom's, while `fetch`,
+// `Request` and `Response` are Node's, since jsdom has none. Vitest gives Node
+// a Node Blob of the same bytes when a test hands a jsdom Blob to
+// `new Request()`, but not when it hands one to `new Response()`, and Node
+// does not read a jsdom Blob there. Node 22's fetch takes it for a Blob, since
+// jsdom 28.1 gave it `arrayBuffer()`, and calls its `stream()`, which jsdom
+// does not have ("object.stream is not a function"). Node 24 and later do not
+// take it for a Blob and answer with the text "[object Blob]" instead. In a
+// browser the Blob and the Response come from the same place, so a test that
+// answers a fetch with a Blob gets here what a page gets there, on every Node:
+// a response with the Blob's bytes and, unless the test sets one, its type.
+if (globalThis.Blob !== NodeBlob) {
+  const DomBlob = globalThis.Blob;
+  const NodeResponse = globalThis.Response;
+  const streamOf = (blob: Blob): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await blob.arrayBuffer()));
+        controller.close();
+      },
+    });
+  class Response extends NodeResponse {
+    constructor(body?: BodyInit | null, init?: ResponseInit) {
+      if (body instanceof DomBlob) {
+        const headers = new Headers(init?.headers);
+        if (body.type !== '' && !headers.has('Content-Type')) {
+          headers.set('Content-Type', body.type);
+        }
+        super(streamOf(body), { ...init, headers });
+      } else {
+        super(body, init);
+      }
+    }
+
+    // `Response.json()`, `Response.error()` and a real fetch make Node's own.
+    static override [Symbol.hasInstance](instance: unknown): boolean {
+      return instance instanceof NodeResponse;
+    }
+  }
+  globalThis.Response = Response;
 }
