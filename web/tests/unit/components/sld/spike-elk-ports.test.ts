@@ -1,12 +1,12 @@
 /**
  * Phase 0 spike.
  *
- * Verifies elkjs 0.9 actually honors `'elk.portConstraints': 'FIXED_SIDE'`
- * with per-port `'elk.port.side'` hints when `'elk.edgeRouting'` is
- * `ORTHOGONAL`, and that the layout result exposes per-edge bend points
- * we can read from `result.children[*].edges[*].sections[*].bendPoints`
- * (or, depending on layout topology, from edges hanging directly off the
- * root node).
+ * Verifies elkjs (0.9 when it was written, 0.12 now) actually honors
+ * `'elk.portConstraints': 'FIXED_SIDE'` with per-port `'elk.port.side'`
+ * hints when `'elk.edgeRouting'` is `ORTHOGONAL`, and that the layout
+ * result exposes per-edge bend points we can read from
+ * `result.children[*].edges[*].sections[*].bendPoints` (or, depending on
+ * layout topology, from edges hanging directly off the root node).
  *
  * If this spike passes, Unit 1's auto-layout case can use ELK as the
  * source of truth for handle assignment + bend-point routing.
