@@ -16,6 +16,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 - The diagram's first layout runs on elkjs 0.12 (from 0.9), which is under GPL-3.0-or-later as well as EPL-2.0 since 0.12. The five example cases a workspace starts with open, tidy and show the values of a power flow as they did, with nothing drawn over anything else.
 
 ### Fixed
+- The tooltip of the eigenvalue scatter stands by the pointer. It was placed from the corner of the chart in a box that starts at the corner of the card around it, so it stood the height of the card's header above the pointer and, in a card wider than the chart, which is centred in it, to the left of the pointer by half the difference.
 - Leaving the results view draws the panels as the layout store has them then. A sidebar, Inspector or drawer hidden or shown from the results view (with the buttons of the top bar or their shortcuts) came back as it was before, whatever its button said: a sidebar hidden that way was drawn empty, and one shown that way stayed hidden until its button was pressed twice.
 - A form or dialog that starts afresh when it opens, or when what it shows changes (adding an event, placing PMUs, importing a profile, Save system, the form of an element and its fields in the Inspector, the selected bin of the state estimation residuals, the line picked for editing on the diagram), no longer shows what it held before for a frame.
 

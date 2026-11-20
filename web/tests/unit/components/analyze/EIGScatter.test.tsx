@@ -372,7 +372,8 @@ describe('<EIGScatter />', () => {
       useAnalyzeStore.getState().setEigResult(RESULT);
       const { container } = render(<EIGScatter />);
       const svg = container.querySelector('svg') as SVGSVGElement;
-      // Twice the size of the viewBox, 10 px in from the corner of the page.
+      // Twice the size of the viewBox, 10 px in from the corner of the page,
+      // where its card starts as well.
       svg.getBoundingClientRect = () =>
         ({
           width: 640,
@@ -385,6 +386,7 @@ describe('<EIGScatter />', () => {
           y: 10,
           toJSON: () => ({}),
         }) as DOMRect;
+      screen.getByTestId('eig-scatter').getBoundingClientRect = svg.getBoundingClientRect;
       const circle = screen.getByTestId('eig-scatter-point-0');
       const cx = Number(circle.getAttribute('cx'));
       const cy = Number(circle.getAttribute('cy'));
@@ -395,6 +397,36 @@ describe('<EIGScatter />', () => {
       // so the place is checked to a hundredth of a pixel.
       expect(parseFloat(tip.style.left)).toBeCloseTo(2 * cx + 12, 2);
       expect(parseFloat(tip.style.top)).toBeCloseTo(2 * cy + 12, 2);
+    });
+
+    it('puts the tooltip by the pointer wherever the chart sits in its card', () => {
+      useAnalyzeStore.getState().setEigResult(RESULT);
+      const { container } = render(<EIGScatter />);
+      const svg = container.querySelector('svg') as SVGSVGElement;
+      const card = screen.getByTestId('eig-scatter');
+      const rect = (left: number, top: number, width: number, height: number) =>
+        ({
+          width,
+          height,
+          top,
+          left,
+          right: left + width,
+          bottom: top + height,
+          x: left,
+          y: top,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      // A wide card: the chart is below the header and centred, 180 px in.
+      card.getBoundingClientRect = () => rect(100, 50, 1000, 400);
+      svg.getBoundingClientRect = () => rect(280, 90, 640, 480);
+      const circle = screen.getByTestId('eig-scatter-point-0');
+      const cx = Number(circle.getAttribute('cx'));
+      const cy = Number(circle.getAttribute('cy'));
+      fireEvent.pointerMove(svg, { clientX: 280 + 2 * cx, clientY: 90 + 2 * cy, pointerId: 1 });
+      const tip = screen.getByTestId('eig-scatter-tooltip');
+      expect(tip).toHaveAttribute('data-mode-idx', '0');
+      expect(parseFloat(tip.style.left)).toBeCloseTo(180 + 2 * cx + 12, 2);
+      expect(parseFloat(tip.style.top)).toBeCloseTo(40 + 2 * cy + 12, 2);
     });
 
     it('hides the tooltip when the pointer leaves the chart', () => {

@@ -130,7 +130,8 @@ interface ViewRect {
 
 /**
  * Where the pointer is on the chart: in SVG-viewBox pixels, and in CSS pixels
- * from the SVG's top left corner (``css``), where the tooltip is put.
+ * from the top left corner of the card (``css``), the box the tooltip is
+ * placed in.
  */
 interface CursorPx {
   x: number;
@@ -434,18 +435,26 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
    * The SVG renders at ``preserveAspectRatio="xMidYMid meet"`` so we
    * compute the linear scale between the SVG's CSS pixels and its
    * viewBox-pixel space directly from the bounding rect — this stays
-   * correct regardless of the parent container's size. The CSS pixels
-   * are kept as well, for the tooltip, which is put where the pointer
-   * was when it moved and does not measure the SVG while rendering.
+   * correct regardless of the parent container's size. Where the pointer
+   * is in the card is kept as well, for the tooltip, which is put where the
+   * pointer was when it moved and does not measure anything while
+   * rendering. The tooltip is placed in the card, not in the SVG: the SVG
+   * sits below the card's header and is centred in a wide card.
    */
   const eventToSvgPx = (evt: ReactPointerEvent | ReactWheelEvent): CursorPx | null => {
     const svg = svgRef.current;
     if (svg === null) return null;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
-    const css = { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
-    const x = (css.x / rect.width) * SVG_WIDTH;
-    const y = (css.y / rect.height) * SVG_HEIGHT;
+    const x = ((evt.clientX - rect.left) / rect.width) * SVG_WIDTH;
+    const y = ((evt.clientY - rect.top) / rect.height) * SVG_HEIGHT;
+    // An absolutely placed box is placed from inside the card's border.
+    const card = cardRef.current;
+    const box = card?.getBoundingClientRect() ?? rect;
+    const css = {
+      x: evt.clientX - box.left - (card?.clientLeft ?? 0),
+      y: evt.clientY - box.top - (card?.clientTop ?? 0),
+    };
     return { x, y, css };
   };
 
@@ -933,9 +942,9 @@ interface TooltipFields {
 
 /**
  * Hover tooltip — absolutely positioned near the cursor. Receives the
- * cursor in CSS pixels from the SVG's top left corner (measured when the
- * pointer moved, ``eventToSvgPx``), so it stays pinned correctly even when
- * the SVG renders at non-1:1 scale.
+ * cursor in CSS pixels from the card's top left corner (measured when the
+ * pointer moved, ``eventToSvgPx``), so it stays pinned correctly wherever
+ * the SVG sits in the card and at whatever scale it renders.
  */
 function Tooltip({ at, fields }: { at: { x: number; y: number }; fields: TooltipFields }) {
   const left = at.x + 12;
