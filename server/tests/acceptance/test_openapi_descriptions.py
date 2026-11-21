@@ -123,6 +123,7 @@ async def test_every_route_declares_problem_details_for_4xx(
         ("delete", "/api/sessions/{session_id}"),  # idempotent close
         ("get", "/api/topology/schema"),    # static compile-time table
         ("get", "/api/version"),            # package metadata, no input
+        ("get", "/api/engines"),            # the engines' capabilities, data, no input
         ("get", "/api/health"),             # server state, no input
         ("get", "/api/workspace/files"),    # directory listing
         ("get", "/api/examples"),           # the example catalog, read from the package
