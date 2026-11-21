@@ -6,6 +6,7 @@ This file is for any agent (human or AI) working in this repo. Read it before to
 
 - **Layout**: `server/` is the Python substrate package (PEP 621 + src layout, hatchling build backend). `web/` is the v0.1+ React UI (Vite 8 + React 19 + TS + Tailwind v4 + Radix; pnpm). The two are independent packages with their own CI workflows.
 - **All file paths in commits, plans, and reviews are repo-relative.** Never use absolute paths in code, docs, or commit messages.
+- **Multi-engine work** (branch `multiengine`): TENSA is gaining engines beside ANDES, Sienna (Julia) first. `design/multiengine/spec.md` is the specification and `design/multiengine/README.md` says which phase is current. Read the specification before touching anything that carries an engine name. Where it and "Architectural decisions" or "Out of scope" below disagree, the specification governs for the code it covers; those sections are rewritten as each phase lands.
 
 ## Pinned versions
 
@@ -129,6 +130,7 @@ The trust model lives in the top-level docstring of `server/src/tensa/__init__.p
 - `.github/workflows/draft-pdf.yml`: builds the JOSS paper (`paper/paper.md`) into a PDF with the Open Journals draft action on a push that changes `paper/` and on a manual run, and keeps `paper/paper.pdf` as an artifact. It changes nothing in the repository; the action publishes no release tags, so it is pinned to a commit of its `master` (the branch named in a comment) and Dependabot moves the pin
 - `server/src/tensa/mcp_server.py` reports `tensa.__version__` as the MCP server's version (`serverInfo.version`): 2.x's `MCPServer` is given it, and on 1.x, whose `FastMCP` takes none, it is set on the server under it, which would otherwise show the library's own version. A tool raises `_ToolError`, the SDK's `ToolError`, for what the agent should read (a refusal of the HTTP API with its recovery, a server that does not answer, a request the tool refuses), because 2.x answers any other exception with the tool's name alone. `test_client_examples.py` makes the handshake and calls tools over the real standard input and output
 - `llms.txt` — condensed API map for LLM agents (update when routes change)
+- `design/multiengine/`: the multi-engine specification, the decisions taken, the phase reports and the spike scripts behind them. It is not part of the docs site (`docs/` holds only pages the navigation lists)
 
 ## Out of scope (do not add without discussion)
 
