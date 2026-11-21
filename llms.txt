@@ -222,6 +222,12 @@ Examples:        GET /examples  → {"examples": [...]}: the catalog of example 
                  external entry. EXAMPLE-SOURCES.md in the workspace root records source, citations and licence of what was added
                  (not a case file, not listed). Cite the case when you use it: the "citations" say how.
 Version:         GET /version  → {"tensa": "...", "andes": "..."}  (installed package versions, no session needed)
+Models:          GET /sessions/{id}/models  → {"groups": {group: [model, ...]}}  (every model ANDES ships, about a hundred,
+                 grouped as ANDES groups them; wider than what the element routes build, which is GET /topology/schema)
+                 GET /sessions/{id}/models/{model}/doc  → {"model", "doc"}  (ANDES's own text for `andes doc <model>`,
+                 verbatim: plain-text tables of parameters, variables and equations, 78 columns, under 30 kB; 404 for a
+                 name not in the list, exact case). Both need a session (ANDES runs in the workers) but no case, and
+                 leave the session's System alone; 409 on a session of another engine
 Health:          GET /health  → {"status": "ok", "version", "andes_version", "sessions": {"active", "max"},
                  "cache": {"state": ready|unchecked|missing, "warm", "generating"}}  (poll it; no session, never waits for a worker;
                  "cache" is ANDES's generated code: until it is ready, the first case load may take 10 s or more)

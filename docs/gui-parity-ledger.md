@@ -22,7 +22,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 6 |
+| `none` | 9 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -30,7 +30,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **74** |
+| **total** | **77** |
 
 ## OpenAPI routes
 
@@ -78,6 +78,8 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/keys` | `auto` |  |
 | `GET` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
 | `DELETE` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
+| `GET` | `/api/sessions/{session_id}/models` | `none` | No web surface shows ANDES's model list or its documentation yet; the routes are for scripts and agents. They will later feed the Inspector's model help panel. |
+| `GET` | `/api/sessions/{session_id}/models/{model}/doc` | `none` | No web surface shows ANDES's model list or its documentation yet; the routes are for scripts and agents. They will later feed the Inspector's model help panel. |
 | `GET` | `/api/sessions/{session_id}/operating-point` | `data-grid` |  |
 | `POST` | `/api/sessions/{session_id}/pflow` | `run-controls` |  |
 | `POST` | `/api/sessions/{session_id}/pmu` | `pmu-dialog` |  |

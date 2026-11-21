@@ -8,7 +8,7 @@ The models live in one module per domain, beside this file and named for the
 routes that use them where there is one: ``errors``, ``jobs``, ``messages``,
 ``sessions``, ``topology``, ``cases``, ``elements``, ``pflow``, ``disturbances``,
 ``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``external_results``,
-``workspace``, ``ybus`` and ``version``. A model
+``workspace``, ``ybus``, ``models`` and ``version``. A model
 that another domain builds on (``TopologySummary``, ``ProblemDetails``) is imported
 from the module that defines it. Every name the single-file module defined is
 importable from here.
@@ -98,6 +98,10 @@ from tensa.api.schemas.metrics import (
     ResponseMetricsRequest,
     ResponseMetricsResponse,
     SeriesMetrics,
+)
+from tensa.api.schemas.models import (
+    ModelDoc,
+    SupportedModels,
 )
 from tensa.api.schemas.pflow import (
     GeneratorOutput,
@@ -208,6 +212,7 @@ __all__ = [
     "MessageLevelSchema",
     "MetricExtremum",
     "MetricsSeries",
+    "ModelDoc",
     "PflowResult",
     "PflowRunRequest",
     "PflowSettings",
@@ -226,6 +231,7 @@ __all__ = [
     "SessionMessageSchema",
     "SessionMessages",
     "SidecarLayout",
+    "SupportedModels",
     "TdsBatchResult",
     "TdsControllerCatalogue",
     "TdsControllerResult",

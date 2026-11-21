@@ -172,6 +172,22 @@ class ElementNotFoundError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class ModelDocError(AndesAppError):
+    """Raised when ``model_doc(model)`` names no model ANDES ships: a name that
+    is not in ``supported_models()``, a routine such as ``PFlow`` or any other
+    attribute of a System included. Surfaced as HTTP 404."""
+
+    recovery_kind: str | None = "none"
+
+
+class ModelDocUnavailableError(AndesAppError):
+    """Raised when ANDES fails to write the documentation of a model it ships
+    (its ``doc()`` raised). Surfaced as HTTP 422; the session is untouched, so
+    there is nothing to recover."""
+
+    recovery_kind: str | None = "none"
+
+
 class SystemAlreadyLoadedError(AndesAppError):
     """Raised when ``create_blank()`` is called on a session that already has
     a loaded System. The caller must reload or open a fresh session."""

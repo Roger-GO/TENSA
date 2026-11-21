@@ -42,8 +42,10 @@ Sensitivity sweeps, eigenvalue sweeps and report generation are not captured: a
 sweep runs hundreds of power flows and time-domain runs (an eigenvalue sweep reads
 and solves the case once per value) whose messages would bury the user's own (the
 plan the server asks the worker for before it spreads one over sub-workers is part
-of the sweep), and a report re-prints a summary ANDES logged when the run ended. A
-warning from any of them still goes to the server's console, as it did before.
+of the sweep), and a report re-prints a summary ANDES logged when the run ended.
+Nor are the model list and a model's documentation, which build a System of their
+own that is not the session's case. A warning from any of them still goes to the
+server's console, as it did before.
 """
 
 from __future__ import annotations
@@ -83,6 +85,8 @@ MAX_MESSAGE_CHARS: Final = 20_000
 # warnings and errors still reach stderr. ``sweep_plan`` is the check the server asks
 # the worker for before it spreads a sweep over sub-workers, so it is part of the sweep.
 # An eigenvalue sweep reads, sets up and solves the case again for every value.
+# ``supported_models`` and ``model_doc`` read a throwaway System built for the call:
+# what ANDES says while it builds one is not about the session's case.
 UNCAPTURED_OPS: Final[frozenset[str]] = frozenset(
     {
         "run_sweep",
@@ -91,6 +95,8 @@ UNCAPTURED_OPS: Final[frozenset[str]] = frozenset(
         "generate_report",
         "sweep_plan",
         "run_eig_sweep",
+        "supported_models",
+        "model_doc",
     }
 )
 

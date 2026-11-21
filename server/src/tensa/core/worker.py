@@ -646,6 +646,20 @@ def _handle_alterable_params(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return list(wrapper.alterable_params(args["model"]))
 
 
+def _handle_supported_models(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Every model ANDES ships, grouped as ANDES groups them. A read that needs
+    no case: the wrapper builds a fresh System of its own for it."""
+    return {"groups": wrapper.supported_models()}
+
+
+def _handle_model_doc(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """ANDES's documentation text for one model. ``ModelDocError`` (a name
+    that is no model) and ``ModelDocUnavailableError`` reach the route as the
+    other wrapper errors do."""
+    model = str(args["model"])
+    return {"model": model, "doc": wrapper.model_doc(model)}
+
+
 # ---- clone-on-write (Unit 21) ----------------------------------------------
 
 
@@ -1840,6 +1854,8 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
     "alterable_params": _handle_alterable_params,
+    "supported_models": _handle_supported_models,
+    "model_doc": _handle_model_doc,
     "list_dae_variables": _handle_list_dae_variables,
     "list_tds_controllers": _handle_list_tds_controllers,
     # Unit 21 — clone-on-write file edits (init / edit / undo / redo / save-as / reset).

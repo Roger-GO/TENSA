@@ -34,6 +34,8 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "delete_element",
             "run_pflow",
             "alterable_params",
+            "supported_models",
+            "model_doc",
             "list_dae_variables",
             "list_tds_controllers",
             "init_clone",

@@ -36,6 +36,8 @@ each in its own module of this package over the shared state in
 - ``snapshot``, ``sweep``, ``bundle``: save and restore a session, sweep over a
   snapshot, import a bundle.
 - ``clone``: clone-on-write editing.
+- ``docs``: the models ANDES ships and its documentation of each, read off a
+  fresh System of their own.
 
 ``results`` holds the records the methods return, ``params`` the models and
 parameters a client may touch, and ``pflow_extract`` the readers of a solved
@@ -49,6 +51,7 @@ from tensa.core.wrapper.bundle import BundleMixin
 from tensa.core.wrapper.clone import CloneMixin
 from tensa.core.wrapper.connectivity import ConnectivityMixin
 from tensa.core.wrapper.cpf import CpfMixin, _argmax, _build_cpf_result, _first_turn
+from tensa.core.wrapper.docs import DocsMixin
 from tensa.core.wrapper.eig import (
     EigMixin,
     _compute_damping_ratio,
@@ -140,6 +143,7 @@ class Wrapper(
     SeMixin,
     ConnectivityMixin,
     YbusMixin,
+    DocsMixin,
 ):
     """Synchronous wrapper around a single ``andes.System`` instance.
 

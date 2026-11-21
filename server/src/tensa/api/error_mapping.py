@@ -112,6 +112,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     # --- 404 Not Found ---
     "ElementNotFoundError": status.HTTP_404_NOT_FOUND,
     "SnapshotNotFoundError": status.HTTP_404_NOT_FOUND,
+    "ModelDocError": status.HTTP_404_NOT_FOUND,
     # --- 422 Unprocessable Content (validation / dirty-state) ---
     "SetupFailedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "TdsRequestError": status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -124,6 +125,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ElementValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "YbusTooLargeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "ModelDocUnavailableError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CloneEditError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
