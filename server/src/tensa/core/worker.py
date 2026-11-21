@@ -121,6 +121,7 @@ from tensa.core.tds_controllers import log_notices as log_controller_notices
 from tensa.core.tds_controllers import parse_controllers
 from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
+from tensa.core.wrapper.tds import validate_integrator
 from tensa.engines.base import EngineRuntime
 from tensa.engines.ops import ENGINE_OPS, engines_with_op
 from tensa.engines.registry import load_runtime
@@ -1514,14 +1515,9 @@ def _handle_run_tds(
     # Unit 16: integrator selection + adaptive-tolerance overrides.
     # ``integrator`` defaults to ``"trapezoidal"`` so a caller that names
     # none (the REST route and the WS ``start_tds`` frame both pass it on
-    # when given) sees no behaviour change. Validation of the literal value
-    # lives in the wrapper; we only normalise the wire shape here.
-    integrator_raw = args.get("integrator", "trapezoidal")
-    if integrator_raw not in ("trapezoidal", "qndf"):
-        raise AndesAppError(
-            f"unknown integrator {integrator_raw!r}; "
-            "expected 'trapezoidal' or 'qndf'"
-        )
+    # when given) sees no behaviour change. The value is held to the literal
+    # the REST body takes, here as in the wrapper, whoever sent it.
+    integrator_raw = validate_integrator(args.get("integrator", "trapezoidal"))
 
     overrides_raw = args.get("tds_config_overrides")
     tds_config_overrides: dict[str, float] | None = None
@@ -1530,7 +1526,7 @@ def _handle_run_tds(
             raise AndesAppError(
                 "'tds_config_overrides' must be a dict of "
                 "{string → float}; keys are canonical aliases "
-                "(rtol/atol/max_step) or real ss.TDS.config field names"
+                "(rtol/atol/max_step/min_step) or real ss.TDS.config field names"
             )
         coerced: dict[str, float] = {}
         for key, value in overrides_raw.items():

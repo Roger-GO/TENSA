@@ -73,6 +73,7 @@ from tensa.core.session import (
 from tensa.core.stream import DEFAULT_VARS, VAR_GROUPS
 from tensa.core.tds_controllers import parse_controllers
 from tensa.core.wrapper import validate_step_size
+from tensa.core.wrapper.tds import validate_integrator
 
 router = APIRouter()
 log = logging.getLogger("tensa.ws")
@@ -247,15 +248,12 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     # default to the trapezoidal-fixed-step path so existing clients see
     # no change. Validation is light-touch here (literal + dict shape);
     # the wrapper raises ``TdsRequestError`` on unknown override keys
-    # which the WS path surfaces as a worker_error close.
-    integrator_raw = cfg.get("integrator", "trapezoidal")
-    if integrator_raw not in ("trapezoidal", "qndf"):
-        await _close_with_error(
-            websocket,
-            WS_CLOSE_INTERNAL_ERROR,
-            f"unknown integrator {short_repr(integrator_raw)}; "
-            "expected 'trapezoidal' or 'qndf'",
-        )
+    # which the WS path surfaces as a worker_error close. The integrator is
+    # held to the literal the REST body takes (``IntegratorName``).
+    try:
+        integrator_raw = validate_integrator(cfg.get("integrator", "trapezoidal"))
+    except TdsRequestError as exc:
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
     overrides_raw = cfg.get("tds_config_overrides")
     if overrides_raw is not None and not isinstance(overrides_raw, dict):
@@ -263,7 +261,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
             "'tds_config_overrides' must be an object of {string → number}; "
-            "keys are canonical aliases (rtol/atol/max_step) or real "
+            "keys are canonical aliases (rtol/atol/max_step/min_step) or real "
             "ss.TDS.config field names, validated by the substrate",
         )
         return

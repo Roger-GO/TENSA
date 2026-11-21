@@ -171,6 +171,20 @@ def test_a_step_andes_retries_is_one_row() -> None:
     assert labels[-1] == 1.0
 
 
+def test_a_step_far_shorter_than_a_nanosecond_is_a_row_of_its_own() -> None:
+    """ANDES's adaptive trapezoidal method converges on steps far below a
+    nanosecond (1.7e-13 s on IEEE 14 with a loose tolerance). Each is a step
+    ANDES stored, so each is a row; a step it retries still is not."""
+    system = _system(tf=1.0, step=0.25)
+    # Thirty-eight retries halve the step to 9.1e-13 s; five steps of it follow.
+    rows = _record(system, failing=set(range(2, 40)), stop_at_call=44, shortest=1e-15)
+    labels = [label for label, _ in rows]
+    assert labels == system.stored
+    assert all(label == held for label, held in rows)
+    assert len(labels) == 7
+    assert 0 < labels[-1] - labels[-2] < 1e-12
+
+
 def test_a_run_that_gives_up_ends_on_the_last_step_it_solved() -> None:
     system = _system(tf=1.0, step=0.25)
     rows = _record(system, failing=set(range(2, 99)))

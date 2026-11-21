@@ -69,6 +69,10 @@ Keys:            GET /sessions/{id}/keys  (every element's key, each with bucket
                  element the same way in every engine: bus:7, branch:7-8-1, gen:1-1, gen:1-1/exciter)
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
+                 integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |
+                 qndf (variable step, error control from tds_config_overrides rtol/atol, bounds max_step/min_step; h
+                 ignored). Same values in the start_tds frame. qndf after steps taken with another integrator: 422,
+                 reload first; the others switch freely. The result echoes "integrator".
                  dae_vars: ANDES variables to record, named as ANDES names them ("omega GENROU 1", "vf GENROU 2");
                  their values at every step come back under "traces" ({t, variables:[{name, values}], truncated}):
                  one row per step ANDES solved, at the time it solved it, the last at tf when the run reached it.

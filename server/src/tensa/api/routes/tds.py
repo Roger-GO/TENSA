@@ -106,7 +106,7 @@ async def run_tds(
     mgr = _manager(request)
     # Unit 16: forward integrator + tolerance overrides. The wrapper
     # validates ``integrator`` (Literal-bounded by Pydantic) and the
-    # override keys (rtol/atol/max_step). ``tds_config_overrides`` is
+    # override keys (rtol/atol/max_step/min_step). ``tds_config_overrides`` is
     # only forwarded when non-None so the wire shape stays minimal for
     # the default trapezoidal path.
     args: dict[str, Any] = {
@@ -210,6 +210,7 @@ async def run_tds(
         converged=bool(payload["converged"]),
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
+        integrator=payload.get("integrator"),
         traces=(
             TdsTraces(
                 t=traces["t"],

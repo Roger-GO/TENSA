@@ -231,6 +231,7 @@ class TdsBatchResult:
     converged: bool
     final_t: float
     callpert_count: int  # how many times the per-step hook fired
+    integrator: str = "trapezoidal"  # the integrator the run used, by its API name
 
 
 @dataclass

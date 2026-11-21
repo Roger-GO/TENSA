@@ -14,6 +14,7 @@ from tensa.core.tds_controllers import (
     MAX_SAMPLE_VALUES,
     ControllerSpec,
 )
+from tensa.core.wrapper.tds import IntegratorName
 
 
 class TdsRunRequest(BaseModel):
@@ -35,10 +36,11 @@ class TdsRunRequest(BaseModel):
         description=(
             "Integration step size, in seconds, applied as ANDES "
             "``TDS.config.tstep``. With the default ``trapezoidal`` "
-            "integrator this is the fixed step; ``None`` keeps the ANDES "
-            "default (1/30 s). The ``qndf`` integrator picks its own step "
-            "and ignores it; bound its step with "
-            "``tds_config_overrides.max_step`` instead."
+            "integrator this is the fixed step, and so it is with ``backeuler``; "
+            "``None`` keeps the ANDES default (1/30 s). The ``trap_adapt`` and "
+            "``qndf`` integrators pick their own steps and ignore it; bound "
+            "their steps with ``tds_config_overrides.max_step`` and "
+            "``min_step`` instead."
         ),
         gt=0.0,
         allow_inf_nan=False,
@@ -79,17 +81,26 @@ class TdsRunRequest(BaseModel):
             "exactly so."
         ),
     )
-    integrator: Literal["trapezoidal", "qndf"] = Field(
+    integrator: IntegratorName = Field(
         "trapezoidal",
         description=(
-            "DAE integrator. ``\"trapezoidal\"`` (default) maps "
-            "to ANDES's fixed-step Implicit Trapezoidal Method "
-            "(``ss.TDS.config.method = \"trapezoid\"``). ``\"qndf\"`` "
-            "selects the variable-order, variable-step QNDF (NDF) method "
-            "and forces ``fixt = 0`` so ANDES enables LTE-driven step "
-            "control. Combine ``integrator=\"qndf\"`` with the Auto "
-            "preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing "
-            "the values via ``tds_config_overrides``."
+            "DAE integrator. ``\"trapezoidal\"`` (default) is ANDES's "
+            "fixed-step Implicit Trapezoidal Method "
+            "(``ss.TDS.config.method = \"trapezoid\"``), stepping at ``h``. "
+            "``\"backeuler\"`` is fixed-step backward Euler "
+            "(``method = \"backeuler\"``), first order and so more damped, "
+            "also stepping at ``h``. ``\"trap_adapt\"`` is the trapezoidal "
+            "method with a variable step (``method = \"trap_adapt\"``) chosen "
+            "from an estimate of the local error, one step against two half "
+            "steps, held to ``rtol`` and ``atol``. ``\"qndf\"`` is the "
+            "variable-order, variable-step QNDF (NDF) method "
+            "(``method = \"qndf\"``). The two variable-step integrators run "
+            "with ``fixt = 0``, ignore ``h`` and take ``rtol``, ``atol``, "
+            "``max_step`` and ``min_step`` from ``tds_config_overrides`` (the "
+            "Auto preset is ``rtol=1e-3, atol=1e-6, max_step=0.05``). Any "
+            "integrator can follow any other on the same System except "
+            "``qndf``, which keeps a history: after a run with another "
+            "integrator it is refused with 422 until the case is reloaded."
         ),
     )
     controllers: list[ControllerSpec] | None = Field(
@@ -121,15 +132,18 @@ class TdsRunRequest(BaseModel):
         description=(
             "Optional adaptive-integrator tolerance overrides. "
             "Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), "
-            "``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ "
-            "``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` "
+            "``atol`` (→ ``ss.TDS.config.abstol``), ``max_step`` (→ "
+            "``ss.TDS.config.dtmax``) and ``min_step`` (→ "
+            "``ss.TDS.config.dtmin_adapt``, the smallest step a variable-step "
+            "integrator may shrink to), or the name of any ``ss.TDS.config`` "
             "field. An unknown key is refused with 422. So is a value that "
             "ANDES would take and then misbehave on: ``tstep`` must be "
-            "finite and greater than 0, ``max_step`` (``dtmax``) finite "
-            "and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and "
-            "every other value a finite number. The tolerances have no "
-            "effect when ``integrator=\"trapezoidal\"`` (the fixed-step "
-            "path ignores ``reltol/abstol`` and uses ``h`` for stepping)."
+            "finite and greater than 0, ``max_step`` (``dtmax``) and "
+            "``min_step`` (``dtmin_adapt``) finite and not negative (0 lets "
+            "ANDES choose), ``fixt`` 0 or 1, and every other value a finite "
+            "number. The tolerances and the two bounds apply to "
+            "``trap_adapt`` and ``qndf`` only: the fixed-step integrators "
+            "ignore ``reltol/abstol`` and use ``h`` for stepping."
         ),
     )
 
@@ -281,6 +295,14 @@ class TdsBatchResult(BaseModel):
         description=(
             "Number of times the per-step ``TDS.callpert`` hook fired during "
             "the run. Useful as a sanity check that streaming is wired."
+        ),
+    )
+    integrator: IntegratorName | None = Field(
+        default=None,
+        description=(
+            "The integrator the run used, as the request named it (the "
+            "default ``trapezoidal`` when it named none). ``null`` only on "
+            "responses from before this field existed."
         ),
     )
     job_id: str | None = Field(
