@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from tensa.core.errors import SessionBusyError, WorkerDiedError
+from tensa.core.errors import EngineUnavailableError, SessionBusyError, WorkerDiedError
 from tensa.core.jobs import JobRecord, JobStatus
 from tensa.core.messages import MessageLog
 from tensa.core.session.base import _Session
@@ -24,6 +24,7 @@ from tensa.core.session.jobs import JobsMixin
 from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
 from tensa.core.worker import worker_main
 from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
+from tensa.engines import engine_unavailable_reason, is_engine
 
 log = logging.getLogger("tensa.session")
 
@@ -186,12 +187,20 @@ class RegistryMixin(JobsMixin):
                     result,
                 )
 
-    async def create_session(self) -> str:
-        """Spawn a new worker subprocess and register it. Returns the session_id.
+    async def create_session(self, engine: str = "andes") -> str:
+        """Spawn a new worker subprocess for ``engine`` and register it. Returns the
+        session_id.
 
+        An unknown engine name raises ``ValueError``; an engine this build cannot
+        start raises :class:`EngineUnavailableError` before anything is spawned.
         Raises ``RuntimeError`` if at the ``max_sessions`` cap (the API layer
         translates this to HTTP 429).
         """
+        if not is_engine(engine):
+            raise ValueError(f"unknown engine: {engine!r}")
+        reason = engine_unavailable_reason(engine)
+        if reason is not None:
+            raise EngineUnavailableError(engine, reason)
         with self._registry_lock:
             if len(self._sessions) >= self._max_sessions:
                 raise RuntimeError(
@@ -217,8 +226,9 @@ class RegistryMixin(JobsMixin):
                 self._workspace,
                 session_id,
                 os.getpid(),
+                engine,
             ),
-            name=f"andes-worker-{session_id[:8]}",
+            name=f"{engine}-worker-{session_id[:8]}",
             daemon=False,
         )
         # The thread caps must be in the environment before the child loads numpy.
@@ -239,10 +249,16 @@ class RegistryMixin(JobsMixin):
             ctrl=parent_ctrl,
             data=parent_data,
             abort_event=abort_event,
+            engine=engine,
         )
         with self._registry_lock:
             self._sessions[session_id] = sess
         return session_id
+
+    def engine_of(self, session_id: str) -> str:
+        """The engine of a live session. Raises ``SessionExpiredError`` for an
+        unknown or closed one, as the other lookups do."""
+        return self._require_session(session_id).engine
 
     async def close_session(self, session_id: str) -> None:
         """Cleanly terminate a session. Idempotent — closing an unknown

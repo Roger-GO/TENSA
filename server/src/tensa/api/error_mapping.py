@@ -107,6 +107,8 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "TdsNotRunError": status.HTTP_409_CONFLICT,
     "EigReportPrerequisiteError": status.HTTP_409_CONFLICT,
     "SnapshotCollisionError": status.HTTP_409_CONFLICT,
+    "EngineUnsupportedError": status.HTTP_409_CONFLICT,
+    "EngineUnavailableError": status.HTTP_409_CONFLICT,
     # --- 404 Not Found ---
     "ElementNotFoundError": status.HTTP_404_NOT_FOUND,
     "SnapshotNotFoundError": status.HTTP_404_NOT_FOUND,

@@ -14,7 +14,12 @@ GET /api/version and tensa --version say which version is running.
 
 ## Golden workflow (order matters)
 
-1. POST /sessions                          → {"session_id": "..."}  (one ANDES System per session, isolated subprocess)
+1. POST /sessions                          → {"session_id": "...", "engine": "andes"}  (one engine per session, isolated
+                                             subprocess; optional body {"engine": "andes"} — no body or {} is ANDES;
+                                             "sienna" is declared but not in this build: 409 with the reason)
+GET /engines                               → {"engines": [...]}  (every engine the server knows, available or not, each with
+                                             available, unavailable_reason, versions, formats read/write, routines, ops,
+                                             editing; no session needed)
 2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx, wscc9.xlsx, ieee39_full.xlsx and npcc.xlsx; GET /examples lists more); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
 3. (pre-setup only) POST /sessions/{id}/disturbances  (add faults/toggles/alters BEFORE running anything)
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
@@ -43,7 +48,9 @@ add-measurements | wait-for-job | wait-for-sweep | none, label: "..."}. Follow i
 ## Route inventory
 
 Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
-                 (a session with no request for 180 s is reaped; GET /sessions/{id} counts as one)
+                 (a session with no request for 180 s is reaped; GET /sessions/{id} counts as one;
+                 every session descriptor carries "engine")
+Engines:         GET /engines  (the engines a session can be created for and what each can do)
 Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
                  GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point

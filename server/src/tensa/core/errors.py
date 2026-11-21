@@ -391,6 +391,42 @@ class CloneEditError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class EngineUnsupportedError(AndesAppError):
+    """Raised when a session's worker is asked for an op its engine does not have.
+
+    The op exists (another engine answers it), so this is not ``unknown op``: the
+    message names the engines that have it, and the reply carries them as
+    structured extra for the routes layer. Surfaced as HTTP 409.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, op: str, engine: str, engines_with_op: list[str]) -> None:
+        super().__init__(
+            f"{op!r} is not available with the {engine} engine; "
+            f"engines that have it: {', '.join(engines_with_op)}"
+        )
+        self.op = op
+        self.engine = engine
+        self.engines_with_op = engines_with_op
+
+
+class EngineUnavailableError(AndesAppError):
+    """Raised when a session is asked for an engine this build cannot start.
+
+    The engine is declared (``tensa.engines`` knows its name) but has no runtime
+    here; ``reason`` says why. Raised before anything is spawned. Surfaced as
+    HTTP 409.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, engine: str, reason: str) -> None:
+        super().__init__(f"the {engine} engine is not available: {reason}")
+        self.engine = engine
+        self.reason = reason
+
+
 class WorkerDiedError(AndesAppError):
     """Raised when a session's worker subprocess dies mid-RPC — the parent
     detects this as a torn IPC pipe (``EOFError`` / ``BrokenPipeError`` /

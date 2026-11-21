@@ -69,6 +69,9 @@ METHODS: dict[str, str] = {
     "_sweep_stale_scratch_dirs": "registry",
     "shutdown": "registry",
     "create_session": "registry",
+    # Added with the engine seam (design/multiengine/spec.md, section 9): which
+    # engine a live session runs.
+    "engine_of": "registry",
     "close_session": "registry",
     "_close_session": "registry",
     "_cleanup_clone_dir": "registry",

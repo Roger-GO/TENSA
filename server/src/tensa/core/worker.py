@@ -84,6 +84,7 @@ from tensa.core.errors import (
     AndesAppError,
     DisturbanceCommitError,
     ElementHasDependentsError,
+    EngineUnsupportedError,
     NoCaseLoadedError,
     TdsRequestError,
     short_repr,
@@ -120,6 +121,9 @@ from tensa.core.tds_controllers import log_notices as log_controller_notices
 from tensa.core.tds_controllers import parse_controllers
 from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
+from tensa.engines.base import EngineRuntime
+from tensa.engines.ops import ENGINE_OPS, engines_with_op
+from tensa.engines.registry import load_runtime
 
 
 def _set_parent_death_signal() -> None:
@@ -236,20 +240,21 @@ def _warm_andes() -> None:
             importlib.import_module(name)
 
 
-def _warm_up_if_idle(ctrl: Connection) -> None:
-    """Run :func:`_warm_andes`, unless a command is already waiting.
+def _warm_up_if_idle(ctrl: Connection, warm_up: Callable[[], None]) -> None:
+    """Run the engine's warm-up, unless a command is already waiting.
 
     A command that arrives before the worker is up (a script that creates a
     session and loads a case at once) pulls in what it needs itself, and a warm-up
     first would only delay it. Called before the first ``recv``, so a command
-    that arrives during the warm-up waits for it, at most a second.
+    that arrives during the warm-up waits for it, at most a second. A worker warms
+    up only its own engine.
     """
     try:
         if ctrl.poll(0):
             return
     except (EOFError, OSError):
         return
-    _warm_andes()
+    warm_up()
 
 
 def _normalized_path(path: str) -> str:
@@ -1811,6 +1816,45 @@ HANDLERS: dict[str, Callable[..., Any]] = {
 }
 
 
+# ---- the ANDES runtime ------------------------------------------------------
+
+
+def _dispatch_andes(
+    state: Any,
+    op: str,
+    args: dict[str, Any],
+    abort_event: Any,
+    data: Any,
+    seq: Any,
+) -> Any:
+    """Answer one op on a ``Wrapper``: the branch of ``_serve_commands`` as a function.
+
+    ``run_tds``, ``run_sweep`` and ``run_sweep_iteration`` are special-cased (they
+    need the abort event and the data pipe); every other op goes to ``HANDLERS``.
+    """
+    if op == "run_tds":
+        return _handle_run_tds(state, args, abort_event, data, seq)
+    if op == "run_sweep":
+        # Sweep is also long-running + uses the data pipe for progress events +
+        # needs the abort event for cancellation. Same special-cased dispatch.
+        return _handle_run_sweep(state, args, abort_event, data, seq)
+    if op == "run_sweep_iteration":
+        return _handle_run_sweep_iteration(state, args, abort_event)
+    return HANDLERS[op](state, args)
+
+
+def andes_runtime() -> EngineRuntime:
+    """The ANDES engine: a ``Wrapper`` per session, the existing handlers, ``_warm_andes``."""
+    return EngineRuntime(
+        name="andes",
+        make_state=lambda workspace, session_id, owner_pid: Wrapper(
+            workspace=workspace, session_id=session_id, owner_pid=owner_pid
+        ),
+        dispatch=_dispatch_andes,
+        warm_up=_warm_andes,
+    )
+
+
 # ---- main entry point -------------------------------------------------------
 
 
@@ -1821,6 +1865,7 @@ def worker_main(
     workspace: str | None = None,
     session_id: str | None = None,
     owner_pid: int | None = None,
+    engine: str = "andes",
 ) -> int:
     """Subprocess entry. Runs until a ``shutdown`` command arrives, the parent
     dies, or an unrecoverable error occurs.
@@ -1837,6 +1882,10 @@ def worker_main(
     ``owner_pid`` is the parent server's pid. It goes into the scratch dir's
     owner marker so a later server can tell the dir was abandoned (see
     ``core/session_dirs.py``).
+
+    ``engine`` names the engine the session runs (``tensa.engines``); the worker
+    loads its runtime and warms up only it. The default is ``andes``, and an ANDES
+    worker behaves exactly as before.
 
     Unless a command is already waiting, the worker imports ANDES before it reads
     the first one (``_warm_andes``), so the first case load does not pay for it.
@@ -1858,12 +1907,13 @@ def worker_main(
     # workspace is the root its paths are written relative to, so none is sent in full.
     install_capture(workspace)
     try:
+        runtime = load_runtime(engine)
         # Import ANDES now, before the first ``recv``, so the first load does not. This
         # runs ahead of the audit hook on purpose: it reads only library files, and the
         # hook would log some of them (the system's ``mime.types``) as strays.
-        _warm_up_if_idle(ctrl)
+        _warm_up_if_idle(ctrl, runtime.warm_up)
         _install_strict_fs_audit_hook(workspace)
-        return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid)
+        return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid, engine)
     finally:
         uninstall_capture()
 
@@ -1875,15 +1925,17 @@ def _serve_commands(
     workspace: str | None,
     session_id: str | None,
     owner_pid: int | None,
+    engine: str = "andes",
 ) -> int:
     """The command loop of :func:`worker_main`: read a command, run it, send the
     reply (with what ANDES logged while it ran), until ``shutdown`` or a closed pipe."""
 
+    runtime = load_runtime(engine)
     # ``workspace`` is forwarded so the wrapper's snapshot methods
     # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
     # without re-deriving the directory from the FastAPI app state (which
     # the worker subprocess can't read).
-    wrapper = Wrapper(workspace=workspace, session_id=session_id, owner_pid=owner_pid)
+    state = runtime.make_state(workspace, session_id, owner_pid)
 
     def reply(message: dict[str, Any]) -> None:
         data.send(attach_log(message))
@@ -1906,20 +1958,12 @@ def _serve_commands(
 
         begin_command(str(op))
         try:
-            if op == "run_tds":
-                payload = _handle_run_tds(wrapper, args, abort_event, data, seq)
-            elif op == "run_sweep":
-                # Sweep is also long-running + uses the data pipe for
-                # progress events + needs the abort event for
-                # cancellation. Same special-cased dispatch as run_tds.
-                payload = _handle_run_sweep(wrapper, args, abort_event, data, seq)
-            elif op == "run_sweep_iteration":
-                payload = _handle_run_sweep_iteration(wrapper, args, abort_event)
-            else:
-                handler = HANDLERS.get(op)
-                if handler is None:
-                    raise AndesAppError(f"unknown op: {op!r}")
-                payload = handler(wrapper, args)
+            if op not in ENGINE_OPS[engine]:
+                others = engines_with_op(str(op))
+                if others:
+                    raise EngineUnsupportedError(str(op), engine, others)
+                raise AndesAppError(f"unknown op: {op!r}")
+            payload = runtime.dispatch(state, str(op), args, abort_event, data, seq)
             reply({"type": "result", "seq": seq, "payload": payload})
         except DisturbanceCommitError as exc:
             reply(
@@ -1967,6 +2011,12 @@ def _serve_commands(
             # have to peek into ``detail`` strings.
             wire_category = exc.__class__.__name__
             extra: dict[str, Any] | None = None
+            if isinstance(exc, EngineUnsupportedError):
+                extra = {
+                    "op": exc.op,
+                    "engine": exc.engine,
+                    "engines_with_op": list(exc.engines_with_op),
+                }
             bundle_category = getattr(exc, "category", None)
             if isinstance(bundle_category, str) and exc.__class__.__name__ == "BundleValidationError":
                 wire_category = f"BundleValidationError:{bundle_category}"

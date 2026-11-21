@@ -25,6 +25,7 @@ class _Session:
     ctrl: Any  # multiprocessing.connection.Connection (no Generic in 3.12 stdlib)
     data: Any
     abort_event: Any  # multiprocessing.synchronize.Event
+    engine: str = "andes"
     lock: threading.RLock = field(default_factory=threading.RLock)
     seq: int = 0
     last_active: float = field(default_factory=time.monotonic)

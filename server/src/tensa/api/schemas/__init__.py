@@ -52,6 +52,11 @@ from tensa.api.schemas.elements import (
     TopologyParamMeta,
     TopologySchema,
 )
+from tensa.api.schemas.engines import (
+    EngineCapabilities,
+    EngineFormats,
+    EngineList,
+)
 from tensa.api.schemas.errors import (
     RECOVERY_DEFAULT_LABELS,
     ProblemDetails,
@@ -166,6 +171,9 @@ __all__ = [
     "EditElementRequest",
     "EditStep",
     "ElementCreated",
+    "EngineCapabilities",
+    "EngineFormats",
+    "EngineList",
     "ExampleList",
     "ExampleListEntry",
     "FaultSpec",

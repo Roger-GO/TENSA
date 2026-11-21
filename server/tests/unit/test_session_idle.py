@@ -135,6 +135,7 @@ def test_get_session_counts_as_activity(tmp_path: Path) -> None:
             "session_id": "s1",
             "state": "live",
             "workspace_id": workspace_id(client.app.state.workspace),
+            "engine": "andes",
         }
         assert sess.last_active > before
         assert time.monotonic() - sess.last_active < 5.0

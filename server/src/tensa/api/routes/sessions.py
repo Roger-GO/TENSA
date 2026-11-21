@@ -25,6 +25,7 @@ from tensa.api.schemas import (
     SessionDescriptor,
     SessionList,
 )
+from tensa.core.errors import EngineUnavailableError
 from tensa.core.session import SessionExpiredError, SessionManager
 
 router = APIRouter()
@@ -53,10 +54,12 @@ def workspace_id(workspace: Path) -> str:
 
 def _descriptor(request: Request, session_id: str) -> SessionDescriptor:
     workspace = getattr(request.app.state, "workspace", None)
+    mgr = _manager(request)
     return SessionDescriptor(
         session_id=session_id,
         state="live",
         workspace_id=workspace_id(workspace) if isinstance(workspace, Path) else "",
+        engine=mgr.engine_of(session_id),
     )
 
 
@@ -64,13 +67,17 @@ def _descriptor(request: Request, session_id: str) -> SessionDescriptor:
     "/sessions",
     openapi_extra={"x-tensa-gui-location": "auto"},
     operation_id="createSession",
-    summary="Create a new session backed by a fresh ANDES worker subprocess.",
+    summary="Create a new session backed by a fresh worker subprocess for its engine.",
     response_model=SessionDescriptor,
     status_code=status.HTTP_201_CREATED,
     responses={
+        409: {
+            "model": ProblemDetails,
+            "description": "The named engine is not part of this build; the detail says why.",
+        },
         422: {
             "model": ProblemDetails,
-            "description": "Body included a client-supplied session_id (rejected).",
+            "description": "Body failed validation (an unknown engine, or a field other than engine).",
         },
         429: {
             "model": ProblemDetails,
@@ -81,24 +88,30 @@ def _descriptor(request: Request, session_id: str) -> SessionDescriptor:
 async def create_session(
     request: Request
 ) -> SessionDescriptor:
-    # Reject any non-empty body. ``CreateSessionRequest`` has ``extra="forbid"``,
-    # so client-supplied ``session_id`` (or any other field) raises 422.
+    # A body is optional; ``CreateSessionRequest`` has ``extra="forbid"``, so a
+    # client-supplied ``session_id`` (or any field but ``engine``) raises 422.
+    engine = "andes"
     raw = await request.body()
     if raw:
         try:
-            CreateSessionRequest.model_validate_json(raw)
+            engine = CreateSessionRequest.model_validate_json(raw).engine
         except ValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=(
-                    "POST /sessions does not accept any body fields. "
+                    "POST /sessions accepts only an optional 'engine' field. "
                     "session_id is server-generated. "
                     f"validation errors: {exc.errors()}"
                 ),
             ) from exc
     mgr = _manager(request)
     try:
-        session_id = await mgr.create_session()
+        session_id = await mgr.create_session(engine)
+    except EngineUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

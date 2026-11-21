@@ -33,6 +33,8 @@ Date: 2026-11-20. Branch `multiengine`, cut from `main` at `3f2181a9`, pushed to
 
 Linux checks: the server and web workflows now run on pushes to `multiengine` (commit `d0b8d8a6`), since this PC has no WSL and installing it needs admin.
 
+First CI run on the branch (commit `d0b8d8a6`, no product change): all green. Server: lint, types and GUI parity; tests on Ubuntu, macOS and Windows with Python 3.12 and 3.13; the MCP 1.x job; the web build; the Linux acceptance suite. Web: type check, lint, tests and build; Playwright end-to-end against a real server. So the web type-check error and the palette test failure seen on this PC come from this PC's install of the web dependencies, not from the code, and CI is the judge for web changes.
+
 ## Worker infrastructure
 
 - `.claude/kimi/kimi.py`: batch runner for `moonshotai/kimi-k3` on MindRouter, standard library only, capped at 150 requests per minute, resumable, key read at run time from the sibling folder's `.env`.
