@@ -32,6 +32,7 @@ import type {
   DeleteSnapshotVars,
   EditElementVars,
   EditElementsVars,
+  EigSweepVars,
   ExternalResultsResponse,
   ExternalSeries,
   ExportBundleVars,
@@ -86,6 +87,7 @@ export type PublicTypes = [
   DeleteSnapshotVars,
   EditElementVars,
   EditElementsVars,
+  EigSweepVars,
   ExternalResultsResponse,
   ExternalSeries,
   ExportBundleVars,
@@ -157,8 +159,10 @@ const PUBLIC_VALUES = [
   'useEigParticipation',
   'useEngines',
   'useEigRun',
+  'useEigSweepRun',
   'useExportBundle',
   'useExportPmuCsv',
+  'useForgetYbus',
   'useGetSidecar',
   'useImportBundle',
   'useImportExternalResults',
@@ -169,6 +173,7 @@ const PUBLIC_VALUES = [
   'useListSnapshots',
   'useListWorkspaceFiles',
   'useLoadCase',
+  'useModelDoc',
   'usePutSidecar',
   'useRedoEdit',
   'useRefreshTopology',
@@ -182,6 +187,7 @@ const PUBLIC_VALUES = [
   'useSeGenerateMeasurements',
   'useSeRun',
   'useStartSweep',
+  'useSupportedModels',
   'useTdsControllers',
   'useTdsInit',
   'useTopology',
@@ -191,6 +197,7 @@ const PUBLIC_VALUES = [
   'useUploadProfile',
   'useUploadWorkspaceFile',
   'useVersionInfo',
+  'useYbus',
   'wireGlobalErrorRecovery',
 ];
 
@@ -214,6 +221,7 @@ describe('@/api/queries public surface', () => {
   it('keeps the query keys the invalidations rely on', () => {
     const id = parseSessionId('s1');
     expect(queries.queryKeys.topology(id)).toEqual(['topology', 's1']);
+    expect(queries.queryKeys.ybus(id)).toEqual(['ybus', 's1']);
     expect(queries.queryKeys.report(id, 'pflow')).toEqual(['report', 's1', 'pflow']);
     expect(queries.SAVE_CASE_MUTATION_KEY).toEqual(['save-case']);
   });

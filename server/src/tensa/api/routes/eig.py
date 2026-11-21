@@ -410,13 +410,7 @@ async def run_eig(
 
 @router.post(
     "/sessions/{session_id}/eig/sweep",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": (
-            "Root loci data for scripts and agents first; the analysis panel's "
-            "root-loci view beside the eigenvalue scatter is a later unit."
-        ),
-    },
+    openapi_extra={"x-tensa-gui-location": "analysis-panel"},
     operation_id="runEigSweep",
     summary=(
         "Eigenvalues at each of a list of values of one parameter of one device "

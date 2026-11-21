@@ -44,6 +44,8 @@ import { useReloadedCaseStore } from '@/store/reloadedCase';
 import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useExampleCasesStore } from '@/store/exampleCases';
+import { useYbusDialogStore } from '@/store/ybusDialog';
+import { useModelDocStore } from '@/store/modelDoc';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
@@ -76,6 +78,16 @@ const LoadSnapshotDialog = lazyNamed(
 const ExampleCasesDialog = lazyNamed(
   () => import('@/components/examples/ExampleCasesDialog'),
   'ExampleCasesDialog',
+  'overlay',
+);
+const YbusDialogLazy = lazyNamed(
+  () => import('@/components/ybus/YbusDialog'),
+  'YbusDialog',
+  'overlay',
+);
+const ModelDocDialog = lazyNamed(
+  () => import('@/components/models/ModelDocDialog'),
+  'ModelDocDialog',
   'overlay',
 );
 // What a run that failed is answered with. Each draws nothing until a run of
@@ -319,6 +331,35 @@ function ExampleCasesHost() {
 }
 
 /**
+ * The admittance matrix (Ybus) dialog, opened from the command palette through
+ * its store flag. Fetched and mounted the first time it is opened.
+ */
+function YbusDialogHost() {
+  const open = useYbusDialogStore((s) => s.open);
+  const closeDialog = useYbusDialogStore((s) => s.closeDialog);
+  return (
+    <LazyMount when={open} onLoadFailed={closeDialog}>
+      <YbusDialogLazy />
+    </LazyMount>
+  );
+}
+
+/**
+ * The Model documentation dialog, opened from a form's button or the command
+ * palette through its store flag. Fetched and mounted the first time it is
+ * opened.
+ */
+function ModelDocHost() {
+  const open = useModelDocStore((s) => s.dialogOpen);
+  const closeDialog = useModelDocStore((s) => s.closeDialog);
+  return (
+    <LazyMount when={open} onLoadFailed={closeDialog}>
+      <ModelDocDialog />
+    </LazyMount>
+  );
+}
+
+/**
  * The Add element panel, which draws nothing while it is closed, so it is
  * fetched and mounted once something has opened it.
  */
@@ -399,6 +440,8 @@ export function App() {
                   unreachable). Mount them at the app root so the actions work. */}
               <SnapshotDialogs />
               <ExampleCasesHost />
+              <YbusDialogHost />
+              <ModelDocHost />
             </>
           }
         />

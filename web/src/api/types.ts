@@ -247,6 +247,18 @@ export interface EigParticipationResponse {
   participation: ParticipationFactor[];
 }
 
+/**
+ * The eigenvalues at one value of a parameter sweep
+ * (``POST /sessions/{id}/eig/sweep``). An eigenvalue ANDES counts as zero is
+ * exactly ``{0, 0}`` with a damping ratio of 1, as in ``EigResult``.
+ */
+export type EigSweepPoint = components['schemas']['EigSweepPointModel'];
+/**
+ * Wire shape of ``POST /sessions/{id}/eig/sweep``: one point per requested
+ * value, in the request's order, every point with ``mode_count`` eigenvalues.
+ */
+export type EigSweepResponse = components['schemas']['EigSweepResponse'];
+
 // ---- CPF result (Unit 12 — continuation power flow) ----------------------
 
 /**

@@ -11,6 +11,7 @@ import type {
   CpfResult,
   EigParticipationResponse,
   EigResult,
+  EigSweepResponse,
   SeMeasurementsGeneratedResponse,
   SeResult,
   SessionId,
@@ -53,6 +54,85 @@ export function useEigRun(): UseMutationResult<EigResult, Error, SessionId> {
     onSuccess: (data, sessionId, ctx) => {
       useAnalyzeStore.getState().setEigResult(data);
       queryClient.setQueryData(queryKeys.eig(sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
+
+/**
+ * Request body of ``POST /api/sessions/{id}/eig/sweep``, with the session it
+ * goes to. All four fields are required by the server.
+ */
+export interface EigSweepVars {
+  sessionId: SessionId;
+  /** ANDES model name, e.g. 'GENROU'. */
+  model: string;
+  /**
+   * idx of the device within the model, as text, e.g. '1'. The server types
+   * it as a string and matches it to a numeric idx by its text.
+   */
+  idx: string;
+  /** Parameter name as ANDES names it, e.g. 'M'. */
+  param: string;
+  /** The values to take the eigenvalues at, in order: 1 to 200 finite numbers. */
+  values: number[];
+}
+
+/**
+ * ``POST /api/sessions/{id}/eig/sweep``: the eigenvalues at each of a list of
+ * values of one parameter of one device (root locus data). Synchronous, like
+ * ``POST /eig``. Each value costs a read, a setup, a power flow and an
+ * eigenvalue analysis of the case, so the time grows with the number of
+ * values and so does the timeout (``TIMEOUTS.eigSweepPoint`` for each value).
+ *
+ * ``points[i]`` of the answer is at ``values[i]`` of the request. No mode is
+ * followed through the sweep, so a client drawing root loci matches the modes
+ * itself. ``tds_initialized`` is not changed by the sweep, and a sweep whose
+ * points differ in ``mode_count`` is refused (422), not answered with lists of
+ * different lengths. The server runs it as a job of kind ``eig``, as it does
+ * the single run, and so does the client's mirror of it.
+ *
+ * On success: writes through to ``useAnalyzeStore.setEigSweepResult`` so the
+ * sweep panel reads it synchronously, and seeds the TanStack Query cache at
+ * ``queryKeys.eigSweep(sessionId)``.
+ *
+ * Errors:
+ *
+ * - 404: session not found or already closed, OR the case has no such model,
+ *   device or parameter.
+ * - 409: no case loaded OR the session has no converged power flow. Run
+ *   /pflow first: the sweep solves each point's power flow with that run's
+ *   settings.
+ * - 422: the values are not 1 to 200 finite numbers, OR a point failed: its
+ *   system did not set up, its power flow did not converge, the eigenvalue
+ *   routine failed, or it has another number of eigenvalues than the first
+ *   point. The detail names the value. A failed point fails the whole sweep:
+ *   no answer carries a point without its eigenvalues.
+ */
+export function useEigSweepRun(): UseMutationResult<EigSweepResponse, Error, EigSweepVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, model, idx, param, values }: EigSweepVars) => {
+      return await andesClient.post<EigSweepResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/eig/sweep`,
+        {
+          body: { model, idx, param, values },
+          // A power flow's time, and a point's for each value.
+          timeoutMs: TIMEOUTS.pflowRun + values.length * TIMEOUTS.eigSweepPoint,
+        },
+      );
+    },
+    // The job keeps the body it was sent, under the server's names, as the
+    // server's own record of the job does (kind "eig", like the single run).
+    onMutate: ({ model, idx, param, values }) => ({
+      jobId: registerJob('eig', { model, idx, param, values }),
+    }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      useAnalyzeStore.getState().setEigSweepResult(data);
+      queryClient.setQueryData(queryKeys.eigSweep(sessionId), data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {

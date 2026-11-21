@@ -12,7 +12,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- |
 | `about-dialog` | 1 |
 | `activity-panel` | 2 |
-| `analysis-panel` | 10 |
+| `analysis-panel` | 11 |
 | `auto` | 6 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 6 |
@@ -22,7 +22,8 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 8 |
+| `model-doc-dialog` | 2 |
+| `none` | 4 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -30,6 +31,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
+| `ybus-dialog` | 1 |
 | **total** | **78** |
 
 ## OpenAPI routes
@@ -68,7 +70,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/eig` | `analysis-panel` |  |
 | `GET` | `/api/sessions/{session_id}/eig/modes/{mode_idx}/participation` | `analysis-panel` |  |
 | `GET` | `/api/sessions/{session_id}/eig/state-matrix.mat` | `analysis-panel` |  |
-| `POST` | `/api/sessions/{session_id}/eig/sweep` | `none` | Root loci data for scripts and agents first; the analysis panel's root-loci view beside the eigenvalue scatter is a later unit. |
+| `POST` | `/api/sessions/{session_id}/eig/sweep` | `analysis-panel` |  |
 | `POST` | `/api/sessions/{session_id}/elements` | `inspector` |  |
 | `PUT` | `/api/sessions/{session_id}/elements/{model}/{idx}` | `inspector` |  |
 | `DELETE` | `/api/sessions/{session_id}/elements/{model}/{idx}` | `inspector` |  |
@@ -78,8 +80,8 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/keys` | `auto` |  |
 | `GET` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
 | `DELETE` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
-| `GET` | `/api/sessions/{session_id}/models` | `none` | No web surface shows ANDES's model list or its documentation yet; the routes are for scripts and agents. They will later feed the Inspector's model help panel. |
-| `GET` | `/api/sessions/{session_id}/models/{model}/doc` | `none` | No web surface shows ANDES's model list or its documentation yet; the routes are for scripts and agents. They will later feed the Inspector's model help panel. |
+| `GET` | `/api/sessions/{session_id}/models` | `model-doc-dialog` |  |
+| `GET` | `/api/sessions/{session_id}/models/{model}/doc` | `model-doc-dialog` |  |
 | `GET` | `/api/sessions/{session_id}/operating-point` | `data-grid` |  |
 | `POST` | `/api/sessions/{session_id}/pflow` | `run-controls` |  |
 | `POST` | `/api/sessions/{session_id}/pmu` | `pmu-dialog` |  |
@@ -107,7 +109,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/topology` | `workspace` |  |
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |
-| `GET` | `/api/sessions/{session_id}/ybus` | `none` | No web surface reads the bus admittance matrix yet; the route is for scripts and agents. It will later appear on the network-analysis results panel. |
+| `GET` | `/api/sessions/{session_id}/ybus` | `ybus-dialog` |  |
 | `GET` | `/api/topology/schema` | `inspector` |  |
 | `GET` | `/api/version` | `about-dialog` |  |
 | `GET` | `/api/workspace/files` | `left-sidebar` |  |

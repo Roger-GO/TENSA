@@ -7,6 +7,7 @@ import { elementToPng } from '@/components/export/exportToPng';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { clamp } from '@/lib/clamp';
 import { cn } from '@/lib/cn';
+import { unstableModeCount } from '@/lib/eigModes';
 import { applyEigFilter, useAnalyzeStore } from '@/store/analyze';
 import { useSessionStore } from '@/store/session';
 import { eigResultToCsv } from './analyzeExport';
@@ -229,7 +230,8 @@ export function computeTicks(min: number, max: number, target = 5): number[] {
 }
 
 /** Compact tick label: trims float noise, falls back to exponent form. */
-function formatTick(v: number): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function formatTick(v: number): string {
   if (v === 0 || Object.is(v, -0)) return '0';
   const abs = Math.abs(v);
   if (abs >= 10000 || abs < 0.001) return v.toExponential(0);
@@ -390,15 +392,11 @@ export function EIGScatter({ result: resultProp, className }: EIGScatterProps) {
 
   // Modes whose damping is negative (or whose real part is positive)
   // are growing — flag them so the log-scale axis layout is explained.
-  const negativeDampingCount = useMemo(() => {
-    if (result === null) return 0;
-    let n = 0;
-    for (const i of visibleIndices) {
-      const z = result.eigenvalues[i];
-      if (z !== undefined && z.real > 0) n += 1;
-    }
-    return n;
-  }, [result, visibleIndices]);
+  const negativeDampingCount = useMemo(
+    () =>
+      result === null ? 0 : unstableModeCount(visibleIndices.map((i) => result.eigenvalues[i])),
+    [result, visibleIndices],
+  );
 
   // ---- hover: nearest-point search in pixel space ---------------------
   const recomputeHover = useCallback(

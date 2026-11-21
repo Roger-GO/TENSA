@@ -7,11 +7,57 @@ import {
   cpfGeneratorsToCsv,
   cpfResultToCsv,
   eigResultToCsv,
+  eigSweepResultToCsv,
   participationToCsv,
   seResidualsToCsv,
 } from '@/components/analyze/analyzeExport';
 import { readBlob } from '../../helpers/downloads';
 import type { CpfResult, EigResult, SeResult } from '@/api/types';
+import type { EigSweepResponse } from '@/api/types';
+
+describe('eigSweepResultToCsv', () => {
+  const result: EigSweepResponse = {
+    model: 'GENROU',
+    idx: '1',
+    param: 'M',
+    points: [
+      {
+        value: 1,
+        eigenvalues: [
+          { real: -0.2, imag: 3 },
+          { real: -1, imag: 0 },
+        ],
+        damping_ratios: [0.066, 1],
+        frequencies_hz: [0.477, 0],
+      },
+      {
+        value: 3,
+        eigenvalues: [
+          { real: 0.05, imag: 2.5 },
+          { real: -0.9, imag: 0 },
+        ],
+        damping_ratios: [-0.02, 1],
+        frequencies_hz: [0.398, 0],
+      },
+    ],
+    mode_count: 2,
+    tds_initialized: false,
+    job_id: null,
+  };
+
+  it('writes one row per (point, mode) at full precision and names the run', async () => {
+    const text = await readBlob(eigSweepResultToCsv(result));
+    expect(text.split('\n')).toEqual([
+      '# sweep of M of GENROU 1, 2 points, 2 modes per point',
+      'point,value,mode,real,imag,damping_ratio,frequency_hz',
+      '0,1,0,-0.2,3,0.066,0.477',
+      '0,1,1,-1,0,1,0',
+      '1,3,0,0.05,2.5,-0.02,0.398',
+      '1,3,1,-0.9,0,1,0',
+      '',
+    ]);
+  });
+});
 
 describe('eigResultToCsv', () => {
   const result: EigResult = {

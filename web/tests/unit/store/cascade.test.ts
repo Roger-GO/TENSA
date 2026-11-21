@@ -35,7 +35,7 @@ import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 import { DEFAULT_TDS_CONFIG, useUiStore } from '@/store/ui';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { CpfResult, EigResult, PflowResult } from '@/api/types';
+import type { CpfResult, EigResult, EigSweepResponse, PflowResult } from '@/api/types';
 import { NO_ELEMENT_NAMES } from '@/lib/elementNames';
 
 const PF: PflowResult = {
@@ -60,6 +60,22 @@ const EIG: EigResult = {
   tds_initialized: true,
 };
 
+const EIG_SWEEP: EigSweepResponse = {
+  model: 'GENROU',
+  idx: '1',
+  param: 'M',
+  points: [
+    {
+      value: 2,
+      eigenvalues: [{ real: -0.1, imag: 1.0 }],
+      damping_ratios: [0.1],
+      frequencies_hz: [0.159],
+    },
+  ],
+  mode_count: 1,
+  tds_initialized: false,
+};
+
 const CPF: CpfResult = {
   lambdas: [0, 1],
   voltages_per_bus: { '1': [1.0, 0.9] },
@@ -75,11 +91,15 @@ function caseOf(name: string) {
   return { primaryPath: parseWorkspacePath(name), addfiles: [] };
 }
 
-/** A case with a PF result, an EIG result, SE measurements and a finished TDS run. */
+/**
+ * A case with a PF result, an EIG result, an EIG sweep, SE measurements and a
+ * finished TDS run.
+ */
 function seedResults(): void {
   useCaseStore.getState().setCase(caseOf('kundur_full.xlsx'));
   usePflowStore.getState().setLastRun(PF);
   useAnalyzeStore.getState().setEigResult(EIG);
+  useAnalyzeStore.getState().setEigSweepResult(EIG_SWEEP);
   useAnalyzeStore.getState().setSeMeasurementsCount(30);
   useRunsStore.getState().startRun({ runId: 'run-1', tf: 1, columnNames: ['Bus_1_v'] });
 }
@@ -103,6 +123,7 @@ describe('store cascade — case change', () => {
 
     expect(usePflowStore.getState().lastRun).toBeNull();
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
+    expect(useAnalyzeStore.getState().eigSweepResult).toBeNull();
     expect(useAnalyzeStore.getState().seMeasurementsCount).toBeNull();
     expect(useRunsStore.getState().activeRunId).toBeNull();
   });
@@ -335,6 +356,7 @@ describe('store cascade — PF result cleared on its own', () => {
     usePflowStore.getState().clearPflow();
 
     expect(useAnalyzeStore.getState().eigResult).toBeNull();
+    expect(useAnalyzeStore.getState().eigSweepResult).toBeNull();
     expect(useAnalyzeStore.getState().cpfResult).toBeNull();
     expect(useAnalyzeStore.getState().seMeasurementsCount).toBeNull();
     // The case itself, and its TDS runs, stay: only the operating point went.
@@ -346,6 +368,7 @@ describe('store cascade — PF result cleared on its own', () => {
     seedResults();
     usePflowStore.getState().setLastRun({ ...PF, run_id: 'pf-2' });
     expect(useAnalyzeStore.getState().eigResult).not.toBeNull();
+    expect(useAnalyzeStore.getState().eigSweepResult).toEqual(EIG_SWEEP);
   });
 });
 

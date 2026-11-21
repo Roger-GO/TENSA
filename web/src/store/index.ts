@@ -170,10 +170,15 @@ export function wireStoreCascade(): void {
   });
 }
 
-/** Drop the EIG, CPF and SE results (and the SE measurement count). */
+/**
+ * Drop the EIG, EIG sweep, CPF and SE results (and the SE measurement count).
+ * A sweep's points each solve a power flow with the settings of the session's
+ * last one, so the sweep goes with that power flow too.
+ */
 function clearAnalysisResults(): void {
   const analyze = useAnalyzeStore.getState();
   analyze.clearEigResult();
+  analyze.clearEigSweepResult();
   analyze.clearCpfResult();
   analyze.clearSeResult();
 }
@@ -203,6 +208,7 @@ export function __resetCascadeForTests(): void {
   usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({
     eigResult: null,
+    eigSweepResult: null,
     selectedModeId: null,
     cpfResult: null,
     seResult: null,

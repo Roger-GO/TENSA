@@ -36,7 +36,7 @@
  * point past ``mode_count``.
  */
 import { create } from 'zustand';
-import type { CpfResult, EigResult, SeResult } from '@/api/types';
+import type { CpfResult, EigResult, EigSweepResponse, SeResult } from '@/api/types';
 
 /** Sub-mode picker values for the Analyze panel. */
 export type AnalyzeSubMode = 'pflow' | 'tds' | 'eig' | 'cpf' | 'se';
@@ -89,6 +89,17 @@ export interface AnalyzeState {
   eigResult: EigResult | null;
   setEigResult: (result: EigResult | null) => void;
   clearEigResult: () => void;
+
+  /**
+   * Most recent EIG parameter-sweep (root locus) result. ``null`` means "no
+   * sweep yet on this session". Set by ``useEigSweepRun`` mutation
+   * ``onSuccess``; cleared on case change and when the power flow is cleared
+   * (the cascade in ``store/index.ts``), as the EIG result is. The sweep has
+   * no linked selection, so clearing touches nothing else.
+   */
+  eigSweepResult: EigSweepResponse | null;
+  setEigSweepResult: (result: EigSweepResponse | null) => void;
+  clearEigSweepResult: () => void;
 
   selectedModeId: number | null;
   setSelectedModeId: (id: number | null) => void;
@@ -154,6 +165,10 @@ export const useAnalyzeStore = create<AnalyzeState>((set) => ({
       return { eigResult: result, selectedModeId: nextSelected };
     }),
   clearEigResult: () => set({ eigResult: null, selectedModeId: null }),
+
+  eigSweepResult: null,
+  setEigSweepResult: (result) => set({ eigSweepResult: result }),
+  clearEigSweepResult: () => set({ eigSweepResult: null }),
 
   selectedModeId: null,
   setSelectedModeId: (id) => set({ selectedModeId: id }),

@@ -25,18 +25,11 @@ def _manager(request: Request) -> SessionManager:
     return mgr
 
 
-# parity-reviewed: 2026-11-20. No web surface reads the matrix yet; it is for
-# scripts and agents, and will later appear on the network-analysis results panel.
+# parity-reviewed: 2026-11-21. The Admittance matrix (Ybus) dialog, opened by the
+# command of that name, reads it when the user presses Read matrix (``useYbus``).
 @router.get(
     "/sessions/{session_id}/ybus",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": (
-            "No web surface reads the bus admittance matrix yet; the route is for "
-            "scripts and agents. It will later appear on the network-analysis "
-            "results panel."
-        ),
-    },
+    openapi_extra={"x-tensa-gui-location": "ybus-dialog"},
     operation_id="getBusAdmittanceMatrix",
     summary="Get the bus admittance matrix of the loaded case, as sparse triplets.",
     response_model=YbusResponse,

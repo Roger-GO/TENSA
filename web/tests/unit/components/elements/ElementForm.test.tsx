@@ -38,6 +38,7 @@ import type { ReactNode } from 'react';
 
 import { ElementForm } from '@/components/elements/ElementForm';
 import type { TopologySchema, TopologySummary } from '@/api/types';
+import { useModelDocStore } from '@/store/modelDoc';
 
 const SCHEMA: TopologySchema = {
   models: {
@@ -134,6 +135,7 @@ function emptyTopology(): TopologySummary {
 beforeEach(() => {
   MOCK_TOPOLOGY = emptyTopology();
   MOCK_REFETCHING = false;
+  useModelDocStore.setState({ dialogOpen: false, model: null });
 });
 
 describe('<ElementForm />', () => {
@@ -158,6 +160,62 @@ describe('<ElementForm />', () => {
     expect(screen.queryByTestId('field-r')).toBeNull();
     // Submit label uses the model name.
     expect(screen.getByRole('button', { name: /add bus/i })).toBeInTheDocument();
+  });
+
+  it('names the model at the top, with the control that opens its documentation', async () => {
+    const user = userEvent.setup();
+    render(
+      withQueryClient(
+        <ElementForm
+          model="Bus"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    const form = screen.getByTestId('element-form-Bus');
+    expect(form.firstElementChild).toHaveTextContent('Bus');
+    const button = screen.getByTestId('model-doc-open');
+    expect(button).toHaveAccessibleName('Model documentation for Bus');
+    expect(useModelDocStore.getState()).toMatchObject({ dialogOpen: false, model: null });
+
+    await user.click(button);
+    expect(useModelDocStore.getState()).toMatchObject({ dialogOpen: true, model: 'Bus' });
+  });
+
+  it('names the model of each form it is given, and has no control without a model', () => {
+    const view = render(
+      withQueryClient(
+        <ElementForm
+          model="Line"
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    expect(screen.getByTestId('model-doc-open')).toHaveAccessibleName(
+      'Model documentation for Line',
+    );
+    view.unmount();
+
+    render(
+      withQueryClient(
+        <ElementForm
+          model=""
+          saving={false}
+          serverError={null}
+          onSubmit={() => {}}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    // No model is no form: the form says so, with nothing to document.
+    expect(screen.getByText('No schema for model "".')).toBeInTheDocument();
+    expect(screen.queryByTestId('model-doc-open')).toBeNull();
   });
 
   it('renders Line-specific fields when model="Line" (different polymorphic shape)', () => {
@@ -632,6 +690,9 @@ describe('<ElementForm /> names a battery after its idx', () => {
       ),
     );
     const name = inputOf('name');
+    // The control beside the model's name comes first, then the idx.
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByTestId('model-doc-open'));
     await user.tab();
     await user.tab();
     expect(document.activeElement).toBe(name);

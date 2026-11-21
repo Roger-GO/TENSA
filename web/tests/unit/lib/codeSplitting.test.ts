@@ -122,6 +122,8 @@ const LAZY_MODULES = [
   'components/case/SaveSystemDialog.tsx',
   'components/examples/ExampleCasesDialog.tsx',
   'components/examples/ExampleCard.tsx',
+  'components/ybus/YbusDialog.tsx',
+  'components/models/ModelDocDialog.tsx',
   'components/shell/SwitchEngineConfirmDialog.tsx',
   'components/tds/TdsInitResultDialog.tsx',
   'components/disturbance/AddEventDialog.tsx',
@@ -196,5 +198,19 @@ describe('code splitting', () => {
       eager.packages.has(pkg),
       `${pkg} is statically imported from code that loads eagerly`,
     ).toBe(false);
+  });
+
+  it('reaches the Model documentation dialog only through import()', () => {
+    // Its button sits in the element form, which loads late too, so a static
+    // import of the dialog there would not reach the entry: it would load the
+    // dialog with every form instead of the first time it is opened.
+    const dialog = path.join(SRC, 'components/models/ModelDocDialog.tsx');
+    const importers = [...all.files].filter((file) =>
+      [...readFileSync(file, 'utf8').matchAll(STATIC_IMPORT)].some(
+        (m) => resolveSource(file, m[1]!) === dialog,
+      ),
+    );
+    expect(importers.map(rel)).toEqual([]);
+    expect(allFiles.has('components/models/ModelDocDialog.tsx')).toBe(true);
   });
 });

@@ -124,10 +124,24 @@ async def test_the_session_case_is_left_as_it_was(client: httpx.AsyncClient) -> 
     assert after == before
     # ...and the case is still open to disturbances: it was not set up.
     fault = {"kind": "fault", "bus_idx": 9, "tf": 1.0, "tc": 1.1, "xf": 0.05, "rf": 0}
-    added = await client.post(
-        f"/api/sessions/{sid}/disturbances", json={"disturbances": [fault]}
-    )
+    added = await client.post(f"/api/sessions/{sid}/disturbances", json={"disturbances": [fault]})
     assert added.status_code == 200, added.text
+
+
+@pytest.mark.integration
+async def test_the_routes_are_tagged_for_the_dialog_that_reads_them(
+    client: httpx.AsyncClient,
+) -> None:
+    """The web UI's Model documentation dialog reads both routes, so the parity
+    ledger names it and neither route carries a deferral any more."""
+    spec = (await client.get("/openapi.json")).json()
+    for path in (
+        "/api/sessions/{session_id}/models",
+        "/api/sessions/{session_id}/models/{model}/doc",
+    ):
+        operation = spec["paths"][path]["get"]
+        assert operation["x-tensa-gui-location"] == "model-doc-dialog"
+        assert "x-tensa-parity-deferred" not in operation
 
 
 _SERVER_PROCESS = textwrap.dedent(

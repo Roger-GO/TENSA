@@ -20,11 +20,10 @@ from tensa.core.session import SessionExpiredError, SessionManager, WorkerError
 
 router = APIRouter()
 
-_DEFERRED = (
-    "No web surface shows ANDES's model list or its documentation yet; the "
-    "routes are for scripts and agents. They will later feed the Inspector's "
-    "model help panel."
-)
+# The web UI's Model documentation dialog reads both routes: the list in its
+# browse mode, opened from the command palette, and the text of one model,
+# also opened from the button beside a model's name in an element form.
+_GUI_LOCATION = "model-doc-dialog"
 
 _SESSION_404 = "Session not found or already closed."
 _ENGINE_409 = "The session's engine is not ANDES, and only ANDES documents its models."
@@ -54,12 +53,9 @@ async def _invoke(request: Request, session_id: str, op: str, args: dict[str, An
         raise map_worker_error(exc) from exc
 
 
-# parity-reviewed: 2026-11-21. No web surface reads the model list or the
-# documentation yet; they are for scripts and agents, and will later feed the
-# Inspector's model help panel.
 @router.get(
     "/sessions/{session_id}/models",
-    openapi_extra={"x-tensa-gui-location": "none", "x-tensa-parity-deferred": _DEFERRED},
+    openapi_extra={"x-tensa-gui-location": _GUI_LOCATION},
     operation_id="listSupportedModels",
     summary="List every model ANDES ships, grouped as ANDES groups them.",
     response_model=SupportedModels,
@@ -83,7 +79,7 @@ async def list_supported_models(session_id: str, request: Request) -> SupportedM
 
 @router.get(
     "/sessions/{session_id}/models/{model}/doc",
-    openapi_extra={"x-tensa-gui-location": "none", "x-tensa-parity-deferred": _DEFERRED},
+    openapi_extra={"x-tensa-gui-location": _GUI_LOCATION},
     operation_id="getModelDoc",
     summary="Get ANDES's own documentation of one model, as plain text.",
     response_model=ModelDoc,

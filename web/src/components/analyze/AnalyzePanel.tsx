@@ -18,6 +18,7 @@ import { CpfQLimitsSwitch } from './CpfQLimitsSwitch';
 import { CpfQvCurvePanel } from './CpfQvCurvePanel';
 import { CpfStepLimitNote } from './CpfStepLimitNote';
 import { RunReadinessNote } from './RunReadinessNote';
+import { EigSweepPanel } from './EigSweepPanel';
 import { EIGScatter } from './EIGScatter';
 import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
@@ -118,7 +119,7 @@ export function AnalyzePanel({ className }: AnalyzePanelProps) {
  * disagrees with the client's view of readiness (e.g., the PF result we
  * trust was actually invalidated server-side).
  */
-function AnalyzeRunButton({
+export function AnalyzeRunButton({
   routine,
   label,
   pendingLabel,
@@ -288,9 +289,23 @@ function SeGenerateButton({
  * ``error`` is the live mutation error (a ``ProblemDetailsError`` or a plain
  * ``Error``). ``null`` renders nothing.
  */
-function AnalyzeRoutineError({ routine, error }: { routine: RunRoutine; error: Error | null }) {
+export function AnalyzeRoutineError({
+  routine,
+  error,
+  testIdPrefix,
+}: {
+  routine: RunRoutine;
+  error: Error | null;
+  /**
+   * The test-id stem of the banner, defaulting to the routine. A second
+   * surface of the same routine on one screen (the EIG sweep beside the
+   * single run) passes its own so the two do not collide.
+   */
+  testIdPrefix?: string;
+}) {
   if (error === null) return null;
 
+  const prefix = testIdPrefix ?? routine;
   const isPrerequisite = error instanceof ProblemDetailsError && error.status === 409;
 
   if (isPrerequisite) {
@@ -305,7 +320,7 @@ function AnalyzeRoutineError({ routine, error }: { routine: RunRoutine; error: E
       <ProblemDetailsErrorSurface
         variant="banner"
         tone="warning"
-        testId={`${routine}-prerequisite-error`}
+        testId={`${prefix}-prerequisite-error`}
         hideRawDisclosure
         error={{
           title: error.detail ?? 'Run PFlow first.',
@@ -322,7 +337,7 @@ function AnalyzeRoutineError({ routine, error }: { routine: RunRoutine; error: E
     <ProblemDetailsErrorSurface
       variant="banner"
       tone="danger"
-      testId={`${routine}-error`}
+      testId={`${prefix}-error`}
       hideRawDisclosure
       error={{ title: detail, recovery }}
     />
@@ -359,6 +374,9 @@ export function AnalyzeEigSubMode() {
   const eigResult = useAnalyzeStore((s) => s.eigResult);
   const eigRun = useEigRun();
   const reloadDiscardsEdits = useReloadDiscardsEdits();
+  // The sweep form starts over with each case, as the power-flow options do:
+  // a parameter typed for one case's devices means nothing on another's.
+  const casePath = useCaseStore((s) => s.selection?.primaryPath ?? null);
 
   // When the case changes (PF cleared on case-load via cross-slice
   // cascade), drop the stale EIG result so the empty-state shows.
@@ -413,6 +431,7 @@ export function AnalyzeEigSubMode() {
       <EIGScatter className="min-h-[260px] flex-shrink-0" />
       <EIGParticipationTable className="min-h-[140px] flex-shrink-0" />
       <EIGDampingChart className="min-h-[140px] flex-shrink-0" />
+      <EigSweepPanel key={casePath ?? 'no-case'} className="flex-shrink-0" />
     </div>
   );
 }

@@ -21,6 +21,7 @@
  * case files are other people's data.
  */
 import type { EigResult, PflowResult } from '@/api/types';
+import { unstableModeCount } from '@/lib/eigModes';
 import type { ElementNames } from '@/lib/elementNames';
 import {
   comparisonCellText,
@@ -709,7 +710,7 @@ function eigSection(eig: EigResult): Section {
     damping: eig.damping_ratios[i],
     frequency: eig.frequencies_hz[i],
   }));
-  const unstable = modes.filter((m) => m.real > 0).length;
+  const unstable = unstableModeCount(eig.eigenvalues);
   // The least damped first: they are the ones a reader looks for.
   modes.sort(
     (x, y) => (x.damping ?? Number.POSITIVE_INFINITY) - (y.damping ?? Number.POSITIVE_INFINITY),

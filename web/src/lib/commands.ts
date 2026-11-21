@@ -51,11 +51,13 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useSweepStore } from '@/store/sweep';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useExampleCasesStore } from '@/store/exampleCases';
+import { useModelDocStore } from '@/store/modelDoc';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useEditJournalStore } from '@/store/editJournal';
 import { redoTarget, undoTarget, useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useReportDialogStore } from '@/store/reportDialog';
+import { useYbusDialogStore } from '@/store/ybusDialog';
 import {
   useAbortRun,
   useCloneRedo,
@@ -932,6 +934,21 @@ function useCommandSets(): CommandSets {
                 ? 'The diagram of this case is not drawn, so there is nothing to make a figure of.'
                 : 'The diagram has no buses yet, so there is nothing to draw.',
       },
+      // The bus admittance matrix of the loaded case, read on demand: the dialog
+      // says what the read does (it sets the system up) before anything is asked
+      // of the server, and builds the CSV and MATLAB downloads in the browser.
+      {
+        id: 'export.ybus',
+        label: 'Admittance matrix (Ybus)…',
+        description:
+          'The bus admittance matrix of the loaded case, as sparse triplets: read it, filter and sort it, and download it as CSV or as a MATLAB file.',
+        group: 'export',
+        keywords: ['ybus', 'admittance', 'matrix', 'sparse', 'matlab', 'csv', 'network'],
+        action: () => useYbusDialogStore.getState().openDialog(),
+        when: () => sessionId !== null && topology !== null,
+        unavailableReason: () =>
+          sessionScopeDisabled ? null : 'Open a case first: the matrix is of the loaded case.',
+      },
 
       // ---- view ----------------------------------------------------------
       // v3 Unit 2 — IDE-style pane toggles. Each command mirrors a
@@ -1425,6 +1442,28 @@ function useCommandSets(): CommandSets {
         keywords: ['shortcuts', 'cheatsheet', 'help', 'keys'],
         action: toggleCheatsheet,
         shortcut: SHORTCUTS.cheatsheet,
+      },
+      // ANDES's own documentation of every model it ships. It needs only a
+      // session, like the catalogue it lists. Read via getState, as the theme
+      // toggle does, so the registry's subscription set is unchanged.
+      {
+        id: 'help.model-doc',
+        label: 'Model documentation...',
+        description:
+          "Every model ANDES ships, by group, with ANDES's own documentation of each: parameters, variables and equations.",
+        group: 'help',
+        keywords: [
+          'model',
+          'documentation',
+          'docs',
+          'help',
+          'andes',
+          'parameters',
+          'equations',
+          'reference',
+        ],
+        action: () => useModelDocStore.getState().openDialog(),
+        when: () => sessionId !== null,
       },
       // Dark-mode cycle (Unit 12). Cycles light → dark → system →
       // light via the theme slice. We read the action via

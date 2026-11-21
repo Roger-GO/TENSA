@@ -1,6 +1,6 @@
 /**
- * CSV for the Analyze panel's results: the eigenvalues, a mode's participation
- * factors, a CPF curve and the SE residuals. Pure functions of the result, so
+ * CSV for the Analyze panel's results: the eigenvalues, a parameter sweep's
+ * eigenvalues, a mode's participation factors, a CPF curve and the SE residuals. Pure functions of the result, so
  * each one is tested without mounting a chart; the charts wire them to their
  * `<ExportMenu>`.
  *
@@ -20,7 +20,13 @@ import {
   reachedTarget,
   targetLambda,
 } from '@/lib/cpfOptions';
-import type { CpfResult, EigResult, ParticipationFactor, SeResult } from '@/api/types';
+import type {
+  CpfResult,
+  EigResult,
+  EigSweepResponse,
+  ParticipationFactor,
+  SeResult,
+} from '@/api/types';
 
 /**
  * Every computed eigenvalue, whatever the scatter's display filter hides. The
@@ -38,6 +44,38 @@ export function eigResultToCsv(result: EigResult): Blob {
     columns: ['mode', 'real', 'imag', 'damping_ratio', 'frequency_hz'],
     rows,
     comments: [`${result.mode_count} modes, ${result.state_count} states`],
+  });
+}
+
+/**
+ * Every eigenvalue of every point of a parameter sweep, one row per (point,
+ * mode), in the request's order. `point` is the index into the response's
+ * `points` and `value` the parameter's value there; `mode` is the index into
+ * the point's `eigenvalues` (no mode is followed through the sweep, so it is
+ * not comparable across points).
+ */
+export function eigSweepResultToCsv(result: EigSweepResponse): Blob {
+  const rows: (string | number | boolean | undefined)[][] = [];
+  result.points.forEach((point, pointIdx) => {
+    point.eigenvalues.forEach((z, modeIdx) => {
+      rows.push([
+        pointIdx,
+        point.value,
+        modeIdx,
+        z.real,
+        z.imag,
+        point.damping_ratios[modeIdx],
+        point.frequencies_hz[modeIdx],
+      ]);
+    });
+  });
+  return recordsToCsv({
+    columns: ['point', 'value', 'mode', 'real', 'imag', 'damping_ratio', 'frequency_hz'],
+    rows,
+    comments: [
+      `sweep of ${result.param} of ${result.model} ${result.idx}, ` +
+        `${result.points.length} points, ${result.mode_count} modes per point`,
+    ],
   });
 }
 

@@ -9,7 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
@@ -143,6 +143,60 @@ describe('<AnalyzePanel />', () => {
     expect(screen.getByTestId('analyze-run-eig')).toBeInTheDocument();
     // Empty-state shown until EIG runs.
     expect(screen.getByTestId('eig-empty')).toBeInTheDocument();
+  });
+
+  it('the EIG sub-mode shows the Parameter sweep section below the damping chart', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<AnalyzePanel />));
+    await user.click(screen.getByTestId('analyze-sub-mode-eig'));
+    const sweep = screen.getByTestId('eig-sweep');
+    expect(sweep).toHaveTextContent('Parameter sweep');
+    expect(screen.getByTestId('eig-sweep-empty')).toHaveTextContent(
+      'Run a sweep to see the root locus.',
+    );
+    // Below the damping chart in the sub-mode's stack.
+    const damping = screen.getByTestId('eig-damping-chart');
+    expect(damping.compareDocumentPosition(sweep) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('the single EIG run still posts an empty body when the sweep section is untouched', async () => {
+    const fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    fetchSpy.mockImplementation((...args: unknown[]) => {
+      const url = String(args[0]);
+      const body = url.includes('/alterable_params')
+        ? { model: 'GENROU', params: ['M'] }
+        : url.endsWith('/topology')
+          ? { state: 'committed', buses: [], lines: [], generators: [], loads: [] }
+          : RESULT_WITH_TDS_INIT;
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+    try {
+      useAnalyzeStore.getState().setSubMode('eig');
+      usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig'));
+      await waitFor(() =>
+        expect(
+          fetchSpy.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith('/eig') && (init as RequestInit)?.method === 'POST',
+          ),
+        ).toBe(true),
+      );
+      const post = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/eig') && (init as RequestInit)?.method === 'POST',
+      )!;
+      expect((post[1] as RequestInit).body).toBe('{}');
+      // The sweep has its own button and mutation; nothing of it was sent.
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/eig/sweep'))).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('shows the tds-initialized info banner when EIG result has tds_initialized=true', () => {
@@ -1341,7 +1395,9 @@ describe('<AnalyzePanel /> run-readiness notes', () => {
       'analyze-run-eig-hint',
     );
     expect(note.id).toBe('analyze-run-eig-hint');
-    expect(screen.getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
+    // The sweep section carries the same note for its own button; the single
+    // run's recovery is the one inside its note.
+    expect(within(note).getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
   });
 
   it('EIG: the Run power flow action starts a power flow', async () => {
@@ -1452,8 +1508,9 @@ describe('<AnalyzePanel /> run-readiness notes', () => {
     useRunsStore.setState({ activeRunId: 'run-1' });
     try {
       render(withQueryClient(<AnalyzePanel />));
-      expect(screen.getByTestId('analyze-run-eig-hint')).toHaveTextContent(/Reset the run first/i);
-      expect(screen.getByRole('button', { name: 'Reset run' })).toBeInTheDocument();
+      const note = screen.getByTestId('analyze-run-eig-hint');
+      expect(note).toHaveTextContent(/Reset the run first/i);
+      expect(within(note).getByRole('button', { name: 'Reset run' })).toBeInTheDocument();
     } finally {
       useRunsStore.setState({ activeRunId: null });
     }
