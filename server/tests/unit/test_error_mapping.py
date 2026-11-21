@@ -148,6 +148,16 @@ def test_map_worker_error_cpf_request_is_422_with_no_recovery() -> None:
     assert detail["recovery"] is None
 
 
+def test_map_worker_error_sienna_error_is_422_with_no_recovery() -> None:
+    """A Julia refusal is the caller's to fix, like a bad case file: 422, no CTA."""
+    http = map_worker_error(WorkerError("SiennaError", "case file not found: nope.raw"))
+    assert http.status_code == 422
+    detail = http.detail
+    assert isinstance(detail, dict)
+    assert detail["detail"] == "case file not found: nope.raw"
+    assert detail["recovery"] is None
+
+
 def test_map_worker_error_pflow_request_is_422_with_no_recovery() -> None:
     """A power-flow setting out of range is the caller's to fix: no reload helps."""
     http = map_worker_error(

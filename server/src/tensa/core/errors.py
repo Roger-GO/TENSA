@@ -476,6 +476,20 @@ class EngineUnavailableError(AndesAppError):
         self.reason = reason
 
 
+class SiennaError(AndesAppError):
+    """Raised when the Sienna engine's Julia side refuses a request.
+
+    The message is the first line of the Julia error, with the exception type
+    prefix of the module's own messages (``ArgumentError: ``,
+    ``ErrorException: ``) removed, and the server's own paths scrubbed the way
+    the worker scrubs ANDES's messages. The full Julia text goes to the
+    ``tensa.sienna`` logger at debug level. Surfaced as HTTP 422; the caller
+    fixes the request and sends it again, so there is no recovery action.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class WorkerDiedError(AndesAppError):
     """Raised when a session's worker subprocess dies mid-RPC — the parent
     detects this as a torn IPC pipe (``EOFError`` / ``BrokenPipeError`` /

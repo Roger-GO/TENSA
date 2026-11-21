@@ -196,7 +196,10 @@ files = ["src"]
 # tests), and the module imports from whichever of its majors is installed, so the
 # modules of the other one are always unresolved. ``webview`` (pywebview, for ``tensa
 # desktop``) is optional too, and ``[dev]`` does not install it, so its import is
-# unresolved under the default CI type-check.
+# unresolved under the default CI type-check. ``juliacall`` (the Sienna engine's
+# embedded Julia, imported only inside ``engines/sienna/bridge.py``) ships no stubs
+# and is not installed by ``[dev]`` either, so one override covers it whether it is
+# installed or not.
 module = [
     "andes",
     "andes.*",
@@ -209,6 +212,8 @@ module = [
     "mcp.*",
     "webview",
     "webview.*",
+    "juliacall",
+    "juliacall.*",
 ]
 ignore_missing_imports = true
 
@@ -229,6 +234,7 @@ markers = [
     "acceptance: end-to-end acceptance tests (require running server + ANDES)",
     "integration: tests that spawn subprocesses or hit ANDES",
     "smoke: cross-platform smoke test, run on every OS in the CI matrix (pytest -m smoke)",
+    "sienna: tests that start the real Julia runtime of the Sienna engine",
     "unit: pure-unit tests with no I/O",
 ]
 addopts = [

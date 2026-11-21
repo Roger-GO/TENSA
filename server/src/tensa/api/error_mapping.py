@@ -130,6 +130,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CloneEditError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SiennaError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CaseLoadError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CaseSaveError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SnapshotMetadataError": status.HTTP_422_UNPROCESSABLE_CONTENT,
