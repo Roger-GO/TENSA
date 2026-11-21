@@ -11,6 +11,7 @@ import {
   INLINE_FROM_MEDIUM,
   INLINE_FROM_NARROW,
   INLINE_FROM_WIDE,
+  LABEL_FROM_MEDIUM,
   MEDIUM_PX,
   MORE_BELOW_MEDIUM,
   MORE_BELOW_NARROW,
@@ -21,7 +22,7 @@ import {
 
 /** The width, in px, that a `max-` or a `min-` class of the bar has in its brackets. */
 function widthOf(cls: string): number {
-  const match = /^(?:max|min)-\[(\d+)px\]:hidden$/.exec(cls);
+  const match = /^(?:max|min)-\[(\d+)px\]:(?:hidden|sr-only)$/.exec(cls);
   if (match === null) throw new Error(`not a width class: ${cls}`);
   return Number(match[1]);
 }
@@ -31,6 +32,12 @@ describe('topBarLayout', () => {
     expect(widthOf(INLINE_FROM_WIDE)).toBe(WIDE_PX);
     expect(widthOf(INLINE_FROM_MEDIUM)).toBe(MEDIUM_PX);
     expect(widthOf(INLINE_FROM_NARROW)).toBe(NARROW_PX);
+  });
+
+  it('keeps the words of the job chip from MEDIUM_PX up, for a screen reader below it', () => {
+    expect(LABEL_FROM_MEDIUM.startsWith('max-')).toBe(true);
+    expect(LABEL_FROM_MEDIUM.endsWith(':sr-only')).toBe(true);
+    expect(widthOf(LABEL_FROM_MEDIUM)).toBe(MEDIUM_PX);
   });
 
   it('hides an inline control below its width (max) and its More stand-in from it (min)', () => {
