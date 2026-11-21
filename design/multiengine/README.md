@@ -20,6 +20,7 @@ Work in progress on the `multiengine` branch. `main` is unchanged until the pull
 | `reports/model_matrix.md` | Every dynamic model name against ANDES, Sienna's parser and Sienna's simulator. |
 | `reports/spec-review-1.md` | The first review of the specification, merged, with the verdict on each correction. |
 | `reports/phase-3.md` | The engine seam: what exists, the evidence, what went wrong and what changed because of it. |
+| `reports/phase-4.md` | A Sienna session that loads a case and solves its power flow: the pieces, the agreement with ANDES, timings, what went wrong, open points. |
 | `reports/phase-7a.md` | The ANDES capabilities added: what each route does, what running ANDES showed, the evidence, open points, findings for upstream. |
 | `spike/` | The throwaway scripts behind the spike report, kept so its numbers can be reproduced. They read paths under `%LOCALAPPDATA%\tensa-dev`. |
 
@@ -31,7 +32,7 @@ Work in progress on the `multiengine` branch. `main` is unchanged until the pull
 | 1 | Spike: both engines on one case; bridge to Julia | done |
 | 2 | Specification | draft 2, reviewed once |
 | 3 | Engine seam: sessions name an engine, capabilities, identity, keys, web client | done (`reports/phase-3.md`) |
-| 4 | Sienna: case, topology, power flow | in progress: the Julia module, the case facts and the availability check are in; the worker side is next |
+| 4 | Sienna: case, topology, power flow | done (`reports/phase-4.md`); the cold start of a session is an open point |
 | 5 | Sienna: dynamics, streaming, small-signal, model audits | |
 | 6 | Comparison: API and UI | |
 | 7 | Sienna-only capabilities (matrices, DC power flow, operations) | |
