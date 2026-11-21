@@ -48,11 +48,11 @@ interface Reach {
   packages: Set<string>;
 }
 
-/** Every source file and npm package reachable from the entry. */
-function reachableFromEntry(includeDynamic: boolean): Reach {
+/** Every source file and npm package reachable from the entry (or from `start`). */
+function reachableFromEntry(includeDynamic: boolean, start: string = ENTRY): Reach {
   const files = new Set<string>();
   const packages = new Set<string>();
-  const queue = [ENTRY];
+  const queue = [start];
   while (queue.length > 0) {
     const file = queue.pop()!;
     if (files.has(file)) continue;
@@ -88,6 +88,7 @@ const LAZY_MODULES = [
   'lib/exportHtmlReport.ts',
   'lib/htmlReport.ts',
   'components/plots/TimeSeriesPlot.tsx',
+  'components/plots/ExternalResultsDialog.tsx',
   'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',
   // Reading, fitting and capturing a layout, which only the diagram does:
@@ -134,6 +135,15 @@ const LAZY_MODULES = [
   'streaming/arrow.ts',
 ];
 
+/**
+ * Lazy modules that the lazy module which opens them must not import
+ * statically either, so they are a chunk of their own and not part of the
+ * opener's: `[opener, module]`.
+ */
+const LAZY_WITHIN_LAZY: readonly (readonly [string, string])[] = [
+  ['components/plots/TimeSeriesPlot.tsx', 'components/plots/ExternalResultsDialog.tsx'],
+];
+
 /** Heavy packages whose only importers are lazy modules. */
 const LAZY_PACKAGES = [
   'apache-arrow',
@@ -168,6 +178,16 @@ describe('code splitting', () => {
     expect(
       eagerFiles.has(module),
       `${module} is statically imported from the entry; load it with lazyNamed(() => import(...))`,
+    ).toBe(false);
+  });
+
+  it.each(LAZY_WITHIN_LAZY)('keeps %s from importing %s statically', (opener, module) => {
+    const fromOpener = reachableFromEntry(false, path.join(SRC, opener));
+    const reached = new Set([...fromOpener.files].map(rel));
+    expect(allFiles.has(module), `${module} is no longer imported anywhere`).toBe(true);
+    expect(
+      reached.has(module),
+      `${module} is statically imported from ${opener}; load it with lazyNamed(() => import(...))`,
     ).toBe(false);
   });
 

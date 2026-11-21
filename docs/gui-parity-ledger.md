@@ -12,7 +12,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | --- | --- |
 | `about-dialog` | 1 |
 | `activity-panel` | 2 |
-| `analysis-panel` | 9 |
+| `analysis-panel` | 10 |
 | `auto` | 6 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 6 |
@@ -22,7 +22,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 9 |
+| `none` | 8 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -40,7 +40,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/engines` | `auto` |  |
 | `GET` | `/api/examples` | `example-dialog` |  |
 | `POST` | `/api/examples/{example_id}/add` | `example-dialog` |  |
-| `POST` | `/api/external-results` | `none` | No web surface imports an external result yet; the route is for scripts and agents. It will later back the analysis panel's overlay of a TSAT or PSS/E export on a run's plotted traces. |
+| `POST` | `/api/external-results` | `analysis-panel` |  |
 | `GET` | `/api/health` | `none` | Operations probe for scripts, process supervisors and container health checks. The UI reads GET /version for its About dialog and GET /sessions/{id} for session liveness. |
 | `POST` | `/api/response-metrics` | `analysis-panel` |  |
 | `GET` | `/api/sessions` | `auto` |  |

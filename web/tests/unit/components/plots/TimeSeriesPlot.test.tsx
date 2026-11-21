@@ -96,6 +96,7 @@ import * as plotModule from '@/store/plot';
 import { usePlotStore } from '@/store/plot';
 import { useThemeStore } from '@/store/theme';
 import { useUnitsStore } from '@/store/units';
+import { useExternalOverlaysStore } from '@/store/externalOverlays';
 import type { UnitBases } from '@/lib/units';
 import userEvent from '@testing-library/user-event';
 import { captureDownloads, exportAs, readBlob } from '../../helpers/downloads';
@@ -136,10 +137,12 @@ describe('TimeSeriesPlot', () => {
       playingByRun: {},
     });
     useUnitsStore.setState({ mode: 'pu' });
+    useExternalOverlaysStore.setState({ traces: [], dialogOpen: false });
   });
 
   afterEach(() => {
     cleanup();
+    useExternalOverlaysStore.setState({ traces: [], dialogOpen: false });
   });
 
   it('renders the empty state when no run is active', () => {

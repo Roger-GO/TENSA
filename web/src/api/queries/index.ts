@@ -51,3 +51,4 @@ export * from './pmu';
 export * from './profiles';
 export * from './sweeps';
 export * from './clone';
+export * from './externalResults';

@@ -294,3 +294,15 @@ async def test_a_body_sent_without_a_length_is_counted_as_it_arrives(
     assert status == 413
     # Refused on the chunk that took it past the cap, with the rest unread.
     assert asked == 3
+
+
+def test_the_route_is_tagged_for_the_plot_of_the_analysis_panel(tmp_path: Path) -> None:
+    operation = make_app(workspace=tmp_path, static_override=tmp_path).openapi()["paths"][
+        "/api/external-results"
+    ]["post"]
+
+    # The time-series plot's Export plot menu imports an export, so the route
+    # is no longer deferred.
+    assert operation["x-tensa-gui-location"] == "analysis-panel"
+    assert "x-tensa-parity-deferred" not in operation
+    assert operation["operationId"] == "importExternalResults"

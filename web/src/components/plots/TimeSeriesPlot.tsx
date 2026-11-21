@@ -16,8 +16,9 @@ import { useUnitsStore } from '@/store/units';
 import type { UnitMode } from '@/lib/units';
 import { UPlot } from './UPlot';
 import { RunLegendChip } from './RunLegendChip';
+import { ExternalTraceChip } from './ExternalTraceChip';
 import { alignRuns, resampleOnto } from './multiRunAlign';
-import type { AlignedRuns } from './multiRunAlign';
+import type { AlignableRun, AlignedRuns } from './multiRunAlign';
 import { primaryRunOf, resolveOverlayRuns, usePlotRunId } from './overlayRuns';
 import { SECONDARY_SCALE, planGroupAxes, scaleColumn } from './axes';
 import type { AxisPlan, GroupAxes, PlannedSeries } from './axes';
@@ -38,7 +39,19 @@ import { useLatest } from '@/lib/useLatest';
 import { runLabel } from '@/lib/runLabel';
 import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
+import { useExternalOverlaysStore } from '@/store/externalOverlays';
+import type { ExternalOverlayTrace } from '@/store/externalOverlays';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { cn } from '@/lib/cn';
+
+// The import dialog is a chunk of its own, fetched the first time it is
+// opened; this file never imports it statically.
+const ExternalResultsDialog = lazyNamed(
+  () => import('./ExternalResultsDialog'),
+  'ExternalResultsDialog',
+  'overlay',
+);
 
 /** What the plot exports as: its series as text or as a COMTRADE record, or its picture. */
 const PLOT_FORMATS = ['csv', 'png', 'comtrade'] as const;
@@ -231,6 +244,94 @@ function axesOptions(plan: GroupAxes): uPlot.Axis[] {
 }
 
 /**
+ * The part of a trace inside ``[tMin, tMax]``. The store keeps every sample of
+ * an imported series; a chart uses the ones inside the plotted run's time
+ * range, so the chart's x range stays the run's and a longer run plotted later
+ * shows more of the series. ``trace.t`` is sorted ascending (once, at import),
+ * so the part is one slice. ``null`` when no sample is inside.
+ */
+function clampTraceToRange(
+  trace: ExternalOverlayTrace,
+  tMin: number,
+  tMax: number,
+): ExternalOverlayTrace | null {
+  let lo = 0;
+  let hi = trace.t.length;
+  while (lo < hi && trace.t[lo]! < tMin) lo += 1;
+  while (hi > lo && trace.t[hi - 1]! > tMax) hi -= 1;
+  if (lo >= hi) return null;
+  return { ...trace, t: trace.t.subarray(lo, hi), y: trace.y.subarray(lo, hi) };
+}
+
+/** The parts of ``traces`` inside ``[tMin, tMax]``, leaving out a trace with none there. */
+function tracesInRange(
+  traces: readonly ExternalOverlayTrace[],
+  tMin: number,
+  tMax: number,
+): ExternalOverlayTrace[] {
+  if (!(tMin <= tMax)) return [];
+  return traces.flatMap((trace) => {
+    const clamped = clampTraceToRange(trace, tMin, tMax);
+    return clamped === null ? [] : [clamped];
+  });
+}
+
+/** The stretch of time the runs cover; a run with no rows yet is left out. */
+function runsTimeRange(runs: readonly RunRecord[]): { tMin: number; tMax: number } {
+  let tMin = Infinity;
+  let tMax = -Infinity;
+  for (const run of runs) {
+    if (run.seqCount === 0) continue;
+    tMin = Math.min(tMin, run.t[0]!);
+    tMax = Math.max(tMax, run.t[run.seqCount - 1]!);
+  }
+  return { tMin, tMax };
+}
+
+/** A y column of a chart: a typed array, or a column laid out by ``placeOnAxis``. */
+type ChartColumn = uPlot.TypedArray | (number | null | undefined)[];
+
+/**
+ * A column laid onto a shared time axis that holds other series' times too.
+ * Row ``k`` of ``values`` goes to ``rowToAxis[k]`` and every other point of the
+ * axis is ``undefined``, which uPlot draws the line straight across, leaves out
+ * when it ranges the axis, and the cursor readout passes over: the series is
+ * drawn through its own samples and nothing else, at its own times. With
+ * ``gapsAsNull`` a value that is not a number (an imported sample the export
+ * did not carry as one) is ``null``, where uPlot breaks the line.
+ */
+function placeOnAxis(
+  values: ArrayLike<number>,
+  rowToAxis: Int32Array,
+  axisLength: number,
+  factor = 1,
+  gapsAsNull = false,
+): (number | null | undefined)[] {
+  const out = new Array<number | null | undefined>(axisLength).fill(undefined);
+  for (let k = 0; k < rowToAxis.length; k += 1) {
+    const value = values[k]!;
+    out[rowToAxis[k]!] = gapsAsNull && Number.isNaN(value) ? null : value * factor;
+  }
+  return out;
+}
+
+/** The uPlot series of one imported trace: dashed, after the run series. */
+function externalTraceSeries(
+  trace: ExternalOverlayTrace,
+  leftScale: string,
+  theme: ResolvedTheme,
+): uPlot.Series {
+  return {
+    label: trace.label,
+    scale: trace.axis === 'right' ? SECONDARY_SCALE : leftScale,
+    stroke: colorFor(trace.label, theme),
+    width: 1.5,
+    points: { show: false },
+    dash: [6, 4],
+  };
+}
+
+/**
  * Build the uPlot options + data for one variable group, single-run mode.
  * Each series gets a unique colour from the variable-name palette. A series
  * on the right-hand axis (an angle) is dashed, so the two axes can be told
@@ -243,13 +344,25 @@ function buildGroupChart(
   syncKey: string,
   theme: ResolvedTheme,
   mode: UnitMode,
+  externalTraces: readonly ExternalOverlayTrace[] = [],
 ): { options: uPlot.Options; data: uPlot.AlignedData; axes: readonly AxisPlan[] } {
   const plan = planGroupAxes(group, plannedSeries([run], selected), mode);
   // Slice typed arrays to the logical seq count (the typed arrays are
   // over-allocated by the runs slice's geometric growth strategy).
   const len = run.seqCount;
   const tSlice = run.t.subarray(0, len);
-  const dataCols: uPlot.AlignedData = [tSlice];
+  // With external traces the chart's x column is the union of the run's
+  // timeline and the traces', each trace cut to the run's time range first:
+  // it keeps its own time base, and only the samples inside the range are
+  // used, so the x range stays the run's and a longer run plotted later shows
+  // more of a series. ``alignRuns`` reads ``seqCount``, which a trace carries
+  // as its length. The run's own arrays are only read.
+  const inRange = len > 0 ? tracesInRange(externalTraces, tSlice[0]!, tSlice[len - 1]!) : [];
+  const aligned =
+    inRange.length > 0
+      ? alignRuns([run, ...inRange.map((trace) => ({ t: trace.t, seqCount: trace.t.length }))])
+      : null;
+  const dataCols: [Float64Array, ...ChartColumn[]] = [aligned ? aligned.t : tSlice];
 
   const series: uPlot.Series[] = [{ label: 't' }];
   for (const parsed of selected) {
@@ -257,7 +370,11 @@ function buildGroupChart(
     const col = run.columns[name];
     if (!col) continue;
     const { scale, factor } = plan.place({ series: parsed, bases: run.bases });
-    dataCols.push(scaleColumn(col.subarray(0, len), factor));
+    dataCols.push(
+      aligned
+        ? placeOnAxis(col, aligned.rowToAxis[0]!, aligned.t.length, factor)
+        : scaleColumn(col.subarray(0, len), factor),
+    );
     series.push({
       label: name,
       scale,
@@ -266,6 +383,15 @@ function buildGroupChart(
       points: { show: false },
       ...(scale === SECONDARY_SCALE ? { dash: [6, 4] } : {}),
     });
+  }
+
+  if (aligned) {
+    const leftScale = plan.axes.find((a) => a.side === 'left')!.scale;
+    for (let k = 0; k < inRange.length; k += 1) {
+      const trace = inRange[k]!;
+      dataCols.push(placeOnAxis(trace.y, aligned.rowToAxis[k + 1]!, aligned.t.length, 1, true));
+      series.push(externalTraceSeries(trace, leftScale, theme));
+    }
   }
 
   const options: uPlot.Options = {
@@ -317,10 +443,12 @@ function buildMultiRunGroupChart(
   syncKey: string,
   colorMode: 'hash' | 'gradient' = 'hash',
   mode: UnitMode = 'pu',
+  externalTraces: readonly ExternalOverlayTrace[] = [],
+  theme: ResolvedTheme = 'light',
 ): { options: uPlot.Options; data: uPlot.AlignedData; axes: readonly AxisPlan[] } {
   const plan = planGroupAxes(group, plannedSeries(runs, selected), mode);
   const tUnion = aligned.t;
-  const dataCols: uPlot.AlignedData = [tUnion];
+  const dataCols: [Float64Array, ...ChartColumn[]] = [tUnion];
   const series: uPlot.Series[] = [{ label: 't' }];
 
   for (let runIdx = 0; runIdx < runs.length; runIdx += 1) {
@@ -342,7 +470,14 @@ function buildMultiRunGroupChart(
       // another case than the open one.
       const { scale, factor } = plan.place({ series: parsed, bases: run.bases });
       // Resample: copy known values (in the axis's unit), leave NaN elsewhere.
-      dataCols.push(resampleOnto(col, rowToAxis, tUnion.length, factor));
+      // With imported traces on the axis too, the other points are left
+      // undefined instead, so the cursor readout reads the run at a time that
+      // falls next to a trace's sample (see ``placeOnAxis``).
+      dataCols.push(
+        externalTraces.length > 0
+          ? placeOnAxis(col, rowToAxis, tUnion.length, factor)
+          : resampleOnto(col, rowToAxis, tUnion.length, factor),
+      );
       // Series label encodes the run's label + var name so the legend
       // distinguishes the same var across runs.
       const seriesProps: uPlot.Series = {
@@ -360,6 +495,20 @@ function buildMultiRunGroupChart(
         seriesProps.dash = [...style.dash];
       }
       series.push(seriesProps);
+    }
+  }
+
+  // The imported traces come once, after every run's series, dashed, each at
+  // its own times: ``aligned`` was made with the traces' samples inside the
+  // runs' time range after the runs (``externalTraces`` are those parts).
+  if (externalTraces.length > 0) {
+    const leftScale = plan.axes.find((a) => a.side === 'left')!.scale;
+    for (let k = 0; k < externalTraces.length; k += 1) {
+      const trace = externalTraces[k]!;
+      dataCols.push(
+        placeOnAxis(trace.y, aligned.rowToAxis[runs.length + k]!, tUnion.length, 1, true),
+      );
+      series.push(externalTraceSeries(trace, leftScale, theme));
     }
   }
 
@@ -693,6 +842,11 @@ export function TimeSeriesPlot({
   const caseName = useExportCaseName();
   const containerRef = useRef<HTMLDivElement>(null);
   const unitMode = useUnitsStore((s) => s.mode);
+  // The imported external traces and the dialog's open flag.
+  const externalTraces = useExternalOverlaysStore((s) => s.traces);
+  const externalDialogOpen = useExternalOverlaysStore((s) => s.dialogOpen);
+  const openExternalDialog = useExternalOverlaysStore((s) => s.openDialog);
+  const closeExternalDialog = useExternalOverlaysStore((s) => s.closeDialog);
 
   // Group the selected series by chart (``chartKeyOf``: a streamed group is one
   // chart, an ANDES variable is one chart per variable) using the column-name
@@ -804,8 +958,17 @@ export function TimeSeriesPlot({
       axes: readonly AxisPlan[];
     }> = [];
     // One time axis serves every stacked chart, so merge the runs' timelines
-    // once here and not once per group.
-    const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(overlayRuns) : null;
+    // once here and not once per group. The external traces are merged with
+    // them, cut to the runs' time range: each keeps its own time base, and
+    // only the samples inside the range land on the axis, so the x range
+    // stays the runs' (a longer run plotted later shows more of a series).
+    const { tMin, tMax } = runsTimeRange(overlayRuns);
+    const shownTraces = isMultiRun ? tracesInRange(externalTraces, tMin, tMax) : [];
+    const alignable: readonly AlignableRun[] = [
+      ...overlayRuns,
+      ...shownTraces.map((trace) => ({ t: trace.t, seqCount: trace.t.length })),
+    ];
+    const aligned = isMultiRun && groupedSelections.size > 0 ? alignRuns(alignable) : null;
     for (const [key, { group, series }] of groupedSelections) {
       const title = chartTitle(group, new Set(series.map((p) => p.field)));
       if (aligned) {
@@ -817,6 +980,8 @@ export function TimeSeriesPlot({
           syncKey,
           colorMode,
           unitMode,
+          shownTraces,
+          resolvedTheme,
         );
         out.push({ key, title, note: axesNote(axes, false), axes, ...chart });
       } else {
@@ -827,6 +992,7 @@ export function TimeSeriesPlot({
           syncKey,
           resolvedTheme,
           unitMode,
+          externalTraces,
         );
         out.push({ key, title, note: axesNote(axes, true), axes, ...chart });
       }
@@ -846,6 +1012,7 @@ export function TimeSeriesPlot({
     colorMode,
     resolvedTheme,
     unitMode,
+    externalTraces,
   ]);
 
   // The value of every plotted series under each cursor, in the units the charts
@@ -935,14 +1102,21 @@ export function TimeSeriesPlot({
         <div className="flex flex-wrap items-center gap-2">
           <Toolbar>{toolbar}</Toolbar>
           <CursorControls runId={effectiveRunId} />
-          {isMultiRun ? (
+          {isMultiRun || externalTraces.length > 0 ? (
             <div
               data-testid="time-series-plot-legend"
               className="flex flex-wrap items-center gap-1"
             >
               {/* A chip reads its own pin: the active run is here without one. */}
-              {overlayRuns.map((r) => (
-                <RunLegendChip key={r.runId} runId={r.runId} />
+              {isMultiRun
+                ? overlayRuns.map((r) => <RunLegendChip key={r.runId} runId={r.runId} />)
+                : null}
+              {externalTraces.map((trace) => (
+                <ExternalTraceChip
+                  key={trace.id}
+                  trace={trace}
+                  color={colorFor(trace.label, resolvedTheme)}
+                />
               ))}
             </div>
           ) : null}
@@ -958,6 +1132,14 @@ export function TimeSeriesPlot({
             onExportCsv={onExportCsv}
             onExportPng={onExportPng}
             onExportComtrade={onExportComtrade}
+            extraActions={[
+              {
+                id: 'import-external',
+                label: 'Import external result…',
+                hint: 'Overlay a TSAT or PSS/E export (.xlsx) on this plot',
+                onSelect: openExternalDialog,
+              },
+            ]}
           />
         </RowEnd>
       </div>
@@ -979,6 +1161,9 @@ export function TimeSeriesPlot({
         />
       ))}
       {showReadout ? <CursorTable cursors={cursors} rows={cursorRows} /> : null}
+      <LazyMount when={externalDialogOpen} onLoadFailed={closeExternalDialog}>
+        <ExternalResultsDialog />
+      </LazyMount>
     </div>
   );
 }

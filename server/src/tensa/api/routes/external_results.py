@@ -78,12 +78,9 @@ async def _read_export_body(request: Request) -> bytes:
 @router.post(
     "/external-results",
     openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": (
-            "No web surface imports an external result yet; the route is for "
-            "scripts and agents. It will later back the analysis panel's overlay "
-            "of a TSAT or PSS/E export on a run's plotted traces."
-        ),
+        # The time-series plot of the analysis panel: its Export plot menu has
+        # "Import external result...", which overlays the export on the run.
+        "x-tensa-gui-location": "analysis-panel",
         "requestBody": {
             "required": True,
             "description": (
