@@ -391,6 +391,24 @@ class CloneEditError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class YbusTooLargeError(AndesAppError):
+    """Raised when the bus admittance matrix of the loaded case has more nonzero
+    entries than one answer carries (``MAX_YBUS_ENTRIES`` in
+    ``tensa.core.wrapper.ybus``). Surfaced as HTTP 422; the case is as it was,
+    so there is nothing to recover.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, entries: int, cap: int) -> None:
+        super().__init__(
+            f"the bus admittance matrix has {entries} nonzero entries, more than "
+            f"the {cap} one answer carries"
+        )
+        self.entries = entries
+        self.cap = cap
+
+
 class EngineUnsupportedError(AndesAppError):
     """Raised when a session's worker is asked for an op its engine does not have.
 

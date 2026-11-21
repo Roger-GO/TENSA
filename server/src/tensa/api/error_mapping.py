@@ -123,6 +123,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "SeNonConvergentError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ElementValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "YbusTooLargeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ElementHasDependentsError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "CloneEditError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "DisturbanceValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,

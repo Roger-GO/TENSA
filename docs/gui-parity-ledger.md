@@ -22,7 +22,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 4 |
+| `none` | 5 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -30,7 +30,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **72** |
+| **total** | **73** |
 
 ## OpenAPI routes
 
@@ -102,6 +102,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/topology` | `workspace` |  |
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |
+| `GET` | `/api/sessions/{session_id}/ybus` | `none` | No web surface reads the bus admittance matrix yet; the route is for scripts and agents. It will later appear on the network-analysis results panel. |
 | `GET` | `/api/topology/schema` | `inspector` |  |
 | `GET` | `/api/version` | `about-dialog` |  |
 | `GET` | `/api/workspace/files` | `left-sidebar` |  |

@@ -67,6 +67,7 @@ from tensa.api.routes.tds import router as tds_router
 from tensa.api.routes.version import router as version_router
 from tensa.api.routes.workspace import router as workspace_router
 from tensa.api.routes.ws import router as ws_router
+from tensa.api.routes.ybus import router as ybus_router
 from tensa.api.schemas import JobRecordSchema, ProblemDetails
 from tensa.core.errors import SessionBusyError, WorkerDiedError
 from tensa.core.session import SessionManager, SweepInProgressError
@@ -361,6 +362,7 @@ def make_app(
     # is registered by FastAPI itself and stays at the root path.
     app.include_router(sessions_router, prefix="/api", tags=["sessions"])
     app.include_router(cases_router, prefix="/api", tags=["cases"])
+    app.include_router(ybus_router, prefix="/api", tags=["ybus"])
     app.include_router(keys_router, prefix="/api", tags=["keys"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])

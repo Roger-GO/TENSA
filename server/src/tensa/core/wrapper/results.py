@@ -231,3 +231,34 @@ class TdsBatchResult:
     converged: bool
     final_t: float
     callpert_count: int  # how many times the per-step hook fired
+
+
+@dataclass
+class YbusEntry:
+    """One nonzero of the bus admittance matrix: row, column, and the complex
+    value split into its real and imaginary parts (per unit on the system
+    base)."""
+
+    row: int
+    col: int
+    re: float
+    im: float
+
+
+@dataclass
+class YbusResult:
+    """The bus admittance matrix of the loaded case, as sparse triplets.
+
+    ``n_bus`` is the matrix's size (N x N for an N-bus case), ``bus_idx[i]``
+    the bus of row and column ``i`` (the position of the bus in
+    ``ss.Bus.idx.v``) and ``bus_key[i]`` its key (``None`` for a bus the key
+    book has none for). ``base_mva`` is the system base the per-unit values
+    are on, ``None`` when the System carries no usable one. ``entries`` holds
+    only the nonzeros.
+    """
+
+    n_bus: int
+    base_mva: float | None
+    bus_idx: list[str]
+    bus_key: list[str | None]
+    entries: list[YbusEntry]

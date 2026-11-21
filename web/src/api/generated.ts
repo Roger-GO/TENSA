@@ -157,6 +157,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/ybus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the bus admittance matrix of the loaded case, as sparse triplets.
+         * @description The bus admittance matrix ANDES builds from the case's lines,
+         *     transformers and shunts, in per unit on the system base, as the nonzero
+         *     entries with ``bus_idx`` and ``bus_key`` naming the bus of each row and
+         *     column. It reflects the status of each device at the time of the call.
+         *
+         *     ANDES builds the matrix only on a System that is set up, so the wrapper
+         *     sets it up first when it is not, as the connectivity check does; after
+         *     that no disturbance can be added until the case is reloaded. No power
+         *     flow is needed. A ``SetupFailedError`` answers 422 with its reload hint and
+         *     the ``reload-case`` recovery.
+         */
+        get: operations["getBusAdmittanceMatrix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/keys": {
         parameters: {
             query?: never;
@@ -5902,6 +5931,63 @@ export interface components {
              */
             files: components["schemas"]["WorkspaceFile"][];
         };
+        /**
+         * YbusEntrySchema
+         * @description One nonzero of the bus admittance matrix.
+         */
+        YbusEntrySchema: {
+            /**
+             * Row
+             * @description Row of the entry, from 0; bus_idx[row] is the bus of the row.
+             */
+            row: number;
+            /**
+             * Col
+             * @description Column of the entry, from 0; bus_idx[col] is the bus of the column.
+             */
+            col: number;
+            /**
+             * Re
+             * @description Real part (conductance), in per unit on the system base (base_mva).
+             */
+            re: number;
+            /**
+             * Im
+             * @description Imaginary part (susceptance), in per unit on the system base (base_mva).
+             */
+            im: number;
+        };
+        /**
+         * YbusResponse
+         * @description The bus admittance matrix of the loaded case, as sparse triplets.
+         */
+        YbusResponse: {
+            /**
+             * N Bus
+             * @description Number of buses; the matrix is n_bus by n_bus.
+             */
+            n_bus: number;
+            /**
+             * Base Mva
+             * @description The system MVA base the per-unit values are on: an admittance in siemens is the per-unit value times base_mva over the square of the bus's rated voltage in kV. Null when the case carries no usable base.
+             */
+            base_mva: number | null;
+            /**
+             * Bus Idx
+             * @description bus_idx[i] is the ANDES idx of the bus of row and column i.
+             */
+            bus_idx: string[];
+            /**
+             * Bus Key
+             * @description bus_key[i] is the key of the bus of row and column i, as GET /sessions/{id}/keys gives it; null for a bus that has none.
+             */
+            bus_key: (string | null)[];
+            /**
+             * Entries
+             * @description The nonzero entries of the bus admittance matrix ANDES builds from its lines, transformers and shunts (the models it flags ybus), in per unit on the system base; an entry not listed is zero. Device status at the time of the call is reflected (a line switched off adds nothing); the models that contribute are those present at setup. Loads and generators are not in it.
+             */
+            entries: components["schemas"]["YbusEntrySchema"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -6287,6 +6373,55 @@ export interface operations {
                 };
             };
             /** @description ANDES setup() failed before the connectivity check could run; call POST /api/sessions/{id}/reload to recover. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getBusAdmittanceMatrix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YbusResponse"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES setup() failed before the matrix could be built (recovery reload-case: POST /api/sessions/{id}/reload), or the matrix has more than 500000 nonzero entries, the most one answer carries. */
             422: {
                 headers: {
                     [name: string]: unknown;

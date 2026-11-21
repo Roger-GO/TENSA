@@ -7,7 +7,7 @@ response is shaped as ``ProblemDetails`` per RFC 7807.
 The models live in one module per domain, beside this file and named for the
 routes that use them where there is one: ``errors``, ``jobs``, ``messages``,
 ``sessions``, ``topology``, ``cases``, ``elements``, ``pflow``, ``disturbances``,
-``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``workspace`` and ``version``. A model
+``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``workspace``, ``ybus`` and ``version``. A model
 that another domain builds on (``TopologySummary``, ``ProblemDetails``) is imported
 from the module that defines it. Every name the single-file module defined is
 importable from here.
@@ -138,6 +138,10 @@ from tensa.api.schemas.workspace import (
     WorkspaceFile,
     WorkspaceFileList,
 )
+from tensa.api.schemas.ybus import (
+    YbusEntrySchema,
+    YbusResponse,
+)
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 
 # Every name the single-file module defined, kept importable from here (the three
@@ -233,4 +237,6 @@ __all__ = [
     "VersionInfo",
     "WorkspaceFile",
     "WorkspaceFileList",
+    "YbusEntrySchema",
+    "YbusResponse",
 ]

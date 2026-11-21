@@ -809,6 +809,17 @@ def _handle_compute_connectivity(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.compute_connectivity())
 
 
+def _handle_bus_admittance_matrix(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.bus_admittance_matrix``.
+
+    Returns the serialized :class:`YbusResult` dict (``n_bus``, ``bus_idx``
+    and the nonzero ``entries`` as ``row`` / ``col`` / ``re`` / ``im``). A
+    computed result, not a listing: with no case loaded the
+    ``NoCaseLoadedError`` propagates like the other case-requiring handlers.
+    """
+    return _serialize_dataclass(wrapper.bus_admittance_matrix())
+
+
 def _handle_generate_measurements_from_pflow(
     wrapper: Wrapper, args: dict[str, Any]
 ) -> Any:
@@ -1826,6 +1837,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     # Unit 17 — connectivity / island detection (post-run only; no per-frame
     # streaming integration per the plan's auto-fix).
     "compute_connectivity": _handle_compute_connectivity,
+    "bus_admittance_matrix": _handle_bus_admittance_matrix,
     # Unit 7 — snapshot save / restore / list / delete.
     "save_snapshot": _handle_save_snapshot,
     "restore_snapshot": _handle_restore_snapshot,

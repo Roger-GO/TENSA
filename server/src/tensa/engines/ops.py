@@ -60,6 +60,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "list_timeseries",
             "delete_timeseries",
             "compute_connectivity",
+            "bus_admittance_matrix",
             "save_snapshot",
             "restore_snapshot",
             "list_snapshots",
