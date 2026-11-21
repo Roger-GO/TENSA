@@ -7,7 +7,9 @@ server process can read it without loading one. The ``"andes"`` set is the keys 
 a unit test holds the literal set to that, so the two cannot drift.
 """
 
-DEFAULT_ENGINE = "andes"
+from typing import Final
+
+DEFAULT_ENGINE: Final = "andes"
 
 ENGINE_NAMES: tuple[str, ...] = ("andes", "sienna")
 

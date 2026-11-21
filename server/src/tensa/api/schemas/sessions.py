@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tensa.engines.ops import DEFAULT_ENGINE
+
 
 class CreateSessionRequest(BaseModel):
     """Request body for ``POST /sessions``. A body is optional; ``engine`` is the
@@ -15,7 +17,7 @@ class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     engine: Literal["andes", "sienna"] = Field(
-        "andes",
+        DEFAULT_ENGINE,
         description=(
             "The engine the session runs. A session is created for one engine and "
             "keeps it; a body that names none (or no body at all) creates an ANDES "

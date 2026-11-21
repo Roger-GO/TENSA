@@ -143,6 +143,74 @@ async def test_list_keys_unknown_session_is_404(client: httpx.AsyncClient) -> No
 
 
 @pytest.mark.integration
+async def test_list_keys_in_assignment_order_with_the_problems_noted(
+    client: httpx.AsyncClient,
+) -> None:
+    """WSCC 9 with a three-winding transformer: ANDES adds a star bus and three
+    lines the file does not name, which the assignment notes as one problem. The
+    keys come in assignment order: the buses first, in file order, then the lines."""
+    workspace = client._transport.app.state.workspace  # type: ignore[attr-defined]  # noqa: SLF001
+    shutil.copy2(_bundled_cases_dir() / "wscc9" / "wscc9_3wxfr.raw", workspace)
+    sid = await _session_with_case(client, "wscc9_3wxfr.raw")
+
+    resp = await client.get(f"/api/sessions/{sid}/keys")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert len(body["problems"]) == 1
+    assert "three-winding" in body["problems"][0]
+    assert "1 bus(es) and 3 line(s)" in body["problems"][0]
+    # Reading the keys again, directly or through the topology, notes nothing new.
+    assert (await client.get(f"/api/sessions/{sid}/topology")).status_code == 200
+    assert (await client.get(f"/api/sessions/{sid}/keys")).json() == body
+
+    models = [entry["model"] for entry in body["keys"]]
+    bus_count = models.count("Bus")
+    assert models[:bus_count] == ["Bus"] * bus_count
+    assert models[bus_count] == "Line"
+    file_buses = [
+        entry["key"] for entry in body["keys"][:bus_count] if entry["key"].startswith("bus:")
+    ]
+    assert file_buses == [f"bus:{n}" for n in range(1, 10)]
+
+
+@pytest.mark.integration
+async def test_list_keys_maps_a_worker_error_like_every_route(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal from the worker reaches the client with the status and the
+    problem details the shared mapping gives it, recovery included."""
+    from tensa.core.session import WorkerError
+
+    resp = await client.post("/api/sessions")
+    sid = str(resp.json()["session_id"])
+    mgr = client._transport.app.state.session_manager  # type: ignore[attr-defined]  # noqa: SLF001
+
+    async def refuse(session_id: str, op: str, args: dict[str, object]) -> object:
+        raise WorkerError("no-case-loaded", "no case is loaded")
+
+    monkeypatch.setattr(mgr, "invoke", refuse)
+    resp = await client.get(f"/api/sessions/{sid}/keys")
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["detail"] == "no case is loaded"
+    assert body["recovery"] is not None
+    assert body["recovery"]["kind"]
+
+
+@pytest.mark.integration
+async def test_list_keys_without_a_session_manager_is_500(tmp_path: Path) -> None:
+    """An app whose lifespan has not run holds no session manager: the route says
+    so with a 500, not a 404 that would read as a session that is gone."""
+    app = make_app(workspace=tmp_path, bind_host="127.0.0.1", bind_port=8000)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as ac:
+        resp = await ac.get("/api/sessions/nope/keys")
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"] == "session manager is not configured"
+
+
+@pytest.mark.integration
 async def test_pflow_result_keys_match_topology(client: httpx.AsyncClient) -> None:
     sid = await _session_with_case(client, "ieee14.raw", ["ieee14.dyr"])
     # The body is required; an empty object asks for the case's own settings.

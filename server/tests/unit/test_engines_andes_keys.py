@@ -91,6 +91,20 @@ def test_non_numeric_bus_idx_numbered_after_largest() -> None:
 
 
 @pytest.mark.unit
+def test_fractional_float_bus_idx_is_not_a_number() -> None:
+    # 1.5 is no bus number: it is numbered after the largest, not cut to 1.
+    ss = _system(Bus=_model([2, 1.5, 3.0]))
+    book = assign_andes_keys(ss, None)
+    assert book.key_of("Bus", 2) == "bus:2"
+    assert book.key_of("Bus", 3.0) == "bus:3"
+    assert book.key_of("Bus", 1.5) == "bus:4"
+    entries = {entry.idx: entry for entry in book.entries()}
+    assert entries[1.5].source == "ordinal"
+    assert entries[3.0].source == "engine"
+    assert book.problems == ["bus 1.5 has no number; numbered 4 in ANDES order"]
+
+
+@pytest.mark.unit
 def test_lines_matched_to_identity_with_parallel_circuits() -> None:
     ss = _system(
         Bus=_model([7, 8]),
@@ -388,6 +402,26 @@ def test_loads_matched_and_unmatched() -> None:
 
 
 @pytest.mark.unit
+def test_loads_not_matched_when_the_file_has_more_records() -> None:
+    # The file names three loads, ANDES holds two whose buses match the first
+    # two records: the counts differ, so no file id is given by position.
+    ss = _system(
+        Bus=_model([7, 8]),
+        PQ=_model([1, 2], bus=[7, 7]),
+    )
+    identity = _identity(
+        buses=(7, 8),
+        loads=(DeviceId(7, "A"), DeviceId(7, "B"), DeviceId(8, "C")),
+    )
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("PQ", 1) == "load:7-1"
+    assert book.key_of("PQ", 2) == "load:7-2"
+    assert all(
+        entry.source == "ordinal" for entry in book.entries() if entry.model == "PQ"
+    )
+
+
+@pytest.mark.unit
 def test_exciter_and_governor_resolve_to_their_unit() -> None:
     ss = _system(
         Bus=_model([1]),
@@ -478,6 +512,29 @@ def test_second_call_keeps_old_keys_and_numbers_the_new_line() -> None:
     assert book.key_of("Line", 101) == "branch:7-8-1"
     assert book.key_of("Line", 102) == "branch:7-8-2"
     assert book.problems == []
+
+
+@pytest.mark.unit
+def test_second_call_notes_no_problem_twice() -> None:
+    # The keys are read again on every listing; a problem the first assignment
+    # noted (an unnumbered bus, a file record left unused) is noted once.
+    ss = _system(
+        Bus=_model([7, 8, "star"]),
+        Line=_model([101], bus1=[7], bus2=[8]),
+    )
+    identity = _identity(
+        buses=(7, 8),
+        branches=(
+            BranchId(7, 8, "1", transformer=False),
+            BranchId(7, 8, "2", transformer=False),
+        ),
+    )
+    book = assign_andes_keys(ss, identity)
+    first = list(book.problems)
+    assert len(first) == 2
+    book = assign_andes_keys(ss, identity, book)
+    book = assign_andes_keys(ss, identity, book)
+    assert book.problems == first
 
 
 @pytest.mark.unit

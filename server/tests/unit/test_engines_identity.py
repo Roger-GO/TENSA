@@ -276,6 +276,74 @@ def test_psse_raw_transformer_record_length(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("basfrq", ["0.0", "-50.0", "x"])
+def test_psse_raw_frequency_that_is_not_positive_is_none(basfrq: str) -> None:
+    text = f"0, 100.00, 33, 0, 0, {basfrq} /\ncomment\ncomment\nQ\n"
+    identity = read_psse_raw_identity(text)
+    assert identity.freq_hz is None
+
+
+@pytest.mark.unit
+def test_psse_raw_transformer_j_taken_by_absolute_value() -> None:
+    # A negative J on a transformer record is the metering flag, as on a branch.
+    text = """\
+  0,    100.00, 33, 0, 0, 60.00       /
+  TRANSFORMER WITH A NEGATIVE J
+  SECOND COMMENT LINE
+    1,'Bus One    ',  20.0000,3,   1,   1,   1,1.04000,   0.0000
+    2,'Bus Two    ', 230.0000,1,   1,   1,   1,1.02500,   9.3507
+ 0 / END OF BUS DATA, BEGIN LOAD DATA
+ 0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA
+ 0 / END OF FIXED SHUNT DATA, BEGIN GENERATOR DATA
+ 0 / END OF GENERATOR DATA, BEGIN BRANCH DATA
+ 0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA
+    1,    -2,    0,'1 ',1,1,1,  0.00000,  0.00000,2,'        ',1,   1,1.0000
+ 0.00000, 0.05760, 100.00
+1.00000,  0.000,   0.000,   0.00,   0.00,   0.00,0,     0, 1.50000, 0.51000, 1.50000, 0.51000,159, 0, 0.00000, 0.00000
+1.00000,  0.000
+ 0 / END OF TRANSFORMER DATA, BEGIN AREA DATA
+Q
+"""
+    identity = read_psse_raw_identity(text)
+    assert identity.branches == (BranchId(1, 2, "1", transformer=True),)
+
+
+@pytest.mark.unit
+def test_psse_raw_stops_at_q() -> None:
+    # Whatever follows the "Q" that ends the data is not read as records.
+    text = """\
+  0,    100.00, 33, 0, 0, 60.00       /
+  CASE WITH LINES AFTER Q
+  SECOND COMMENT LINE
+    1,'Bus One    ',  20.0000,3,   1,   1,   1,1.04000,   0.0000
+ 0 / END OF BUS DATA, BEGIN LOAD DATA
+Q
+    1,'L1',1,   1,   1,   125.000,    50.000
+"""
+    identity = read_psse_raw_identity(text)
+    assert identity.buses == (1,)
+    assert identity.loads == ()
+    assert identity.counts["load"] == 0
+
+
+@pytest.mark.unit
+def test_matpower_load_with_only_p_or_only_q() -> None:
+    text = """\
+mpc.baseMVA = 100;
+mpc.bus = [
+    1 3 0 0 0 0 1 1.0 0 230 1 1.1 0.9;
+    2 1 10 0 0 0 1 1.0 0 230 1 1.1 0.9;
+    3 1 0 5 0 0 1 1.0 0 230 1 1.1 0.9;
+    4 1 0 0 0 3 1 1.0 0 230 1 1.1 0.9;
+];
+"""
+    identity = read_matpower_identity(text)
+    # A non-zero Pd alone or Qd alone is a load; a Bs alone is a shunt only.
+    assert identity.loads == (DeviceId(2, "1"), DeviceId(3, "1"))
+    assert identity.fixed_shunts == (DeviceId(4, "1"),)
+
+
+@pytest.mark.unit
 def test_matpower_snippet() -> None:
     identity = read_matpower_identity(MATPOWER_SNIPPET)
     assert identity.format == "matpower"

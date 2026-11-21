@@ -7,12 +7,17 @@ No subprocess is spawned here; the integration coverage of the routes lives in
 
 from __future__ import annotations
 
+import typing
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from tensa.api.app import make_app
 from tensa.api.error_mapping import WORKER_ERROR_HTTP_MAP
-from tensa.api.schemas import CreateSessionRequest
+from tensa.api.schemas import CreateSessionRequest, SaveCaseRequest
 from tensa.core.errors import EngineUnavailableError, EngineUnsupportedError
+from tensa.core.example_catalog import SUPPORTED_CASE_EXTENSIONS
 from tensa.core.worker import HANDLERS
 from tensa.engines import (
     ENGINE_NAMES,
@@ -43,6 +48,21 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
+def test_engines_with_op_lists_engines_in_engine_names_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When two engines share an op, the list follows ``ENGINE_NAMES``: the error
+    that names the engines with an op reads the same every time."""
+    monkeypatch.setitem(ENGINE_OPS, "sienna", frozenset({"run_pflow"}))
+    assert engines_with_op("run_pflow") == ["andes", "sienna"]
+
+
+def test_every_engine_name_has_an_ops_entry() -> None:
+    """The two tables name the same engines, so asking either is one question."""
+    assert set(ENGINE_OPS) == set(ENGINE_NAMES)
+    assert len(ENGINE_NAMES) == len(set(ENGINE_NAMES))
+
+
 def test_is_engine() -> None:
     assert is_engine("andes")
     assert is_engine("sienna")
@@ -67,6 +87,50 @@ def test_load_runtime_sienna_is_unavailable() -> None:
     with pytest.raises(EngineUnavailableError) as excinfo:
         load_runtime("sienna")
     assert excinfo.value.engine == "sienna"
+    # The error says why, in the words GET /engines gives for it.
+    assert excinfo.value.reason == engine_unavailable_reason("sienna")
+
+
+# The extension of the files each read format of the capabilities stands for.
+_EXTENSION_OF_FORMAT = {
+    "xlsx": ".xlsx",
+    "json": ".json",
+    "psse-raw": ".raw",
+    "psse-dyr": ".dyr",
+    "matpower": ".m",
+}
+# The capability name of each ``format`` a save request takes.
+_FORMAT_OF_SAVE = {"xlsx": "xlsx", "json": "json", "raw": "psse-raw"}
+
+
+def test_andes_reads_every_kind_of_case_file_the_workspace_takes() -> None:
+    read = engine_capabilities("andes")["formats"]["read"]
+    assert len(read) == len(set(read))
+    assert {_EXTENSION_OF_FORMAT[name] for name in read} == SUPPORTED_CASE_EXTENSIONS
+
+
+def test_andes_writes_the_formats_a_save_takes() -> None:
+    write = engine_capabilities("andes")["formats"]["write"]
+    save_formats = typing.get_args(SaveCaseRequest.model_fields["format"].annotation)
+    assert len(write) == len(set(write))
+    assert set(write) == {_FORMAT_OF_SAVE[name] for name in save_formats}
+
+
+def test_andes_routines_are_the_runs_it_has_a_route_for(tmp_path: Path) -> None:
+    """A routine is listed when the API has ``POST /sessions/{id}/<routine>`` and the
+    worker answers ``run_<routine>``. A sensitivity sweep repeats those routines and
+    is not one of them."""
+    paths = make_app(workspace=tmp_path, static_override=tmp_path).openapi()["paths"]
+    prefix = "/api/sessions/{session_id}/"
+    routed = {
+        path[len(prefix):]
+        for path, methods in paths.items()
+        if path.startswith(prefix) and "/" not in path[len(prefix):] and "post" in methods
+    }
+    runs = {name for name in routed if f"run_{name}" in ENGINE_OPS["andes"]} - {"sweep"}
+    routines = engine_capabilities("andes")["routines"]
+    assert len(routines) == len(set(routines))
+    assert set(routines) == runs
 
 
 def test_engine_capabilities_andes() -> None:

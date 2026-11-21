@@ -24,7 +24,7 @@ from tensa.core.session.jobs import JobsMixin
 from tensa.core.session_dirs import SESSIONS_DIRNAME, remove_tree, sweep_stale_session_dirs
 from tensa.core.worker import worker_main
 from tensa.core.worker_spawn import attach_kill_on_close_job, worker_spawn_env
-from tensa.engines import engine_unavailable_reason, is_engine
+from tensa.engines import DEFAULT_ENGINE, engine_unavailable_reason, is_engine
 
 log = logging.getLogger("tensa.session")
 
@@ -187,7 +187,7 @@ class RegistryMixin(JobsMixin):
                     result,
                 )
 
-    async def create_session(self, engine: str = "andes") -> str:
+    async def create_session(self, engine: str = DEFAULT_ENGINE) -> str:
         """Spawn a new worker subprocess for ``engine`` and register it. Returns the
         session_id.
 

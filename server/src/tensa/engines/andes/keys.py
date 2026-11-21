@@ -609,13 +609,22 @@ def assign_andes_keys(
 
     ``identity`` is what ``tensa.engines.identity.read_identity`` gave for the
     file the system was loaded from, or ``None``. When ``book`` is given,
-    elements that already have a key keep it and only new ones are assigned.
+    elements that already have a key keep it and only new ones are assigned,
+    and a problem the book already notes is not noted a second time.
     """
     if book is None:
         book = KeyBook()
+    noted = len(book.problems)
     bus_numbers, added_buses = _assign_buses(ss, identity, book)
     _assign_lines(ss, identity, book, bus_numbers, added_buses)
     _assign_generators(ss, book, bus_numbers)
     _assign_devices_on_buses(ss, identity, book, bus_numbers)
     _assign_dynamic_and_other(ss, book, bus_numbers)
+    seen = set(book.problems[:noted])
+    fresh: list[str] = []
+    for problem in book.problems[noted:]:
+        if problem not in seen:
+            seen.add(problem)
+            fresh.append(problem)
+    book.problems[noted:] = fresh
     return book

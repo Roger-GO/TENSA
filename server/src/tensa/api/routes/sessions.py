@@ -27,6 +27,7 @@ from tensa.api.schemas import (
 )
 from tensa.core.errors import EngineUnavailableError
 from tensa.core.session import SessionExpiredError, SessionManager
+from tensa.engines.ops import DEFAULT_ENGINE
 
 router = APIRouter()
 
@@ -90,7 +91,7 @@ async def create_session(
 ) -> SessionDescriptor:
     # A body is optional; ``CreateSessionRequest`` has ``extra="forbid"``, so a
     # client-supplied ``session_id`` (or any field but ``engine``) raises 422.
-    engine = "andes"
+    engine = DEFAULT_ENGINE
     raw = await request.body()
     if raw:
         try:
