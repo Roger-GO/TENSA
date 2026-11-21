@@ -76,6 +76,26 @@ export interface SessionState {
   engine: string | null;
   setEngine: (engine: string | null) => void;
   /**
+   * The engine the session had before the user switched engine, while the
+   * session of the new engine is being created (`startEngineSwitch` to the
+   * first session that lands), and `null` at any other time. When the
+   * automatic create for the new engine is refused, the recovery driver puts
+   * this back into `engine` so the next automatic create restores a session
+   * of the engine the user came from.
+   */
+  previousEngine: string | null;
+  setPreviousEngine: (engine: string | null) => void;
+  /**
+   * The step of an engine switch that follows the release of the old session
+   * (`startSessionOver` in `useSessionRecovery.ts`): in one change, no
+   * session, the new engine, and the engine left behind in `previousEngine`.
+   * One change, so that no reader sees the old engine with no session or the
+   * new one with the old session, and so that the automatic create that the
+   * cleared id sets off asks for the new engine. The id is cleared as by
+   * `clearSession` (not by `resetSession`): the case closes with it.
+   */
+  startEngineSwitch: (from: string, to: string) => void;
+  /**
    * The engines the server knows and what each can do (`GET /engines`),
    * mirrored from the query by `useEnginesSync` so that readers that are not
    * hooks (the run-readiness gate of a command) can use it. It is server-wide,
@@ -209,6 +229,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setWorkspaceId: (id) => set({ workspaceId: id }),
   engine: null,
   setEngine: (engine) => set({ engine }),
+  previousEngine: null,
+  setPreviousEngine: (engine) => set({ previousEngine: engine }),
+  startEngineSwitch: (from, to) => set({ sessionId: null, engine: to, previousEngine: from }),
   engines: null,
   setEngines: (engines) => set({ engines }),
   recoveryInProgress: false,

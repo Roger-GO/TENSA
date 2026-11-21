@@ -88,15 +88,29 @@
  *    + future telemetry sinks). The logger gives us a paper trail for
  *    "the badge said failed but I never saw a toast" diagnosis and is
  *    where a future analytics integration would tap in.
+ *
+ * 8. **Engine switch** (multi-engine): the engine picker creates no session
+ *    either. ``startSessionOver`` closes the live session on the server
+ *    (``DELETE /sessions/{id}``) and only then, in one store change, clears
+ *    the id, sets the new engine and records the old one
+ *    (``startEngineSwitch``). The cleared id closes the case through the
+ *    store cascade, as Change case does, and the auto-create branch asks for
+ *    the new engine. When that create fails (a 409 when the engine went away
+ *    between the listing and the create), the settle effect below puts the
+ *    old engine back, says why, and starts a session of it through the
+ *    recovery path, which shows its progress and gives up with a Reload.
  */
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCreateSession, useLoadCase } from './queries';
+import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { retryWhileBusy } from './replayJournal';
 import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdits';
 import { useSessionStore, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
 import { useCaseStore } from '@/store/case';
+import { usePflowStore } from '@/store/pflow';
 import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import { DEFAULT_ENGINE, engineLabel } from '@/lib/engines';
 import { toast } from '@/lib/toast';
 
 const CREATE_DEBOUNCE_MS = 1_000;
@@ -152,6 +166,96 @@ export function resetRecoveryLogger(): void {
     // eslint-disable-next-line no-console
     console.info(`[session-recovery] ${from} → ${to} at ${new Date(at).toISOString()}`);
   };
+}
+
+/** What the server said, in the words a toast can show. */
+function reasonOf(err: unknown): string {
+  if (err instanceof ProblemDetailsError) return err.detail ?? err.message;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** True from the first step of a switch until its release has an answer. */
+let releaseInFlight = false;
+
+/**
+ * What became of a request to switch engine: `switched` when the old session
+ * is closed and a session of the new engine is on its way, `kept` when the
+ * user stays on the session and the case they had (a toast says why), and
+ * `ignored` when there was nothing to do (the engine is the current one, or a
+ * switch is already under way).
+ */
+export type EngineSwitchOutcome = 'switched' | 'kept' | 'ignored';
+
+/**
+ * Start over with a session of the engine `name`. The engine picker's switch,
+ * and the only one: it is what Change case does (close the session on the
+ * server, then close the case) with the engine changed in the same step.
+ *
+ * 1. Nothing happens while another switch is under way, for the engine the
+ *    session already has, or with no live session (one is being created or
+ *    recovered, and a switch then would race it). While a power flow runs it
+ *    is refused, as Change case is.
+ * 2. `DELETE /sessions/{id}`, so the server ends the worker and its scratch
+ *    directory now rather than leaving them to the idle timeout and the
+ *    session cap. Until it answers, the store still holds the old session,
+ *    its engine and the open case.
+ * 3. A refusal or no answer (other than a 404, the session is gone already)
+ *    keeps all of that: the user carries on where they were, and a toast
+ *    says why.
+ * 4. Otherwise `startEngineSwitch` clears the id and sets the new engine in
+ *    one change, and the case is closed as Change case closes it. The store
+ *    cascade (`store/index.ts`) takes the case's results and runs, the edit
+ *    journal and the layout history start over, and the mark a reload reads
+ *    to reopen the case is removed (`reloadedCase.ts`), so neither a reload
+ *    nor a session recovery brings the old case back.
+ * 5. The auto-create branch of `useSessionRecovery` creates the session of
+ *    the new engine; its settle effect handles a refusal.
+ */
+export async function startSessionOver(name: string): Promise<EngineSwitchOutcome> {
+  const store = useSessionStore.getState();
+  const sessionId = store.sessionId;
+  const from = store.engine ?? DEFAULT_ENGINE;
+  if (releaseInFlight || store.previousEngine !== null || name === from) return 'ignored';
+  if (sessionId === null || store.recoveryInProgress || store.recoveryFailed) return 'ignored';
+  const label = engineLabel(name);
+  if (usePflowStore.getState().isRunning) {
+    toast.error(`Could not switch to ${label}`, {
+      description: 'Wait for power flow to finish.',
+    });
+    return 'kept';
+  }
+  releaseInFlight = true;
+  try {
+    try {
+      await andesClient.delete<void>(`/sessions/${encodeURIComponent(sessionId)}`, {
+        timeoutMs: TIMEOUTS.sessionLifecycle,
+      });
+    } catch (err) {
+      const gone = err instanceof ProblemDetailsError && err.status === 404;
+      if (!gone) {
+        toast.error(`Could not switch to ${label}: ${reasonOf(err)}`, {
+          description: `You are still on ${engineLabel(from)}, with the case as it was.`,
+        });
+        return 'kept';
+      }
+    }
+    // A recovery may have replaced the session while the request was out:
+    // that one is the user's now, and the switch is off.
+    if (useSessionStore.getState().sessionId !== sessionId) {
+      toast.error(`Could not switch to ${label}`, {
+        description: 'The session was replaced while switching. Try again.',
+      });
+      return 'kept';
+    }
+    useSessionStore.getState().startEngineSwitch(from, name);
+    // As Change case does after its DELETE (the cascade has done the same
+    // already; this holds where the cascade is not wired).
+    useCaseStore.getState().clearCase();
+    usePflowStore.getState().clearPflow();
+    return 'switched';
+  } finally {
+    releaseInFlight = false;
+  }
 }
 
 export function useSessionRecovery(): void {
@@ -336,6 +440,42 @@ export function useSessionRecovery(): void {
     // The dep array tracks the gate's primitive inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, recoveryFailed, recoveryInProgress]);
+
+  // ---- (8) Engine switch: a refused create, and the session that lands -----
+  //
+  // ``previousEngine`` is set by ``startEngineSwitch`` while the session of
+  // the new engine is being created. When that create fails (a 409: the
+  // engine went away between the listing and the create; or no answer), the
+  // old engine goes back into the store and a toast says why. The session of
+  // the old engine is then started through the recovery path, since nothing
+  // else would fire the create again (the auto-create gate runs on a change
+  // of its inputs, and the debounce would hold back a create this soon after
+  // the refused one): the badge shows it connecting, and it gives up with a
+  // Reload as any recovery does. The case was closed by the switch, so the
+  // recovery has nothing to reopen. Once a session lands the switch is over.
+  const createError = createSession.error;
+  const createIsError = createSession.isError;
+  useEffect(() => {
+    const store = useSessionStore.getState();
+    if (sessionId !== null) {
+      if (store.previousEngine !== null) store.setPreviousEngine(null);
+      return;
+    }
+    if (!createIsError || createError === null) return;
+    const previousEngine = store.previousEngine;
+    if (previousEngine === null) return;
+    const refused = store.engine ?? DEFAULT_ENGINE;
+    store.setEngine(previousEngine);
+    store.setPreviousEngine(null);
+    toast.error(`Could not switch to ${engineLabel(refused)}: ${reasonOf(createError)}`, {
+      description: `Starting a new ${engineLabel(previousEngine)} session instead.`,
+    });
+    createSession.reset();
+    lastCreateAttemptRef.current = 0;
+    store.resetSession();
+    // ``createSession`` excluded for the same stability reason as above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, createIsError, createError]);
 
   // ---- Branch (3+4): restore the case and its edits after recovery -------
   useEffect(() => {

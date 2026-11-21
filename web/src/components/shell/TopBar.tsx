@@ -18,6 +18,7 @@ import { InspectorToggle } from '@/components/shell/InspectorToggle';
 import { BottomDrawerToggle } from '@/components/shell/BottomDrawerToggle';
 import { ResultsViewToggle } from '@/components/shell/ResultsViewToggle';
 import { InFlightChip } from '@/components/shell/InFlightChip';
+import { EnginePicker } from '@/components/shell/EnginePicker';
 import { TopBarMoreMenu } from '@/components/shell/TopBarMoreMenu';
 import {
   INLINE_FROM_MEDIUM,
@@ -159,6 +160,12 @@ export const TopBar = forwardRef<HTMLElement, TopBarProps>(function TopBar(
         className="flex shrink-0 items-center justify-end gap-1"
       >
         {right}
+        {/* Engine picker: shows the session's engine and switches it by
+            starting a new session. Sits at the start of the auto-mounted
+            cluster so the engine reads next to the case/run indicators, and
+            is inline at every width (it is no command the More menu could
+            stand in for). */}
+        <EnginePicker />
         {/* v3.1 Unit 24 (R18) — compact dynamic-content indicator: an
             icon-only chip with a tooltip, so the user always sees whether
             the loaded case supports the dynamic routines. Renders nothing

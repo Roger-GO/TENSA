@@ -30,6 +30,7 @@ import { parseSessionId } from '@/api/types';
 const FRESH_STATE = {
   sessionId: null,
   engine: null,
+  previousEngine: null,
   engines: null,
   recoveryInProgress: false,
   recoveryFailed: false,
@@ -111,6 +112,51 @@ describe('session store — engine of the session', () => {
     useSessionStore.getState().setEngine('sienna');
     useSessionStore.getState().resetSession();
     expect(useSessionStore.getState().engine).toBe('sienna');
+  });
+});
+
+describe('session store — previousEngine of an engine switch', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().previousEngine).toBeNull();
+  });
+
+  it('setPreviousEngine records the engine the session had', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setPreviousEngine('andes');
+    expect(useSessionStore.getState().previousEngine).toBe('andes');
+  });
+
+  it('setPreviousEngine(null) clears it once a session has landed', () => {
+    useSessionStore.getState().setPreviousEngine('andes');
+    useSessionStore.getState().setPreviousEngine(null);
+    expect(useSessionStore.getState().previousEngine).toBeNull();
+  });
+
+  it('clearSession leaves it alone (the switch rollback still needs it)', () => {
+    useSessionStore.getState().setPreviousEngine('andes');
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().previousEngine).toBe('andes');
+  });
+
+  it('startEngineSwitch clears the session, sets the engine and records the old one in one change', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'andes' });
+    const seen: Array<{ sessionId: unknown; engine: unknown; previousEngine: unknown }> = [];
+    const stop = useSessionStore.subscribe((s) =>
+      seen.push({ sessionId: s.sessionId, engine: s.engine, previousEngine: s.previousEngine }),
+    );
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    stop();
+    expect(seen).toEqual([{ sessionId: null, engine: 'sienna', previousEngine: 'andes' }]);
+    // Not a recovery: the case closes with the session.
+    expect(useSessionStore.getState().recoveryInProgress).toBe(false);
   });
 });
 

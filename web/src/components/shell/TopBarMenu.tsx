@@ -133,6 +133,14 @@ export interface TopBarMenuProps {
   iconOnly?: boolean;
   /** Optional class on the trigger button. */
   triggerClassName?: string;
+  /**
+   * The trigger's accessible name and hover text, for a menu whose label is a
+   * value rather than a name (the engine picker shows `ANDES` and is named
+   * `Engine: ANDES`). The menu itself is then named by `menuLabel`.
+   */
+  triggerAriaLabel?: string;
+  /** The menu's accessible name, when it is not `label`. */
+  menuLabel?: string;
 }
 
 /**
@@ -147,6 +155,8 @@ export function TopBarMenu({
   disabled = false,
   iconOnly = false,
   triggerClassName,
+  triggerAriaLabel,
+  menuLabel,
 }: TopBarMenuProps) {
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -218,8 +228,8 @@ export function TopBarMenu({
           size="sm"
           disabled={disabled}
           aria-haspopup="menu"
-          aria-label={iconOnly ? label : undefined}
-          title={iconOnly ? label : undefined}
+          aria-label={triggerAriaLabel ?? (iconOnly ? label : undefined)}
+          title={triggerAriaLabel ?? (iconOnly ? label : undefined)}
           data-testid={`${testId}-trigger`}
           className={cn(
             'gap-1 px-2 text-xs',
@@ -240,7 +250,7 @@ export function TopBarMenu({
         align={alignEnd ? 'end' : 'start'}
         sideOffset={4}
         role="menu"
-        aria-label={label}
+        aria-label={menuLabel ?? label}
         onKeyDown={handleKeyDown}
         data-testid={`${testId}-content`}
         className="w-60 p-1"
