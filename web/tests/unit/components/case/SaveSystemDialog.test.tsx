@@ -29,7 +29,7 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { BLANK_CASE_KEY, useDraftsStore } from '@/store/drafts';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { ProblemDetails, TopologySummary } from '@/api/types';
+import type { EngineCapabilities, EngineList, ProblemDetails, TopologySummary } from '@/api/types';
 import { stillEditing, suggestedCopyName } from '@/lib/savedCopy';
 import { toast } from '@/lib/toast';
 import { startBeatClock } from '../../helpers/beatClock';
@@ -60,6 +60,23 @@ function makeProblemDetails(status: number, detail: string): ProblemDetails {
     detail,
     instance: null,
   };
+}
+
+function makeEngineWriting(name: string, write: string[]): EngineCapabilities {
+  return {
+    name,
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: [], write },
+    routines: [],
+    ops: [],
+    editing: false,
+  };
+}
+
+function enginesWriting(write: string[]): EngineList {
+  return { engines: [makeEngineWriting('andes', write)] };
 }
 
 vi.mock('@/api/client', async () => {
@@ -108,6 +125,11 @@ beforeEach(() => {
     cloneInitialized: false,
     savedCopy: null,
   });
+});
+
+afterEach(() => {
+  useSessionStore.getState().setEngines(null);
+  useSessionStore.getState().setEngine(null);
 });
 
 /**
@@ -509,6 +531,251 @@ describe('<SaveSystemDialog /> saving as .raw', () => {
       PQ_0: anchored,
     });
   });
+});
+
+describe('<SaveSystemDialog /> the formats the engine writes', () => {
+  it('offers m when the engine writes matpower: preview, note, and the save it sends', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+    useSessionStore.getState().setEngine('andes');
+    nextPost = () => Promise.resolve({ filename: 'my-system.m', bytes_written: 256 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+
+    const mRadio = screen.getByTestId('save-format-m');
+    expect(mRadio).toBeInTheDocument();
+    await user.click(mRadio);
+    expect(screen.getByText(/my-system\.m/)).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-note-m')).toHaveTextContent(
+      'The loads on one bus are written as one load, and its shunts as one shunt. Buses are ' +
+        'numbered from 1 unless every bus already has a positive whole number. What the file ' +
+        'leaves out is listed in Messages after the save.',
+    );
+
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy.mock.calls[0]).toEqual([
+      '/sessions/test-session-id/save',
+      { filename: 'my-system.m', format: 'm', overwrite: false },
+    ]);
+  });
+
+  it('offers no m when the engine does not write matpower, the three others as before', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'psse-raw', 'json']));
+    useSessionStore.getState().setEngine('andes');
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(screen.queryByTestId('save-format-m')).toBeNull();
+    expect(screen.getByTestId('save-format-xlsx')).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-raw')).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-json')).toBeInTheDocument();
+  });
+
+  it('offers no m while the engines list has not arrived, the three others as before', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(null);
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(screen.queryByTestId('save-format-m')).toBeNull();
+    expect(screen.getByTestId('save-format-xlsx')).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-raw')).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-json')).toBeInTheDocument();
+  });
+
+  it('lists the radios in the order xlsx, raw, m, json', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['json', 'matpower', 'psse-raw', 'xlsx']));
+    useSessionStore.getState().setEngine('andes');
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    const radios = screen.getAllByRole('radio', { name: /xlsx|raw|m|json/i });
+    expect(radios.map((radio) => radio.getAttribute('data-testid'))).toEqual([
+      'save-format-xlsx',
+      'save-format-raw',
+      'save-format-m',
+      'save-format-json',
+    ]);
+  });
+
+  it('refuses a name that is only the extension with m selected, and sends nothing', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'matpower']));
+    useSessionStore.getState().setEngine('andes');
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-format-m'));
+    await user.clear(screen.getByTestId('save-filename'));
+    await user.click(screen.getByTestId('save-confirm'));
+    expect(await screen.findByTestId('save-error')).toHaveTextContent('Pick a non-empty filename.');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses a name typed as ".m" and sends nothing', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'matpower']));
+    useSessionStore.getState().setEngine('andes');
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-format-m'));
+    await user.clear(screen.getByTestId('save-filename'));
+    await user.type(screen.getByTestId('save-filename'), '.m');
+    await user.click(screen.getByTestId('save-confirm'));
+    expect(await screen.findByTestId('save-error')).toHaveTextContent('Pick a non-empty filename.');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts a one-letter name with m selected, which the old length check refused', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'matpower']));
+    useSessionStore.getState().setEngine('andes');
+    nextPost = () => Promise.resolve({ filename: 'a.m', bytes_written: 64 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-format-m'));
+    await user.clear(screen.getByTestId('save-filename'));
+    await user.type(screen.getByTestId('save-filename'), 'a');
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy.mock.calls[0]).toEqual([
+      '/sessions/test-session-id/save',
+      { filename: 'a.m', format: 'm', overwrite: false },
+    ]);
+  });
+
+  it('says the engine cannot write a case file and disables Save when it writes nothing', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting([]));
+    useSessionStore.getState().setEngine('andes');
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(screen.getByTestId('save-format-none')).toHaveTextContent(
+      'This engine cannot write a case file.',
+    );
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.getByTestId('save-confirm')).toBeDisabled();
+  });
+
+  it('moves the selection to a format that is offered when the list changes under the dialog', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+    useSessionStore.getState().setEngine('andes');
+    nextPost = () => Promise.resolve({ filename: 'my-system.xlsx', bytes_written: 1024 });
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    await user.click(screen.getByTestId('save-format-m'));
+    expect(screen.getByTestId('save-format-m')).toBeChecked();
+
+    act(() => {
+      useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'psse-raw', 'json']));
+    });
+    expect(screen.queryByTestId('save-format-m')).toBeNull();
+    expect(screen.getByTestId('save-format-xlsx')).toBeChecked();
+
+    await user.click(screen.getByTestId('save-confirm'));
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+    expect(postSpy.mock.calls[0]).toEqual([
+      '/sessions/test-session-id/save',
+      { filename: 'my-system.xlsx', format: 'xlsx', overwrite: false },
+    ]);
+  });
+
+  it('offers m in a dialog opened before the engines list arrived, once it arrives', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    expect(screen.queryByTestId('save-format-m')).toBeNull();
+    act(() => {
+      useSessionStore
+        .getState()
+        .setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+    });
+    expect(screen.getByTestId('save-format-m')).toBeInTheDocument();
+    expect(screen.getByTestId('save-format-xlsx')).toBeChecked();
+  });
+
+  it('shows the note for m only, and the m radio is described by it', async () => {
+    const user = userEvent.setup();
+    useSessionStore.getState().setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+    render(withQueryClient(<Owner />));
+    await user.click(screen.getByTestId('save-system-button'));
+    for (const other of ['xlsx', 'raw', 'json']) {
+      await user.click(screen.getByTestId(`save-format-${other}`));
+      expect(screen.queryByTestId('save-format-note-m')).toBeNull();
+    }
+    await user.click(screen.getByTestId('save-format-m'));
+    expect(screen.getByRole('radio', { name: /MATPOWER/ })).toHaveAccessibleDescription(
+      /written as one load.*listed in Messages after the save\./,
+    );
+  });
+
+  describe.each([
+    ['xlsx', '.xlsx'],
+    ['raw', '.raw'],
+    ['m', '.m'],
+    ['json', '.json'],
+  ])('a name with %s selected', (format, ext) => {
+    const pick = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+      useSessionStore
+        .getState()
+        .setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+      render(withQueryClient(<Owner />));
+      await user.click(screen.getByTestId('save-system-button'));
+      await user.click(screen.getByTestId(`save-format-${format}`));
+      await user.clear(screen.getByTestId('save-filename'));
+      if (name !== '') await user.type(screen.getByTestId('save-filename'), name);
+      await user.click(screen.getByTestId('save-confirm'));
+    };
+
+    it.each([
+      ['empty', ''],
+      ['only spaces', '   '],
+      ['only the extension', ext],
+    ])('is refused when it is %s, and nothing is sent', async (_what, name) => {
+      const user = userEvent.setup();
+      await pick(user, name);
+      expect(await screen.findByTestId('save-error')).toHaveTextContent(
+        'Pick a non-empty filename.',
+      );
+      expect(postSpy).not.toHaveBeenCalled();
+    });
+
+    it('is accepted when it is one letter', async () => {
+      const user = userEvent.setup();
+      await pick(user, 'a');
+      await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+      expect(postSpy.mock.calls[0]).toEqual([
+        '/sessions/test-session-id/save',
+        { filename: `a${ext}`, format, overwrite: false },
+      ]);
+    });
+  });
+
+  it.each([
+    ['case.raw', 'm', 'case.m'],
+    ['case.m', 'raw', 'case.raw'],
+    ['case.xlsx', 'm', 'case.m'],
+  ])(
+    'saves a name typed as %s with %s selected under one extension, as %s',
+    async (typed, format, sent) => {
+      const user = userEvent.setup();
+      useSessionStore
+        .getState()
+        .setEngines(enginesWriting(['xlsx', 'psse-raw', 'matpower', 'json']));
+      render(withQueryClient(<Owner />));
+      await user.click(screen.getByTestId('save-system-button'));
+      await user.click(screen.getByTestId(`save-format-${format}`));
+      await user.clear(screen.getByTestId('save-filename'));
+      await user.type(screen.getByTestId('save-filename'), typed);
+      expect(screen.getByText(sent)).toBeInTheDocument();
+      await user.click(screen.getByTestId('save-confirm'));
+      await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1));
+      expect(postSpy.mock.calls[0]).toEqual([
+        '/sessions/test-session-id/save',
+        { filename: sent, format, overwrite: false },
+      ]);
+    },
+  );
 });
 
 describe('<Owner /> — auto-close beat', () => {

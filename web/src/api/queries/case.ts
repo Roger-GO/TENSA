@@ -134,8 +134,8 @@ export const SAVE_CASE_MUTATION_KEY = ['save-case'] as const;
 
 /**
  * `POST /sessions/{id}/save`. Writes the current System to the workspace
- * as xlsx or json. ANDES 2.0 has no PSS/E .raw writer — that format is
- * read-only on this substrate. On success the workspace lister query is
+ * as xlsx, json, raw (the substrate's own PSS/E v33 writer) or m (MATPOWER),
+ * whichever the request names. On success the workspace lister query is
  * invalidated so the new file shows up immediately in the picker. A write over
  * the open case's own file also moves the edit journal's base to that file, as
  * the substrate moves its own (`Wrapper.save_case`): the substrate then has no
