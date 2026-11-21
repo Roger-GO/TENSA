@@ -68,6 +68,14 @@ export interface SessionState {
   workspaceId: string | null;
   setWorkspaceId: (id: string | null) => void;
   /**
+   * The engine of the live session (`engine` of its descriptor), `null`
+   * until the first session has answered. It is kept when the session is
+   * reset for recovery so the replacement session asks for the same engine;
+   * `clearSession` (the user closed the session) sets it back to `null`.
+   */
+  engine: string | null;
+  setEngine: (engine: string | null) => void;
+  /**
    * True while the session-recovery handler is running (id cleared, waiting
    * for ``useCreateSession`` to resolve). The RecoveryBadge in the top bar
    * watches this flag and renders the "Reconnecting..." pill while it is
@@ -191,12 +199,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sessionId: null,
   workspaceId: null,
   setWorkspaceId: (id) => set({ workspaceId: id }),
+  engine: null,
+  setEngine: (engine) => set({ engine }),
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],
   recoveryStuckSince: null,
   setSessionId: (id: SessionId) => set({ sessionId: id }),
-  clearSession: () => set({ sessionId: null }),
+  clearSession: () => set({ sessionId: null, engine: null }),
   resetSession: () => {
     const now = Date.now();
     const cutoff = now - RECOVERY_WINDOW_MS;

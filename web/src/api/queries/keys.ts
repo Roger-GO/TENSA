@@ -28,6 +28,8 @@ export const queryKeys = {
   sidecars: ['sidecar'] as const,
   topologySchema: ['topology-schema'] as const,
   version: ['version'] as const,
+  /** The engines the server can start a session for, with their capabilities. */
+  engines: ['engines'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
   alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
   /** Report payload, scoped per (session, routine). */

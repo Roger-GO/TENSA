@@ -29,11 +29,43 @@ import { parseSessionId } from '@/api/types';
 
 const FRESH_STATE = {
   sessionId: null,
+  engine: null,
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],
   recoveryStuckSince: null,
 };
+
+describe('session store — engine of the session', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().engine).toBeNull();
+  });
+
+  it('setEngine sets it', () => {
+    useSessionStore.getState().setEngine('sienna');
+    expect(useSessionStore.getState().engine).toBe('sienna');
+  });
+
+  it('clearSession clears it (the user closed the session)', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().engine).toBeNull();
+  });
+
+  it('resetSession keeps it, so the replacement session asks for the same engine', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().resetSession();
+    expect(useSessionStore.getState().engine).toBe('sienna');
+  });
+});
 
 describe('session store — recoveryStuckSince stamp', () => {
   beforeEach(() => {

@@ -75,6 +75,10 @@ export type DeletedDisturbance = components['schemas']['DeletedDisturbance'];
 export type EditStep = components['schemas']['EditStep'];
 export type TopologySchema = components['schemas']['TopologySchema'];
 export type VersionInfo = components['schemas']['VersionInfo'];
+/** What one engine of `GET /engines` can do: routines, formats, versions. */
+export type EngineCapabilities = components['schemas']['EngineCapabilities'];
+/** The engines the server can start a session for, from `GET /engines`. */
+export type EngineList = components['schemas']['EngineList'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
 export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];
 export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];

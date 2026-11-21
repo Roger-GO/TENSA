@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { andesClient, TIMEOUTS } from '@/api/client';
-import type { TopologySchema, VersionInfo } from '@/api/types';
+import type { EngineList, TopologySchema, VersionInfo } from '@/api/types';
 import { queryKeys } from './keys';
 
 /**
@@ -31,6 +31,23 @@ export function useVersionInfo(): UseQueryResult<VersionInfo, Error> {
     staleTime: Infinity,
     queryFn: async () => {
       return await andesClient.get<VersionInfo>('/version', {
+        timeoutMs: TIMEOUTS.sessionLifecycle,
+      });
+    },
+  });
+}
+
+/**
+ * `GET /engines`. The engines the server can start a session for, each with
+ * the routines it has. They cannot change while the server runs, so this is
+ * fetched once per page.
+ */
+export function useEngines(): UseQueryResult<EngineList, Error> {
+  return useQuery({
+    queryKey: queryKeys.engines,
+    staleTime: Infinity,
+    queryFn: async () => {
+      return await andesClient.get<EngineList>('/engines', {
         timeoutMs: TIMEOUTS.sessionLifecycle,
       });
     },

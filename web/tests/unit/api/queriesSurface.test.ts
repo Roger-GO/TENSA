@@ -147,6 +147,7 @@ const PUBLIC_VALUES = [
   'useEditElement',
   'useEditElements',
   'useEigParticipation',
+  'useEngines',
   'useEigRun',
   'useExportBundle',
   'useExportPmuCsv',
