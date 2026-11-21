@@ -8,7 +8,10 @@ voltage setpoint of a generator bus (the file's ``VS``, not the bus record's
 stored voltage), a transformer's off-nominal ratio (not snapped to a tap-step
 grid), and the total line charging of a branch record. This module reads those
 three facts from the file itself, without an engine, so an adapter can be handed
-them. It is pure Python and imports no engine.
+them. A fourth was found later: where a branch record gives no rating (0),
+PowerSystems makes one up from the branch's impedance and voltage, so the
+module also reads each branch's first rating. It is pure Python and imports
+no engine.
 """
 
 from __future__ import annotations
@@ -65,6 +68,26 @@ class LineFact:
 
 
 @dataclass(frozen=True)
+class RatingFact:
+    """One two-terminal branch record: buses, circuit id and first rating.
+
+    ``rate_mva`` is the branch's first rating in MVA: ``RATEA`` of a
+    non-transformer branch (``RATE1`` at revision 34), ``RATA1`` of a
+    two-winding transformer (``RATE1`` of winding 1 at revision 34), ``rateA``
+    of a MATPOWER branch row. 0 when the file gives none; a negative or
+    non-finite value is read as 0. ``CaseFacts.ratings`` lists the
+    non-transformer branches first and the two-winding transformers after,
+    each in file order: the order of ``lines`` then ``transformers`` and of
+    the identity's ``branches``.
+    """
+
+    from_bus: int
+    to_bus: int
+    ckt: str
+    rate_mva: float
+
+
+@dataclass(frozen=True)
 class CaseFacts:
     """The facts of a case file an engine's reader can get wrong, in file order.
 
@@ -77,6 +100,7 @@ class CaseFacts:
     v_setpoints: dict[int, float]
     transformers: tuple[TransformerFact, ...]
     lines: tuple[LineFact, ...]
+    ratings: tuple[RatingFact, ...] = ()
     notes: tuple[str, ...] = ()
 
 
@@ -95,6 +119,17 @@ def _number(fields: list[str], index: int, default: float) -> float:
     if index >= len(fields) or not fields[index]:
         return default
     return float(fields[index])
+
+
+def _rating(fields: list[str], index: int) -> float:
+    """Field ``index`` of a record as a rating in MVA.
+
+    A missing or blank field, a negative value and a non-finite one are 0.
+    """
+    value = _number(fields, index, 0.0)
+    if not math.isfinite(value) or value < 0.0:
+        return 0.0
+    return value
 
 
 def _winding_ratios(
@@ -160,7 +195,10 @@ def read_psse_raw_facts(text: str) -> CaseFacts:
     from it); ``CW`` 2 and 3 need the ``BASKV`` of both buses and a record
     whose bus has none raises ``CaseFactsError``. A record whose winding-2
     ratio differs from 1.0 by more than 1e-9 gets a line in ``notes``.
-    ``shift_rad`` is ``ANG1`` in radians. A blank field takes its default, and
+    ``shift_rad`` is ``ANG1`` in radians. ``ratings`` gives each branch record
+    its ``RATEA`` (the seventh field; at revision 34 ``RATE1``, the eighth,
+    after ``NAME``) and each two-winding record its ``RATA1`` (the fourth
+    field of its third line). A blank field takes its default, and
     a file that ends early is read as far as it goes (a record cut short is
     dropped).
     """
@@ -187,6 +225,7 @@ def read_psse_raw_facts(text: str) -> CaseFacts:
     v_setpoints: dict[int, float] = {}
     line_facts: list[LineFact] = []
     transformer_facts: list[TransformerFact] = []
+    rating_facts: list[RatingFact] = []
     notes: list[str] = []
 
     block_idx = -1 if version >= 34 else 0
@@ -231,6 +270,9 @@ def read_psse_raw_facts(text: str) -> CaseFacts:
         transformer_facts.append(
             TransformerFact(i_bus, j_bus, ckt, ratio1 / ratio2, math.radians(ang1))
         )
+        # RATA1 (RATE1 of winding 1 at revision 34): the fourth field of the
+        # record's third line, after WINDV1, NOMV1, ANG1.
+        rating_facts.append(RatingFact(i_bus, j_bus, ckt, _rating(winding1, 3)))
 
     def take_record(block: str, record: list[list[str]]) -> None:
         if block == "transf":
@@ -245,8 +287,13 @@ def read_psse_raw_facts(text: str) -> CaseFacts:
         elif block == "branch":
             ckt = row[2] if len(row) > 2 and row[2] else "1"
             b_total = _number(row, 5, 0.0)
-            line_facts.append(
-                LineFact(_int_field(row[0]), abs(_int_field(row[1])), ckt, b_total)
+            from_bus = _int_field(row[0])
+            to_bus = abs(_int_field(row[1]))
+            line_facts.append(LineFact(from_bus, to_bus, ckt, b_total))
+            # RATEA is the seventh field, after I, J, CKT, R, X, B; at
+            # revision 34 a NAME field follows B, so RATE1 is the eighth.
+            rating_facts.append(
+                RatingFact(from_bus, to_bus, ckt, _rating(row, 7 if version >= 34 else 6))
             )
 
     for raw_line in lines[3:]:
@@ -288,6 +335,7 @@ def read_psse_raw_facts(text: str) -> CaseFacts:
         v_setpoints=v_setpoints,
         transformers=tuple(transformer_facts),
         lines=tuple(line_facts),
+        ratings=tuple(rating_facts),
         notes=tuple(notes),
     )
 
@@ -301,7 +349,9 @@ def read_matpower_facts(text: str) -> CaseFacts:
     transformer whose ``tap`` is that ratio and whose ``shift_rad`` is its angle
     (column 10, degrees) in radians; any other row is a line whose ``b_total``
     is its ``b`` (column 5). ``ckt`` is the ordinal among the rows of the same
-    unordered bus pair, from ``"1"``, as ``identity.py`` assigns it.
+    unordered bus pair, from ``"1"``, as ``identity.py`` assigns it. Every row
+    gives a rating, its ``rateA`` (column 6); ``ratings`` holds the lines'
+    first and then the transformers', as ``identity.py`` orders ``branches``.
     """
     gen_rows = _matpower_rows(text, "gen")
     branch_rows = _matpower_rows(text, "branch")
@@ -315,6 +365,8 @@ def read_matpower_facts(text: str) -> CaseFacts:
 
     line_facts: list[LineFact] = []
     transformer_facts: list[TransformerFact] = []
+    line_ratings: list[RatingFact] = []
+    transformer_ratings: list[RatingFact] = []
     pair_ordinals: dict[tuple[int, int], int] = {}
     for row in branch_rows:
         from_bus = int(row[0])
@@ -323,19 +375,29 @@ def read_matpower_facts(text: str) -> CaseFacts:
         pair_ordinals[pair] = pair_ordinals.get(pair, 0) + 1
         ckt = str(pair_ordinals[pair])
         ratio = row[8] if len(row) > 8 else 0.0
+        rate_a = row[5] if len(row) > 5 else 0.0
+        if not math.isfinite(rate_a) or rate_a < 0.0:
+            rate_a = 0.0
+        rating = RatingFact(from_bus, to_bus, ckt, rate_a)
         if ratio != 0.0:
             angle = row[9] if len(row) > 9 else 0.0
             transformer_facts.append(
                 TransformerFact(from_bus, to_bus, ckt, ratio, math.radians(angle))
             )
+            transformer_ratings.append(rating)
         else:
             b_total = row[4] if len(row) > 4 else 0.0
             line_facts.append(LineFact(from_bus, to_bus, ckt, b_total))
+            line_ratings.append(rating)
 
+    # The lines' ratings, then the transformers', each in row order: the order
+    # of ``lines`` followed by ``transformers`` and of the identity's
+    # ``branches``, which is not the row order where the rows interleave them.
     return CaseFacts(
         v_setpoints=v_setpoints,
         transformers=tuple(transformer_facts),
         lines=tuple(line_facts),
+        ratings=tuple(line_ratings + transformer_ratings),
     )
 
 
@@ -369,8 +431,11 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
     ``v_setpoints`` is keyed by the bus number as a string; ``transformers``
     holds ``[from_bus, to_bus, ckt, tap, shift_rad]`` per two-winding
     transformer and ``line_charging`` holds ``[from_bus, to_bus, ckt, b_total]``
-    per non-transformer branch, both in file order; ``notes`` is the list of
-    ``facts.notes``.
+    per non-transformer branch, both in file order; ``ratings`` holds
+    ``[from_bus, to_bus, ckt, rate_mva]`` per two-terminal branch, the rows of
+    ``line_charging`` first and those of ``transformers`` after, in the same
+    order and with the same ``[from_bus, to_bus, ckt]``; ``notes`` is the
+    list of ``facts.notes``.
     """
     return {
         "v_setpoints": {str(bus): vs for bus, vs in facts.v_setpoints.items()},
@@ -382,6 +447,10 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
             [line.from_bus, line.to_bus, line.ckt, line.b_total]
             for line in facts.lines
         ],
+        "ratings": [
+            [rating.from_bus, rating.to_bus, rating.ckt, rating.rate_mva]
+            for rating in facts.ratings
+        ],
         "notes": list(facts.notes),
     }
 
@@ -390,6 +459,7 @@ __all__ = [
     "CaseFacts",
     "CaseFactsError",
     "LineFact",
+    "RatingFact",
     "TransformerFact",
     "corrections_document",
     "read_case_facts",

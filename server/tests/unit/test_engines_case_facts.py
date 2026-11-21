@@ -17,17 +17,27 @@ import pytest
 
 from tensa.core.examples import _andes_cases_dir
 from tensa.engines.case_facts import (
+    CaseFacts,
     CaseFactsError,
     LineFact,
+    RatingFact,
     TransformerFact,
     corrections_document,
     read_case_facts,
     read_matpower_facts,
     read_psse_raw_facts,
 )
-from tensa.engines.identity import read_identity, read_psse_raw_identity
+from tensa.engines.identity import (
+    read_identity,
+    read_matpower_identity,
+    read_psse_raw_identity,
+)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "julia" / "fixtures"
+SAMPLES = Path(__file__).resolve().parent / "sienna_samples"
+EXAMPLE_CASES = (
+    Path(__file__).resolve().parents[2] / "src" / "tensa" / "examples" / "cases"
+)
 
 RAW_HEADER = """\
   0,    100.00, 33, 0, 0, 60.00       /
@@ -76,6 +86,10 @@ def _transformer(
         f"{line3}\n"
         f"{line4}\n"
     )
+
+
+def _rating_keys(facts: CaseFacts) -> list[tuple[int, int, str]]:
+    return [(r.from_bus, r.to_bus, r.ckt) for r in facts.ratings]
 
 
 @pytest.mark.unit
@@ -456,6 +470,7 @@ def test_order_matches_identity_on_a_snippet() -> None:
     identity = read_psse_raw_identity(text)
     assert keys == [(b.from_bus, b.to_bus, b.ckt) for b in identity.branches]
     assert keys == [(3, 2, "2"), (2, 3, "1"), (4, 2, "1"), (1, 2, "1")]
+    assert _rating_keys(facts) == keys
 
 
 _THREE_WINDING = (
@@ -487,6 +502,8 @@ def test_order_matches_identity_around_three_winding_records() -> None:
     assert keys == [(b.from_bus, b.to_bus, b.ckt) for b in identity.branches]
     assert keys == [(2, 3, "1"), (1, 2, "1"), (4, 2, "1")]
     assert len(identity.transformers3) == 4
+    # A three-winding record gives no rating row, as it gives no other fact.
+    assert _rating_keys(facts) == keys
 
 
 @pytest.mark.unit
@@ -500,8 +517,82 @@ def test_corrections_document_shape() -> None:
         "v_setpoints": {"2": 1.025},
         "transformers": [[1, 2, "1", 1.1, math.radians(10.0)]],
         "line_charging": [[2, 3, "1", 0.176]],
+        # The branch's seventh field, RATEA, is 1; the transformer's third
+        # line ends before RATA1.
+        "ratings": [[2, 3, "1", 1.0], [1, 2, "1", 0.0]],
         "notes": [],
     }
+
+
+@pytest.mark.unit
+def test_branch_ratea_revision_33() -> None:
+    # RATEA is the seventh field, after I, J, CKT, R, X, B.
+    branches = "    2,     3,'1 ', 0.01000, 0.06800,0.17600,  250.000,  300.000,  350.000\n"
+    facts = read_psse_raw_facts(_raw(branches=branches))
+    assert facts.ratings == (RatingFact(2, 3, "1", 250.0),)
+
+
+@pytest.mark.unit
+def test_branch_rate1_revision_34_after_the_name_field() -> None:
+    # Revision 34 carries a NAME field after B, so RATE1 is the eighth field:
+    # the name must not be taken for the rating nor the rating for the name.
+    branches = (
+        "    2,     3,'1 ', 0.01000, 0.06800,0.17600,'LINE NAME   ',  300.000,  400.000,  500.000\n"
+    )
+    text = (
+        RAW_HEADER.replace(" 33,", " 34,")
+        + "GENERAL, THRSHZ=0.0001\n"
+        + " 0 / END OF SYSTEM-WIDE DATA, BEGIN BUS DATA\n"
+        + RAW_BUSES
+        + " 0 / END OF GENERATOR DATA, BEGIN BRANCH DATA\n"
+        + branches
+        + " 0 / END OF BRANCH DATA, BEGIN SYSTEM SWITCHING DEVICE DATA\n"
+        + " 0 / END OF SYSTEM SWITCHING DEVICE DATA, BEGIN TRANSFORMER DATA\n"
+        + " 0 / END OF TRANSFORMER DATA\nQ\n"
+    )
+    facts = read_psse_raw_facts(text)
+    assert facts.ratings == (RatingFact(2, 3, "1", 300.0),)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("revision", [33, 34])
+def test_transformer_rata1(revision: int) -> None:
+    # RATA1 (RATE1 of winding 1 at revision 34) is the fourth field of the
+    # record's third line, after WINDV1, NOMV1, ANG1.
+    transformers = _transformer(1, "1.10000,  0.000,   0.000,  100.000", "1.00000,  0.000")
+    header = RAW_HEADER if revision == 33 else RAW_HEADER.replace(" 33,", " 34,")
+    text = _raw(header=header, transformers=transformers)
+    if revision == 34:
+        text = text.replace(
+            header,
+            header
+            + "GENERAL, THRSHZ=0.0001\n"
+            + " 0 / END OF SYSTEM-WIDE DATA, BEGIN BUS DATA\n",
+        ).replace(
+            " 0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA\n",
+            " 0 / END OF BRANCH DATA, BEGIN SYSTEM SWITCHING DEVICE DATA\n"
+            " 0 / END OF SYSTEM SWITCHING DEVICE DATA, BEGIN TRANSFORMER DATA\n",
+        )
+    facts = read_psse_raw_facts(text)
+    assert facts.ratings == (RatingFact(1, 2, "1", 100.0),)
+
+
+@pytest.mark.unit
+def test_rating_of_a_short_record_is_zero() -> None:
+    # A branch record that ends after B has no RATEA; a transformer whose
+    # third line ends after ANG1 has no RATA1.
+    branches = "    2,     3,'1 ', 0.01000, 0.06800,0.17600\n"
+    transformers = _transformer(1, "1.10000,  0.000,   0.000", "1.00000,  0.000")
+    facts = read_psse_raw_facts(_raw(branches=branches, transformers=transformers))
+    assert facts.ratings == (RatingFact(2, 3, "1", 0.0), RatingFact(1, 2, "1", 0.0))
+
+
+@pytest.mark.unit
+def test_a_negative_rating_is_zero() -> None:
+    branches = "    2,     3,'1 ', 0.01000, 0.06800,0.17600, -250.000\n"
+    transformers = _transformer(1, "1.10000,  0.000,   0.000, -100.000", "1.00000,  0.000")
+    facts = read_psse_raw_facts(_raw(branches=branches, transformers=transformers))
+    assert facts.ratings == (RatingFact(2, 3, "1", 0.0), RatingFact(1, 2, "1", 0.0))
 
 
 MATPOWER_SNIPPET = """\
@@ -556,7 +647,68 @@ def test_matpower_snippet() -> None:
         [2, 3, "1", 0.158],
         [3, 2, "2", 0.306],
     ]
+    assert document["ratings"] == [
+        [1, 2, "1", 0.0],
+        [2, 3, "1", 0.0],
+        [3, 2, "2", 0.0],
+        [1, 3, "1", 100.0],
+    ]
     assert document["notes"] == []
+
+
+@pytest.mark.unit
+def test_matpower_ratea() -> None:
+    text = MATPOWER_SNIPPET.replace(
+        "    1 2 0.01 0.06 0.176 0 0 0 0 0 1 -360 360;",
+        "    1 2 0.01 0.06 0.176 9900 0 0 0 0 1 -360 360;",
+    )
+    facts = read_matpower_facts(text)
+    assert facts.ratings[0] == RatingFact(1, 2, "1", 9900.0)
+    # rateA is the sixth column of every row, transformer rows included.
+    assert facts.ratings[-1] == RatingFact(1, 3, "1", 100.0)
+
+
+@pytest.mark.unit
+def test_matpower_short_and_negative_ratea_are_zero() -> None:
+    text = MATPOWER_SNIPPET.replace(
+        "    1 2 0.01 0.06 0.176 0 0 0 0 0 1 -360 360;",
+        "    1 2 0.01 0.06 0.176;",
+    ).replace(
+        "    2 3 0.02 0.09 0.158 0 0 0 0 0 1 -360 360;",
+        "    2 3 0.02 0.09 0.158 -50 0 0 0 0 1 -360 360;",
+    )
+    facts = read_matpower_facts(text)
+    assert facts.ratings[0] == RatingFact(1, 2, "1", 0.0)
+    assert facts.ratings[1] == RatingFact(2, 3, "1", 0.0)
+
+
+@pytest.mark.unit
+def test_matpower_ratings_in_the_order_of_the_other_branch_facts() -> None:
+    # A transformer row before the lines, and a line on the transformer's bus
+    # pair written the other way round: the ratings list the lines first and
+    # the transformers after, each in row order, as ``lines`` then
+    # ``transformers`` and the identity's ``branches`` do, and the line on
+    # the transformer's pair is its second circuit.
+    text = MATPOWER_SNIPPET.replace(
+        "    1 2 0.01 0.06 0.176 0 0 0 0 0 1 -360 360;\n"
+        "    2 3 0.02 0.09 0.158 0 0 0 0 0 1 -360 360;\n"
+        "    3 2 0.03 0.16 0.306 0 0 0 0 0 1 -360 360;\n"
+        "    1 3 0.0 0.0576 0 100 100 100 1.02 -5 1 -360 360;\n",
+        "    1 3 0.0 0.0576 0 100 100 100 1.02 -5 1 -360 360;\n"
+        "    1 2 0.01 0.06 0.176 50 0 0 0 0 1 -360 360;\n"
+        "    3 1 0.03 0.16 0.306 70 0 0 0 0 1 -360 360;\n",
+    )
+    facts = read_matpower_facts(text)
+    assert facts.ratings == (
+        RatingFact(1, 2, "1", 50.0),
+        RatingFact(3, 1, "2", 70.0),
+        RatingFact(1, 3, "1", 100.0),
+    )
+    keys = [(f.from_bus, f.to_bus, f.ckt) for f in facts.lines]
+    keys += [(f.from_bus, f.to_bus, f.ckt) for f in facts.transformers]
+    assert _rating_keys(facts) == keys
+    identity = read_matpower_identity(text)
+    assert keys == [(b.from_bus, b.to_bus, b.ckt) for b in identity.branches]
 
 
 @pytest.mark.unit
@@ -632,3 +784,164 @@ def test_order_matches_identity(name: str) -> None:
     fact_keys += [(t.from_bus, t.to_bus, t.ckt) for t in facts.transformers]
     identity_keys = [(b.from_bus, b.to_bus, b.ckt) for b in identity.branches]
     assert fact_keys == identity_keys
+    assert _rating_keys(facts) == identity_keys
+
+
+def _case_files_in(folder: Path) -> list[Path]:
+    """The ``.raw`` and ``.m`` files under ``folder``, sorted.
+
+    The suffix is compared without case: ``RTS-GMLC.RAW`` is written in
+    capitals, which a ``*.raw`` pattern misses on Linux and macOS.
+    """
+    return sorted(
+        path for path in folder.rglob("*") if path.suffix.lower() in (".raw", ".m")
+    )
+
+
+def _all_case_files() -> list[Path]:
+    """Every ``.raw`` and ``.m`` case of the ANDES package and of the examples."""
+    cases_dir = _andes_cases_dir()
+    assert cases_dir is not None, "ANDES cases folder not found"
+    andes_files = _case_files_in(Path(cases_dir))
+    assert andes_files, f"no .raw or .m case file in {cases_dir}"
+    example_files = _case_files_in(EXAMPLE_CASES)
+    assert "RTS-GMLC.RAW" in {path.name for path in example_files}, EXAMPLE_CASES
+    return andes_files + example_files
+
+
+def _branch_fact_keys(facts: CaseFacts) -> list[tuple[int, int, str]]:
+    """The ``(from, to, ckt)`` of ``lines`` then ``transformers``."""
+    keys = [(line.from_bus, line.to_bus, line.ckt) for line in facts.lines]
+    keys += [(t.from_bus, t.to_bus, t.ckt) for t in facts.transformers]
+    return keys
+
+
+@pytest.mark.unit
+def test_ratings_order_matches_identity_on_every_case_file() -> None:
+    # The ratings are in the order of the module's other branch facts and of
+    # the identity's branches, with the same ids, on every file. A MATPOWER
+    # file can write a transformer row among the lines (GBnetwork.m opens with
+    # one, case14.m has them in the middle) and a bus pair several times with
+    # either end first, so row order would not do.
+    for path in _all_case_files():
+        facts = read_case_facts(path)
+        identity_keys = [(b.from_bus, b.to_bus, b.ckt) for b in read_identity(path).branches]
+        assert _branch_fact_keys(facts) == identity_keys, path.name
+        assert _rating_keys(facts) == identity_keys, path.name
+
+
+def _andes_branch_ratings(path: Path) -> dict[tuple[int, int], list[float]]:
+    """ANDES's ``Line.rate_a`` of the case, per unordered bus pair, in MVA.
+
+    ANDES 2.0.0 turns a three-winding transformer into three ``Line`` records
+    on a star bus it adds (``andes/io/psse.py`` builds the star equivalent).
+    Those three are left out here, and counted: the file has no two-terminal
+    record for them, and its three-winding records are left out of the
+    ratings as they are left out of the module's other branch facts.
+    """
+    import andes
+
+    andes.config_logger(stream_level=50)
+    system = andes.load(str(path), setup=False, no_output=True, default_config=True)
+    identity = read_identity(path)
+    file_buses = set(identity.buses)
+    per_pair: dict[tuple[int, int], list[float]] = {}
+    star_windings = 0
+    for bus1, bus2, rate in zip(
+        system.Line.bus1.v, system.Line.bus2.v, system.Line.rate_a.v, strict=True
+    ):
+        first, second = int(bus1), int(bus2)
+        if first not in file_buses or second not in file_buses:
+            # A winding of the star model of a three-winding record: ANDES
+            # holds a Line the file has no branch record for (wscc9_3wxfr.raw
+            # adds the pairs (4, 10), (5, 10) and (6, 10), bus 10 the star).
+            star_windings += 1
+            continue
+        pair = (min(first, second), max(first, second))
+        per_pair.setdefault(pair, []).append(float(rate))
+    assert star_windings == 3 * len(identity.transformers3), path.name
+    return per_pair
+
+
+@pytest.mark.unit
+def test_ratings_match_andes_on_every_case_file() -> None:
+    for path in _all_case_files():
+        facts = read_case_facts(path)
+        andes = _andes_branch_ratings(path)
+        per_pair: dict[tuple[int, int], list[float]] = {}
+        for rating in facts.ratings:
+            pair = (
+                min(rating.from_bus, rating.to_bus),
+                max(rating.from_bus, rating.to_bus),
+            )
+            per_pair.setdefault(pair, []).append(rating.rate_mva)
+        for rates in per_pair.values():
+            rates.sort()
+        for rates in andes.values():
+            rates.sort()
+        # ANDES 2.0.0 reads the same field into rate_a, in MVA and unscaled
+        # (RATEA of a branch, RATA1 of a two-winding transformer, rateA of a
+        # MATPOWER row, a rateA of 0 kept as 0), on every two-terminal branch
+        # of these files, so the file and ANDES agree here. The one place
+        # they part is the star model of a three-winding record, left out
+        # above, not read from the file.
+        assert per_pair == andes, path.name
+
+
+@pytest.mark.unit
+def test_corrections_document_ratings_one_row_per_branch() -> None:
+    for path in _all_case_files():
+        facts = read_case_facts(path)
+        document = corrections_document(facts)
+        rows = document["ratings"]
+        assert isinstance(rows, list)
+        assert rows == [
+            [r.from_bus, r.to_bus, r.ckt, r.rate_mva] for r in facts.ratings
+        ], path.name
+        # Row for row, the ids of line_charging followed by transformers.
+        line_rows = document["line_charging"]
+        transformer_rows = document["transformers"]
+        assert isinstance(line_rows, list)
+        assert isinstance(transformer_rows, list)
+        assert [row[:3] for row in rows] == [
+            row[:3] for row in (*line_rows, *transformer_rows)
+        ], path.name
+
+
+# The case file each recorded corrections document was read from, relative to
+# the ANDES cases folder (a "_dyr" sample shares its base case's file).
+SAMPLE_CASE_FILES = {
+    "kundur": "kundur/kundur.raw",
+    "kundur_dyr": "kundur/kundur.raw",
+    "ieee14": "ieee14/ieee14.raw",
+    "ieee14_dyr": "ieee14/ieee14.raw",
+    "ieee39": "ieee39/ieee39.raw",
+    "wscc9": "wscc9/wscc9.raw",
+    "npcc": "npcc/npcc.raw",
+    "wecc": "wecc/wecc.raw",
+    "case14_m": "matpower/case14.m",
+}
+
+
+@pytest.mark.unit
+def test_every_recorded_corrections_document_has_its_case_file() -> None:
+    recorded = {path.name.split(".")[0] for path in SAMPLES.glob("*.corrections.json")}
+    assert recorded == set(SAMPLE_CASE_FILES)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", tuple(SAMPLE_CASE_FILES))
+def test_corrections_document_keeps_the_committed_keys(name: str) -> None:
+    committed_path = SAMPLES / f"{name}.corrections.json"
+    committed: dict[str, object] = json.loads(committed_path.read_text(encoding="utf-8"))
+    cases_dir = _andes_cases_dir()
+    assert cases_dir is not None, "ANDES cases folder not found"
+    case_path = Path(cases_dir) / SAMPLE_CASE_FILES[name]
+    assert case_path.is_file(), f"ANDES case file missing: {case_path}"
+    document = corrections_document(read_case_facts(case_path))
+    # The committed documents predate "ratings"; every key they have is
+    # what it was, value and serialised text.
+    assert set(document) == set(committed) | {"ratings"}, name
+    for key, value in committed.items():
+        assert document[key] == value, f"{name}: {key}"
+        assert json.dumps(document[key]) == json.dumps(value), f"{name}: {key}"

@@ -25,7 +25,7 @@ from tensa.core.wrapper.results import (
     TopologyEntry,
     TopologySnapshot,
 )
-from tensa.engines.keys import KeyBook
+from tensa.engines.keys import KeyBook, branch_key
 from tensa.engines.roles import role_of_model
 
 Row = dict[str, Any]
@@ -70,10 +70,43 @@ def _key(book: KeyBook, kind: str, idx: Any) -> str | None:
     return book.key_of(kind, idx)
 
 
+def file_ratings(
+    document: Mapping[str, Any] | None, book: KeyBook
+) -> tuple[dict[str, float] | None, int]:
+    """The file's branch ratings of a corrections document, keyed by branch key.
+
+    Each ``"ratings"`` row, ``[from, to, ckt, rate_mva]``, is keyed by
+    ``branch_key(from, to, ckt)``, the key the book gives that record's
+    branch. The answer is the mapping and the count of rows whose key the
+    book does not hold (left out of the mapping); a non-zero count is a
+    problem the caller reports. ``(None, 0)`` when the document is ``None``
+    or carries no ``"ratings"`` key (an older document): the caller then
+    keeps what the engine reported.
+    """
+    if document is None or "ratings" not in document:
+        return None, 0
+    rows = document.get("ratings")
+    if not isinstance(rows, list):
+        return None, 0
+    ratings: dict[str, float] = {}
+    unmatched = 0
+    for row in rows:
+        if not isinstance(row, list | tuple) or len(row) < 4:
+            unmatched += 1
+            continue
+        key = branch_key(_int(row[0]), _int(row[1]), _text(row[2]) or "1")
+        if book.entry_of(key) is None:
+            unmatched += 1
+            continue
+        ratings[key] = _float(row[3])
+    return ratings, unmatched
+
+
 def topology_snapshot(
     topology: Mapping[str, Any],
     report: Mapping[str, Any],
     book: KeyBook,
+    ratings: Mapping[str, float] | None = None,
 ) -> TopologySnapshot:
     """The ``TopologySnapshot`` of the Sienna ``topology`` JSON.
 
@@ -82,6 +115,13 @@ def topology_snapshot(
     numbers, ``"<generator>/<model>"`` for a dynamic record). ``report`` is
     unused for now: the snapshot's ``events`` stay empty and the report's
     messages go to the session log through ``report_messages``.
+
+    With ``ratings`` given (``file_ratings`` of the case's corrections
+    document), a branch's ``rate_a`` is the file's rating for its key (0.0
+    where the file gives none), whatever ``rate_mva`` the JSON holds: where
+    the file gives no rating PowerSystems invents one from the branch's
+    impedance and voltage. A branch whose key is not in ``ratings`` keeps the
+    JSON's value. With ``ratings`` ``None`` the JSON's value is used.
     """
     del report  # the snapshot carries no part of the report yet
     base_mva = _float(topology.get("base_mva"), 100.0)
@@ -111,7 +151,12 @@ def topology_snapshot(
     transformers: list[TopologyEntry] = []
     for row in _rows(topology, "branches"):
         name = _text(row.get("name"))
-        rate = row.get("rate_mva")
+        key = _key(book, "Line", name)
+        if ratings is not None and key is not None and key in ratings:
+            rate_a = ratings[key]
+        else:
+            rate = row.get("rate_mva")
+            rate_a = _float(rate) if rate is not None else 0.0
         params: dict[str, ParamValue] = {
             "bus1": _int(row["from"]),
             "bus2": _int(row["to"]),
@@ -120,7 +165,7 @@ def topology_snapshot(
             "b": _float(row.get("b_pu")),
             "tap": _float(row.get("tap"), 1.0),
             "phi": _float(row.get("shift_rad")),
-            "rate_a": _float(rate) if rate is not None else 0.0,
+            "rate_a": rate_a,
             "u": 1 if row.get("available", True) else 0,
         }
         entry = TopologyEntry(
@@ -128,7 +173,7 @@ def topology_snapshot(
             name=name,
             kind="Line",
             params=params,
-            key=_key(book, "Line", name),
+            key=key,
         )
         if row.get("kind") == "transformer":
             transformers.append(entry)
@@ -426,6 +471,7 @@ def pflow_result(
     pflow: Mapping[str, Any],
     topology: Mapping[str, Any],
     book: KeyBook,
+    ratings: Mapping[str, float] | None = None,
 ) -> PflowResult:
     """The ``PflowResult`` of the Sienna ``pflow`` JSON.
 
@@ -433,6 +479,12 @@ def pflow_result(
     ``keys`` ``{}``. The maps are keyed as the ANDES result keys them: a bus
     by its number, a branch, generator or load by its name (its idx), with
     ``keys`` going from that idx to the element's key.
+
+    With ``ratings`` given (``file_ratings`` of the case's corrections
+    document), a branch's ``rate_a`` is the file's rating for its key,
+    ``None`` when that is 0, and ``loading_pct`` is computed from it, as the
+    ANDES result has them; a branch whose key is not in ``ratings`` keeps the
+    JSON's ``rate_mva``. With ``ratings`` ``None`` the JSON's value is used.
     """
     # PowerFlows reports neither an iteration count nor a final mismatch, so
     # both are 0 here; no number is made up for them.
@@ -465,9 +517,14 @@ def pflow_result(
 
     rate_of: dict[str, float | None] = {}
     for row in _rows(topology, "branches"):
-        rate = row.get("rate_mva")
-        value = _float(rate) if rate is not None else 0.0
-        rate_of[_text(row.get("name"))] = value if value != 0.0 else None
+        name = _text(row.get("name"))
+        key = book.key_of("Line", name)
+        if ratings is not None and key is not None and key in ratings:
+            value = ratings[key]
+        else:
+            rate = row.get("rate_mva")
+            value = _float(rate) if rate is not None else 0.0
+        rate_of[name] = value if value != 0.0 else None
 
     line_flows: dict[str, LineFlow] = {}
     line_keys: dict[str, str] = {}

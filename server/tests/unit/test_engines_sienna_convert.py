@@ -22,9 +22,13 @@ import pytest
 from tensa.core.examples import _andes_cases_dir
 from tensa.core.wrapper import Wrapper
 from tensa.core.wrapper.results import TopologyEntry, TopologySnapshot
+from tensa.engines.andes.keys import assign_andes_keys
+from tensa.engines.case_facts import corrections_document, read_case_facts
 from tensa.engines.identity import read_identity
+from tensa.engines.keys import KeyBook
 from tensa.engines.roles import role_of_model
 from tensa.engines.sienna.convert import (
+    file_ratings,
     pflow_result,
     report_messages,
     topology_snapshot,
@@ -85,6 +89,17 @@ def _sienna_snapshot(name: str) -> TopologySnapshot:
     report = _sample(name, "report")
     book = assign_sienna_keys(topology, read_identity(_case_path(name)))
     return topology_snapshot(topology, report, book)
+
+
+def _file_ratings(name: str) -> tuple[KeyBook, dict[str, float]]:
+    """The key book of the case and the file's ratings of its case file."""
+    topology = _sample(name, "topology")
+    book = assign_sienna_keys(topology, read_identity(_case_path(name)))
+    document = corrections_document(read_case_facts(_case_path(name)))
+    ratings, unmatched = file_ratings(document, book)
+    assert unmatched == 0, f"{name}: {unmatched} rating row(s) matched no branch"
+    assert ratings is not None
+    return book, ratings
 
 
 def _andes_snapshot(name: str, tmp_path: Path) -> TopologySnapshot:
@@ -717,6 +732,195 @@ def test_report_messages_tap_note_kept_unless_put_back() -> None:
     ]
     kept = report_messages({"notes": [note], "applied": [other]})
     assert kept[-1] == ("warning", note["text"])
+
+
+@pytest.mark.unit
+def test_file_ratings_none_and_missing_key() -> None:
+    topology = _small_topology()
+    book = assign_sienna_keys(topology, None)
+    assert file_ratings(None, book) == (None, 0)
+    assert file_ratings({"v_setpoints": {}}, book) == (None, 0)
+
+
+@pytest.mark.unit
+def test_file_ratings_keys_and_unmatched_rows() -> None:
+    topology = _small_topology()
+    book = assign_sienna_keys(topology, None)
+    document = {
+        "ratings": [
+            [1, 2, "1", 250.0],
+            [1, 2, "9", 100.0],  # no branch:1-2-9 in the book
+            [3, 4, "1", 50.0],  # no such branch at all
+        ]
+    }
+    ratings, unmatched = file_ratings(document, book)
+    assert ratings == {"branch:1-2-1": 250.0}
+    assert unmatched == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", CASE_NAMES)
+def test_file_ratings_cover_every_branch_of_the_book(name: str) -> None:
+    book, ratings = _file_ratings(name)
+    branch_keys = {entry.key for entry in book.entries() if entry.model == "Line"}
+    assert set(ratings) == branch_keys
+    rows = corrections_document(read_case_facts(_case_path(name)))["ratings"]
+    assert isinstance(rows, list)
+    assert len(ratings) == len(rows)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relative", ["matpower/case300.m", "GBnetwork/GBnetwork.m"])
+def test_file_ratings_keys_on_matpower_parallel_branches(relative: str) -> None:
+    # No Sienna sample holds a MATPOWER case with parallel branches, so the
+    # keys are held to the book ANDES gets for the file: every row, a pair
+    # written twice or with either end first included, finds its branch.
+    import andes
+
+    cases_dir = _andes_cases_dir()
+    assert cases_dir is not None, "ANDES cases folder not found"
+    path = Path(cases_dir) / relative
+    assert path.is_file(), f"ANDES case file missing: {relative}"
+    identity = read_identity(path)
+    pairs = [(min(b.from_bus, b.to_bus), max(b.from_bus, b.to_bus)) for b in identity.branches]
+    assert len(set(pairs)) < len(pairs), "the case has no parallel branches"
+    andes.config_logger(stream_level=50)
+    ss = andes.load(str(path), setup=False, no_output=True, default_config=True)
+    book = assign_andes_keys(ss, identity)
+    rows = corrections_document(read_case_facts(path))["ratings"]
+    assert isinstance(rows, list)
+    ratings, unmatched = file_ratings({"ratings": rows}, book)
+    assert unmatched == 0
+    assert ratings is not None
+    assert len(ratings) == len(rows)
+    assert set(ratings) == {entry.key for entry in book.entries() if entry.model == "Line"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", CASE_NAMES)
+def test_topology_with_ratings_matches_andes(name: str, tmp_path: Path) -> None:
+    topology = _sample(name, "topology")
+    report = _sample(name, "report")
+    book, ratings = _file_ratings(name)
+    sienna = topology_snapshot(topology, report, book, ratings)
+    andes = _andes_snapshot(name, tmp_path)
+    sienna_branches = _entries_by_key(sienna, "lines", "transformers")
+    andes_branches = _entries_by_key(andes, "lines", "transformers")
+    assert set(sienna_branches) == set(andes_branches)
+    for key, s_entry in sienna_branches.items():
+        a_entry = andes_branches[key]
+        assert float(s_entry.params["rate_a"]) == pytest.approx(
+            float(a_entry.params["rate_a"]), abs=1e-6
+        ), f"branch {key} rate_a"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", CASE_NAMES)
+def test_pflow_with_ratings_matches_andes(name: str, tmp_path: Path) -> None:
+    topology = _sample(name, "topology")
+    pflow = _sample(name, "pflow")
+    book, ratings = _file_ratings(name)
+    sienna = pflow_result(pflow, topology, book, ratings)
+    assert sienna.converged
+    andes = _run_andes_pflow(name, tmp_path)
+
+    def by_key(result: Any, kind: str) -> dict[str, str]:
+        lookup: dict[str, str] = result.keys[kind]
+        return {key: idx for idx, key in lookup.items()}
+
+    andes_line_by_key = by_key(andes, "line")
+    sienna_line_by_key = by_key(sienna, "line")
+    assert set(sienna_line_by_key) == set(andes_line_by_key)
+    for key, s_name in sienna_line_by_key.items():
+        a_flow = andes.line_flows[andes_line_by_key[key]]
+        s_flow = sienna.line_flows[s_name]
+        if a_flow.rate_a is None:
+            # The file gives no rating: no rating and no loading on either side.
+            assert s_flow.rate_a is None, f"branch {key} rate_a"
+            assert s_flow.loading_pct is None, f"branch {key} loading_pct"
+        else:
+            assert s_flow.rate_a == pytest.approx(a_flow.rate_a, abs=1e-6), (
+                f"branch {key} rate_a"
+            )
+            assert s_flow.loading_pct == pytest.approx(
+                a_flow.loading_pct, abs=0.05
+            ), f"branch {key} loading_pct"
+
+
+@pytest.mark.unit
+def test_kundur_ratings_are_the_files_not_the_invented_ones() -> None:
+    # The kundur file gives no branch a rating (0). PowerSystems invents one
+    # from each branch's impedance and voltage and reports it as rate_mva;
+    # with the file's ratings the snapshot and the result say what the file
+    # says, as ANDES does.
+    topology = _sample("kundur", "topology")
+    pflow = _sample("kundur", "pflow")
+    book, ratings = _file_ratings("kundur")
+    without = topology_snapshot(topology, _sample("kundur", "report"), book)
+    for entry in (*without.lines, *without.transformers):
+        assert float(entry.params["rate_a"]) > 0.0  # the engine's invented value
+    with_ratings = topology_snapshot(topology, _sample("kundur", "report"), book, ratings)
+    for entry in (*with_ratings.lines, *with_ratings.transformers):
+        assert entry.params["rate_a"] == 0.0
+    for flow in pflow_result(pflow, topology, book).line_flows.values():
+        assert flow.rate_a is not None and flow.rate_a > 0.0  # invented
+        assert flow.loading_pct is not None
+    result = pflow_result(pflow, topology, book, ratings)
+    assert result.line_flows
+    for flow in result.line_flows.values():
+        assert flow.rate_a is None
+        assert flow.loading_pct is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", CASE_NAMES)
+def test_ratings_none_is_what_the_functions_gave_before(name: str) -> None:
+    topology = _sample(name, "topology")
+    report = _sample(name, "report")
+    pflow = _sample(name, "pflow")
+    book = assign_sienna_keys(topology, read_identity(_case_path(name)))
+    snapshot = topology_snapshot(topology, report, book, None)
+    result = pflow_result(pflow, topology, book, None)
+    assert snapshot == topology_snapshot(topology, report, book)
+    assert result == pflow_result(pflow, topology, book)
+    # What "before" was: the engine's rate_mva, and no rating where it is 0.
+    # A mapping that holds none of the keys changes nothing either.
+    engine_rate = {row["name"]: float(row["rate_mva"]) for row in topology["branches"]}
+    for entry in (*snapshot.lines, *snapshot.transformers):
+        assert entry.params["rate_a"] == engine_rate[entry.name]
+    for line_name, flow in result.line_flows.items():
+        assert flow.rate_a == (engine_rate[line_name] or None)
+    assert topology_snapshot(topology, report, book, {}) == snapshot
+    assert pflow_result(pflow, topology, book, {}) == result
+
+
+@pytest.mark.unit
+def test_ratings_given_replace_the_engines_where_both_rate() -> None:
+    # On IEEE 14 the file and the engine give every branch the same rating,
+    # so the comparison with ANDES cannot tell which one was used; a rating
+    # that differs from the engine's must be the one shown, and the loading
+    # must be computed from it.
+    topology = _sample("ieee14", "topology")
+    report = _sample("ieee14", "report")
+    pflow = _sample("ieee14", "pflow")
+    book = assign_sienna_keys(topology, read_identity(_case_path("ieee14")))
+    engine = pflow_result(pflow, topology, book)
+    doubled: dict[str, float] = {}
+    for row in topology["branches"]:
+        key = book.key_of("Line", row["name"])
+        assert key is not None
+        assert float(row["rate_mva"]) > 0.0
+        doubled[key] = 2.0 * float(row["rate_mva"])
+    snapshot = topology_snapshot(topology, report, book, doubled)
+    for entry in (*snapshot.lines, *snapshot.transformers):
+        assert entry.key is not None
+        assert entry.params["rate_a"] == doubled[entry.key]
+    result = pflow_result(pflow, topology, book, doubled)
+    for line_name, flow in result.line_flows.items():
+        before = engine.line_flows[line_name]
+        assert before.rate_a is not None and before.loading_pct is not None
+        assert flow.rate_a == 2.0 * before.rate_a
+        assert flow.loading_pct == pytest.approx(before.loading_pct / 2.0, rel=1e-12)
 
 
 @pytest.mark.unit
