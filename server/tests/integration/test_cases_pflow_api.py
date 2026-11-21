@@ -297,6 +297,9 @@ async def test_pflow_with_no_body_fields_reports_the_default_settings(
         "max_iterations": 25,
         "flat_start": False,
         "enforce_q_limits": False,
+        "method": "NR",
+        "n_factorize": 4,
+        "linesearch": True,
     }
 
 
@@ -321,6 +324,9 @@ async def test_pflow_settings_in_the_body_apply_to_that_run_only(
         "max_iterations": 40,
         "flat_start": True,
         "enforce_q_limits": True,
+        "method": "NR",
+        "n_factorize": 4,
+        "linesearch": True,
     }
     # The generator on bus 2 is held at its 15 MVAr limit instead of solving to 30.
     assert body["generator_outputs"]["2"]["q"] == pytest.approx(15.0, abs=1e-3)
@@ -363,7 +369,9 @@ async def test_pflow_that_does_not_converge_says_so_with_its_settings_and_no_sum
         {"max_iterations": 0},
         {"max_iterations": 100000},
         {"flat_start": "sometimes"},
-        {"method": "NR"},
+        {"method": "newton"},
+        {"n_factorize": 0},
+        {"solver": "NR"},  # a setting this request does not have
     ],
 )
 async def test_pflow_refuses_a_setting_out_of_range_and_stays_usable(

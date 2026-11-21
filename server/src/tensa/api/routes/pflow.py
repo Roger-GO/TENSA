@@ -138,7 +138,8 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
                 "ANDES setup() failed, OR a previous EIG run mutated dae "
                 "state (``TDS.initialized=True``). Either case requires "
                 "POST /reload to recover. Also a setting outside its range "
-                "(``tolerance``, ``max_iterations``), which needs no reload: "
+                "(``tolerance``, ``max_iterations``, ``method``, "
+                "``n_factorize``, ``linesearch``), which needs no reload: "
                 "fix the request."
             ),
         },

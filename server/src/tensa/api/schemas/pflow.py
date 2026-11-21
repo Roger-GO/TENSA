@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from tensa.core.pflow_options import (
     MAX_ITERATIONS_MAX,
     MAX_ITERATIONS_MIN,
+    N_FACTORIZE_MAX,
+    N_FACTORIZE_MIN,
     TOLERANCE_MAX,
     TOLERANCE_MIN,
 )
@@ -158,6 +160,33 @@ class PflowSettings(BaseModel):
             "``qmin`` or ``qmax`` was held at that limit (PV to PQ switching)."
         ),
     )
+    # The three solver settings are always reported by this server; they default
+    # to null so that a client built against a server that did not report them
+    # still reads the object.
+    method: str | None = Field(
+        default=None,
+        description=(
+            "The solver the run used: ``NR`` (Newton-Raphson), ``dishonest`` "
+            "(Newton-Raphson that reuses the Jacobian after the first "
+            "``n_factorize`` iterations) or ``NK`` (Newton-Krylov from SciPy, "
+            "which stops by SciPy's own rule: it reads neither ``tolerance`` nor "
+            "``max_iterations`` and keeps no iteration count)."
+        ),
+    )
+    n_factorize: int | None = Field(
+        default=None,
+        description=(
+            "The number of initial iterations on which the dishonest method "
+            "refactorized the Jacobian; meaningless for the other methods."
+        ),
+    )
+    linesearch: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the backtracking line search was on; read by ``NR`` and "
+            "``dishonest`` only."
+        ),
+    )
 
 
 class PflowSummary(BaseModel):
@@ -232,7 +261,11 @@ class PflowResult(BaseModel):
         ),
     )
     iterations: int = Field(
-        ..., description="Number of Newton-Raphson iterations executed."
+        ...,
+        description=(
+            "Number of Newton-Raphson iterations executed. 0 for a run with "
+            "``method`` ``NK``, whose SciPy solver keeps no count ANDES reads."
+        ),
     )
     mismatch: float = Field(
         ...,
@@ -369,5 +402,37 @@ class PflowRunRequest(BaseModel):
             "reactive power goes past one (PV to PQ switching). Without it the "
             "limits are reported and not enforced. Left out, the case's own "
             "setting stands; ``false`` turns off enforcement the case file asks for."
+        ),
+    )
+    method: str | None = Field(
+        default=None,
+        description=(
+            "The solver ANDES runs: ``\"NR\"`` Newton-Raphson (the default), "
+            "``\"dishonest\"`` the same but reusing the Jacobian after the "
+            "first ``n_factorize`` iterations, ``\"NK\"`` Newton-Krylov from "
+            "SciPy; one of those three, case-sensitively. ``NK`` stops by "
+            "SciPy's own rule, so ``tolerance``, ``max_iterations`` and "
+            "``linesearch`` do not apply to it, and its result reports "
+            "``iterations`` as 0. Left out, the case's own setting stands."
+        ),
+    )
+    n_factorize: int | None = Field(
+        default=None,
+        ge=N_FACTORIZE_MIN,
+        le=N_FACTORIZE_MAX,
+        description=(
+            "The first N iterations of the dishonest method that refactorize "
+            "the Jacobian; ignored by ``NR`` and ``NK``; ANDES's default is 4. "
+            "Left out, the case's own setting stands."
+        ),
+    )
+    linesearch: bool | None = Field(
+        default=None,
+        description=(
+            "The nonmonotone backtracking line search on the Newton step, "
+            "which shortens a step whose residual would grow and can pull a "
+            "run that overshoots back to convergence; read only by the NR and "
+            "dishonest solvers, so without effect under ``NK``; ANDES's "
+            "default is on. Left out, the case's own setting stands."
         ),
     )

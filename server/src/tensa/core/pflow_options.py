@@ -1,8 +1,13 @@
 """The settings one power-flow request can change, and how they reach ANDES.
 
-ANDES keeps the solver's tolerance and iteration limit in ``ss.PFlow.config``
-and the flat-start switch in ``ss.Bus.config``, both read while the solver runs.
-Reactive-power limit enforcement (``pv2pq``) is different: the PV and Slack
+ANDES keeps the solver's tolerance, iteration limit, method (``NR``,
+``dishonest``, ``NK``), the dishonest method's refactorisation count
+(``n_factorize``) and its line-search switch (``linesearch``) in
+``ss.PFlow.config``, and the flat-start switch in ``ss.Bus.config``, all read by
+``PFlow.run`` and the solver it calls, never copied anywhere earlier. ``NK``
+hands the equations to SciPy's ``newton_krylov`` with SciPy's own stopping
+rule, so it reads neither the tolerance, the iteration limit nor the line-search
+switch, and keeps no iteration count. Reactive-power limit enforcement (``pv2pq``) is different: the PV and Slack
 models build their ``qlim`` limiter once, with ``enable`` copied from the config
 at that moment, so writing ``PV.config.pv2pq`` to a loaded System does nothing.
 The switch that works on a live System is the limiter's own ``enable``, and the
@@ -45,6 +50,19 @@ TOLERANCE_MAX = 1e-2
 MAX_ITERATIONS_MIN = 1
 MAX_ITERATIONS_MAX = 1000
 
+# The solvers ``PFlow.config.method`` takes (its ``_alt`` declares these, in
+# this order). The check is case-sensitive: ``run()`` lowercases the value to
+# choose the solver, but the Newton loop compares it with ``"dishonest"`` as it
+# is, so ``"Dishonest"`` would run plain NR and be reported as the dishonest
+# method. ``n_factorize`` is the first N
+# iterations of the dishonest method that refactorize the Jacobian; ANDES
+# declares only ``>0``, and 100 is past any ``max_iterations`` a request may
+# set, so a larger value would only ever mean "never refactorize", which
+# ``method="NR"`` says directly.
+METHODS = ("NR", "dishonest", "NK")
+N_FACTORIZE_MIN = 1
+N_FACTORIZE_MAX = 100
+
 
 @dataclass(frozen=True)
 class PflowSettings:
@@ -54,6 +72,9 @@ class PflowSettings:
     max_iterations: int
     flat_start: bool
     enforce_q_limits: bool
+    method: str
+    n_factorize: int
+    linesearch: bool
 
 
 def validate_pflow_options(
@@ -62,6 +83,9 @@ def validate_pflow_options(
     max_iterations: object = None,
     flat_start: object = None,
     enforce_q_limits: object = None,
+    method: object = None,
+    n_factorize: object = None,
+    linesearch: object = None,
 ) -> None:
     """Refuse a power-flow setting ANDES would take and then misbehave on.
 
@@ -92,9 +116,26 @@ def validate_pflow_options(
             f"max_iterations must be a whole number from {MAX_ITERATIONS_MIN} to "
             f"{MAX_ITERATIONS_MAX}, got {short_repr(max_iterations)}"
         )
-    for name, value in (("flat_start", flat_start), ("enforce_q_limits", enforce_q_limits)):
+    for name, value in (
+        ("flat_start", flat_start),
+        ("enforce_q_limits", enforce_q_limits),
+        ("linesearch", linesearch),
+    ):
         if value is not None and not isinstance(value, bool):
             raise PflowRequestError(f"{name} must be true or false, got {short_repr(value)}")
+    if method is not None and (not isinstance(method, str) or method not in METHODS):
+        raise PflowRequestError(
+            f"method must be one of {METHODS}, got {short_repr(method)}"
+        )
+    if n_factorize is not None and (
+        isinstance(n_factorize, bool)
+        or not isinstance(n_factorize, int)
+        or not N_FACTORIZE_MIN <= n_factorize <= N_FACTORIZE_MAX
+    ):
+        raise PflowRequestError(
+            f"n_factorize must be a whole number from {N_FACTORIZE_MIN} to "
+            f"{N_FACTORIZE_MAX}, got {short_repr(n_factorize)}"
+        )
 
 
 def q_limiters(ss: System) -> list[Any]:
@@ -136,6 +177,9 @@ def pflow_options_applied(
     max_iterations: int | None = None,
     flat_start: bool | None = None,
     enforce_q_limits: bool | None = None,
+    method: str | None = None,
+    n_factorize: int | None = None,
+    linesearch: bool | None = None,
 ) -> Iterator[PflowSettings]:
     """Apply a request's power-flow settings for one run and restore them after.
 
@@ -156,6 +200,7 @@ def pflow_options_applied(
         bus_config.flat_start,
         [limiter.enable for limiter in limiters],
     )
+    solver_before = (pflow_config.method, pflow_config.n_factorize, pflow_config.linesearch)
     try:
         if tolerance is not None:
             pflow_config.tol = float(tolerance)
@@ -166,16 +211,26 @@ def pflow_options_applied(
         if enforce_q_limits is not None:
             for limiter in limiters:
                 limiter.enable = bool(enforce_q_limits)
+        if method is not None:
+            pflow_config.method = method
+        if n_factorize is not None:
+            pflow_config.n_factorize = int(n_factorize)
+        if linesearch is not None:
+            pflow_config.linesearch = 1 if linesearch else 0
         clear_q_limiters(limiters)
         yield PflowSettings(
             tolerance=_finite(pflow_config.tol, 1e-6),
             max_iterations=int(_finite(pflow_config.max_iter, 25)),
             flat_start=bool(bus_config.flat_start),
             enforce_q_limits=any(bool(limiter.enable) for limiter in limiters),
+            method=str(pflow_config.method),
+            n_factorize=int(_finite(pflow_config.n_factorize, 4)),
+            linesearch=bool(pflow_config.linesearch),
         )
     finally:
         pflow_config.tol, pflow_config.max_iter, bus_config.flat_start = before[:3]
         for limiter, enable in zip(limiters, before[3], strict=True):
             limiter.enable = enable
+        pflow_config.method, pflow_config.n_factorize, pflow_config.linesearch = solver_before
         if not bool(getattr(ss.PFlow, "converged", False)):
             clear_q_limiters(limiters)

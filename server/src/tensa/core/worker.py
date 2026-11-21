@@ -42,7 +42,7 @@ Wire protocol on the control Pipe (parent → worker):
 
     {"op": "load_case", "args": {"path": ..., "addfiles": [...]}, "seq": N}
     {"op": "add_disturbance", "args": {"spec": <dict>}, "seq": N}
-    {"op": "run_pflow", "args": {"tolerance": ..., "max_iterations": ..., "flat_start": ..., "enforce_q_limits": ...}, "seq": N}
+    {"op": "run_pflow", "args": {"tolerance": ..., "max_iterations": ..., "flat_start": ..., "enforce_q_limits": ..., "method": ..., "n_factorize": ..., "linesearch": ...}, "seq": N}
     {"op": "run_tds", "args": {"tf": ..., "h": ...}, "seq": N}
     {"op": "reload_case", "args": {}, "seq": N}
     {"op": "topology", "args": {}, "seq": N}
@@ -684,7 +684,15 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     # value out of range, so the worker does not rely on the REST body's checks.
     options = {
         key: args[key]
-        for key in ("tolerance", "max_iterations", "flat_start", "enforce_q_limits")
+        for key in (
+            "tolerance",
+            "max_iterations",
+            "flat_start",
+            "enforce_q_limits",
+            "method",
+            "n_factorize",
+            "linesearch",
+        )
         if args.get(key) is not None
     }
     result = wrapper.run_pflow(**options)
