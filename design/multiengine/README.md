@@ -20,6 +20,7 @@ Work in progress on the `multiengine` branch. `main` is unchanged until the pull
 | `reports/model_matrix.md` | Every dynamic model name against ANDES, Sienna's parser and Sienna's simulator. |
 | `reports/spec-review-1.md` | The first review of the specification, merged, with the verdict on each correction. |
 | `reports/phase-3.md` | The engine seam: what exists, the evidence, what went wrong and what changed because of it. |
+| `reports/phase-7a.md` | The ANDES capabilities added: what each route does, what running ANDES showed, the evidence, open points, findings for upstream. |
 | `spike/` | The throwaway scripts behind the spike report, kept so its numbers can be reproduced. They read paths under `%LOCALAPPDATA%\tensa-dev`. |
 
 ## Phases
@@ -30,11 +31,11 @@ Work in progress on the `multiengine` branch. `main` is unchanged until the pull
 | 1 | Spike: both engines on one case; bridge to Julia | done |
 | 2 | Specification | draft 2, reviewed once |
 | 3 | Engine seam: sessions name an engine, capabilities, identity, keys, web client | done (`reports/phase-3.md`) |
-| 4 | Sienna: case, topology, power flow | next |
+| 4 | Sienna: case, topology, power flow | in progress: the Julia module, the case facts and the availability check are in; the worker side is next |
 | 5 | Sienna: dynamics, streaming, small-signal, model audits | |
 | 6 | Comparison: API and UI | |
 | 7 | Sienna-only capabilities (matrices, DC power flow, operations) | |
-| 7A | ANDES capabilities not yet in TENSA | |
+| 7A | ANDES capabilities not yet in TENSA | server side done but for the pandapower bridge, deferred (`reports/phase-7a.md`); web surfaces in progress |
 | 8 | Editing under Sienna, packaging, CI with Julia, docs, pull request | |
 
 ## How the work is done
