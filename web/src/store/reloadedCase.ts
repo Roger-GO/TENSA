@@ -23,11 +23,21 @@
  * the page then only stops waiting for it (`postpone`): the mark stays, and
  * the next reload asks again.
  *
+ * The mark also names the engine of the session the case is open in: a case
+ * opened under one engine is not replayed into a session of another, so a
+ * mark whose engine is not the session's is not reopened
+ * (`useReopenAfterReload`). A mark without `engine` reads as the default
+ * engine (`markEngine`): a mark written before engines were kept, and the
+ * mark of a case open under the default engine, which leaves it out so that
+ * the mark is what it always was.
+ *
  * A storage failure (private mode, quota) leaves the page starting empty, as
  * on a first visit, and nothing else changed.
  */
 import { create } from 'zustand';
+import { DEFAULT_ENGINE } from '@/lib/engines';
 import type { CaseSelection } from './case';
+import { useSessionStore } from './session';
 
 export const OPEN_CASE_STORAGE_KEY = 'tensa:open-case-v1';
 
@@ -37,6 +47,8 @@ export interface CaseOnFile {
   primaryPath: string;
   /** Workspace-relative paths of the dynamic files it was opened with, in load order. */
   addfiles: string[];
+  /** The engine of the session the case is open in; absent for the default engine. */
+  engine?: string;
 }
 
 /** A system that was built from scratch: no file holds it, and the edits kept for it are all of it. */
@@ -44,6 +56,7 @@ export interface CaseFromScratch {
   primaryPath: null;
   addfiles: [];
   blank: true;
+  engine?: string;
 }
 
 /** What the tab had open: a case file, or a system built from scratch. */
@@ -54,11 +67,17 @@ export function isOnFile(mark: OpenCaseMark): mark is CaseOnFile {
   return mark.primaryPath !== null;
 }
 
+/** The engine of the session the case was open in: the mark's own, or the default for a mark that names none. */
+export function markEngine(mark: OpenCaseMark): string {
+  return mark.engine ?? DEFAULT_ENGINE;
+}
+
 function markFrom(value: unknown): OpenCaseMark | null {
   if (value === null || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
+  const engine = typeof v.engine === 'string' && v.engine.length > 0 ? { engine: v.engine } : {};
   if (v.blank === true && v.primaryPath === null) {
-    return { primaryPath: null, addfiles: [], blank: true };
+    return { primaryPath: null, addfiles: [], blank: true, ...engine };
   }
   if (
     typeof v.primaryPath === 'string' &&
@@ -66,7 +85,7 @@ function markFrom(value: unknown): OpenCaseMark | null {
     Array.isArray(v.addfiles) &&
     v.addfiles.every((a) => typeof a === 'string')
   ) {
-    return { primaryPath: v.primaryPath, addfiles: [...(v.addfiles as string[])] };
+    return { primaryPath: v.primaryPath, addfiles: [...(v.addfiles as string[])], ...engine };
   }
   return null;
 }
@@ -135,12 +154,15 @@ export interface ReloadedCaseState {
 export const useReloadedCaseStore = create<ReloadedCaseState>((set) => ({
   closed: readOpenCaseMark(),
   follow: (selection) => {
+    // The engine the case is open under, left out for the default engine.
+    const engine = useSessionStore.getState().engine;
+    const named = engine !== null && engine !== DEFAULT_ENGINE ? { engine } : {};
     const mark: OpenCaseMark | null =
       selection === null
         ? null
         : selection.primaryPath === null
-          ? { primaryPath: null, addfiles: [], blank: true }
-          : { primaryPath: selection.primaryPath, addfiles: [...selection.addfiles] };
+          ? { primaryPath: null, addfiles: [], blank: true, ...named }
+          : { primaryPath: selection.primaryPath, addfiles: [...selection.addfiles], ...named };
     writeOpenCaseMark(mark);
     if (mark === null || isOnFile(mark)) dropBlankDrafts();
     set({ closed: null });

@@ -36,6 +36,7 @@
  */
 import { create } from 'zustand';
 import type { EngineList, SessionId } from '@/api/types';
+import { DEFAULT_ENGINE } from '@/lib/engines';
 
 /**
  * Maximum recovery attempts allowed within ``RECOVERY_WINDOW_MS`` before the
@@ -72,6 +73,11 @@ export interface SessionState {
    * until the first session has answered. It is kept when the session is
    * reset for recovery so the replacement session asks for the same engine;
    * `clearSession` (the user closed the session) sets it back to `null`.
+   *
+   * The tab also keeps it across a reload of the page (`ENGINE_STORAGE_KEY`),
+   * so the first session of the next page asks for it: the store starts with
+   * the kept engine, and the key is written in one place, when a session
+   * lands (`setSessionId`), never for an engine that was only asked for.
    */
   engine: string | null;
   setEngine: (engine: string | null) => void;
@@ -209,6 +215,40 @@ function defaultHardReset(): void {
 let hardResetImpl: () => void = defaultHardReset;
 
 /**
+ * Where the tab keeps the engine of its session for a reload of the page. The
+ * default engine is not written (no key reads as the default already), so a
+ * tab that never left ANDES keeps nothing and asks for a session as it always
+ * did.
+ */
+export const ENGINE_STORAGE_KEY = 'tensa:engine-v1';
+
+/** The engine the tab's last session had, kept so a reload starts with it; anything missing or malformed reads as none. */
+export function readKeptEngine(): string | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    const raw = sessionStorage.getItem(ENGINE_STORAGE_KEY);
+    return raw !== null && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keep the engine of a session that exists, or drop what is kept with `null`
+ * or the default engine. Returns `false` if storage threw.
+ */
+export function writeKeptEngine(engine: string | null): boolean {
+  try {
+    if (typeof sessionStorage === 'undefined') return false;
+    if (engine === null || engine === DEFAULT_ENGINE) sessionStorage.removeItem(ENGINE_STORAGE_KEY);
+    else sessionStorage.setItem(ENGINE_STORAGE_KEY, engine);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Test seam: swap the side-effect implementation invoked by
  * ``hardReset``. Production callers should never use this — the default
  * implementation is the entire contract. Tests use it because jsdom
@@ -227,10 +267,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sessionId: null,
   workspaceId: null,
   setWorkspaceId: (id) => set({ workspaceId: id }),
-  engine: null,
+  engine: readKeptEngine(),
   setEngine: (engine) => set({ engine }),
   previousEngine: null,
   setPreviousEngine: (engine) => set({ previousEngine: engine }),
+  // Nothing is kept here: a reload before the new session lands comes back on
+  // the engine of the session that was released (the switch closed the case,
+  // so there is nothing to reopen), and a refused create is never kept.
   startEngineSwitch: (from, to) => set({ sessionId: null, engine: to, previousEngine: from }),
   engines: null,
   setEngines: (engines) => set({ engines }),
@@ -238,7 +281,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   recoveryFailed: false,
   recoveryAttempts: [],
   recoveryStuckSince: null,
-  setSessionId: (id: SessionId) => set({ sessionId: id }),
+  setSessionId: (id: SessionId) => {
+    set({ sessionId: id });
+    // A session landing is what says its engine exists: the one place the
+    // kept engine is written (the default engine, or none, drops it).
+    writeKeptEngine(get().engine);
+  },
   clearSession: () => set({ sessionId: null, engine: null }),
   resetSession: () => {
     const now = Date.now();

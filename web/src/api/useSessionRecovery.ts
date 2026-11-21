@@ -106,12 +106,15 @@ import { useCreateSession, useLoadCase } from './queries';
 import { andesClient, ProblemDetailsError, TIMEOUTS } from './client';
 import { retryWhileBusy } from './replayJournal';
 import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdits';
-import { useSessionStore, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
+import { useSessionStore, writeKeptEngine, RECOVERY_STUCK_TIMEOUT_MS } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
+import { isOnFile, useReloadedCaseStore } from '@/store/reloadedCase';
 import { DEFAULT_ENGINE, engineLabel } from '@/lib/engines';
+import { baseName } from '@/lib/paths';
 import { toast } from '@/lib/toast';
+import { RELOADED } from './useReopenAfterReload';
 
 const CREATE_DEBOUNCE_MS = 1_000;
 
@@ -453,6 +456,13 @@ export function useSessionRecovery(): void {
   // the refused one): the badge shows it connecting, and it gives up with a
   // Reload as any recovery does. The case was closed by the switch, so the
   // recovery has nothing to reopen. Once a session lands the switch is over.
+  //
+  // The first create after a reload asks for the engine the tab kept
+  // (`ENGINE_STORAGE_KEY` in `store/session.ts`). When the server refuses it,
+  // the page falls back to the default engine the same way, forgets the kept
+  // one, and drops the case the reload interrupted and its edits, which were
+  // made under the engine that is gone (`useReopenAfterReload` never sees
+  // them).
   const createError = createSession.error;
   const createIsError = createSession.isError;
   useEffect(() => {
@@ -463,7 +473,52 @@ export function useSessionRecovery(): void {
     }
     if (!createIsError || createError === null) return;
     const previousEngine = store.previousEngine;
-    if (previousEngine === null) return;
+    if (previousEngine === null) {
+      // No switch under way. With no recovery under way either, this is the
+      // first create of the page, for the engine a reload kept. Only a
+      // refusal of the server says that engine cannot be had: a 409 (not
+      // available in this build) or a 422 (a name the server does not know,
+      // from a kept value no build of the client writes). A request that got
+      // no answer drops nothing the tab keeps: the next reload asks again. A
+      // recovery that is refused is left to the recovery's own failure, since
+      // the case it holds would be reloaded into the fallback session.
+      const refused = store.engine;
+      if (refused === null || refused === DEFAULT_ENGINE || store.recoveryInProgress) return;
+      if (!(createError instanceof ProblemDetailsError)) return;
+      if (createError.status !== 409 && createError.status !== 422) return;
+      // Fall back to the default engine, forget the kept one, and do not
+      // reopen the case that was open under it.
+      store.setEngine(null);
+      writeKeptEngine(null);
+      // A 422 names the body's validation errors, which say nothing to a user.
+      const reason =
+        createError.status === 422
+          ? 'the server does not know this engine'
+          : reasonOf(createError).replace(/\.+$/, '');
+      toast.error(
+        `${engineLabel(refused)} is not available any more: ${reason}. Started an ${engineLabel(DEFAULT_ENGINE)} session instead.`,
+      );
+      const closed = useReloadedCaseStore.getState().closed;
+      if (closed !== null) {
+        // What `useReopenAfterReload` says while it waits for the session.
+        useCaseStore.getState().setLoadingPath(null);
+        // The mark, and the journal the tab kept (the journal's own keeping
+        // drops it when the store starts over).
+        useReloadedCaseStore.getState().forget();
+        useEditJournalStore.getState().reset();
+        toast.error(
+          `${isOnFile(closed) ? baseName(closed.primaryPath) : 'The system you were building'} was open under ${engineLabel(refused)} and was not reopened: a case opened under one engine is not replayed into another.`,
+          { description: RELOADED, duration: 12_000 },
+        );
+      }
+      // The fallback create goes through the recovery path: the badge shows
+      // it connecting, the auto-create gate fires (the debounce is reset),
+      // and the body is `{}` (the default engine) because `engine` is null.
+      createSession.reset();
+      lastCreateAttemptRef.current = 0;
+      store.resetSession();
+      return;
+    }
     const refused = store.engine ?? DEFAULT_ENGINE;
     store.setEngine(previousEngine);
     store.setPreviousEngine(null);

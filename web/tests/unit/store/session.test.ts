@@ -20,8 +20,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   useSessionStore,
+  ENGINE_STORAGE_KEY,
   RECOVERY_STUCK_TIMEOUT_MS,
   MAX_RECOVERY_ATTEMPTS,
+  readKeptEngine,
   setHardResetImpl,
   resetHardResetImpl,
 } from '@/store/session';
@@ -317,6 +319,97 @@ describe('session store — stuck-detection wall-clock arithmetic', () => {
     vi.setSystemTime(new Date('2026-05-09T12:00:05Z'));
     const elapsed = Date.now() - (stuckSince ?? 0);
     expect(elapsed).toBeLessThan(RECOVERY_STUCK_TIMEOUT_MS);
+  });
+});
+
+describe('session store — kept engine across a reload', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+    window.sessionStorage.clear();
+  });
+
+  it('setEngine alone keeps nothing: an engine that was only asked for is not kept', () => {
+    useSessionStore.getState().setEngine('sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useSessionStore.getState().setEngine('sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('setSessionId keeps the engine of the session that landed (a session landing keeps its engine)', () => {
+    useSessionStore.setState({ engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+
+  it('a session of the default engine, or of none named, drops what was kept', () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ engine: 'andes' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ engine: null });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-2'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('startEngineSwitch keeps nothing until the session of the new engine lands', () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().startEngineSwitch('sienna', 'andes');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+    useSessionStore.setState({ sessionId: null, engine: 'andes' });
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+    window.sessionStorage.removeItem(ENGINE_STORAGE_KEY);
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('clearSession keeps the key (a recovery clears and recreates the session and must keep the engine)', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    useSessionStore.getState().clearSession();
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+
+  it('resetSession leaves the key alone', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    useSessionStore.getState().resetSession();
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+});
+
+describe('session store — the initial engine is the kept one', () => {
+  afterEach(() => {
+    vi.resetModules();
+    window.sessionStorage.clear();
+  });
+
+  it('a fresh store starts with the engine the tab kept', async () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    vi.resetModules();
+    const fresh = await import('@/store/session');
+    expect(fresh.useSessionStore.getState().engine).toBe('sienna');
+    expect(fresh.readKeptEngine()).toBe('sienna');
+  });
+
+  it('a malformed kept value (an empty string) reads as none', async () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, '');
+    vi.resetModules();
+    const fresh = await import('@/store/session');
+    expect(fresh.useSessionStore.getState().engine).toBeNull();
+    expect(fresh.readKeptEngine()).toBeNull();
+  });
+
+  it('nothing kept reads as none', () => {
+    expect(readKeptEngine()).toBeNull();
   });
 });
 

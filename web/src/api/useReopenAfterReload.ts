@@ -47,17 +47,18 @@ import { recreateBlankSystem, replayEditsInto, reportReplay } from './restoreEdi
 import { parseWorkspacePath } from './types';
 import type { WorkspacePath } from './types';
 import { describeError } from '@/lib/describeError';
+import { DEFAULT_ENGINE, engineLabel } from '@/lib/engines';
 import { pageIsLeaving } from '@/lib/pageLeaving';
 import { baseName } from '@/lib/paths';
 import { toast } from '@/lib/toast';
 import { useCaseStore } from '@/store/case';
 import { isWorkOp, journalBeforeReload, useEditJournalStore } from '@/store/editJournal';
 import type { KeptJournal } from '@/store/editJournal';
-import { isOnFile, useReloadedCaseStore } from '@/store/reloadedCase';
+import { isOnFile, markEngine, useReloadedCaseStore } from '@/store/reloadedCase';
 import { useSessionStore } from '@/store/session';
 
 /** What the notices of a reopening start with: why anything was opened at all. */
-const RELOADED = 'The page was reloaded.';
+export const RELOADED = 'The page was reloaded.';
 
 /**
  * What else a reload of the page keeps of a case file, said with the edits that
@@ -83,6 +84,21 @@ function giveUp(err: unknown): { why: string; kept: boolean } {
   useReloadedCaseStore.getState().postpone();
   // The error of a request that failed names its address, which says nothing here.
   return { why: 'The server did not answer.', kept: true };
+}
+
+/**
+ * Drop the case a reload interrupted and what the tab kept for it: it was
+ * open under another engine, and its edits are not replayed into this one.
+ * The same `forget` path as a case that cannot be put back, plus the journal
+ * (whose own `reset` drops the copy the tab keeps).
+ */
+function forgetOtherEngine(name: string, markEngineName: string, sessionEngineName: string): void {
+  useReloadedCaseStore.getState().forget();
+  useEditJournalStore.getState().reset();
+  toast.error(`${name} was not reopened`, {
+    description: `${RELOADED} It was open under ${engineLabel(markEngineName)}, and this session is ${engineLabel(sessionEngineName)}. Open it again from the Project tab of the left sidebar.`,
+    duration: 12_000,
+  });
 }
 
 /** Whether `journal` holds work that no save had written out. */
@@ -119,6 +135,18 @@ export function useReopenAfterReload(): void {
     if (closed === null || sessionId === null || started.current) return;
     started.current = true;
     if (useCaseStore.getState().selection !== null) return;
+    // A case opened under one engine is not reopened into a session of another.
+    const sessionEngine = useSessionStore.getState().engine ?? DEFAULT_ENGINE;
+    const caseEngine = markEngine(closed);
+    if (caseEngine !== sessionEngine) {
+      useCaseStore.getState().setLoadingPath(null);
+      forgetOtherEngine(
+        isOnFile(closed) ? baseName(closed.primaryPath) : 'The system you were building',
+        caseEngine,
+        sessionEngine,
+      );
+      return;
+    }
     const journal = journalBeforeReload();
     const entries = journal !== null && journal.replayable ? journal.entries : [];
     // What the journal could not record cannot be replayed: said once the case is open.
