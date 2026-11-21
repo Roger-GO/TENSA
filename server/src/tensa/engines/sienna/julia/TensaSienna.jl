@@ -39,6 +39,8 @@ mutable struct Session
     normalised_buses::Vector{Int}
     dyr_records::Vector{Dict{String, Any}}
     applied::Vector{Dict{String, Any}}
+    scratch::String
+    pflow_solved::Bool
 end
 
 # ---------------------------------------------------------------------------
@@ -511,6 +513,8 @@ function load_case(
         normalised_buses,
         dyr_records,
         applied,
+        String(scratch),
+        false,
     )
 end
 
@@ -875,6 +879,7 @@ function pflow_json(s::Session; tolerance = nothing, max_iterations = nothing)::
     converged = Logging.with_logger(logger) do
         solve_and_store_power_flow!(ACPowerFlow(), sys; kwargs...)
     end
+    s.pflow_solved = converged
     notes = [
         Dict{String, Any}("level" => _level_name(l), "text" => _scrub(t, (s.raw, s.dyr))) for
         (l, t) in logger.records
