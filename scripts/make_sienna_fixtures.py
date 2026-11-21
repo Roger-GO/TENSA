@@ -63,7 +63,7 @@ def main() -> None:
         a_ref = float(ss.Bus.a.v[0])
         pflow = {
             str(int(idx)): [float(v), math.remainder(float(a) - a_ref, 2 * math.pi)]
-            for idx, v, a in zip(ss.Bus.idx.v, ss.Bus.v.v, ss.Bus.a.v)
+            for idx, v, a in zip(ss.Bus.idx.v, ss.Bus.v.v, ss.Bus.a.v, strict=True)
         }
         fixture = {
             "name": name,
