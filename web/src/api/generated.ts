@@ -14,7 +14,7 @@ export interface paths {
         /** List currently-active sessions. */
         get: operations["listSessions"];
         put?: never;
-        /** Create a new session backed by a fresh ANDES worker subprocess. */
+        /** Create a new session backed by a fresh worker subprocess for its engine. */
         post: operations["createSession"];
         delete?: never;
         options?: never;
@@ -149,6 +149,28 @@ export interface paths {
          *     surfaces as 422 with the standard reload-recovery hint.
          */
         get: operations["getConnectivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the keys of the loaded case's elements, in assignment order.
+         * @description Every key of the case, each with its bucket, model, idx and source, and
+         *     the problems the assignment noted. With no case loaded the lists are empty:
+         *     a listing is a read.
+         */
+        get: operations["listKeys"];
         put?: never;
         post?: never;
         delete?: never;
@@ -766,6 +788,26 @@ export interface paths {
          *     change while the server runs.
          */
         get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the engines the server can start a session for, with their capabilities.
+         * @description Static endpoint: the capabilities are data and never change while the server runs.
+         */
+        get: operations["listEngines"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2867,6 +2909,12 @@ export interface components {
             /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
             redo?: components["schemas"]["EditStep"] | null;
             /**
+             * Has Dynamics
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``.
+             * @default false
+             */
+            has_dynamics: boolean;
+            /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
@@ -3144,6 +3192,78 @@ export interface components {
              * @description Job-registry id mirroring the element-add routine (kind ``element-add``). ``null`` on legacy responses.
              */
             job_id?: string | null;
+        };
+        /**
+         * EngineCapabilities
+         * @description What one engine can do, as ``GET /engines`` reports it (spec section 7).
+         */
+        EngineCapabilities: {
+            /**
+             * Name
+             * @description The engine's name (``andes``, ``sienna``).
+             */
+            name: string;
+            /**
+             * Available
+             * @description Whether this build can start a session for the engine.
+             */
+            available: boolean;
+            /**
+             * Unavailable Reason
+             * @description Why the engine cannot start a session, or null when it can.
+             */
+            unavailable_reason: string | null;
+            /**
+             * Versions
+             * @description The versions the engine runs with, by package (``andes`` for the ANDES engine). Empty for an engine that is not available.
+             */
+            versions: {
+                [key: string]: string;
+            };
+            /** @description The case file formats the engine reads and writes. */
+            formats: components["schemas"]["EngineFormats"];
+            /**
+             * Routines
+             * @description The routines the engine runs (``pflow``, ``tds``, ``eig``, ``cpf``, ``se``). A routine an engine lacks is absent here and refused with a 409 that names the engines that have it.
+             */
+            routines: string[];
+            /**
+             * Ops
+             * @description Every worker op the engine answers, sorted. Empty for an engine that is not available.
+             */
+            ops: string[];
+            /**
+             * Editing
+             * @description Whether the engine edits a case (add, edit and delete elements).
+             */
+            editing: boolean;
+        };
+        /**
+         * EngineFormats
+         * @description The case file formats an engine reads and writes.
+         */
+        EngineFormats: {
+            /**
+             * Read
+             * @description The formats the engine loads a case from (``xlsx``, ``json``, ``psse-raw``, ``psse-dyr``, ``matpower``). Empty for an engine that is not available.
+             */
+            read: string[];
+            /**
+             * Write
+             * @description The formats the engine saves a case as. Empty for an engine that is not available.
+             */
+            write: string[];
+        };
+        /**
+         * EngineList
+         * @description Response shape for ``GET /engines``.
+         */
+        EngineList: {
+            /**
+             * Engines
+             * @description Every engine the server knows, available or not, in a fixed order.
+             */
+            engines: components["schemas"]["EngineCapabilities"][];
         };
         /**
          * ExampleList
@@ -3554,6 +3674,54 @@ export interface components {
              * @default 0
              */
             repeated_count: number;
+        };
+        /**
+         * KeyEntrySchema
+         * @description One element of the loaded case and the key it was given.
+         */
+        KeyEntrySchema: {
+            /**
+             * Key
+             * @description The element's key: a string that names it the same way in every engine that loads the case (``bus:7``, ``line:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``), built from the case by the rule of section 4 of ``design/multiengine/spec.md``.
+             */
+            key: string;
+            /**
+             * Bucket
+             * @description The part of the case the element belongs to: ``bus``, ``line``, ``transformer``, ``generator``, ``load``, ``shunt``, ``dynamic`` or ``other``.
+             */
+            bucket: string;
+            /**
+             * Model
+             * @description The engine's model of the element (an ANDES model class name).
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The engine's own handle of the element within ``model``.
+             */
+            idx: number | string;
+            /**
+             * Source
+             * @description Where the id in the key came from: ``file`` for one read from the case file, ``engine`` for one the engine holds, ``ordinal`` for one made up from order.
+             */
+            source: string;
+        };
+        /**
+         * KeyList
+         * @description Every key of the loaded case, in assignment order, with the problems
+         *     the assignment noted.
+         */
+        KeyList: {
+            /**
+             * Keys
+             * @description One entry per element of the loaded case, in the order the keys were assigned. Empty when no case is loaded.
+             */
+            keys?: components["schemas"]["KeyEntrySchema"][];
+            /**
+             * Problems
+             * @description What assigning the keys found worth saying (a collision, an element the file does not name, ...). Empty when there is nothing to say.
+             */
+            problems?: string[];
         };
         /**
          * LayoutBranchRoute
@@ -4003,6 +4171,15 @@ export interface components {
             settings?: components["schemas"]["PflowSettings"] | null;
             /** @description System totals: generation, load, bus shunts, line losses and the slack output. ``null`` when the run did not converge, and on ``GET /sessions/{id}/operating-point``. */
             summary?: components["schemas"]["PflowSummary"] | null;
+            /**
+             * Keys
+             * @description The key of every element the result names, per kind: ``keys["bus"]`` maps the stringified idx of every bus in ``bus_voltages`` to its key, and ``line``, ``generator`` and ``load`` do the same for ``line_flows``, ``generator_outputs`` and ``load_consumption``. A key names an element the same way in every engine (section 4 of ``design/multiengine/spec.md``). An idx with no key is left out.
+             */
+            keys?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
             /**
              * Job Id
              * @description Job-registry id mirroring this routine invocation. Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
@@ -4645,6 +4822,11 @@ export interface components {
              * @default
              */
             workspace_id: string;
+            /**
+             * Engine
+             * @description The engine the session runs (``andes``, ``sienna``). A session is created for one engine and keeps it; the capabilities of the engine are listed by ``GET /engines``, not repeated here.
+             */
+            engine: string;
         };
         /**
          * SessionList
@@ -5413,6 +5595,11 @@ export interface components {
                 [key: string]: number | string | boolean;
             };
             /**
+             * Key
+             * @description The element's key: a string that names it the same way in every engine that loads the case (``bus:7``, ``line:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``), built from the case by the rule of section 4 of ``design/multiengine/spec.md``. ``idx`` stays the engine's own handle. ``null`` where the entry was built away from the key book.
+             */
+            key?: string | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the mutation that produced this entry. Populated only when this ``TopologyEntry`` is the top-level response of an edit / PMU-add / profile-add routine; ``null`` for nested entries inside a ``TopologySummary``.
              */
@@ -5537,6 +5724,12 @@ export interface components {
             undo?: components["schemas"]["EditStep"] | null;
             /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
             redo?: components["schemas"]["EditStep"] | null;
+            /**
+             * Has Dynamics
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``.
+             * @default false
+             */
+            has_dynamics: boolean;
             /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
@@ -5758,7 +5951,16 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDescriptor"];
                 };
             };
-            /** @description Body included a client-supplied session_id (rejected). */
+            /** @description The named engine is not part of this build; the detail says why. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Body failed validation (an unknown engine, or a field other than engine). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6093,6 +6295,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyList"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7647,6 +7889,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
+    listEngines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngineList"];
                 };
             };
         };
