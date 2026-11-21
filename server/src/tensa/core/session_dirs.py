@@ -118,10 +118,17 @@ def pid_space() -> str | None:
     return f"{host} {namespace}"
 
 
+def proc_stat_path(pid: int, proc_root: str = "/proc") -> str:
+    """The file Linux keeps the status of process ``pid`` in, which
+    ``process_start_time`` reads there. A worker writes an owner marker, so its
+    file-open audit hook counts this file of the marker's pid as routine."""
+    return f"{proc_root}/{pid}/stat"
+
+
 def _linux_process_start_time(pid: int, proc_root: str = "/proc") -> str | None:
     """Field 22 of ``/proc/<pid>/stat``: start time in clock ticks after boot."""
     try:
-        with open(f"{proc_root}/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+        with open(proc_stat_path(pid, proc_root), encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         # The command name (field 2) sits in parentheses and may hold spaces and
         # parentheses of its own, so split after the last one: field 3 comes next.

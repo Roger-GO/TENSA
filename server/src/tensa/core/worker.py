@@ -97,6 +97,7 @@ from tensa.core.messages import (
     uninstall_capture,
 )
 from tensa.core.pflow_notices import log_pflow_notices
+from tensa.core.session_dirs import proc_stat_path
 
 # AndesAppError catches the new ElementValidationError /
 # ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
@@ -327,11 +328,31 @@ def _routine_files(*directories: str) -> frozenset[str]:
     anything asks for a type, which ``openpyxl`` does, and ``dateutil`` reads the local time
     zone from ``/etc/localtime``. None of them reads anything of a case. Each of
     ``directories`` is itself one too (not what is in it): ``NamedTemporaryFile`` opens the
-    temporary directory it makes its file in, on every platform.
+    temporary directory it makes its file in, on every platform. The installer also passes
+    the files of ``_owner_marker_files`` here: each name is one exact path, never a tree.
     """
     local_time = () if os.name == "nt" else ("/etc/localtime",)
     names = (os.devnull, *getattr(mimetypes, "knownfiles", ()), *local_time, *directories)
     return frozenset(_normalized_path(name) for name in names)
+
+
+def _owner_marker_files(owner_pid: int | None, platform: str | None = None) -> tuple[str, ...]:
+    """The files outside the workspace that writing the session's owner marker reads, as
+    ``write_owner_marker`` (``core/session_dirs.py``) reads them in this worker.
+
+    The marker records when its owner started, which on Linux is a field of
+    ``/proc/<pid>/stat`` (``process_start_time``), so that a later server can tell a reused
+    pid. A Sienna state writes the marker on every load and an ANDES worker's clone manager
+    when it makes its scratch folder. The pid is the one the marker names: ``owner_pid``,
+    the server's, as the worker was handed it, or the worker's own when it was handed none,
+    which is the marker code's own default. Only that pid's ``stat``, never ``/proc`` as a
+    whole: another process's file there (its ``environ``, its memory) is no part of it.
+    Other systems read no file for it (Windows asks the kernel, macOS does not record it).
+    """
+    if not (platform or sys.platform).startswith("linux"):
+        return ()
+    pid = os.getpid() if owner_pid is None else owner_pid
+    return (proc_stat_path(pid),)
 
 
 def _routine_trees() -> tuple[str, ...]:
@@ -427,7 +448,9 @@ def _out_of_workspace_open(
     return real
 
 
-def _install_strict_fs_audit_hook(workspace: str | None, engine: str = "andes") -> None:
+def _install_strict_fs_audit_hook(
+    workspace: str | None, engine: str = "andes", owner_pid: int | None = None
+) -> None:
     """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
     file opens occurring outside the configured workspace.
 
@@ -441,6 +464,10 @@ def _install_strict_fs_audit_hook(workspace: str | None, engine: str = "andes") 
     opens ``lock.pid`` and ``pyjuliapkg/meta.json`` in the Sienna project
     folder when it starts, which is outside the workspace and routine for
     that engine, so the project folder is a routine tree then and only then.
+
+    ``owner_pid`` is the pid the worker was handed for the owner marker of its
+    scratch folders; on Linux the marker reads that pid's ``/proc/<pid>/stat``
+    (``_owner_marker_files``), which is routine for every engine.
 
     Best-effort only — the hook fires for ``open()`` events that travel
     through the Python interpreter. Reads from C extensions
@@ -460,10 +487,11 @@ def _install_strict_fs_audit_hook(workspace: str | None, engine: str = "andes") 
     # The standard library finds the temporary directory by creating a file with a random
     # name in a candidate directory the first time it is asked, which is an open outside the
     # workspace that ``tempfile`` does not announce. It is asked here, before the hook is in.
+    marker_files = _owner_marker_files(owner_pid)
     try:
-        routine_files = _routine_files(tempfile.gettempdir())
+        routine_files = _routine_files(tempfile.gettempdir(), *marker_files)
     except OSError:  # no usable temporary directory: nothing is made in one
-        routine_files = _routine_files()
+        routine_files = _routine_files(*marker_files)
     routine_trees = _routine_trees()
     if engine == "sienna":
         from tensa.engines.sienna.environment import sienna_project
@@ -2026,7 +2054,7 @@ def worker_main(
         # runs ahead of the audit hook on purpose: it reads only library files, and the
         # hook would log some of them (the system's ``mime.types``) as strays.
         _warm_up_if_idle(ctrl, runtime.warm_up)
-        _install_strict_fs_audit_hook(workspace, engine)
+        _install_strict_fs_audit_hook(workspace, engine, owner_pid)
         return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid, engine)
     finally:
         uninstall_capture()
