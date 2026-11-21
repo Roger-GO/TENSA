@@ -88,6 +88,12 @@ function LockProbe() {
   return <p data-testid="lock-probe">{blockedReason ?? 'open'}</p>;
 }
 
+/** Open the run actions menu beside the Run button and give its Check initialisation entry. */
+async function openCheck(): Promise<HTMLElement> {
+  await userEvent.click(screen.getByTestId('run-actions-trigger'));
+  return screen.findByTestId('tds-init-check');
+}
+
 function renderApp() {
   const client = makeQueryClient();
   client.setQueryData(queryKeys.topology(SESSION_ID), topology('pre-setup'));
@@ -148,7 +154,7 @@ describe('Check initialisation against the substrate', () => {
     expect(screen.getByTestId('lock-probe')).toHaveTextContent('open');
 
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
 
     const sent = fetchSpy.mock.calls.find(([input]) => urlOf(input).endsWith('/tds/init'));
     expect(sent).toBeDefined();
@@ -171,7 +177,8 @@ describe('Check initialisation against the substrate', () => {
     // check is offered again.
     await userEvent.click(screen.getByTestId('tds-init-reset-run'));
     await waitFor(() => expect(screen.getByTestId('lock-probe')).toHaveTextContent('open'));
-    await waitFor(() => expect(screen.getByTestId('tds-init-check')).toBeEnabled());
+    const check = await openCheck();
+    await waitFor(() => expect(check).not.toHaveAttribute('aria-disabled'));
   });
 
   it('a refused check (422) shows the server detail and leaves the system as it was', async () => {
@@ -196,7 +203,7 @@ describe('Check initialisation against the substrate', () => {
     });
     renderApp();
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     expect(await screen.findByTestId('tds-init-error')).toHaveTextContent(
       'The initialisation could not be checked: the loaded case has no dynamic models; there is no time-domain run to initialise',
     );

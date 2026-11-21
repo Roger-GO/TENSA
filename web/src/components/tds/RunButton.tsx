@@ -16,6 +16,7 @@ import {
   loadOperatingPointIntoStore,
 } from '@/api/queries';
 import type { TdsInitResult } from '@/api/types';
+import { TopBarMenu, TopBarMenuItem } from '@/components/shell/TopBarMenu';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { ProblemDetailsError } from '@/api/client';
@@ -69,6 +70,12 @@ const TdsInitResultDialog = lazyNamed(
  * - A small segmented control to the right of the button lets the user
  *   override the auto pick. Manual selection sticks until a state change
  *   (case load / reset) wipes it.
+ * - In TDS mode, a menu on a chevron beside the button holds the secondary
+ *   actions of the run: Check initialisation (with the reason it cannot be
+ *   used now under it), and Reset run once the check (or an eigenvalue
+ *   analysis) has initialised the run without a run to say Reset run itself.
+ *   The top bar has no room for a button of each at a laptop's width
+ *   (`topBarLayout.ts`).
  *
  * State machine:
  *
@@ -159,6 +166,41 @@ function Spinner() {
   );
 }
 
+/** The spinner, sized by the class the run actions trigger gives its glyph. */
+function SpinnerGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={cn('animate-spin', className)}
+    >
+      <path d="M8 1.5 A6.5 6.5 0 1 1 1.5 8" />
+    </svg>
+  );
+}
+
+/** A chevron pointing down: the trigger of the run actions menu, as on a split button. */
+function RunActionsGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M4 6.5 8 10.5 12 6.5" />
+    </svg>
+  );
+}
+
 export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const isPfRunning = usePflowStore((s) => s.isRunning);
@@ -224,9 +266,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   const [tdsInitOpen, setTdsInitOpen] = useState(false);
   const [tdsInitResult, setTdsInitResult] = useState<TdsInitResult | null>(null);
   const [tdsInitError, setTdsInitError] = useState<Error | null>(null);
-  // What the check button gives the focus back to when its dialog closes: the
-  // button, or the span that holds it while it is disabled with a reason.
-  const checkFocusRef = useRef<HTMLElement | null>(null);
+  // The box (none of its own on the page) round the run actions menu, through
+  // which its dialog finds the menu's trigger to give the focus back to.
+  const runActionsAnchor = useRef<HTMLSpanElement>(null);
 
   // Whether the check has initialised the run this session holds now. The
   // server answers a second check 422 until the case is read again, so the
@@ -780,50 +822,77 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     </div>
   );
 
-  // ---- check-initialisation button ---------------------------------------
+  // ---- run actions menu: Check initialisation -----------------------------
 
   // The check is offered only when a TDS run could start (the readiness of
   // the run button), and not while a run, a power flow, a reset or the check
   // itself is under way. Nor once the run is initialised, by a finished run,
   // an eigenvalue analysis or this check: the route would answer 422 "already
   // initialised", and Reset run is the way back. The reason is derived during
-  // render, like the run button's own disabled reason.
-  const checkDisabledReason =
+  // render, like the run button's own disabled reason, and the menu shows it
+  // under the entry.
+  //
+  // The check is a secondary action of the run control, so it is an entry of
+  // the menu beside the run button and not a button of its own in the top bar,
+  // which has no room for one at a laptop's width (`topBarLayout.ts`).
+  const initialised = isTdsTerminal || checkedInit || eigInitialised;
+  const checkReason =
     disabledReason ??
-    (isTdsTerminal || checkedInit || eigInitialised
+    (initialised
       ? 'Reset the run first; the system is already initialised.'
-      : null);
-  const checkDisabled =
-    checkDisabledReason !== null ||
-    isTdsRunning ||
-    tdsStarting ||
-    isPfRunning ||
-    resetRun.isPending ||
-    tdsInit.isPending;
+      : tdsInit.isPending
+        ? 'The check is under way.'
+        : isTdsRunning || tdsStarting
+          ? 'A run is under way. Wait for it to end, or abort it.'
+          : isPfRunning
+            ? 'Wait for power flow to finish.'
+            : resetRun.isPending
+              ? 'Wait for the case to be read again.'
+              : null);
 
-  const checkButton = (
-    <Button
-      ref={(node) => {
-        if (checkDisabledReason === null) checkFocusRef.current = node;
-      }}
-      type="button"
-      variant="outline"
-      size="sm"
-      disabled={checkDisabled}
-      onClick={onCheckInit}
-      title="Initialise the time-domain run without stepping it, and report whether every dynamic model starts at a steady state"
-      data-testid="tds-init-check"
-      aria-describedby={checkDisabledReason ? 'tds-init-check-disabled-reason-text' : undefined}
-    >
-      {tdsInit.isPending ? (
-        <>
-          <Spinner />
-          <span>Checking…</span>
-        </>
-      ) : (
-        <span>Check initialisation</span>
-      )}
-    </Button>
+  const runActionsMenu = (
+    <span ref={runActionsAnchor} className="contents">
+      <TopBarMenu
+        label="More run actions"
+        triggerAriaLabel={
+          tdsInit.isPending ? 'More run actions: checking the initialisation' : undefined
+        }
+        menuLabel="Run actions"
+        icon={tdsInit.isPending ? SpinnerGlyph : RunActionsGlyph}
+        iconOnly
+        testId="run-actions"
+        triggerClassName="border-border border"
+      >
+        <TopBarMenuItem
+          testId="tds-init-check"
+          title="Initialise the time-domain run without stepping it, and report whether every dynamic model starts at a steady state"
+          unavailableReason={checkReason ?? undefined}
+          onClick={onCheckInit}
+        >
+          {tdsInit.isPending ? 'Checking…' : 'Check initialisation'}
+        </TopBarMenuItem>
+        {/* The way out of the reason above, beside it, as every place that says a
+            run holds the system has one (`lib/runLock.ts`). After a finished run
+            the Run button itself says Reset run, so it is offered here only for an
+            initialisation that left the button as it was (this check, or an
+            eigenvalue analysis). */}
+        {initialised && !isTdsTerminal ? (
+          <TopBarMenuItem
+            testId="run-actions-reset-run"
+            title={
+              'Read the case again, which takes the initialisation back, so the check can be made again. The disturbances stay in the list.' +
+              (reloadDiscardsEdits
+                ? ' The elements you added, changed or deleted since the case was opened do not: save the system first to keep them.'
+                : '')
+            }
+            unavailableReason={resetRun.isPending ? 'The case is being read again.' : undefined}
+            onClick={onReset}
+          >
+            Reset run
+          </TopBarMenuItem>
+        ) : null}
+      </TopBarMenu>
+    </span>
   );
 
   // ---- inline recovery affordance ----------------------------------------
@@ -875,38 +944,8 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
             {disabledReason}
           </span>
         ) : null}
+        {mode === 'tds' ? runActionsMenu : null}
         {inlineRecovery}
-        {mode === 'tds' ? (
-          checkDisabledReason ? (
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    ref={(node) => {
-                      checkFocusRef.current = node;
-                    }}
-                    tabIndex={0}
-                    className="inline-block"
-                  >
-                    {checkButton}
-                  </span>
-                </TooltipTrigger>
-                <TooltipPortal>
-                  <TooltipContent id="tds-init-check-disabled-reason">
-                    {checkDisabledReason}
-                  </TooltipContent>
-                </TooltipPortal>
-              </Tooltip>
-            </TooltipProvider>
-          ) : (
-            checkButton
-          )
-        ) : null}
-        {mode === 'tds' && checkDisabledReason ? (
-          <span id="tds-init-check-disabled-reason-text" className="sr-only">
-            {checkDisabledReason}
-          </span>
-        ) : null}
         {modeSelector}
       </div>
       <LazyMount when={tdsInitOpen} onLoadFailed={() => setTdsInitOpen(false)}>
@@ -920,10 +959,12 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
           resetting={resetRun.isPending}
           disturbancesListed={disturbances.length > 0}
           onCloseAutoFocus={(event) => {
-            // The button was disabled while the check ran, so Radix has nothing
-            // of its own to give the focus back to.
-            const target = checkFocusRef.current;
-            if (target !== null && target.isConnected) {
+            // The entry the check was asked from is in a menu that closed, so
+            // the focus goes back to the menu's trigger, beside the run button.
+            const target = runActionsAnchor.current?.querySelector<HTMLButtonElement>(
+              'button[aria-haspopup="menu"]',
+            );
+            if (target !== null && target !== undefined && target.isConnected) {
               event.preventDefault();
               target.focus();
             }

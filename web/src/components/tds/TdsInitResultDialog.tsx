@@ -15,8 +15,8 @@ import { formatSignificant } from '@/lib/series';
 import { cn } from '@/lib/cn';
 
 /**
- * TdsInitResultDialog. The answer of the "Check initialisation" action beside
- * the TDS run control: whether every dynamic model starts at a steady state,
+ * TdsInitResultDialog. The answer of the "Check initialisation" action in the
+ * menu beside the TDS run control: whether every dynamic model starts at a steady state,
  * with the clamped-limit and residual tables when it does not, and what the
  * check did to the session. The check sets the system up and initialises the
  * run, so the dialog says what every place a run has fixed the system says

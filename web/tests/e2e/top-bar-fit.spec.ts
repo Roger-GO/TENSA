@@ -3,7 +3,11 @@
  * units toggle are showing), and while a time-domain run streams (the longest the
  * bar gets: the Abort button, the "Streaming" status and the job chip show too), no
  * control is scrolled out of sight at 1280 or 1440 px, the widths of a laptop, where
- * the right end of the bar (Search, Theme, History, Help) used to be cut off.
+ * the right end of the bar (Search, Theme, History, Help) used to be cut off, nor at
+ * any step of `topBarLayout.ts` or the pixel below it. Both checks run with the run
+ * control in its time-domain mode, where Check initialisation is offered in the menu
+ * beside the Run button, and with the engine picker showing the longest engine label:
+ * the two controls that, added without a measurement, made the bar scroll again.
  *
  * What does not fit inline is in the More menu (`TopBarMoreMenu`), which is there
  * below the width the layout constants give and gone from it up. jsdom applies no
@@ -16,11 +20,31 @@
  * menu in reach.
  */
 import { test, expect, type Page } from './fixtures';
+import { MEDIUM_PX, NARROW_PX, WIDE_PX } from '../../src/components/shell/topBarLayout';
+import { DEFAULT_ENGINE, engineLabel } from '../../src/lib/engines';
 
 const CASE_FILE = 'ieee14_full.xlsx';
 
-/** `WIDE_PX` of `src/components/shell/topBarLayout.ts`: from here the bar is all inline. */
-const WIDE_PX = 1820;
+/**
+ * The widths each test checks: the two of a laptop, each step of `topBarLayout.ts` and
+ * the pixel below it (the widest the bar is at before the step hands controls over),
+ * and a full HD window.
+ */
+const STEP_WIDTHS = [
+  1280,
+  1440,
+  NARROW_PX - 1,
+  NARROW_PX,
+  1600,
+  MEDIUM_PX - 1,
+  MEDIUM_PX,
+  WIDE_PX - 1,
+  WIDE_PX,
+  1920,
+];
+
+/** The engines whose labels the picker can show: those the client names, and the server's. */
+const KNOWN_ENGINES = [DEFAULT_ENGINE, 'sienna'];
 
 /** Key under which the UI remembers that the first-run coach was dismissed. */
 const FIRST_RUN_COACH_KEY = 'tensa:first-run-coach-v1';
@@ -45,6 +69,45 @@ async function onScreen(page: Page, testId: string): Promise<boolean> {
   const box = await page.getByTestId(testId).boundingBox();
   const width = page.viewportSize()?.width ?? 0;
   return box !== null && box.x >= 0 && box.x + box.width <= width;
+}
+
+/**
+ * Put the longest engine label in the engine picker's trigger, the widest the picker
+ * gets. The server of the tests runs one engine, so the label is written into the page:
+ * each label the client or the server knows is measured in the trigger's own font, and
+ * the widest is shown. Called before each width is checked, in case a render put the
+ * live label back.
+ */
+async function showLongestEngineLabel(page: Page, engines: readonly string[]): Promise<void> {
+  const labels = [...new Set(engines.map(engineLabel))];
+  const shown = await page.getByTestId('engine-picker-trigger').evaluate((trigger, all) => {
+    const span = trigger.querySelector('span');
+    if (span === null) throw new Error('the engine picker has no label');
+    const probe = span.cloneNode() as HTMLElement;
+    span.after(probe);
+    let widest = span.textContent ?? '';
+    let widestPx = -1;
+    for (const label of all) {
+      probe.textContent = label;
+      const px = probe.getBoundingClientRect().width;
+      if (px > widestPx) {
+        widestPx = px;
+        widest = label;
+      }
+    }
+    probe.remove();
+    span.textContent = widest;
+    return widest;
+  }, labels);
+  await expect(page.getByTestId('engine-picker-trigger')).toHaveText(shown);
+}
+
+/** Every engine the server lists, with the ones the client names itself. */
+async function enginesKnown(page: Page): Promise<string[]> {
+  const response = await page.request.get('/api/engines');
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as { engines: Array<{ name: string }> };
+  return [...KNOWN_ENGINES, ...body.engines.map((engine) => engine.name)];
 }
 
 async function loadCaseAndRunPf(page: Page): Promise<void> {
@@ -75,9 +138,20 @@ test('top bar: nothing is cut off at laptop widths, and More holds what does not
 }) => {
   await loadCaseAndRunPf(page);
   const help = 'topbar-menu-help-trigger';
+  const engines = await enginesKnown(page);
 
-  for (const width of [1100, 1280, 1440, 1600, 1819, WIDE_PX, 1920]) {
+  // The run control in its time-domain mode, with Check initialisation offered in its
+  // menu: the widest the centre of the bar is while nothing runs.
+  await page.getByTestId('run-mode-tds').click();
+  await page.getByTestId('run-actions-trigger').click();
+  await expect(page.getByTestId('tds-init-check')).toBeVisible();
+  await expect(page.getByTestId('tds-init-check')).not.toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('run-actions-content')).toBeHidden();
+
+  for (const width of [1100, ...STEP_WIDTHS]) {
     await page.setViewportSize({ width, height: 900 });
+    await showLongestEngineLabel(page, engines);
     expect(await overflow(page), `the bar scrolls at ${width}px`).toBe(0);
     expect(await onScreen(page, help), `Help is cut off at ${width}px`).toBe(true);
     const more = page.getByTestId('topbar-menu-more-trigger');
@@ -111,11 +185,13 @@ test('top bar: nothing is cut off while a time-domain run streams, the longest t
   await expect(abort).toHaveText('Abort', { timeout: 60_000 });
   await expect(page.getByTestId('tds-run-status-badge')).toHaveAttribute('data-state', 'streaming');
   await expect(page.getByTestId('in-flight-chip')).toBeVisible();
+  const engines = await enginesKnown(page);
 
-  for (const width of [1280, 1440, 1600, 1819, WIDE_PX]) {
+  for (const width of STEP_WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
     // The run is what makes the bar this long: it must still be going at each width.
     await expect(abort, `the run ended before ${width}px was checked`).toHaveText('Abort');
+    await showLongestEngineLabel(page, engines);
     expect(await overflow(page), `the bar scrolls at ${width}px while streaming`).toBe(0);
     expect(await onScreen(page, 'topbar-menu-help-trigger'), `Help is cut off at ${width}px`).toBe(
       true,

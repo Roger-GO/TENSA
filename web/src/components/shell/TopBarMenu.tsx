@@ -131,6 +131,12 @@ export interface TopBarMenuProps {
    * label stays as the accessible name and the hover text. Needs `icon`.
    */
   iconOnly?: boolean;
+  /**
+   * Draw the chevron after the label (the default). A trigger whose label is a
+   * value the bar must show at every width (the engine picker's) leaves it out
+   * to stay narrow; it is still announced as a menu (`aria-haspopup`).
+   */
+  chevron?: boolean;
   /** Optional class on the trigger button. */
   triggerClassName?: string;
   /**
@@ -154,6 +160,7 @@ export function TopBarMenu({
   alignEnd = false,
   disabled = false,
   iconOnly = false,
+  chevron = true,
   triggerClassName,
   triggerAriaLabel,
   menuLabel,
@@ -242,7 +249,7 @@ export function TopBarMenu({
         >
           {Icon ? <Icon className={iconOnly ? 'h-4 w-4' : 'h-3.5 w-3.5'} /> : null}
           {iconOnly ? null : <span>{label}</span>}
-          {iconOnly ? null : <ChevronDown className="ml-0.5 opacity-80" />}
+          {iconOnly || !chevron ? null : <ChevronDown className="ml-0.5 opacity-80" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent

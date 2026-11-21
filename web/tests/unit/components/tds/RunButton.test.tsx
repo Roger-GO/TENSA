@@ -2819,24 +2819,38 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     });
   });
 
-  it('TDS mode, ready: the check button is rendered and enabled', async () => {
+  // Check initialisation is an entry of the run actions menu beside the Run
+  // button, so each test opens the menu first. An entry that cannot be used is
+  // marked `aria-disabled` (it stays focusable, with its reason under it), not
+  // `disabled`.
+
+  /** Open the run actions menu and give its Check initialisation entry. */
+  async function openCheck(): Promise<HTMLElement> {
+    await userEvent.click(screen.getByTestId('run-actions-trigger'));
+    return screen.findByTestId('tds-init-check');
+  }
+
+  it('TDS mode, ready: the check is offered in the run actions menu', async () => {
     seedReady();
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    const button = screen.getByTestId('tds-init-check');
-    expect(button).toBeEnabled();
+    const button = await openCheck();
+    expect(button).not.toHaveAttribute('aria-disabled');
     expect(button).toHaveTextContent('Check initialisation');
+    // Nothing holds the system: no Reset run beside it.
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
   });
 
-  it('PF mode: the check button is not rendered', () => {
+  it('PF mode: neither the menu nor the check is rendered', () => {
     seedReady();
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.queryByTestId('run-actions-trigger')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tds-init-check')).not.toBeInTheDocument();
   });
 
-  it('no case loaded: the check button is disabled with the run button’s reason', async () => {
+  it('no case loaded: the check is refused with the run button’s reason', async () => {
     // A disturbance puts the button in TDS mode even with no case behind it.
     useDisturbanceStore.setState({
       disturbances: [
@@ -2847,27 +2861,32 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     });
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
-    const button = screen.getByTestId('tds-init-check');
-    expect(button).toBeDisabled();
+    const button = await openCheck();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAccessibleDescription(/No case loaded\./);
-    await userEvent.hover(button.parentElement!);
-    const matches = await screen.findAllByText(/No case loaded/i);
-    expect(matches.length).toBeGreaterThan(0);
+    expect(screen.getByTestId('tds-init-check-reason')).toHaveTextContent(/No case loaded/i);
+    // A click on a refused entry does nothing.
+    await userEvent.click(button);
+    expect(tdsInitMutateMock).not.toHaveBeenCalled();
   });
 
-  it('while the check is pending it says Checking…, and both buttons are disabled', async () => {
+  it('while the check is pending it says Checking…, and both are refused', async () => {
     seedReady();
     tdsInitPending = true;
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    const check = screen.getByTestId('tds-init-check');
+    // The menu's trigger says so too, as the menu is closed while the check runs.
+    expect(screen.getByTestId('run-actions-trigger')).toHaveAccessibleName(
+      'More run actions: checking the initialisation',
+    );
+    const check = await openCheck();
     expect(check).toHaveTextContent(/checking/i);
-    expect(check).toBeDisabled();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByTestId('run-tds-button')).toBeDisabled();
   });
 
-  it('while a TDS run streams, the check is disabled and the run button still offers Abort', () => {
+  it('while a TDS run streams, the check is refused and the run button still offers Abort', async () => {
     seedReady();
     useDisturbanceStore.setState({
       disturbances: [
@@ -2898,13 +2917,15 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     });
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
-    expect(screen.getByTestId('tds-init-check')).toBeDisabled();
     const primary = screen.getByTestId('run-tds-button');
     expect(primary).toHaveTextContent(/^abort$/i);
     expect(primary).toBeEnabled();
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    expect(check).toHaveAccessibleDescription(/A run is under way/);
   });
 
-  it('a finished run holds the system: the check is disabled and says to Reset first', async () => {
+  it('a finished run holds the system: the check is refused and says to Reset first', async () => {
     seedReady();
     useDisturbanceStore.setState({
       disturbances: [
@@ -2935,14 +2956,17 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     });
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
-    const check = screen.getByTestId('tds-init-check');
-    expect(check).toBeDisabled();
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
     expect(check).toHaveAccessibleDescription(
       /Reset the run first; the system is already initialised\./,
     );
-    await userEvent.hover(check.parentElement!);
-    const matches = await screen.findAllByText(/Reset the run first; the system is already/i);
-    expect(matches.length).toBeGreaterThan(0);
+    expect(screen.getByTestId('tds-init-check-reason')).toHaveTextContent(
+      /Reset the run first; the system is already/i,
+    );
+    // The Run button says Reset run itself after a finished run; the menu does not
+    // repeat it.
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
   });
 
   it('click sends only the session id: no testInit key, so the default request is unchanged', async () => {
@@ -2950,11 +2974,24 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     expect(tdsInitMutateMock).toHaveBeenCalledTimes(1);
     const [vars] = tdsInitMutateMock.mock.calls[0] as [Record<string, unknown>, unknown];
     expect(vars).toEqual({ sessionId: SESSION_ID });
     expect(vars).not.toHaveProperty('testInit');
+  });
+
+  it('the check can be asked for from the keyboard', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    screen.getByTestId('run-actions-trigger').focus();
+    await userEvent.keyboard('{Enter}');
+    const check = await screen.findByTestId('tds-init-check');
+    await waitFor(() => expect(check).toHaveFocus());
+    await userEvent.keyboard('{Enter}');
+    expect(tdsInitMutateMock).toHaveBeenCalledTimes(1);
   });
 
   it('the result dialog loads on first open: nothing of it is mounted until a check answers', async () => {
@@ -2963,7 +3000,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
     expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
@@ -2976,7 +3013,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
@@ -2994,7 +3031,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     const error = new ProblemDetailsError({
       type: 'about:blank',
       title: 'Unprocessable Entity',
@@ -3019,7 +3056,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     act(() => {
       tdsInitHandlers.onError?.(new Error('socket hang up'));
     });
@@ -3038,18 +3075,20 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
     await screen.findByTestId('tds-init-dialog');
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
-    const check = screen.getByTestId('tds-init-check');
-    expect(check).toBeDisabled();
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
     expect(check).toHaveAccessibleDescription(
       'Reset the run first; the system is already initialised.',
     );
+    // The way out is beside the reason.
+    expect(screen.getByTestId('run-actions-reset-run')).not.toHaveAttribute('aria-disabled');
     expect(screen.getByTestId('run-tds-button')).toBeEnabled();
 
     // The topology read the check asked for says the case is set up: still refused.
@@ -3058,7 +3097,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
       if (topology !== null)
         useCaseStore.setState({ topology: { ...topology, state: 'committed' } });
     });
-    expect(screen.getByTestId('tds-init-check')).toBeDisabled();
+    expect(screen.getByTestId('tds-init-check')).toHaveAttribute('aria-disabled', 'true');
 
     // Reset run reads the case again, back to pre-setup: the check is offered again.
     act(() => {
@@ -3066,22 +3105,49 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
       if (topology !== null)
         useCaseStore.setState({ topology: { ...topology, state: 'pre-setup' } });
     });
-    expect(screen.getByTestId('tds-init-check')).toBeEnabled();
+    expect(screen.getByTestId('tds-init-check')).not.toHaveAttribute('aria-disabled');
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
   });
 
-  it('the dialog gives the focus back to the check control when it closes', async () => {
+  it('Reset run in the menu reads the case again after a check', async () => {
     seedReady();
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await screen.findByTestId('tds-init-dialog');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    await openCheck();
+    await userEvent.click(screen.getByTestId('run-actions-reset-run'));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(([input]) =>
+          (typeof input === 'string' ? input : (input as Request).url).endsWith(
+            `/sessions/${SESSION_ID}/reload`,
+          ),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('the dialog gives the focus back to the menu’s trigger when it closes', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
     await userEvent.click(await screen.findByTestId('tds-init-close'));
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
-    // The button is disabled now, so the span that carries its reason has the focus.
-    expect(document.activeElement).toContainElement(screen.getByTestId('tds-init-check'));
+    // The entry is in a menu that closed, so its trigger, beside the Run button, has
+    // the focus, and the entry is one key away.
+    expect(screen.getByTestId('run-actions-trigger')).toHaveFocus();
   });
 
   it('a refused check (422) leaves the check offered and marks nothing as set up', async () => {
@@ -3089,7 +3155,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     const { Wrapper } = makeWrapper();
     render(<RunButton />, { wrapper: Wrapper });
     await userEvent.click(screen.getByTestId('run-mode-tds'));
-    await userEvent.click(screen.getByTestId('tds-init-check'));
+    await userEvent.click(await openCheck());
     act(() => {
       tdsInitHandlers.onError?.(
         new ProblemDetailsError({
@@ -3104,11 +3170,11 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     await screen.findByTestId('tds-init-dialog');
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
-    expect(screen.getByTestId('tds-init-check')).toBeEnabled();
+    expect(await openCheck()).not.toHaveAttribute('aria-disabled');
     expect(useCaseStore.getState().topology?.state).toBe('pre-setup');
   });
 
-  it('an eigenvalue analysis has initialised the run: the check is disabled with the reason', async () => {
+  it('an eigenvalue analysis has initialised the run: the check is refused with the reason', async () => {
     seedReady({ withDisturbances: true });
     const { useAnalyzeStore } = await import('@/store/analyze');
     useAnalyzeStore.setState({
@@ -3125,8 +3191,8 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     try {
       const { Wrapper } = makeWrapper();
       render(<RunButton />, { wrapper: Wrapper });
-      const check = screen.getByTestId('tds-init-check');
-      expect(check).toBeDisabled();
+      const check = await openCheck();
+      expect(check).toHaveAttribute('aria-disabled', 'true');
       expect(check).toHaveAccessibleDescription(
         'Reset the run first; the system is already initialised.',
       );

@@ -16,8 +16,11 @@
  * back with the words Change case uses; a time-domain run or a sweep under
  * way is stopped by it, as by Change case, and the confirm says so.
  *
- * The control stays in the bar at every width: it is short (a label and a
- * chevron), and the engine is not a command the More menu could stand in for.
+ * The control stays in the bar at every width: the engine is not a command the
+ * More menu could stand in for. So it is drawn as short as it can be, the
+ * engine's label with no chevron (a trigger of about 63 px for "ANDES", the
+ * longest label `engineLabel` knows), and `topBarLayout.ts` counts it in the
+ * widths at which the other controls hand over to More.
  */
 import { useRef, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel } from '@/components/shell/TopBarMenu';
@@ -133,6 +136,7 @@ export function EnginePicker() {
         triggerAriaLabel={`Engine: ${currentLabel}`}
         menuLabel="Engine"
         testId="engine-picker"
+        chevron={false}
         alignEnd
       >
         <TopBarMenuLabel>Engine</TopBarMenuLabel>
