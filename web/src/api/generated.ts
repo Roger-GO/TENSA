@@ -662,6 +662,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/external-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a TSAT or PSS/E Excel export as series to overlay on a run's traces.
+         * @description Read the request body as a TSAT or PSS/E Excel export and answer with its
+         *     series.
+         *
+         *     The first sheet is read as ANDES's ``tsat_to_df`` and ``psse_to_df`` read it:
+         *     its first row is a header, the next 6 rows (TSAT) or 1 row (PSS/E) are
+         *     skipped, the first column after them is time and the others are signals. The
+         *     signals come back in the order the tool wrote them, named ``column 1``,
+         *     ``column 2``, ... because the format carries no names ANDES reads; the caller
+         *     labels them (ANDES's own comparison plot takes the names separately). A value
+         *     that is not a finite number is ``null``, and a row whose time is not one is
+         *     left out. The response is the ``series`` shape of ``POST /response-metrics``,
+         *     so the same client code plots a TENSA run's ``traces`` and an imported export
+         *     together. Needs no session.
+         */
+        post: operations["importExternalResults"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/comtrade": {
         parameters: {
             query?: never;
@@ -817,6 +849,62 @@ export interface paths {
          *     change while the server runs.
          */
         get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every model ANDES ships, grouped as ANDES groups them.
+         * @description Every model class ANDES ships (about a hundred in ANDES 2.0.0), under the
+         *     group ANDES puts it in, in ANDES's own order. Any of them names a model
+         *     for ``GET /sessions/{id}/models/{model}/doc``.
+         *
+         *     This is wider than what can be built: the element routes add and edit
+         *     only the models ``GET /topology/schema`` lists, and a case file may hold
+         *     any model here. No case is needed; the session's System is not touched.
+         */
+        get: operations["listSupportedModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/models/{model}/doc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get ANDES's own documentation of one model, as plain text.
+         * @description The text ANDES prints for ``andes doc <model>``, verbatim: plain text
+         *     set in tables 78 columns wide (a heading with the model and its group, the
+         *     description, then the parameters with their defaults and units, the
+         *     variables, the initialization, differential and algebraic equations, the
+         *     services, discretes and blocks, and the model's config fields, as the
+         *     model has them). Read it in a fixed-width font. The longest, of the renewable
+         *     controllers, are under 30 kB.
+         *
+         *     ``model`` is matched exactly, case included, against the names
+         *     ``GET /sessions/{id}/models`` lists; any other name answers 404. No case
+         *     is needed; the session's System is not touched.
+         */
+        get: operations["getModelDoc"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1067,6 +1155,31 @@ export interface paths {
          *     info banner ("Running EIG initialised the dynamic state...").
          */
         post: operations["runEig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/eig/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Eigenvalues at each of a list of values of one parameter of one device (root loci data).
+         * @description Take the eigenvalues at each value of one parameter of one device.
+         *
+         *     Synchronous, like ``POST /eig``, and run as a job of kind ``eig``. Each
+         *     value is a read, a setup, a power flow and an eigenvalue analysis of the
+         *     case, so the time grows with the number of values; the session's own
+         *     System is not touched.
+         */
+        post: operations["runEigSweep"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2675,14 +2788,14 @@ export interface components {
             q_limits_enforced: boolean;
             /**
              * Stop At
-             * @description What the run was asked to trace: up to the nose, or the full curve.
+             * @description What the run was asked to trace: up to the nose, or the full curve. A run given a target lambda has ``'nose'`` here and the target in ``stop_at_lambda``.
              * @default nose
              * @enum {string}
              */
             stop_at: "nose" | "full";
             /**
              * Complete
-             * @description Whether the run ended the way ``stop_at`` asked. ``false`` with ``truncated: false`` is a full curve whose lower branch broke off; ``done_msg`` says where.
+             * @description Whether the run ended the way ``stop_at`` asked. ``false`` with ``truncated: false`` is a full curve whose lower branch broke off, or a run whose nose came before its target lambda; ``done_msg`` says where. A run that reached its target lambda is complete, with ``truncated: true`` since it found no nose.
              * @default true
              */
             complete: boolean;
@@ -2691,6 +2804,43 @@ export interface components {
              * @description The direction of the increase a PV run was asked for; ``null`` for a QV curve.
              */
             direction?: ("load" | "load-only" | "gen" | "custom") | null;
+            /**
+             * Angles Per Bus
+             * @description Bus voltage angles in radians at every step (``CPF.theta``), keyed by bus idx and index-aligned with ``lambdas`` and that bus's ``voltages_per_bus`` row. Empty for a QV curve, and when ANDES's angles could not be aligned with the points kept.
+             */
+            angles_per_bus?: {
+                [key: string]: number[];
+            };
+            /**
+             * Parameterization
+             * @description The parameterization the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            parameterization?: ("natural" | "arclength" | "pseudo_arclength") | null;
+            /**
+             * Tol
+             * @description The corrector tolerance the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            tol?: number | null;
+            /**
+             * Corrector Max Iter
+             * @description The corrector's Newton iterations per step the run used, as the request gave them; ``null`` where the case's own setting was kept.
+             */
+            corrector_max_iter?: number | null;
+            /**
+             * Step Min
+             * @description The smallest step the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            step_min?: number | null;
+            /**
+             * Step Max
+             * @description The largest step the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            step_max?: number | null;
+            /**
+             * Stop At Lambda
+             * @description The target lambda the run was given in ``stop_at``; ``null`` when ``stop_at`` was ``'nose'`` or ``'full'``.
+             */
+            stop_at_lambda?: number | null;
             /**
              * Job Id
              * @description Job-registry id mirroring this CPF routine (kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
@@ -2704,8 +2854,11 @@ export interface components {
          *     All fields are optional, and each applies to this run only.
          *     ``direction`` says what lambda increases, ``enforce_q_limits`` holds
          *     generators to their reactive limits along the path, ``stop_at`` asks
-         *     for the lower branch as well, and ``step`` and ``max_iter`` set the
-         *     corresponding ``ss.CPF.config`` values for the run.
+         *     for the lower branch as well or names a target lambda, ``step`` and
+         *     ``max_iter`` set ``ss.CPF.config.step`` and ``max_steps`` for the run,
+         *     and ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``
+         *     and ``step_max`` the routine's settings of those names (ANDES calls
+         *     ``corrector_max_iter`` ``max_iter``).
          */
         CpfRunRequest: {
             /**
@@ -2732,11 +2885,35 @@ export interface components {
             enforce_q_limits?: boolean | null;
             /**
              * Stop At
-             * @description ``'nose'`` (default) stops at the nose. ``'full'`` turns there and follows the lower-voltage solutions back to ``lambda = 0`` (``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` are that lower branch.
+             * @description ``'nose'`` (default) stops at the nose. ``'full'`` turns there and follows the lower-voltage solutions back to ``lambda = 0`` (``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` are that lower branch. A number above zero is a target lambda: the routine shortens the step that would cross it and lands on it, and the run ends there (``complete`` true, with no nose, so ``truncated`` true). A target past the nose is never crossed: the run ends at the nose (``complete`` false, ``done_msg`` naming the target), where ANDES alone would go on down the lower branch. Not with ``parameterization: 'natural'`` and ``'full'`` together.
              * @default nose
-             * @enum {string}
              */
-            stop_at: "nose" | "full";
+            stop_at: ("nose" | "full") | number;
+            /**
+             * Parameterization
+             * @description The equation that fixes the length of a step in the corrector (``CPF.config.parameterization``). ``'pseudo_arclength'`` is ANDES's default and the most robust at the nose; ``'arclength'`` also goes round it. ``'natural'`` fixes lambda, which is singular at the nose: the routine finds the nose by halving the step until it fails, with about twice the points and none past it, and it cannot trace the lower branch, so it is refused with ``stop_at: 'full'``. Left out, the case's setting stands.
+             */
+            parameterization?: ("natural" | "arclength" | "pseudo_arclength") | null;
+            /**
+             * Tol
+             * @description The corrector's tolerance on the mismatch, in pu (``CPF.config.tol``; ANDES's default 1e-6). At most 1e-4: the nose and the switches of reactive limits are found from the points the corrector solves. Left out, the case's setting stands.
+             */
+            tol?: number | null;
+            /**
+             * Corrector Max Iter
+             * @description The Newton iterations the corrector takes per continuation step (ANDES's own ``CPF.config.max_iter``; its default 20). Not the cap on continuation steps, which is what ``max_iter`` sets. A step whose corrector runs out of iterations fails, and the routine calls the nose where failures pile up, so a low cap can call it early; at least 2. Left out, the case's setting stands.
+             */
+            corrector_max_iter?: number | null;
+            /**
+             * Step Min
+             * @description The smallest continuation step (``CPF.config.step_min``; ANDES's default 1e-4). A failed step is halved, and once it is below this the routine calls the nose, so a larger value ends the search for it sooner. Not above ``step_max`` (the request's or the case's). Left out, the case's setting stands.
+             */
+            step_min?: number | null;
+            /**
+             * Step Max
+             * @description The largest step the routine grows its adaptive step to (``CPF.config.step_max``; ANDES's default 0.5): smaller draws the curve with more points. Left out, the case's setting stands.
+             */
+            step_max?: number | null;
             /**
              * Step
              * @description Optional initial continuation step size for lambda (``ss.CPF.config.step`` for this run). Default uses ANDES's own default (0.1).
@@ -3204,6 +3381,100 @@ export interface components {
          */
         EigRunRequest: Record<string, never>;
         /**
+         * EigSweepPointModel
+         * @description The eigenvalues at one value of the swept parameter.
+         */
+        EigSweepPointModel: {
+            /**
+             * Value
+             * @description The parameter value of this point: ``points[i]`` is at ``values[i]`` of the request.
+             */
+            value: number;
+            /**
+             * Eigenvalues
+             * @description Eigenvalues of the reduced state matrix at this value, each ``{real, imag}``, as ``POST /sessions/{id}/eig`` gives them for a case opened with the value (an eigenvalue ANDES counts as zero is exactly ``{0, 0}``). The order is not comparable across points, since ANDES does not keep one: each point is a list of its own and no mode is followed through the sweep, so a client drawing root loci matches the modes itself.
+             */
+            eigenvalues: components["schemas"]["ComplexNumberModel"][];
+            /**
+             * Damping Ratios
+             * @description Per-mode damping ratio ``-Re(z) / |z|`` at this value, index-aligned with ``eigenvalues``; 1.0 for a zero eigenvalue.
+             */
+            damping_ratios: number[];
+            /**
+             * Frequencies Hz
+             * @description Per-mode oscillation frequency ``|Im(z)| / (2*pi)`` in Hz at this value, index-aligned with ``eigenvalues``.
+             */
+            frequencies_hz: number[];
+        };
+        /**
+         * EigSweepRequest
+         * @description Request body for ``POST /sessions/{id}/eig/sweep``: one parameter of
+         *     one device and the values to take the eigenvalues at.
+         */
+        EigSweepRequest: {
+            /**
+             * Model
+             * @description ANDES model name, e.g. 'GENROU'.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description idx of the device within the model, as a string, e.g. '1'.
+             */
+            idx: string;
+            /**
+             * Param
+             * @description Parameter name as ANDES names it, e.g. 'M': a numeric parameter of the model that is not copied from another model, the ones GET /sessions/{id}/topology/models/{model}/alterable_params lists before its services.
+             */
+            param: string;
+            /**
+             * Values
+             * @description The values to take the eigenvalues at, in order: 1 to 200 finite numbers. A value is on the base the case file and an edit of the element use, which for a per-unit parameter is the device's own base (ANDES's ``vin``). Each value costs a read, a setup, a power flow and an eigenvalue analysis of the case.
+             */
+            values: number[];
+        };
+        /**
+         * EigSweepResponse
+         * @description Wire shape of ``POST /sessions/{id}/eig/sweep``.
+         */
+        EigSweepResponse: {
+            /**
+             * Model
+             * @description The model of the swept parameter, as requested.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device of the swept parameter, as requested.
+             */
+            idx: string;
+            /**
+             * Param
+             * @description The swept parameter, as requested.
+             */
+            param: string;
+            /**
+             * Points
+             * @description One point per requested value, in the request's order. Each is an eigenvalue analysis of a system of its own: the case with the session's edits and the parameter at the value, its power flow solved with the settings of the session's last one. The session's own system is not changed by the sweep.
+             */
+            points: components["schemas"]["EigSweepPointModel"][];
+            /**
+             * Mode Count
+             * @description Number of eigenvalues at every point. A sweep whose points differ in it is refused (422), not answered with lists of different lengths.
+             */
+            mode_count: number;
+            /**
+             * Tds Initialized
+             * @description Whether the session's dynamic state is initialised, which the sweep does not change: ``false`` unless an eigenvalue analysis or a time-domain run of the session initialised it, so a power flow can still run after a sweep that followed one.
+             */
+            tds_initialized: boolean;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this sweep (kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record.
+             */
+            job_id?: string | null;
+        };
+        /**
          * ElementCreated
          * @description Response body for ``POST /sessions/{id}/elements`` (201).
          *
@@ -3394,6 +3665,49 @@ export interface components {
              * @description Whether every file the case copies can be found: in the installed ANDES, or in this package. ``false`` for a case that has no file (``external``), and for an ANDES case the installed release does not hold.
              */
             available: boolean;
+        };
+        /**
+         * ExternalResultsResponse
+         * @description Response body for ``POST /external-results``.
+         */
+        ExternalResultsResponse: {
+            /**
+             * Source
+             * @description The format the file was read as.
+             * @enum {string}
+             */
+            source: "tsat" | "psse";
+            /**
+             * Series
+             * @description One series per signal column of the export, in the order the tool wrote them, all on the same ``t``. Feed them to ``POST /response-metrics`` as they are (at most 64 series a request), or plot them against a run's ``traces``.
+             */
+            series: components["schemas"]["ExternalSeries"][];
+            /**
+             * Samples
+             * @description The length of every series' ``t`` and ``y``.
+             */
+            samples: number;
+        };
+        /**
+         * ExternalSeries
+         * @description One signal of an imported export, in the wire shape of ``MetricsSeries``.
+         */
+        ExternalSeries: {
+            /**
+             * Name
+             * @description What the series is called. The export format carries no signal names ANDES reads, so the import names them by position: ``column 1``, ``column 2``, ... in the order the tool wrote them.
+             */
+            name: string;
+            /**
+             * T
+             * @description Sample times in seconds, in the order the export gives them (not sorted); a row whose time is not a finite number is left out.
+             */
+            t: number[];
+            /**
+             * Y
+             * @description The signal's value at each time. A value the export did not carry as a finite number (text, a date, an empty cell, an Excel error) is ``null``.
+             */
+            y: (number | null)[];
         };
         /** ExtraFile */
         ExtraFile: {
@@ -4120,6 +4434,22 @@ export interface components {
             y: (number | null)[];
         };
         /**
+         * ModelDoc
+         * @description ANDES's own documentation of one model.
+         */
+        ModelDoc: {
+            /**
+             * Model
+             * @description The ANDES model class name the documentation is for.
+             */
+            model: string;
+            /**
+             * Doc
+             * @description The text ANDES prints for the model (``andes doc <model>``), verbatim: plain text with tables 78 columns wide of its parameters, variables and equations, to be read in a fixed-width font.
+             */
+            doc: string;
+        };
+        /**
          * ParticipationFactorModel
          * @description One per-state participation factor row entry.
          */
@@ -4152,7 +4482,7 @@ export interface components {
             converged: boolean;
             /**
              * Iterations
-             * @description Number of Newton-Raphson iterations executed.
+             * @description Number of Newton-Raphson iterations executed. 0 for a run with ``method`` ``NK``, whose SciPy solver keeps no count ANDES reads.
              */
             iterations: number;
             /**
@@ -4242,6 +4572,21 @@ export interface components {
              * @description Hold a PV or slack generator at ``qmin`` or ``qmax`` when its reactive power goes past one (PV to PQ switching). Without it the limits are reported and not enforced. Left out, the case's own setting stands; ``false`` turns off enforcement the case file asks for.
              */
             enforce_q_limits?: boolean | null;
+            /**
+             * Method
+             * @description The solver ANDES runs: ``"NR"`` Newton-Raphson (the default), ``"dishonest"`` the same but reusing the Jacobian after the first ``n_factorize`` iterations, ``"NK"`` Newton-Krylov from SciPy; one of those three, case-sensitively. ``NK`` stops by SciPy's own rule, so ``tolerance``, ``max_iterations`` and ``linesearch`` do not apply to it, and its result reports ``iterations`` as 0. Left out, the case's own setting stands.
+             */
+            method?: string | null;
+            /**
+             * N Factorize
+             * @description The first N iterations of the dishonest method that refactorize the Jacobian; ignored by ``NR`` and ``NK``; ANDES's default is 4. Left out, the case's own setting stands.
+             */
+            n_factorize?: number | null;
+            /**
+             * Linesearch
+             * @description The nonmonotone backtracking line search on the Newton step, which shortens a step whose residual would grow and can pull a run that overshoots back to convergence; read only by the NR and dishonest solvers, so without effect under ``NK``; ANDES's default is on. Left out, the case's own setting stands.
+             */
+            linesearch?: boolean | null;
         };
         /**
          * PflowSettings
@@ -4269,6 +4614,21 @@ export interface components {
              * @description ``true`` if a PV or slack generator whose reactive power went past ``qmin`` or ``qmax`` was held at that limit (PV to PQ switching).
              */
             enforce_q_limits: boolean;
+            /**
+             * Method
+             * @description The solver the run used: ``NR`` (Newton-Raphson), ``dishonest`` (Newton-Raphson that reuses the Jacobian after the first ``n_factorize`` iterations) or ``NK`` (Newton-Krylov from SciPy, which stops by SciPy's own rule: it reads neither ``tolerance`` nor ``max_iterations`` and keeps no iteration count).
+             */
+            method?: string | null;
+            /**
+             * N Factorize
+             * @description The number of initial iterations on which the dishonest method refactorized the Jacobian; meaningless for the other methods.
+             */
+            n_factorize?: number | null;
+            /**
+             * Linesearch
+             * @description Whether the backtracking line search was on; read by ``NR`` and ``dishonest`` only.
+             */
+            linesearch?: boolean | null;
         };
         /**
          * PflowSummary
@@ -5160,6 +5520,19 @@ export interface components {
             job_id?: string | null;
         };
         /**
+         * SupportedModels
+         * @description Every model ANDES ships, grouped as ANDES groups them.
+         */
+        SupportedModels: {
+            /**
+             * Groups
+             * @description The ANDES model class names, keyed by the group ANDES puts each in (``Bus`` under ``ACNode``, ``GENROU`` under ``SynGen``), groups and models in ANDES's own order. A name here is what ``model`` takes on ``GET /sessions/{id}/models/{model}/doc``. It is not the list of what the element routes build: those take only the models ``GET /topology/schema`` lists.
+             */
+            groups: {
+                [key: string]: string[];
+            };
+        };
+        /**
          * SweepParameter
          * @description Discriminated sweep target.
          *
@@ -5280,6 +5653,11 @@ export interface components {
              * @description Number of times the per-step ``TDS.callpert`` hook fired during the run. Useful as a sanity check that streaming is wired.
              */
             callpert_count: number;
+            /**
+             * Integrator
+             * @description The integrator the run used, as the request named it (the default ``trapezoidal`` when it named none). ``null`` only on responses from before this field existed.
+             */
+            integrator?: ("trapezoidal" | "trap_adapt" | "backeuler" | "qndf") | null;
             /**
              * Job Id
              * @description Job-registry id mirroring this TDS run. Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
@@ -5494,7 +5872,7 @@ export interface components {
             tf: number;
             /**
              * H
-             * @description Integration step size, in seconds, applied as ANDES ``TDS.config.tstep``. With the default ``trapezoidal`` integrator this is the fixed step; ``None`` keeps the ANDES default (1/30 s). The ``qndf`` integrator picks its own step and ignores it; bound its step with ``tds_config_overrides.max_step`` instead.
+             * @description Integration step size, in seconds, applied as ANDES ``TDS.config.tstep``. With the default ``trapezoidal`` integrator this is the fixed step, and so it is with ``backeuler``; ``None`` keeps the ANDES default (1/30 s). The ``trap_adapt`` and ``qndf`` integrators pick their own steps and ignore it; bound their steps with ``tds_config_overrides.max_step`` and ``min_step`` instead.
              */
             h?: number | null;
             /**
@@ -5509,11 +5887,11 @@ export interface components {
             dae_vars?: string[] | null;
             /**
              * Integrator
-             * @description DAE integrator. ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
+             * @description DAE integrator. ``"trapezoidal"`` (default) is ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``), stepping at ``h``. ``"backeuler"`` is fixed-step backward Euler (``method = "backeuler"``), first order and so more damped, also stepping at ``h``. ``"trap_adapt"`` is the trapezoidal method with a variable step (``method = "trap_adapt"``) chosen from an estimate of the local error, one step against two half steps, held to ``rtol`` and ``atol``. ``"qndf"`` is the variable-order, variable-step QNDF (NDF) method (``method = "qndf"``). The two variable-step integrators run with ``fixt = 0``, ignore ``h`` and take ``rtol``, ``atol``, ``max_step`` and ``min_step`` from ``tds_config_overrides`` (the Auto preset is ``rtol=1e-3, atol=1e-6, max_step=0.05``). Any integrator can follow any other on the same System except ``qndf``, which keeps a history: after a run with another integrator it is refused with 422 until the case is reloaded.
              * @default trapezoidal
              * @enum {string}
              */
-            integrator: "trapezoidal" | "qndf";
+            integrator: "trapezoidal" | "trap_adapt" | "backeuler" | "qndf";
             /**
              * Controllers
              * @description Controllers that act while the run goes: each reads the frequency once a sample ``period`` and sets the power of a battery or another distributed generation device, on top of the device's own set-point. Two kinds, picked by ``type``: ``droop`` (power in proportion to the frequency deviation beyond a dead band) and ``ffr`` (a fixed power, once, for a set time when the frequency leaves a threshold or moves too fast). Powers are in MW, positive discharging, and frequencies in Hz. ``GET /sessions/{id}/tds/controllers`` lists the devices that can be named. A controller that names a device the case does not have is refused with 422 before anything runs. What each did comes back in the result's ``controllers``; when the run ends the devices' inputs are as they were. A later run that names the same controllers and goes on from where this one stopped (a larger ``tf``) keeps their state, so an ``ffr`` that has fired does not fire again. After a reload or a restored snapshot they start afresh, and it can. The streaming ``start_tds`` frame takes the same field. Sweeps do not take controllers.
@@ -5521,7 +5899,7 @@ export interface components {
             controllers?: (components["schemas"]["DroopController"] | components["schemas"]["FfrController"])[] | null;
             /**
              * Tds Config Overrides
-             * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances have no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
+             * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``), ``max_step`` (→ ``ss.TDS.config.dtmax``) and ``min_step`` (→ ``ss.TDS.config.dtmin_adapt``, the smallest step a variable-step integrator may shrink to), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) and ``min_step`` (``dtmin_adapt``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances and the two bounds apply to ``trap_adapt`` and ``qndf`` only: the fixed-step integrators ignore ``reltol/abstol`` and use ``h`` for stepping.
              */
             tds_config_overrides?: {
                 [key: string]: number;
@@ -6515,7 +6893,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. Also a setting outside its range (``tolerance``, ``max_iterations``), which needs no reload: fix the request. */
+            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. Also a setting outside its range (``tolerance``, ``max_iterations``, ``method``, ``n_factorize``, ``linesearch``), which needs no reload: fix the request. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7677,6 +8055,70 @@ export interface operations {
             };
         };
     };
+    importExternalResults: {
+        parameters: {
+            query: {
+                /** @description The tool whose export the file is: ``tsat`` or ``psse``. */
+                source: "tsat" | "psse";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The export's bytes, verbatim: an ``.xlsx`` workbook. Not multipart form data, which is refused with 415. */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalResultsResponse"];
+                };
+            };
+            /** @description The upload was interrupted before the whole file arrived. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is larger than 32 MiB, which is refused before it is read, or the workbook is past a bound of what an import reads: it unpacks to more than 128 MiB, or its first sheet has more than 200000 rows after the offset, more than 1024 columns, or more than 1000000 cells. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body was sent as multipart form data instead of the raw file. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ``source`` is missing or is not ``tsat`` or ``psse``, or the file is not an export the reader takes or holds nothing usable: an empty body, a file that is not an ``.xlsx`` workbook (``.xls``, ``.xlsb``, ``.ods`` and CSV are not read), or no signal columns or no samples after the format's offset. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     exportComtrade: {
         parameters: {
             query?: never;
@@ -8023,6 +8465,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionInfo"];
+                };
+            };
+        };
+    };
+    listSupportedModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportedModels"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session's engine is not ANDES, and only ANDES documents its models. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getModelDoc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelDoc"];
+                };
+            };
+            /** @description Session not found or already closed, or no model ANDES ships has that name (GET /api/sessions/{id}/models lists them). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session's engine is not ANDES, and only ANDES documents its models. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES failed to write the documentation of that model. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
         };
@@ -8507,6 +9048,59 @@ export interface operations {
                 };
             };
             /** @description ANDES eigenvalue routine raised (e.g., singular Jacobian after regularization). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    runEigSweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EigSweepRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EigSweepResponse"];
+                };
+            };
+            /** @description Session not found or already closed, OR the case has no such model, device or parameter. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged power flow. Run /pflow first: the sweep solves each point's power flow with that run's settings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The values are not 1 to 200 finite numbers, OR a point failed: its system did not set up, its power flow did not converge, the eigenvalue routine failed, or it has another number of eigenvalues than the first point. The detail names the value. */
             422: {
                 headers: {
                     [name: string]: unknown;
