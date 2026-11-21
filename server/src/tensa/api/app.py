@@ -50,6 +50,7 @@ from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
 from tensa.api.routes.engines import router as engines_router
 from tensa.api.routes.examples import router as examples_router
+from tensa.api.routes.external_results import router as external_results_router
 from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
 from tensa.api.routes.keys import router as keys_router
@@ -370,6 +371,7 @@ def make_app(
     app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
+    app.include_router(external_results_router, prefix="/api", tags=["external-results"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(examples_router, prefix="/api", tags=["examples"])

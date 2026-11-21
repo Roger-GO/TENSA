@@ -40,6 +40,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/engines` | `auto` |  |
 | `GET` | `/api/examples` | `example-dialog` |  |
 | `POST` | `/api/examples/{example_id}/add` | `example-dialog` |  |
+| `POST` | `/api/external-results` | `none` | No web surface imports an external result yet; the route is for scripts and agents. It will later back the analysis panel's overlay of a TSAT or PSS/E export on a run's plotted traces. |
 | `GET` | `/api/health` | `none` | Operations probe for scripts, process supervisors and container health checks. The UI reads GET /version for its About dialog and GET /sessions/{id} for session liveness. |
 | `POST` | `/api/response-metrics` | `analysis-panel` |  |
 | `GET` | `/api/sessions` | `auto` |  |

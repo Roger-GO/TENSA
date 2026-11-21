@@ -90,6 +90,14 @@ Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
                  overshoot_pct, damping {ratio, frequency_hz}; not the "traces" object itself, which is 422: build "series" from a batch
                  run's traces as [{"name": v.name, "t": traces.t, "y": v.values} for v in traces.variables])
+External results:POST /external-results?source=tsat|psse  (no session; the body IS the .xlsx export's bytes, as in
+                 curl --data-binary @out.xlsx ..., not multipart (415); reads the first sheet as ANDES's tsat_to_df /
+                 psse_to_df do (a header row, then 6 rows for tsat or 1 for psse skipped, then time and the signals) and
+                 answers {source, samples, series:[{name, t, y}]}: the columns in the order the tool wrote them, named
+                 "column 1", "column 2", ... because the format carries no names, a value that is not a finite number null,
+                 a row whose time is not one left out; feed "series" to POST /response-metrics as it is (64 at a time), or
+                 plot it against a run's traces; 413 over 32 MiB, 128 MiB unpacked, 200000 rows, 1024 columns or 1000000
+                 cells; 422 for a file that is not an .xlsx export or holds nothing usable)
 COMTRADE export: POST /comtrade  (no session; body {"t":[...],"channels":[{"name","values":[...],"unit"}], optional name, station,
                  device, frequency_hz, start_time, trigger_t} -> application/zip holding <name>.cfg and <name>.dat, an
                  IEEE C37.111-1999 record with ASCII data: one analog channel per signal, scaled over its own range, and a
