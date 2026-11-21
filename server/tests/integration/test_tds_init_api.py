@@ -434,6 +434,16 @@ async def test_route_refuses_a_body_it_does_not_know(client: httpx.AsyncClient) 
     assert ok.status_code == 200, ok.text
 
 
+def test_the_route_is_tagged_for_the_run_controls(tmp_path: Path) -> None:
+    """The "Check initialisation" action beside the run button calls it, so the
+    GUI-parity ledger names the run controls and no deferral."""
+    operation = make_app(workspace=tmp_path, static_override=tmp_path).openapi()["paths"][
+        "/api/sessions/{session_id}/tds/init"
+    ]["post"]
+    assert operation["x-tensa-gui-location"] == "run-controls"
+    assert "x-tensa-parity-deferred" not in operation
+
+
 async def test_route_unknown_session_is_404_and_no_case_is_409(
     client: httpx.AsyncClient,
 ) -> None:

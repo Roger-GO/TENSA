@@ -450,7 +450,21 @@ function load_case(
             _build_system(raw, sanitized, ext)
         end
     catch err
-        msg = _scrub(_first_line(sprint(showerror, err)), paths)
+        # The PSS/E parser logs why it stopped and throws `nothing`, which
+        # prints as "nothing": the reason is then the first error it logged.
+        reason = err === nothing ? "" : _first_line(sprint(showerror, err))
+        if isempty(reason) || reason == "nothing"
+            i = findfirst(r -> r[1] >= Logging.Error, logger.records)
+            reason = i === nothing ? "" : _first_line(logger.records[i][2])
+        end
+        if isempty(reason) || reason == "nothing"
+            reason = string(
+                "it is not a ",
+                ext == ".m" ? "MATPOWER" : "PSS/E RAW",
+                " file this version understands",
+            )
+        end
+        msg = _scrub(reason, paths)
         throw(ErrorException("PowerSystems could not read $(basename(raw)): $(msg)"))
     end
 

@@ -409,6 +409,30 @@ const KUNDUR_ANDES_FLOWS = Dict(
         @test !occursin(dir, msg)
         @test !occursin(replace(dir, '\\' => '/'), msg)
 
+        # A file PowerSystems cannot read: the message names the file by its
+        # name, gives the reason PowerSystems gave (or says what the file is
+        # not), and never ends in the "nothing" the PSS/E parser throws.
+        for (name, body) in (
+            ("junk.raw", "this is not a case file\n"),
+            ("empty.raw", ""),
+            ("junk.m", "this is not a case file\n"),
+        )
+            path = joinpath(dir, name)
+            write(path, body)
+            err = try
+                TensaSienna.load_case(path)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ErrorException
+            msg = sprint(showerror, err)
+            @test startswith(msg, "PowerSystems could not read $(name): ")
+            @test !occursin('/', msg) && !occursin('\\', msg)
+            @test !endswith(strip(msg), "nothing")
+            @test length(msg) > length("PowerSystems could not read $(name): ")
+        end
+
         txt = joinpath(dir, "case.txt")
         write(txt, "x")
         @test_throws ArgumentError TensaSienna.load_case(txt)

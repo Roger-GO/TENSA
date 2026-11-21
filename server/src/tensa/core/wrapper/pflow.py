@@ -170,9 +170,10 @@ class PflowMixin(WrapperBase):
         ss = self._require_loaded()
         if bool(getattr(getattr(ss, "TDS", None), "initialized", False)):
             raise EigDirtyDaeError(
-                "EIG mutated dae state; reload case "
-                "(POST /api/sessions/{id}/reload) to restore pre-EIG PF "
-                "behavior, or use Run TDS instead."
+                "the time-domain run has been initialised on this System, by "
+                "an eigenvalue analysis, an initialisation check or a run; "
+                "reload the case (POST /api/sessions/{id}/reload) before "
+                "another power flow."
             )
         self._ensure_setup()
         with pflow_options_applied(

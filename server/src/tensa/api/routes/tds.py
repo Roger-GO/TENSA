@@ -232,19 +232,11 @@ async def run_tds(
     )
 
 
-# parity-reviewed: 2026-11-21. No web surface initialises without a run yet; the
-# route is for scripts and agents, and will later be a pre-flight check beside
-# the run button of the run controls.
+# parity-reviewed: 2026-11-21. The "Check initialisation" action beside the
+# time-domain run button of the run controls calls it (``useTdsInit``).
 @router.post(
     "/sessions/{session_id}/tds/init",
-    openapi_extra={
-        "x-tensa-gui-location": "none",
-        "x-tensa-parity-deferred": (
-            "No web surface initialises the time-domain run without running it "
-            "yet; the route is for scripts and agents. It will later be a "
-            "pre-flight check beside the run button of the run controls."
-        ),
-    },
+    openapi_extra={"x-tensa-gui-location": "run-controls"},
     operation_id="initTds",
     summary="Initialise the time-domain simulation without running it, and report the initialisation diagnostics.",
     response_model=TdsInitResult,
