@@ -1,5 +1,5 @@
 """Unit tests for ``tensa.engines.andes.keys.assign_andes_keys`` on fake systems
-built from ``types.SimpleNamespace`` (unit P3-B2a).
+built from ``types.SimpleNamespace`` (unit P3-B2a, refined by P3-B2b).
 
 A fake model has ``n``, ``idx.v``, ``group`` and its params as objects with
 ``.v``, shaped like the ANDES models the assigner reads.
@@ -111,27 +111,82 @@ def test_lines_matched_to_identity_with_parallel_circuits() -> None:
 
 
 @pytest.mark.unit
-def test_lines_mismatch_falls_back_to_ordinals_with_problem() -> None:
+def test_lines_matched_by_bus_pair_matpower_order() -> None:
+    # A MATPOWER-like order: ANDES keeps the branch rows in file order with a
+    # transformer between plain lines, and the identity lists the plain lines
+    # first. Every line still gets its file circuit by bus pair.
+    ss = _system(
+        Bus=_model([1, 2, 3, 4]),
+        Line=_model(
+            [101, 102, 103, 104],
+            bus1=[1, 2, 1, 3],
+            bus2=[2, 3, 2, 4],
+            tap=[1.0, 1.05, 1.0, 1.0],
+            phi=[0.0, 0.0, 0.0, 0.0],
+            trans=[0, 1, 0, 0],
+        ),
+    )
+    identity = _identity(
+        buses=(1, 2, 3, 4),
+        branches=(
+            BranchId(1, 2, "1", transformer=False),
+            BranchId(1, 2, "2", transformer=False),
+            BranchId(3, 4, "1", transformer=False),
+            BranchId(2, 3, "1", transformer=True),
+        ),
+    )
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("Line", 101) == "line:1-2-1"
+    assert book.key_of("Line", 102) == "xfmr:2-3-1"
+    assert book.key_of("Line", 103) == "line:1-2-2"
+    assert book.key_of("Line", 104) == "line:3-4-1"
+    assert all(entry.source == "file" for entry in book.entries() if entry.model == "Line")
+    assert book.problems == []
+
+
+@pytest.mark.unit
+def test_line_with_no_record_gets_ordinal_and_note() -> None:
     ss = _system(
         Bus=_model([7, 8, 9]),
         Line=_model([101, 102], bus1=[7, 8], bus2=[8, 9]),
     )
-    # The identity's second branch is on the wrong pair: positions do not line
-    # up, so every line is unmatched and gets an ordinal circuit.
+    # The file names only the 7-8 branch; the 8-9 line has no record and
+    # takes an ordinal circuit, with one note.
     identity = _identity(
         buses=(7, 8, 9),
-        branches=(
-            BranchId(7, 8, "1", transformer=False),
-            BranchId(7, 9, "1", transformer=False),
-        ),
+        branches=(BranchId(7, 8, "1", transformer=False),),
     )
     book = assign_andes_keys(ss, identity)
     assert book.key_of("Line", 101) == "line:7-8-1"
     assert book.key_of("Line", 102) == "line:8-9-1"
-    assert all(
-        entry.source == "ordinal" for entry in book.entries() if entry.model == "Line"
+    entries = {entry.idx: entry for entry in book.entries() if entry.model == "Line"}
+    assert entries[101].source == "file"
+    assert entries[102].source == "ordinal"
+    assert len(book.problems) == 1
+    assert "no branch record" in book.problems[0]
+
+
+@pytest.mark.unit
+def test_identity_branch_left_unused_gets_note() -> None:
+    ss = _system(
+        Bus=_model([7, 8]),
+        Line=_model([101], bus1=[7], bus2=[8]),
     )
-    assert any("line up" in problem for problem in book.problems)
+    # The file names a second 7-8 branch and a 7-8 transformer ANDES does not
+    # hold: two records are left unused, with one note.
+    identity = _identity(
+        buses=(7, 8),
+        branches=(
+            BranchId(7, 8, "1", transformer=False),
+            BranchId(7, 8, "2", transformer=False),
+            BranchId(7, 8, "T", transformer=True),
+        ),
+    )
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("Line", 101) == "line:7-8-1"
+    assert len(book.problems) == 1
+    assert "left unused" in book.problems[0]
+    assert "2 branch record(s)" in book.problems[0]
 
 
 @pytest.mark.unit
@@ -149,6 +204,48 @@ def test_line_past_identity_branches_gets_ordinal_circuit() -> None:
     book = assign_andes_keys(ss, identity)
     assert book.key_of("Line", 101) == "line:7-8-1"
     assert book.key_of("Line", 102) == "line:7-8-2"
+
+
+@pytest.mark.unit
+def test_bus_and_line_the_engine_added_get_engine_keys() -> None:
+    # ANDES turns a three-winding transformer into a star bus the file does
+    # not number (9) and three lines to it.
+    ss = _system(
+        Bus=_model([1, 2, 3, 9]),
+        Line=_model(
+            [101, 102, 103],
+            bus1=[1, 2, 3],
+            bus2=[9, 9, 9],
+            tap=[1.0, 1.0, 1.0],
+            phi=[0.0, 0.0, 0.0],
+            trans=[0, 0, 0],
+        ),
+    )
+    identity = _identity(buses=(1, 2, 3))
+    book = assign_andes_keys(ss, identity)
+    bus_entry = book.entry_of("engine:andes:Bus:9")
+    assert bus_entry is not None
+    assert bus_entry.bucket == "other"
+    assert bus_entry.source == "engine"
+    for idx in (101, 102, 103):
+        entry = book.entry_of(f"engine:andes:Line:{idx}")
+        assert entry is not None
+        assert entry.bucket == "other"
+        assert entry.source == "engine"
+    assert len(book.problems) == 1
+    assert "three-winding" in book.problems[0]
+    assert "1 bus(es) and 3 line(s)" in book.problems[0]
+
+
+@pytest.mark.unit
+def test_added_bus_without_identity_still_gets_a_bus_key() -> None:
+    ss = _system(
+        Bus=_model([1, 2, 9]),
+        Line=_model([101], bus1=[1], bus2=[9]),
+    )
+    book = assign_andes_keys(ss, None)
+    assert book.key_of("Bus", 9) == "bus:9"
+    assert book.key_of("Line", 101) == "line:1-9-1"
 
 
 @pytest.mark.unit
@@ -250,6 +347,23 @@ def test_two_models_of_one_role_on_a_unit() -> None:
     book = assign_andes_keys(ss, None)
     assert book.key_of("GENROU", 1) == "gen:1-1/machine"
     assert book.key_of("GENCLS", 2) == "gen:1-1/machine:GENCLS"
+
+
+@pytest.mark.unit
+def test_three_devices_of_one_model_on_one_unit() -> None:
+    # Six ESD1 devices can name one static generator; here three. The second
+    # and third take "-2" and "-3" on the model-qualified key, with no note.
+    ss = _system(
+        Bus=_model([1]),
+        PV=_model([1], bus=[1], subidx=[1]),
+        ESD1=_model([1, 2, 3], group="DG", bus=[1, 1, 1], gen=[1, 1, 1]),
+    )
+    book = assign_andes_keys(ss, None)
+    assert book.key_of("ESD1", 1) == "gen:1-1/renewable"
+    assert book.key_of("ESD1", 2) == "gen:1-1/renewable:ESD1"
+    assert book.key_of("ESD1", 3) == "gen:1-1/renewable:ESD1-2"
+    assert all("~" not in entry.key for entry in book.entries())
+    assert book.problems == []
 
 
 @pytest.mark.unit

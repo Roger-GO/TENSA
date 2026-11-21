@@ -1,5 +1,6 @@
 """Integration tests of ``assign_andes_keys`` on the real ANDES cases
-(unit P3-B2a). Cases are located as ``test_engines_identity_andes.py`` does.
+(unit P3-B2a, refined by P3-B2b). Cases are located as
+``test_engines_identity_andes.py`` does.
 """
 
 from __future__ import annotations
@@ -80,6 +81,75 @@ def test_psse_case_keys(relative: str, addfile: str | None) -> None:
         if entry.key.startswith("line:") or entry.key.startswith("xfmr:")
     ]
     assert len(branch_keys) == ss.Line.n
+
+
+@pytest.mark.integration
+def test_matpower_case118_lines_matched_by_bus_pair() -> None:
+    # ANDES keeps the MATPOWER branch rows in file order with transformers in
+    # between, while the identity lists the plain branches first; matching by
+    # bus pair still gives every line its file circuit.
+    ss, identity = _load("matpower/case118.m", None)
+    book = assign_andes_keys(ss, identity)
+
+    line_entries = [entry for entry in book.entries() if entry.model == "Line"]
+    assert len(line_entries) == ss.Line.n
+    assert all(entry.source == "file" for entry in line_entries)
+    assert book.problems == []
+    branch_keys = [
+        entry.key
+        for entry in book.entries()
+        if entry.key.startswith("line:") or entry.key.startswith("xfmr:")
+    ]
+    assert len(branch_keys) == ss.Line.n
+
+
+@pytest.mark.integration
+def test_wscc9_three_winding_transformer() -> None:
+    # ANDES turns the file's three-winding transformer into a star bus the
+    # file does not number and three lines to it: one bus and three lines get
+    # engine keys, and the nine branches of the file keep theirs.
+    ss, identity = _load("wscc9/wscc9_3wxfr.raw", None)
+    book = assign_andes_keys(ss, identity)
+
+    line_entries = [entry for entry in book.entries() if entry.model == "Line"]
+    file_lines = [entry for entry in line_entries if entry.source == "file"]
+    assert len(file_lines) == 9
+
+    engine_bus_entries = [
+        entry
+        for entry in book.entries()
+        if entry.model == "Bus" and entry.key.startswith("engine:andes:")
+    ]
+    assert len(engine_bus_entries) == 1
+    engine_line_entries = [
+        entry
+        for entry in line_entries
+        if entry.key.startswith("engine:andes:")
+    ]
+    assert len(engine_line_entries) == 3
+    assert all(entry.bucket == "other" for entry in engine_bus_entries)
+    assert all(entry.bucket == "other" for entry in engine_line_entries)
+
+    assert len(book.problems) == 1
+    assert "three-winding" in book.problems[0]
+
+    keys = [entry.key for entry in book.entries()]
+    assert len(keys) == len(set(keys))
+
+
+@pytest.mark.integration
+def test_ieee14_esd1_same_model_devices_on_one_unit() -> None:
+    # Six ESD1 devices name one static generator; the extra ones take "-2",
+    # "-3", ... on the model-qualified key, and no key carries a "~" suffix.
+    andes = pytest.importorskip("andes")
+    path = _andes_case("ieee14/ieee14_esd1.xlsx")
+    ss = andes.load(str(path), setup=False, no_output=True, default_config=True)
+    book = assign_andes_keys(ss, None)
+
+    keys = [entry.key for entry in book.entries()]
+    assert len(keys) == len(set(keys))
+    assert all("~" not in key for key in keys)
+    assert book.problems == []
 
 
 @pytest.mark.integration

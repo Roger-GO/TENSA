@@ -2,8 +2,13 @@
 
 Section 4 of ``design/multiengine/spec.md``: ANDES keeps file order but drops
 the circuit id of a branch and the id of a load or shunt, so the identity read
-from the case file (``tensa.engines.identity``) supplies them, matched by
-position. This module never imports ``andes``: the system is read through
+from the case file (``tensa.engines.identity``) supplies them. Lines are
+matched to the file's branches by unordered bus pair rather than by position,
+because ANDES keeps a MATPOWER file's branch rows in file order with the
+transformers in between while the identity lists the non-transformer rows
+first. Elements ANDES adds on its own (the star bus of a three-winding
+transformer and the three lines to it) have no counterpart in the file and get
+engine keys. This module never imports ``andes``: the system is read through
 attributes, and every access is guarded so a missing model or parameter is
 skipped rather than raised.
 """
@@ -152,11 +157,20 @@ def is_transformer_row(ss: Any, i: int) -> bool:
     return False
 
 
-def _assign_buses(ss: Any, book: KeyBook) -> dict[str, int]:
-    """Step 1: key every bus and map each ANDES bus idx to its bus number."""
+def _assign_buses(
+    ss: Any, identity: CaseIdentity | None, book: KeyBook
+) -> tuple[dict[str, int], set[int]]:
+    """Step 1: key every bus and map each ANDES bus idx to its bus number.
+
+    When an identity is given, a bus whose number is not in ``identity.buses``
+    is one the engine added (the star bus of a three-winding transformer): it
+    gets an engine key, bucket ``"other"``, not a ``bus:`` key. The returned
+    set holds the bus numbers of those buses.
+    """
     model = getattr(ss, "Bus", None)
     idx_values = _values(model, "idx") if model is not None else []
     numbers: dict[str, int] = {}
+    added: set[int] = set()
     numeric: list[int] = []
     for idx in idx_values:
         number = _bus_number(idx)
@@ -166,6 +180,15 @@ def _assign_buses(ss: Any, book: KeyBook) -> dict[str, int]:
     for idx in idx_values:
         number = _bus_number(idx)
         if number is not None:
+            if identity is not None and number not in identity.buses:
+                added.add(number)
+                numbers[str(idx)] = number
+                book.assign(
+                    KeyEntry(
+                        engine_key("andes", "Bus", idx), "other", "Bus", idx, "engine"
+                    )
+                )
+                continue
             source = "engine"
         else:
             number = next_free
@@ -176,13 +199,25 @@ def _assign_buses(ss: Any, book: KeyBook) -> dict[str, int]:
             )
         numbers[str(idx)] = number
         book.assign(KeyEntry(bus_key(number), "bus", "Bus", idx, source))
-    return numbers
+    return numbers, added
 
 
 def _assign_lines(
-    ss: Any, identity: CaseIdentity | None, book: KeyBook, bus_numbers: dict[str, int]
+    ss: Any,
+    identity: CaseIdentity | None,
+    book: KeyBook,
+    bus_numbers: dict[str, int],
+    added_buses: set[int],
 ) -> None:
-    """Step 2: key every line and transformer of ``ss.Line``, in ANDES order."""
+    """Step 2: key every line and transformer of ``ss.Line``, in ANDES order.
+
+    With an identity, the file's branch records are queued per unordered bus
+    pair, transformers and plain lines apart, and each ANDES line takes the
+    next record of its pair and kind (of the other kind when its own is out),
+    keeping the record's circuit, bus order and kind. A line with an end on a
+    bus the engine added gets an engine key. A line with no record left gets
+    a circuit by ordinal, skipping the circuits already used for its pair.
+    """
     model = getattr(ss, "Line", None)
     if model is None:
         return
@@ -200,50 +235,73 @@ def _assign_lines(
             return None
         return (min(first, second), max(first, second))
 
-    # The identity matches position by position only when every position's
-    # unordered bus pair agrees; otherwise every line is unmatched.
-    matched = identity is not None and n <= len(identity.branches)
-    if matched and identity is not None:
-        for i in range(n):
-            line_pair = pair(i)
-            branch = identity.branches[i]
-            if line_pair is None or line_pair != (
-                min(branch.from_bus, branch.to_bus),
-                max(branch.from_bus, branch.to_bus),
-            ):
-                matched = False
-                break
-    if identity is not None and not matched:
-        book.problems.append(
-            "the lines ANDES holds do not line up with the branches of the "
-            "case file; circuits are assigned by ordinal"
-        )
+    def raw_end(i: int) -> int | None:
+        if i >= len(bus1_values) or i >= len(bus2_values):
+            return None
+        first = bus_numbers.get(str(bus1_values[i]))
+        second = bus_numbers.get(str(bus2_values[i]))
+        if first in added_buses:
+            return first
+        if second in added_buses:
+            return second
+        return None
 
-    # Circuits already used per unordered pair, file ones included, so an
-    # ordinal circuit never repeats one the file gave for that pair.
-    used_ckts: dict[tuple[int, int], set[str]] = {}
-    ordinal_counts: dict[tuple[int, int], int] = {}
-    if matched and identity is not None:
-        for branch in identity.branches[:n]:
-            line_pair = (
+    # Queues of identity records per unordered pair, transformer records and
+    # plain ones apart, each in the order of ``identity.branches``.
+    queues: dict[tuple[int, int], dict[bool, list[int]]] = {}
+    if identity is not None:
+        for position, branch in enumerate(identity.branches):
+            branch_pair = (
                 min(branch.from_bus, branch.to_bus),
                 max(branch.from_bus, branch.to_bus),
             )
-            used_ckts.setdefault(line_pair, set()).add(branch.ckt)
+            queues.setdefault(branch_pair, {False: [], True: []})[branch.transformer].append(
+                position
+            )
+
+    # Circuits already used per unordered pair, so an ordinal circuit never
+    # repeats one the file gave for that pair.
+    used_ckts: dict[tuple[int, int], set[str]] = {}
+    ordinal_counts: dict[tuple[int, int], int] = {}
+    unmatched_lines = 0
+    added_bus_lines = 0
 
     for i in range(n):
         idx = idx_values[i] if i < len(idx_values) else i
-        if matched and identity is not None:
-            branch = identity.branches[i]
+        if identity is not None and raw_end(i) is not None:
+            # A line to a bus the engine added (a three-winding transformer's
+            # star bus): the file does not name it.
+            added_bus_lines += 1
+            book.assign(
+                KeyEntry(
+                    engine_key("andes", "Line", idx), "other", "Line", idx, "engine"
+                )
+            )
+            continue
+        line_pair = pair(i)
+        record_position: int | None = None
+        if identity is not None and line_pair is not None:
+            by_kind = queues.get(line_pair)
+            if by_kind is not None:
+                want_transformer = is_transformer_row(ss, i)
+                same_kind = by_kind[want_transformer]
+                if same_kind:
+                    record_position = same_kind.pop(0)
+                else:
+                    other_kind = by_kind[not want_transformer]
+                    if other_kind:
+                        record_position = other_kind.pop(0)
+        if record_position is not None and identity is not None:
+            branch = identity.branches[record_position]
             if branch.transformer:
                 key = transformer_key(branch.from_bus, branch.to_bus, branch.ckt)
                 bucket = "transformer"
             else:
                 key = line_key(branch.from_bus, branch.to_bus, branch.ckt)
                 bucket = "line"
+            used_ckts.setdefault(line_pair, set()).add(branch.ckt)  # type: ignore[arg-type]
             book.assign(KeyEntry(key, bucket, "Line", idx, "file"))
             continue
-        line_pair = pair(i)
         if line_pair is None:
             # A line whose buses have no number cannot be keyed by pair; give
             # it an engine key so it is still named.
@@ -251,6 +309,8 @@ def _assign_lines(
                 KeyEntry(engine_key("andes", "Line", idx), "other", "Line", idx, "engine")
             )
             continue
+        if identity is not None:
+            unmatched_lines += 1
         count = ordinal_counts.get(line_pair, 0) + 1
         ordinal_counts[line_pair] = count
         taken = used_ckts.setdefault(line_pair, set())
@@ -267,6 +327,26 @@ def _assign_lines(
             key = line_key(line_pair[0], line_pair[1], ckt)
             bucket = "line"
         book.assign(KeyEntry(key, bucket, "Line", idx, "ordinal"))
+
+    if identity is not None:
+        unused = sum(len(by_kind[kind]) for by_kind in queues.values() for kind in (False, True))
+        if unused > 0:
+            book.problems.append(
+                f"{unused} branch record(s) of the case file matched no line "
+                "ANDES holds and were left unused"
+            )
+        if unmatched_lines > 0:
+            book.problems.append(
+                f"{unmatched_lines} line(s) ANDES holds matched no branch "
+                "record of the case file; circuits assigned by ordinal"
+            )
+        if added_buses or added_bus_lines:
+            book.problems.append(
+                f"{len(added_buses)} bus(es) and {added_bus_lines} line(s) "
+                "come from three-winding transformers or other elements the "
+                "engine added; they get engine keys and are left out of "
+                "comparison"
+            )
 
 
 def _assign_generators(ss: Any, book: KeyBook, bus_numbers: dict[str, int]) -> None:
@@ -453,7 +533,13 @@ def _unit_of_device(
 def _assign_dynamic_and_other(
     ss: Any, book: KeyBook, bus_numbers: dict[str, int]
 ) -> None:
-    """Step 6: key every other model with ``n > 0``."""
+    """Step 6: key every other model with ``n > 0``.
+
+    A device of a generating unit takes ``unit_model_key(unit, role)``; when
+    that is taken, the key with the model name; when that is taken too (two
+    devices of one model and role on one unit), the key with the model name
+    and ``-2``, ``-3``, ... the first that is free, without a problem note.
+    """
     models = getattr(ss, "models", None)
     if models is None:
         return
@@ -487,6 +573,14 @@ def _assign_dynamic_and_other(
                     existing.model != model_name or str(existing.idx) != str(idx)
                 ):
                     key = unit_model_key(unit_key, role, model_name)
+                    existing = book.entry_of(key)
+                    if existing is not None and (
+                        existing.model != model_name or str(existing.idx) != str(idx)
+                    ):
+                        suffix = 2
+                        while book.entry_of(f"{key}-{suffix}") is not None:
+                            suffix += 1
+                        key = f"{key}-{suffix}"
                 book.assign(KeyEntry(key, "dynamic", model_name, idx, "engine"))
                 continue
             bus = (
@@ -522,8 +616,8 @@ def assign_andes_keys(
     """
     if book is None:
         book = KeyBook()
-    bus_numbers = _assign_buses(ss, book)
-    _assign_lines(ss, identity, book, bus_numbers)
+    bus_numbers, added_buses = _assign_buses(ss, identity, book)
+    _assign_lines(ss, identity, book, bus_numbers, added_buses)
     _assign_generators(ss, book, bus_numbers)
     _assign_devices_on_buses(ss, identity, book, bus_numbers)
     _assign_dynamic_and_other(ss, book, bus_numbers)
