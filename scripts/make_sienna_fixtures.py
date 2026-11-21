@@ -6,6 +6,12 @@ engine computes (ANDES's power flow: voltage magnitude and angle at every bus). 
 Julia tests in ``server/tests/julia`` load the same file with Sienna and must find the
 same elements and the same solution.
 
+The fixture also holds the voltage setpoint of every bus a generator regulates (the
+generator's own ``VS``, which ANDES keeps as ``v0`` of its PV and Slack models).
+PowerSystems.jl has no field for ``VS`` and takes the bus record's stored ``VM`` as the
+setpoint instead, so the Julia tests hand these values to the Sienna adapter to solve
+the same power flow ANDES does.
+
     python scripts/make_sienna_fixtures.py [out_dir]
 
 The cases are read from the ANDES installation (``andes/cases``), so the fixtures name
@@ -50,6 +56,26 @@ def dyr_models(path: Path) -> list[list[object]]:
     return out
 
 
+def v_setpoints(ss: andes.system.System, name: str) -> dict[str, float]:
+    """The voltage setpoint of every bus an in-service PV or Slack generator regulates,
+    keyed by bus number. Two generators on one bus that ask for different voltages stop
+    the script, since there is no one setpoint to hand on."""
+    out: dict[str, float] = {}
+    for model in (ss.PV, ss.Slack):
+        for bus, v0, u in zip(model.bus.v, model.v0.v, model.u.v, strict=True):
+            if float(u) != 1.0:
+                continue
+            key = str(int(bus))
+            value = float(v0)
+            if key in out and abs(out[key] - value) > 1e-9:
+                raise SystemExit(
+                    f"{name}: bus {key} has in-service generators with different voltage "
+                    f"setpoints ({out[key]} and {value})"
+                )
+            out[key] = value
+    return out
+
+
 def main() -> None:
     out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO / "server" / "tests" / "julia" / "fixtures"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +101,7 @@ def main() -> None:
             "freq_hz": identity.freq_hz,
             "buses": list(identity.buses),
             "swing_buses": list(identity.swing_buses),
+            "v_setpoints": v_setpoints(ss, name),
             "branches": [[b.from_bus, b.to_bus, b.ckt, b.transformer] for b in identity.branches],
             "transformers3": [[list(t.buses), t.ckt] for t in identity.transformers3],
             "generators": [[g.bus, g.id] for g in identity.generators],
