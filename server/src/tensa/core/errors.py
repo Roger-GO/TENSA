@@ -278,6 +278,21 @@ class SePrerequisiteError(AndesAppError):
     recovery_kind: str | None = "run-pflow"
 
 
+class SeOptionError(AndesAppError):
+    """Raised when a state-estimation run option is not one ANDES can use:
+    an algorithm other than ``wls`` or ``lav``, a tolerance that is not a
+    positive finite number, an iteration limit below 1, or a negative noise
+    seed.
+
+    Like :class:`PflowRequestError`, the check runs before anything is
+    written to the System, so there is nothing to recover from: the caller
+    fixes the request and sends it again. The response is a 422 without a
+    recovery action.
+    """
+
+    recovery_kind: str | None = "none"
+
+
 class SeNonConvergentError(AndesAppError):
     """Raised when ``ss.SE.run()`` returned False after running to
     completion (max_iter reached without satisfying ``config.tol``).

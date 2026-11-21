@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from tensa.core.errors import SeNonConvergentError, SePrerequisiteError, SeUnderDeterminedError
+import math
+
+from tensa.core.errors import (
+    SeNonConvergentError,
+    SeOptionError,
+    SePrerequisiteError,
+    SeUnderDeterminedError,
+    short_repr,
+)
 from tensa.core.se_result import MeasurementsGenerated, SeResult
 from tensa.core.wrapper.base import WrapperBase
 
 
 class SeMixin(WrapperBase):
-    """Static state estimation: the measurement set and the WLS run on it."""
+    """Static state estimation: the measurement set and the WLS or LAV run on it."""
 
     def generate_measurements_from_pflow(
         self, *, noise_seed: int | None = None
@@ -64,9 +72,38 @@ class SeMixin(WrapperBase):
         self._se_measurements = m
         return MeasurementsGenerated(count=int(m.nm))
 
-    def run_se(self) -> SeResult:
+    def run_se(
+        self,
+        *,
+        algorithm: str | None = None,
+        tol: float | None = None,
+        max_iter: int | None = None,
+        noise_seed: int | None = None,
+    ) -> SeResult:
         """Run static state estimation against the substrate's
         in-memory measurement set — Unit 13.
+
+        Per-run options (all optional; a call that names none behaves
+        exactly as before):
+
+        - ``algorithm``: ``"wls"`` (default, weighted least squares via
+          Gauss-Newton) or ``"lav"`` (least absolute value via
+          iteratively reweighted least squares, robust to gross
+          measurement errors; it converges linearly and often needs more
+          than ANDES's 100 iterations once a measurement is bad).
+          Case-insensitive.
+        - ``tol`` / ``max_iter``: convergence tolerance and iteration
+          limit for this run only, written to ``ss.SE.config`` for the
+          run and put back afterwards (the ``pflow_options`` pattern).
+        - ``noise_seed``: when set, this run's measurement values are
+          drawn afresh from the power-flow solution with this seed, over
+          the cached set's measurements and sigmas, and the cached values
+          are put back afterwards, so the same seed gives the same run and
+          the next run without one sees the generate step's draw.
+          ``None`` runs on the cached values.
+
+        A bad option raises :class:`SeOptionError` → 422 before any
+        ANDES call; the worker does not rely on the REST body's checks.
 
         Pre-conditions (raise :class:`SePrerequisiteError` → 409):
 
@@ -82,7 +119,7 @@ class SeMixin(WrapperBase):
           :class:`SeUnderDeterminedError` → 422 BEFORE the WLS iteration
           runs (saves the iteration cost on a guaranteed-failure case).
           Mirrors ANDES's chi-squared ``dof <= 0`` detection.
-        - WLS Gauss-Newton non-convergent (e.g., bad initial guess,
+        - Gauss-Newton non-convergent (e.g., bad initial guess,
           exceeded ``max_iter``): raises :class:`SeNonConvergentError`
           → 422 with the iteration count.
         - Singular gain matrix at iteration 0: raises
@@ -90,10 +127,47 @@ class SeMixin(WrapperBase):
           observability failures to the same error so the UI surfaces
           "add more measurements").
 
-        Returns a :class:`SeResult` with per-measurement residuals and
-        the indices of measurements whose normalised residual exceeds
-        3-sigma (candidate bad-data points the UI highlights).
+        Returns a :class:`SeResult` with per-measurement residuals, the
+        indices of measurements whose normalised residual exceeds
+        3-sigma (candidate bad-data points the UI highlights), the
+        settings the run used and, for WLS, the chi-squared bad-data
+        test on the objective ``J``.
         """
+        if algorithm is not None:
+            if not isinstance(algorithm, str) or algorithm.lower() not in ("wls", "lav"):
+                raise SeOptionError(
+                    f"unknown SE algorithm {short_repr(algorithm)}; "
+                    "expected 'wls' or 'lav'"
+                )
+            algorithm = algorithm.lower()
+        else:
+            algorithm = "wls"
+        if tol is not None:
+            tol_ok = False
+            if isinstance(tol, int | float) and not isinstance(tol, bool):
+                tol = float(tol)
+                tol_ok = math.isfinite(tol) and tol > 0
+            if not tol_ok:
+                raise SeOptionError(
+                    f"tol must be a positive float, got {short_repr(tol)}"
+                )
+        if max_iter is not None and (
+            isinstance(max_iter, bool)
+            or not isinstance(max_iter, int)
+            or max_iter < 1
+        ):
+            raise SeOptionError(
+                f"max_iter must be an integer >= 1, got {short_repr(max_iter)}"
+            )
+        if noise_seed is not None and (
+            isinstance(noise_seed, bool)
+            or not isinstance(noise_seed, int)
+            or noise_seed < 0
+        ):
+            raise SeOptionError(
+                f"noise_seed must be a non-negative integer, got {short_repr(noise_seed)}"
+            )
+
         ss = self._require_loaded()
         self._ensure_setup()
         if not bool(getattr(ss.PFlow, "converged", False)):
@@ -132,8 +206,41 @@ class SeMixin(WrapperBase):
                 "measurements via Measurements.add(...) and re-run."
             )
 
+        from andes.se.algorithms import lav, wls  # heavy import — kept lazy
+
+        saved_z = None
+        # tol and max_iter live on ``ss.SE.config`` and ``SE.run`` reads them
+        # when it starts: snapshot, apply the overrides for this run, and
+        # restore in a ``finally`` so a failed run also puts them back (the
+        # ``pflow_options`` pattern).
+        saved_tol = ss.SE.config.tol
+        saved_max_iter = ss.SE.config.max_iter
+        if tol is not None:
+            ss.SE.config.tol = tol
+        if max_iter is not None:
+            ss.SE.config.max_iter = max_iter
         try:
-            ok = bool(ss.SE.run(measurements=m))
+            # A seeded run draws its own noise and leaves the cached set as
+            # the generate step left it. ``SE.init`` adds the angle-reference
+            # pseudo-measurement on the first run (with the power-flow angle
+            # as its value), so it runs first: the draw then covers the
+            # structure the solver sees, and the values saved for putting
+            # back are ones the next run can use. ``generate_from_pflow``
+            # draws from its own ``numpy.random.default_rng(seed)``, never
+            # from NumPy's global state.
+            if noise_seed is not None:
+                ss.SE.init(measurements=m)
+                saved_z = m.z.copy()  # type: ignore[attr-defined]
+                m.generate_from_pflow(seed=noise_seed)  # type: ignore[attr-defined]
+            # The effective values the solver sees, read back while the
+            # overrides are applied so the result reports them.
+            effective_tol = float(ss.SE.config.tol)
+            effective_max_iter = int(ss.SE.config.max_iter)
+            # Pass the algorithm even for WLS so ``ss.SE._algorithm`` is
+            # always set for the chi-squared test.
+            ok = bool(
+                ss.SE.run(measurements=m, algorithm=wls if algorithm == "wls" else lav)
+            )
         except SePrerequisiteError:
             raise
         except SeUnderDeterminedError:
@@ -142,6 +249,11 @@ class SeMixin(WrapperBase):
             raise SeNonConvergentError(
                 f"State estimation failed: {exc}"
             ) from exc
+        finally:
+            ss.SE.config.tol = saved_tol
+            ss.SE.config.max_iter = saved_max_iter
+            if saved_z is not None:
+                m.z = saved_z  # type: ignore[attr-defined]
 
         result_dict = getattr(ss.SE, "result", None) or {}
         n_iter = int(result_dict.get("n_iter", 0) or 0)
@@ -173,7 +285,7 @@ class SeMixin(WrapperBase):
 
         if not ok:
             raise SeNonConvergentError(
-                f"WLS did not converge after {n_iter} iterations "
+                f"{algorithm.upper()} did not converge after {n_iter} iterations "
                 f"(J={J:.6g}); widen tol/max_iter or check measurements."
             )
 
@@ -195,6 +307,24 @@ class SeMixin(WrapperBase):
                 # highlighting.
                 pass
 
+        # The chi-squared test on J is only valid for WLS; for LAV ANDES
+        # logs a warning and returns a meaningless (False, J, inf, 0), so
+        # it is not called and the result carries ``chi_squared=None``.
+        # ANDES takes ``dof = nm - 2 * nb`` with the angle reference counted
+        # in ``nm``; with no redundancy (``dof <= 0``) it answers an infinite
+        # threshold, which is no test either.
+        chi_squared: dict[str, float | int | bool] | None = None
+        if algorithm == "wls":
+            passed, J_test, threshold, dof = ss.SE.chi_squared_test(confidence=0.95)
+            if int(dof) > 0 and math.isfinite(float(threshold)):
+                chi_squared = {
+                    "passed": bool(passed),
+                    "J": float(J_test),
+                    "threshold": float(threshold),
+                    "dof": int(dof),
+                    "confidence": 0.95,
+                }
+
         return SeResult(
             converged=True,
             iterations=n_iter,
@@ -202,4 +332,11 @@ class SeMixin(WrapperBase):
             residuals=residuals_list,
             measurement_count=finalized_count,
             flagged_indices=flagged,
+            algorithm=algorithm,
+            settings={
+                "tol": effective_tol,
+                "max_iter": effective_max_iter,
+                "noise_seed": noise_seed,
+            },
+            chi_squared=chi_squared,
         )

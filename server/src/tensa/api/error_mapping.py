@@ -123,6 +123,7 @@ WORKER_ERROR_HTTP_MAP: dict[str, int] = {
     "CpfDivergedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SeNonConvergentError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "SeUnderDeterminedError": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "SeOptionError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ElementValidationError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "YbusTooLargeError": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "ModelDocUnavailableError": status.HTTP_422_UNPROCESSABLE_CONTENT,

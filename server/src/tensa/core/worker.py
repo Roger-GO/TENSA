@@ -892,10 +892,19 @@ def _handle_generate_measurements_from_pflow(
 def _handle_run_se(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.run_se`` for Unit 13.
 
-    Returns the serialized :class:`SeResult` dict (converged, iterations,
-    mismatch, residuals, measurement_count, flagged_indices).
+    Forwards the per-run options (``algorithm``, ``tol``, ``max_iter``,
+    ``noise_seed``) when the request names them; the wrapper checks them,
+    so the worker does not rely on the REST body's validation. Returns the
+    serialized :class:`SeResult` dict (converged, iterations, mismatch,
+    residuals, measurement_count, flagged_indices, algorithm, settings,
+    chi_squared).
     """
-    return _serialize_dataclass(wrapper.run_se())
+    options = {
+        key: args[key]
+        for key in ("algorithm", "tol", "max_iter", "noise_seed")
+        if args.get(key) is not None
+    }
+    return _serialize_dataclass(wrapper.run_se(**options))
 
 
 def _handle_add_pmu(wrapper: Wrapper, args: dict[str, Any]) -> Any:

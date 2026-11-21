@@ -179,6 +179,13 @@ CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a
                  case's own setting was kept).
                  cpf/qv body: {"bus_idx": "5", "q_range": 5.0, "enforce_q_limits": false}; same response, lambdas holding Q at the bus and max_lam the largest of them.
 State estimation:POST /sessions/{id}/se/measurements/generate · POST /sessions/{id}/se
+                 generate body: {"noise_seed": 7} (optional) draws the noise the cached set keeps.
+                 se body, every field optional and for that run only: {"algorithm": "wls"|"lav", "tol": 1e-4, "max_iter": 100,
+                 "noise_seed": 7}. lav (least absolute value) shrugs off a gross error that pulls wls, but converges slowly: give it
+                 a larger max_iter (e.g. 1000) when a measurement is bad, or it answers 422. noise_seed draws this run's noise afresh
+                 with that seed and leaves the cached set as it was.
+                 → converged, iterations, mismatch (J), residuals, measurement_count, flagged_indices (|r|/sigma > 3), algorithm,
+                 settings {tol, max_iter, noise_seed}, chi_squared {passed, J, threshold, dof, confidence} (wls only, 95%; null for lav).
 PMU placement:   POST/GET /sessions/{id}/pmu · DELETE /sessions/{id}/pmu/{pmu_idx} · GET .../pmu/{run_id}/export.csv
 Profiles:        POST /sessions/{id}/profiles/upload · POST/GET /sessions/{id}/profiles · DELETE /sessions/{id}/profiles/{profile_idx}
 Sweeps:          POST /sessions/{id}/sweep (param sweep over disturbance/sim values; per-iteration TDS results)
