@@ -301,6 +301,18 @@ class PflowResult(BaseModel):
             "``GET /sessions/{id}/operating-point``."
         ),
     )
+    keys: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description=(
+            "The key of every element the result names, per kind: "
+            "``keys[\"bus\"]`` maps the stringified idx of every bus in "
+            "``bus_voltages`` to its key, and ``line``, ``generator`` and "
+            "``load`` do the same for ``line_flows``, ``generator_outputs`` "
+            "and ``load_consumption``. A key names an element the same way in "
+            "every engine (section 4 of ``design/multiengine/spec.md``). An "
+            "idx with no key is left out."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(

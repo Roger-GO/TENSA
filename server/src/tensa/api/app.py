@@ -52,6 +52,7 @@ from tensa.api.routes.engines import router as engines_router
 from tensa.api.routes.examples import router as examples_router
 from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
+from tensa.api.routes.keys import router as keys_router
 from tensa.api.routes.messages import router as messages_router
 from tensa.api.routes.metrics import router as metrics_router
 from tensa.api.routes.pflow import router as pflow_router
@@ -360,6 +361,7 @@ def make_app(
     # is registered by FastAPI itself and stays at the root path.
     app.include_router(sessions_router, prefix="/api", tags=["sessions"])
     app.include_router(cases_router, prefix="/api", tags=["cases"])
+    app.include_router(keys_router, prefix="/api", tags=["keys"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])

@@ -41,6 +41,17 @@ class TopologyEntry(BaseModel):
             "(None or unavailable on a given model) are omitted."
         ),
     )
+    key: str | None = Field(
+        default=None,
+        description=(
+            "The element's key: a string that names it the same way in every "
+            "engine that loads the case (``bus:7``, ``line:7-8-1``, "
+            "``gen:1-1``, ``gen:1-1/exciter``), built from the case by the "
+            "rule of section 4 of ``design/multiengine/spec.md``. ``idx`` "
+            "stays the engine's own handle. ``null`` where the entry was "
+            "built away from the key book."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
@@ -263,6 +274,14 @@ class TopologySummary(BaseModel):
             "The edit ``POST /sessions/{id}/redo-edit`` would put back: the "
             "one taken back last. ``null`` when there is none, which is the "
             "case after any new edit."
+        ),
+    )
+    has_dynamics: bool = Field(
+        default=False,
+        description=(
+            "Whether the case carries dynamic models (a synchronous machine, "
+            "an exciter, a governor, ...), so a client need not infer it from "
+            "the model names in ``generators`` and ``controllers``."
         ),
     )
     job_id: str | None = Field(

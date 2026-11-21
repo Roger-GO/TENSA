@@ -17,6 +17,30 @@ from tensa.core.wrapper.pflow_extract import (
 from tensa.core.wrapper.results import PflowResult
 
 
+def _result_keys(wrapper: WrapperBase, result: PflowResult) -> dict[str, dict[str, str]]:
+    """The ``keys`` lookup of a power-flow result: per kind, the stringified
+    idx of every entry of the matching result dict mapped to its key. An idx
+    with no key is left out; an empty result dict gives an empty map."""
+    book = wrapper.keys()
+    plans = (
+        ("bus", ("Bus",), result.bus_voltages),
+        ("line", ("Line",), result.line_flows),
+        ("generator", ("PV", "Slack"), result.generator_outputs),
+        ("load", ("PQ",), result.load_consumption),
+    )
+    keys: dict[str, dict[str, str]] = {}
+    for name, models, values in plans:
+        mapped: dict[str, str] = {}
+        for idx in values:
+            for model in models:
+                key = book.key_of(model, idx)
+                if key is not None:
+                    mapped[str(idx)] = key
+                    break
+        keys[name] = mapped
+    return keys
+
+
 class PflowMixin(WrapperBase):
     """Power flow, and the operating point read back without running one."""
 
@@ -109,7 +133,7 @@ class PflowMixin(WrapperBase):
         generator_outputs = _extract_generator_outputs(ss) if converged else {}
         load_consumption = _extract_load_consumption(ss) if converged else {}
 
-        return PflowResult(
+        result = PflowResult(
             converged=converged,
             iterations=iterations,
             mismatch=mismatch,
@@ -125,6 +149,8 @@ class PflowMixin(WrapperBase):
                 else None
             ),
         )
+        result.keys = _result_keys(self, result)
+        return result
 
     def operating_point(self) -> PflowResult:
         """Read the System's CURRENT operating point WITHOUT running anything.
@@ -156,10 +182,12 @@ class PflowMixin(WrapperBase):
                 if math.isfinite(v) and math.isfinite(a):
                     bus_voltages[idx] = v
                     bus_angles[idx] = a - drift
-        return PflowResult(
+        result = PflowResult(
             converged=len(bus_voltages) > 0,
             iterations=0,
             mismatch=0.0,
             bus_voltages=bus_voltages,
             bus_angles=bus_angles,
         )
+        result.keys = _result_keys(self, result)
+        return result

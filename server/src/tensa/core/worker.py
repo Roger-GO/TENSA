@@ -525,6 +525,29 @@ def _handle_topology(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.topology_snapshot())
 
 
+def _handle_list_keys(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The keys of the loaded case's elements, in assignment order, with the
+    problems the assignment noted. A listing is a read: with no case loaded the
+    truthful answer is empty lists."""
+    try:
+        book = wrapper.keys()
+    except NoCaseLoadedError:
+        return {"keys": [], "problems": []}
+    return {
+        "keys": [
+            {
+                "key": entry.key,
+                "bucket": entry.bucket,
+                "model": entry.model,
+                "idx": entry.idx,
+                "source": entry.source,
+            }
+            for entry in book.entries()
+        ],
+        "problems": list(book.problems),
+    }
+
+
 def _handle_operating_point(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.operating_point())
 
@@ -1752,6 +1775,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "load_case": _handle_load_case,
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
+    "list_keys": _handle_list_keys,
     "operating_point": _handle_operating_point,
     "add_disturbance": _handle_add_disturbance,
     "list_disturbances": _handle_list_disturbances,

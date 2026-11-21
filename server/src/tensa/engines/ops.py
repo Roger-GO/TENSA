@@ -17,6 +17,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "load_case",
             "reload_case",
             "topology",
+            "list_keys",
             "operating_point",
             "add_disturbance",
             "list_disturbances",

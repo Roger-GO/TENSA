@@ -97,6 +97,10 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
             PflowSettings(**payload["settings"]) if payload.get("settings") else None
         ),
         summary=PflowSummary(**payload["summary"]) if payload.get("summary") else None,
+        keys={
+            str(kind): {str(idx): str(key) for idx, key in entries.items()}
+            for kind, entries in (payload.get("keys") or {}).items()
+        },
     )
 
 

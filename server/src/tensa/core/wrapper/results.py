@@ -22,6 +22,10 @@ class TopologyEntry:
     name: str
     kind: str  # ANDES model class name (e.g., "Bus", "Line", "GENROU")
     params: dict[str, Any] = field(default_factory=dict)
+    # The element's key (section 4 of ``design/multiengine/spec.md``): the same
+    # in every engine that loads the case. ``None`` where the entry was built
+    # away from the key book.
+    key: str | None = None
 
 
 @dataclass
@@ -76,6 +80,9 @@ class TopologySnapshot:
     # put back, or ``None`` when there is none. See ``tensa.core.edit_log``.
     undo: EditStep | None = None
     redo: EditStep | None = None
+    # Whether the case carries dynamic models (a machine, an exciter, ...), so
+    # a client need not infer it from model names.
+    has_dynamics: bool = False
 
 
 @dataclass
@@ -207,6 +214,10 @@ class PflowResult:
     # converged) the system totals. ``operating_point`` leaves both ``None``.
     settings: PflowSettings | None = None
     summary: PflowSummary | None = None
+    # The key of every element a result dict names, per kind: ``keys["bus"]``
+    # maps the stringified idx of every bus in ``bus_voltages`` to its key, and
+    # so on. An idx with no key is left out.
+    keys: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass

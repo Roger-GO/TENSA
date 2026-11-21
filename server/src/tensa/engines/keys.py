@@ -162,3 +162,21 @@ class KeyBook:
     def has(self, model: str, idx: int | str) -> bool:
         """Whether a ``(model, idx)`` handle already has a key."""
         return (model, str(idx)) in self._by_handle
+
+    def retain(self, handles: set[tuple[str, str]]) -> None:
+        """Drop every entry whose ``(model, idx)`` handle is not in ``handles``.
+
+        ``idx`` is compared as ``str``, as everywhere in the book. The entries
+        that stay keep their order and their keys; a handle that is assigned
+        again after being dropped gets a key afresh.
+        """
+        kept = [
+            entry
+            for entry in self._entries
+            if (entry.model, str(entry.idx)) in handles
+        ]
+        self._entries = kept
+        self._by_handle = {
+            (entry.model, str(entry.idx)): entry for entry in kept
+        }
+        self._by_key = {entry.key: entry for entry in kept}

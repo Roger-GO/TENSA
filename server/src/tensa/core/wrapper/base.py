@@ -11,11 +11,13 @@ from tensa.core.disturbance import DisturbanceSpec
 from tensa.core.edit_log import DeviceRef, Op
 from tensa.core.errors import NoCaseLoadedError, SetupFailedError
 from tensa.core.tds_controllers import ControllerBank
+from tensa.engines.keys import KeyBook
 
 if TYPE_CHECKING:
     from andes.system import System
 
     from tensa.core.clone_manager import CloneManager
+    from tensa.engines.identity import CaseIdentity
 
 
 class WrapperBase:
@@ -106,11 +108,65 @@ class WrapperBase:
         # that one stopped carries its controllers on too. It holds their state
         # and no reference to the System.
         self._controller_bank: ControllerBank | None = None
+        # The identity of the case file (``tensa.engines.identity``) and the
+        # book of the keys assigned from it (``tensa.engines.keys``): how every
+        # element is named the same in every engine. Both live as long as the
+        # case does: a reload, an undo, a redo and a delete keep them, since a
+        # key never changes within a session; a new case or a blank system
+        # starts a fresh book.
+        self._identity: CaseIdentity | None = None
+        self._key_book: KeyBook = KeyBook()
+        # How many of the book's problem notes have been logged already, so a
+        # note is logged once however often ``keys`` is called.
+        self._key_notes_logged: int = 0
+        # The case file the identity and the book belong to, as its path, its
+        # modification time and its size: a ``load_case`` of another file, or of
+        # the same path after the file changed on disk, starts them afresh; a
+        # reload of the unchanged file keeps them.
+        self._keyed_case: tuple[Path, int, int] | None = None
 
     def _require_loaded(self) -> System:
         if self._ss is None:
             raise NoCaseLoadedError("no case has been loaded")
         return self._ss
+
+    def keys(self) -> KeyBook:
+        """The keys of the loaded case's elements, assigning any not yet keyed.
+
+        A key names an element the same way in every engine (section 4 of
+        ``design/multiengine/spec.md``). Entries whose element is gone from the
+        System (a delete rebuilt it without them) are dropped first, so a
+        handle that comes back is keyed afresh; every other key is stable, and
+        calling this twice changes nothing. A problem the assignment notes is
+        logged once as a ``tensa.notice`` warning.
+        """
+        import logging
+
+        from tensa.engines.andes.keys import assign_andes_keys
+
+        ss = self._require_loaded()
+        handles: set[tuple[str, str]] = set()
+        models = getattr(ss, "models", None)
+        if models is not None:
+            for model_name, model in models.items():
+                idx_var = getattr(model, "idx", None)
+                values = getattr(idx_var, "v", None)
+                if values is None:
+                    continue
+                try:
+                    for value in list(values):
+                        handles.add((model_name, str(value)))
+                except TypeError:
+                    continue
+        self._key_book.retain(handles)
+        assign_andes_keys(ss, self._identity, self._key_book)
+        problems = self._key_book.problems
+        if len(problems) > self._key_notes_logged:
+            log = logging.getLogger("tensa.notice")
+            for note in problems[self._key_notes_logged :]:
+                log.warning("keys: %s", note)
+            self._key_notes_logged = len(problems)
+        return self._key_book
 
     def _ensure_setup(self) -> None:
         """Call ``ss.setup()`` if not yet committed.

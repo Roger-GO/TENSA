@@ -13,7 +13,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `about-dialog` | 1 |
 | `activity-panel` | 2 |
 | `analysis-panel` | 9 |
-| `auto` | 5 |
+| `auto` | 6 |
 | `bundle-dialog` | 2 |
 | `command-palette` | 6 |
 | `data-grid` | 1 |
@@ -30,7 +30,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **71** |
+| **total** | **72** |
 
 ## OpenAPI routes
 
@@ -73,6 +73,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/jobs` | `activity-panel` |  |
 | `GET` | `/api/sessions/{session_id}/jobs/{job_id}` | `none` | The activity panel hydrates job state from the multiplexed jobs WS + the GET /jobs list resync; it never polls a single job by id (single-job GET kept for API/agent parity). |
 | `DELETE` | `/api/sessions/{session_id}/jobs/{job_id}` | `activity-panel` |  |
+| `GET` | `/api/sessions/{session_id}/keys` | `auto` |  |
 | `GET` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
 | `DELETE` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
 | `GET` | `/api/sessions/{session_id}/operating-point` | `data-grid` |  |

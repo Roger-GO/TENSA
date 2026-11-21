@@ -74,6 +74,10 @@ from tensa.api.schemas.jobs import (
     JobRecordSchema,
     JobStatusSchema,
 )
+from tensa.api.schemas.keys import (
+    KeyEntrySchema,
+    KeyList,
+)
 from tensa.api.schemas.messages import (
     MessageLevelSchema,
     SessionMessages,
@@ -181,6 +185,8 @@ __all__ = [
     "JobKindSchema",
     "JobRecordSchema",
     "JobStatusSchema",
+    "KeyEntrySchema",
+    "KeyList",
     "LineFlow",
     "LoadCaseRequest",
     "LoadConsumption",

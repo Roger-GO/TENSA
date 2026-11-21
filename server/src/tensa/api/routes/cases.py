@@ -102,6 +102,7 @@ def _topology_from_payload(payload: dict[str, Any]) -> TopologySummary:
         events=payload.get("events", []),
         undo=payload.get("undo"),
         redo=payload.get("redo"),
+        has_dynamics=bool(payload.get("has_dynamics", False)),
     )
 
 

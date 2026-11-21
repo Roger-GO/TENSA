@@ -53,6 +53,11 @@ Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
 Engines:         GET /engines  (the engines a session can be created for and what each can do)
 Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
                  GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
+Keys:            GET /sessions/{id}/keys  (every element's key, each with bucket, model, idx and source, plus
+                 "problems"; empty lists when no case is loaded. Every TopologyEntry also carries "key", the
+                 topology carries "has_dynamics", and a pflow result carries "keys": per kind (bus, line,
+                 generator, load) the stringified idx of each result entry mapped to its key. A key names an
+                 element the same way in every engine: bus:7, line:7-8-1, gen:1-1, gen:1-1/exciter)
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  dae_vars: ANDES variables to record, named as ANDES names them ("omega GENROU 1", "vf GENROU 2");

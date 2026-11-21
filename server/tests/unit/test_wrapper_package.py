@@ -106,6 +106,8 @@ PUBLIC_METHODS: tuple[str, ...] = (
     "get_eig_state_matrix",
     "import_bundle",
     "init_clone",
+    # Added with element keys (design/multiengine/spec.md, section 4).
+    "keys",
     "list_disturbances",
     "list_pmus",
     "list_snapshots",

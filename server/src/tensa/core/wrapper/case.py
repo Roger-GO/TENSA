@@ -31,6 +31,8 @@ from tensa.core.wrapper.topology import TopologyMixin
 if TYPE_CHECKING:
     from andes.system import System
 
+    from tensa.engines.identity import CaseIdentity
+
 
 class CaseMixin(TopologyMixin, DisturbanceMixin):
     """Everything that replaces or writes the System: load, reload, rebuild, adopt
@@ -54,6 +56,21 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
 
         self._ss = ss
         self._case_path = case_path
+        # The identity the keys are assigned from (``tensa.engines.identity``):
+        # read for the formats the reader knows, and never a reason to fail the
+        # load. A reload calls this with the path the session already holds and
+        # keeps the identity and the book, so the keys of a session do not
+        # change; another file, or this one changed on disk since, starts a
+        # fresh book (identifiers read from the old content would be assigned
+        # to the new one's elements).
+        stamp = self._case_stamp(case_path)
+        if self._keyed_case != stamp:
+            self._identity = self._read_identity(case_path)
+            from tensa.engines.keys import KeyBook
+
+            self._key_book = KeyBook()
+            self._key_notes_logged = 0
+            self._keyed_case = stamp
         self._addfiles = resolved_addfiles
         self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
         self._case_events = events_in_case(ss)
@@ -74,6 +91,42 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         # call /se/measurements/generate again on the new System.
         self._se_measurements = None
         return self._topology_snapshot_locked()
+
+    @staticmethod
+    def _case_stamp(case_path: Path) -> tuple[Path, int, int]:
+        """What tells one content of a case file from another: its path, its
+        modification time in nanoseconds and its size. A file that cannot be
+        read for them (it is about to fail the load anyway) stamps as -1, -1."""
+        try:
+            stat = case_path.stat()
+        except OSError:
+            return (case_path, -1, -1)
+        return (case_path, stat.st_mtime_ns, stat.st_size)
+
+    @staticmethod
+    def _read_identity(case_path: Path) -> CaseIdentity | None:
+        """The identity of ``case_path``, or ``None`` when it cannot be read.
+
+        Only ``.raw`` and ``.m`` files have an identity reader; anything else
+        (xlsx, json, dyr) keys its elements by order. A failure of the reader
+        is a warning, never a failed load.
+        """
+        import logging
+
+        from tensa.engines.identity import read_identity
+
+        if case_path.suffix.lower() not in (".raw", ".m"):
+            return None
+        try:
+            return read_identity(case_path)
+        except Exception as exc:  # noqa: BLE001 - never fail a load over keys
+            logging.getLogger("tensa.notice").warning(
+                "keys: the identity of %s could not be read (%s); "
+                "keys are assigned by order",
+                case_path.name,
+                exc,
+            )
+            return None
 
     @staticmethod
     def _load_system(case_path: Path, addfiles: list[Path] | None) -> System:
@@ -409,4 +462,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         self._edit_log = []
         self._redo_log = []
         self._client_events = []
+        # A blank system has no file, so no identity, and a fresh book.
+        from tensa.engines.keys import KeyBook
+
+        self._identity = None
+        self._key_book = KeyBook()
+        self._key_notes_logged = 0
+        self._keyed_case = None
         return self._topology_snapshot_locked()
