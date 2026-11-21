@@ -9,20 +9,20 @@ def _book() -> KeyBook:
     book = KeyBook()
     book.assign(KeyEntry("bus:1", "bus", "Bus", 1, "file"))
     book.assign(KeyEntry("bus:2", "bus", "Bus", 2, "file"))
-    book.assign(KeyEntry("line:1-2-1", "line", "Line", "Line_1", "file"))
+    book.assign(KeyEntry("branch:1-2-1", "line", "Line", "Line_1", "file"))
     return book
 
 
 def test_retain_drops_entries_not_named() -> None:
     book = _book()
     book.retain({("Bus", "1"), ("Line", "Line_1")})
-    assert [entry.key for entry in book.entries()] == ["bus:1", "line:1-2-1"]
+    assert [entry.key for entry in book.entries()] == ["bus:1", "branch:1-2-1"]
 
 
 def test_retain_keeps_order_and_lookup() -> None:
     book = _book()
     book.retain({("Line", "Line_1"), ("Bus", "2")})
-    assert [entry.key for entry in book.entries()] == ["bus:2", "line:1-2-1"]
+    assert [entry.key for entry in book.entries()] == ["bus:2", "branch:1-2-1"]
     assert book.key_of("Bus", 2) == "bus:2"
     assert book.key_of("Bus", 1) is None
     assert book.entry_of("bus:2") is not None

@@ -6,11 +6,14 @@ from the case file (``tensa.engines.identity``) supplies them. Lines are
 matched to the file's branches by unordered bus pair rather than by position,
 because ANDES keeps a MATPOWER file's branch rows in file order with the
 transformers in between while the identity lists the non-transformer rows
-first. Elements ANDES adds on its own (the star bus of a three-winding
-transformer and the three lines to it) have no counterpart in the file and get
-engine keys. This module never imports ``andes``: the system is read through
-attributes, and every access is guarded so a missing model or parameter is
-skipped rather than raised.
+first. Every two-terminal AC branch, line or transformer, gets a
+``branch:<from>-<to>-<ckt>`` key; whether it is a line or a transformer is the
+``bucket`` of its entry, decided by the file's record when there is one and by
+ANDES's own rule otherwise. Elements ANDES adds on its own (the star bus of a
+three-winding transformer and the three lines to it) have no counterpart in
+the file and get engine keys. This module never imports ``andes``: the system
+is read through attributes, and every access is guarded so a missing model or
+parameter is skipped rather than raised.
 """
 
 from __future__ import annotations
@@ -22,14 +25,13 @@ from tensa.engines.identity import CaseIdentity
 from tensa.engines.keys import (
     KeyBook,
     KeyEntry,
+    branch_key,
     bus_key,
     device_key,
     engine_key,
     generator_key,
-    line_key,
     load_key,
     shunt_key,
-    transformer_key,
     unit_model_key,
 )
 
@@ -214,9 +216,12 @@ def _assign_lines(
     With an identity, the file's branch records are queued per unordered bus
     pair, transformers and plain lines apart, and each ANDES line takes the
     next record of its pair and kind (of the other kind when its own is out),
-    keeping the record's circuit, bus order and kind. A line with an end on a
-    bus the engine added gets an engine key. A line with no record left gets
-    a circuit by ordinal, skipping the circuits already used for its pair.
+    keeping the record's circuit, bus order and kind as its bucket. A line
+    with an end on a bus the engine added gets an engine key. A line with no
+    record left gets a circuit by ordinal, counted over all branches of its
+    bus pair (lines and transformers together) and skipping the circuits
+    already used for that pair. Every key is a ``branch:`` key; the bucket
+    (``"line"`` or ``"transformer"``) says which kind the branch is.
     """
     model = getattr(ss, "Line", None)
     if model is None:
@@ -293,12 +298,8 @@ def _assign_lines(
                         record_position = other_kind.pop(0)
         if record_position is not None and identity is not None:
             branch = identity.branches[record_position]
-            if branch.transformer:
-                key = transformer_key(branch.from_bus, branch.to_bus, branch.ckt)
-                bucket = "transformer"
-            else:
-                key = line_key(branch.from_bus, branch.to_bus, branch.ckt)
-                bucket = "line"
+            key = branch_key(branch.from_bus, branch.to_bus, branch.ckt)
+            bucket = "transformer" if branch.transformer else "line"
             used_ckts.setdefault(line_pair, set()).add(branch.ckt)  # type: ignore[arg-type]
             book.assign(KeyEntry(key, bucket, "Line", idx, "file"))
             continue
@@ -320,12 +321,8 @@ def _assign_lines(
             ckt = str(count)
         ordinal_counts[line_pair] = count
         taken.add(ckt)
-        if is_transformer_row(ss, i):
-            key = transformer_key(line_pair[0], line_pair[1], ckt)
-            bucket = "transformer"
-        else:
-            key = line_key(line_pair[0], line_pair[1], ckt)
-            bucket = "line"
+        bucket = "transformer" if is_transformer_row(ss, i) else "line"
+        key = branch_key(line_pair[0], line_pair[1], ckt)
         book.assign(KeyEntry(key, bucket, "Line", idx, "ordinal"))
 
     if identity is not None:

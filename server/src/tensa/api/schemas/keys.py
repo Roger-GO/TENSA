@@ -12,7 +12,7 @@ class KeyEntrySchema(BaseModel):
         ...,
         description=(
             "The element's key: a string that names it the same way in every "
-            "engine that loads the case (``bus:7``, ``line:7-8-1``, "
+            "engine that loads the case (``bus:7``, ``branch:7-8-1``, "
             "``gen:1-1``, ``gen:1-1/exciter``), built from the case by the "
             "rule of section 4 of ``design/multiengine/spec.md``."
         ),

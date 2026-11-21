@@ -76,9 +76,7 @@ def test_psse_case_keys(relative: str, addfile: str | None) -> None:
     assert all(entry.source == "file" for entry in load_entries)
 
     branch_keys = [
-        entry.key
-        for entry in entries
-        if entry.key.startswith("line:") or entry.key.startswith("xfmr:")
+        entry.key for entry in entries if entry.key.startswith("branch:")
     ]
     assert len(branch_keys) == ss.Line.n
 
@@ -96,9 +94,7 @@ def test_matpower_case118_lines_matched_by_bus_pair() -> None:
     assert all(entry.source == "file" for entry in line_entries)
     assert book.problems == []
     branch_keys = [
-        entry.key
-        for entry in book.entries()
-        if entry.key.startswith("line:") or entry.key.startswith("xfmr:")
+        entry.key for entry in book.entries() if entry.key.startswith("branch:")
     ]
     assert len(branch_keys) == ss.Line.n
 
@@ -165,9 +161,9 @@ def test_kundur_unit_keys_and_parallel_circuits() -> None:
     circuits = {
         entry.key
         for entry in book.entries()
-        if entry.key.startswith("line:7-8-")
+        if entry.key.startswith("branch:7-8-") and entry.bucket == "line"
     }
-    assert {"line:7-8-1", "line:7-8-2"} <= circuits
+    assert {"branch:7-8-1", "branch:7-8-2"} <= circuits
 
 
 @pytest.mark.integration
@@ -188,8 +184,6 @@ def test_xlsx_case_without_identity() -> None:
     for idx in ss.PQ.idx.v:
         assert book.has("PQ", idx)
     branch_keys = [
-        entry.key
-        for entry in book.entries()
-        if entry.key.startswith("line:") or entry.key.startswith("xfmr:")
+        entry.key for entry in book.entries() if entry.key.startswith("branch:")
     ]
     assert len(branch_keys) == ss.Line.n

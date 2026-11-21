@@ -1,7 +1,7 @@
 """Keys for the elements of a case (section 4 of ``design/multiengine/spec.md``).
 
 A key is a string that names an element of a case the same way in every engine:
-``bus:7``, ``line:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``. This module builds
+``bus:7``, ``branch:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``. This module builds
 the key vocabulary and keeps the book of the keys one case has been given. It
 is pure Python and imports no engine.
 """
@@ -27,14 +27,13 @@ def bus_key(number: int) -> str:
     return f"bus:{number}"
 
 
-def line_key(from_bus: int, to_bus: int, ckt: str) -> str:
-    """The key of a line: ``line:7-8-1``."""
-    return f"line:{from_bus}-{to_bus}-{_clean_id(ckt)}"
+def branch_key(from_bus: int, to_bus: int, ckt: str) -> str:
+    """The key of a two-terminal AC branch, line or transformer: ``branch:7-8-1``.
 
-
-def transformer_key(from_bus: int, to_bus: int, ckt: str) -> str:
-    """The key of a two-winding transformer: ``xfmr:1-5-1``."""
-    return f"xfmr:{from_bus}-{to_bus}-{_clean_id(ckt)}"
+    Whether the branch is a line or a transformer is not part of the key; it
+    is reported beside it (the ``bucket`` of its ``KeyEntry``).
+    """
+    return f"branch:{from_bus}-{to_bus}-{_clean_id(ckt)}"
 
 
 def generator_key(bus: int, id: str) -> str:

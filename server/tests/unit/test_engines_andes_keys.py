@@ -104,9 +104,10 @@ def test_lines_matched_to_identity_with_parallel_circuits() -> None:
         ),
     )
     book = assign_andes_keys(ss, identity)
-    assert book.key_of("Line", 101) == "line:7-8-1"
-    assert book.key_of("Line", 102) == "line:7-8-2"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:7-8-2"
     assert all(entry.source == "file" for entry in book.entries() if entry.model == "Line")
+    assert all(entry.bucket == "line" for entry in book.entries() if entry.model == "Line")
     assert book.problems == []
 
 
@@ -136,11 +137,16 @@ def test_lines_matched_by_bus_pair_matpower_order() -> None:
         ),
     )
     book = assign_andes_keys(ss, identity)
-    assert book.key_of("Line", 101) == "line:1-2-1"
-    assert book.key_of("Line", 102) == "xfmr:2-3-1"
-    assert book.key_of("Line", 103) == "line:1-2-2"
-    assert book.key_of("Line", 104) == "line:3-4-1"
-    assert all(entry.source == "file" for entry in book.entries() if entry.model == "Line")
+    assert book.key_of("Line", 101) == "branch:1-2-1"
+    assert book.key_of("Line", 102) == "branch:2-3-1"
+    assert book.key_of("Line", 103) == "branch:1-2-2"
+    assert book.key_of("Line", 104) == "branch:3-4-1"
+    entries = {entry.idx: entry for entry in book.entries() if entry.model == "Line"}
+    assert all(entry.source == "file" for entry in entries.values())
+    assert entries[102].bucket == "transformer"
+    assert entries[101].bucket == "line"
+    assert entries[103].bucket == "line"
+    assert entries[104].bucket == "line"
     assert book.problems == []
 
 
@@ -157,8 +163,8 @@ def test_line_with_no_record_gets_ordinal_and_note() -> None:
         branches=(BranchId(7, 8, "1", transformer=False),),
     )
     book = assign_andes_keys(ss, identity)
-    assert book.key_of("Line", 101) == "line:7-8-1"
-    assert book.key_of("Line", 102) == "line:8-9-1"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:8-9-1"
     entries = {entry.idx: entry for entry in book.entries() if entry.model == "Line"}
     assert entries[101].source == "file"
     assert entries[102].source == "ordinal"
@@ -183,7 +189,7 @@ def test_identity_branch_left_unused_gets_note() -> None:
         ),
     )
     book = assign_andes_keys(ss, identity)
-    assert book.key_of("Line", 101) == "line:7-8-1"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
     assert len(book.problems) == 1
     assert "left unused" in book.problems[0]
     assert "2 branch record(s)" in book.problems[0]
@@ -202,8 +208,8 @@ def test_line_past_identity_branches_gets_ordinal_circuit() -> None:
         branches=(BranchId(7, 8, "1", transformer=False),),
     )
     book = assign_andes_keys(ss, identity)
-    assert book.key_of("Line", 101) == "line:7-8-1"
-    assert book.key_of("Line", 102) == "line:7-8-2"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:7-8-2"
 
 
 @pytest.mark.unit
@@ -245,7 +251,7 @@ def test_added_bus_without_identity_still_gets_a_bus_key() -> None:
     )
     book = assign_andes_keys(ss, None)
     assert book.key_of("Bus", 9) == "bus:9"
-    assert book.key_of("Line", 101) == "line:1-9-1"
+    assert book.key_of("Line", 101) == "branch:1-9-1"
 
 
 @pytest.mark.unit
@@ -255,7 +261,7 @@ def test_transformer_told_by_tap() -> None:
         Line=_model([101], bus1=[1], bus2=[5], tap=[1.05], phi=[0.0], trans=[0]),
     )
     book = assign_andes_keys(ss, None)
-    entry = book.entry_of("xfmr:1-5-1")
+    entry = book.entry_of("branch:1-5-1")
     assert entry is not None
     assert entry.bucket == "transformer"
     assert entry.source == "ordinal"
@@ -271,7 +277,69 @@ def test_transformer_told_by_rated_voltages() -> None:
         ),
     )
     book = assign_andes_keys(ss, None)
-    assert book.entry_of("xfmr:1-5-1") is not None
+    entry = book.entry_of("branch:1-5-1")
+    assert entry is not None
+    assert entry.bucket == "transformer"
+
+
+@pytest.mark.unit
+def test_line_and_transformer_of_one_pair_share_the_key_space() -> None:
+    # The file holds a line and a transformer between the same buses with the
+    # same circuit id: both ask for branch:7-8-1. The second is stored with a
+    # "~2" suffix and a note, and keeps its bucket.
+    ss = _system(
+        Bus=_model([7, 8]),
+        Line=_model(
+            [101, 102],
+            bus1=[7, 7],
+            bus2=[8, 8],
+            tap=[1.0, 1.05],
+            phi=[0.0, 0.0],
+            trans=[0, 0],
+        ),
+    )
+    identity = _identity(
+        buses=(7, 8),
+        branches=(
+            BranchId(7, 8, "1", transformer=False),
+            BranchId(7, 8, "1", transformer=True),
+        ),
+    )
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:7-8-1~2"
+    entries = {entry.idx: entry for entry in book.entries() if entry.model == "Line"}
+    assert entries[101].bucket == "line"
+    assert entries[102].bucket == "transformer"
+    assert all(entry.source == "file" for entry in entries.values())
+    assert book.problems == [
+        "key branch:7-8-1 of Line 102 is already held by Line 101; "
+        "stored as branch:7-8-1~2"
+    ]
+
+
+@pytest.mark.unit
+def test_ordinal_circuit_counts_lines_and_transformers_together() -> None:
+    # No identity: a line and a transformer of one bus pair take the circuits
+    # "1" and "2" of one shared ordinal sequence.
+    ss = _system(
+        Bus=_model([7, 8]),
+        Line=_model(
+            [101, 102],
+            bus1=[7, 7],
+            bus2=[8, 8],
+            tap=[1.0, 1.05],
+            phi=[0.0, 0.0],
+            trans=[0, 0],
+        ),
+    )
+    book = assign_andes_keys(ss, None)
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:7-8-2"
+    entries = {entry.idx: entry for entry in book.entries() if entry.model == "Line"}
+    assert entries[101].bucket == "line"
+    assert entries[102].bucket == "transformer"
+    assert book.problems == []
 
 
 @pytest.mark.unit
@@ -399,7 +467,7 @@ def test_second_call_keeps_old_keys_and_numbers_the_new_line() -> None:
         Line=_model([101], bus1=[7], bus2=[8]),
     )
     book = assign_andes_keys(ss, None)
-    assert book.key_of("Line", 101) == "line:7-8-1"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
 
     # A line is added; the same book is passed back in.
     ss.Line.n = 2
@@ -407,8 +475,8 @@ def test_second_call_keeps_old_keys_and_numbers_the_new_line() -> None:
     ss.Line.bus1.v = [7, 7]
     ss.Line.bus2.v = [8, 8]
     book = assign_andes_keys(ss, None, book)
-    assert book.key_of("Line", 101) == "line:7-8-1"
-    assert book.key_of("Line", 102) == "line:7-8-2"
+    assert book.key_of("Line", 101) == "branch:7-8-1"
+    assert book.key_of("Line", 102) == "branch:7-8-2"
     assert book.problems == []
 
 

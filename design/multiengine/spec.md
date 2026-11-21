@@ -37,13 +37,14 @@ A `key` is a string, unique in a case, the same in every engine that loads that 
 | Element | Key | Example |
 |---|---|---|
 | Bus | `bus:<number>` | `bus:7` |
-| Line | `line:<from>-<to>-<ckt>` | `line:7-8-1` |
-| Two-winding transformer | `xfmr:<from>-<to>-<ckt>` | `xfmr:1-5-1` |
+| Branch (line or two-winding transformer) | `branch:<from>-<to>-<ckt>` | `branch:7-8-1` |
 | Generator (static) | `gen:<bus>-<id>` | `gen:1-1` |
 | Load | `load:<bus>-<id>` | `load:7-1` |
 | Shunt | `shunt:<bus>-<id>` | `shunt:7-1` |
 | Dynamic model of a generating unit | `<unit key>/<role>` | `gen:1-1/machine`, `gen:1-1/exciter`, `gen:1-1/governor`, `gen:1-1/pss` |
 | Other device on a bus | `<kind lower-case>:<bus>-<id>` | `motor:5-1` |
+
+The kind of a branch is not part of its key, because engines classify the same record differently (the branches of one file are 27 transformers to one engine and 96 to another); whether a branch is a line or a transformer is reported beside the key.
 
 Rules:
 
@@ -70,10 +71,10 @@ JSON. Quantities carry their unit in the field name or are per unit on a stated 
     {"key": "bus:1", "number": 1, "name": "BUS1", "vn_kv": 20.0, "type": "pv", "v_pu": 1.03, "angle_deg": 20.2, "area": 1, "zone": 1}
   ],
   "lines": [
-    {"key": "line:7-8-1", "from": 7, "to": 8, "ckt": "1", "r_pu": 0.011, "x_pu": 0.11, "b_pu": 0.1925, "rate_a_mva": 0.0, "in_service": true}
+    {"key": "branch:7-8-1", "from": 7, "to": 8, "ckt": "1", "r_pu": 0.011, "x_pu": 0.11, "b_pu": 0.1925, "rate_a_mva": 0.0, "in_service": true}
   ],
   "transformers": [
-    {"key": "xfmr:1-5-1", "from": 1, "to": 5, "ckt": "1", "r_pu": 0.0, "x_pu": 0.15, "rate_mva": 900.0, "vn_from_kv": 20.0, "vn_to_kv": 230.0, "tap": 1.0, "shift_deg": 0.0, "rate_a_mva": 0.0, "in_service": true}
+    {"key": "branch:1-5-1", "from": 1, "to": 5, "ckt": "1", "r_pu": 0.0, "x_pu": 0.15, "rate_mva": 900.0, "vn_from_kv": 20.0, "vn_to_kv": 230.0, "tap": 1.0, "shift_deg": 0.0, "rate_a_mva": 0.0, "in_service": true}
   ],
   "generators": [
     {"key": "gen:1-1", "bus": 1, "id": "1", "p_mw": 700.0, "q_mvar": 185.0, "v_set_pu": 1.03, "q_min_mvar": -1e4, "q_max_mvar": 1e4, "mbase_mva": 900.0, "in_service": true}
@@ -90,7 +91,7 @@ JSON. Quantities carry their unit in the field name or are per unit on a stated 
      "names": ["T'do", "T''do", "T'qo", "T''qo", "H", "D", "Xd", "Xq", "X'd", "X'q", "X''d", "Xl", "S(1.0)", "S(1.2)"]}
   ],
   "events": [
-    {"kind": "branch_trip", "target": "line:7-8-1", "t": 2.0, "source": "case"}
+    {"kind": "branch_trip", "target": "branch:7-8-1", "t": 2.0, "source": "case"}
   ],
   "ext": {"andes": {}, "sienna": {}}
 }
@@ -123,7 +124,7 @@ Round trip is a test: file → engine A → document → engine B → document m
   "options": {"t_end": 10.0, "step": 0.0083333, "method": "default"},
   "load_model": "impedance",
   "disturbances": [
-    {"kind": "branch_trip", "target": "line:7-8-1", "t": 1.0}
+    {"kind": "branch_trip", "target": "branch:7-8-1", "t": 1.0}
   ],
   "record": [
     {"quantity": "rotor_speed", "of": "gen:*"},

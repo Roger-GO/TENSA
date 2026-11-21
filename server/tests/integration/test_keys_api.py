@@ -217,6 +217,8 @@ async def test_a_reload_of_a_file_changed_on_disk_keys_the_new_content(
     buses = {key for key in keys if key.startswith("bus:")}
     assert buses == {f"bus:{n}" for n in range(1, 11)}
     # Kundur's two parallel lines between buses 7 and 8, by the file's circuits.
-    assert {"line:7-8-1", "line:7-8-2"} <= keys
+    assert {"branch:7-8-1", "branch:7-8-2"} <= keys
+    buckets = {entry["key"]: entry["bucket"] for entry in after["keys"]}
+    assert buckets["branch:7-8-1"] == buckets["branch:7-8-2"] == "line"
     lines = [e for e in after["keys"] if e["bucket"] in ("line", "transformer")]
     assert lines and all(entry["source"] == "file" for entry in lines)

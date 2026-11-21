@@ -8,15 +8,14 @@ import pytest
 from tensa.engines.keys import (
     KeyBook,
     KeyEntry,
+    branch_key,
     bus_key,
     device_key,
     engine_key,
     generator_key,
     is_key,
-    line_key,
     load_key,
     shunt_key,
-    transformer_key,
     unit_model_key,
 )
 
@@ -24,8 +23,8 @@ from tensa.engines.keys import (
 @pytest.mark.unit
 def test_builders() -> None:
     assert bus_key(7) == "bus:7"
-    assert line_key(7, 8, "1") == "line:7-8-1"
-    assert transformer_key(1, 5, "1") == "xfmr:1-5-1"
+    assert branch_key(7, 8, "1") == "branch:7-8-1"
+    assert branch_key(1, 5, "1") == "branch:1-5-1"
     assert generator_key(1, "1") == "gen:1-1"
     assert load_key(7, "1") == "load:7-1"
     assert shunt_key(7, "1") == "shunt:7-1"
@@ -40,7 +39,7 @@ def test_ids_are_cleaned() -> None:
     # Spaces inside an id become "_" and "/" becomes "_"; surrounding spaces
     # are stripped; an empty id becomes "1".
     assert generator_key(1, " G 2 ") == "gen:1-G_2"
-    assert line_key(7, 8, "1/2") == "line:7-8-1_2"
+    assert branch_key(7, 8, "1/2") == "branch:7-8-1_2"
     assert load_key(7, "  ") == "load:7-1"
     assert shunt_key(7, "") == "shunt:7-1"
 
@@ -48,6 +47,7 @@ def test_ids_are_cleaned() -> None:
 @pytest.mark.unit
 def test_is_key() -> None:
     assert is_key("bus:7")
+    assert is_key("branch:7-8-1")
     assert is_key("gen:1-1/exciter")
     assert is_key("engine:andes:PMU:3")
     assert not is_key("Bus:7")
