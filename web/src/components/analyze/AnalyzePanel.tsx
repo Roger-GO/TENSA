@@ -30,6 +30,9 @@ import {
   useSeGenerateMeasurements,
   useSeRun,
 } from '@/api/queries';
+import type { SeRunVars } from '@/api/queries';
+import type { SeResult } from '@/api/types';
+import { formatSignificant } from '@/lib/series';
 import { directionRows } from '@/lib/cpfOptions';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -647,6 +650,81 @@ function validateSeNoiseSeed(text: string): string | null {
   return null;
 }
 
+/**
+ * Validate the optional SE run ``tol`` text input. The substrate requires
+ * a tolerance above 0; blank (the default) omits ``tol`` from the request
+ * so the case's own setting is kept. Returns ``null`` when valid or a
+ * form-level error string otherwise. Module-local like
+ * ``validateSeNoiseSeed``; behaviour is covered through the AnalyzePanel
+ * SE-sub-mode tests.
+ */
+function validateSeTol(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 'Enter a tolerance above 0, or leave blank.';
+  }
+  return null;
+}
+
+/**
+ * Validate the optional SE run ``max_iter`` text input. The substrate
+ * requires a whole number of at least 1; blank omits ``max_iter`` so the
+ * case's own setting is kept. Returns ``null`` when valid or a form-level
+ * error string otherwise.
+ */
+function validateSeMaxIter(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  if (!/^\+?\d+$/.test(trimmed) || Number(trimmed) < 1 || !Number.isSafeInteger(Number(trimmed))) {
+    return 'Enter a whole number of at least 1, or leave blank.';
+  }
+  return null;
+}
+
+/** The options of one SE run, as ``useSeRun`` takes them, without the session. */
+type SeRunOptions = Omit<SeRunVars, 'sessionId'>;
+
+/**
+ * The options the SE form asks for: only what was set, so a form left as it
+ * is gives ``{}`` and the request body stays empty. ``null`` while a field is
+ * invalid, when no run may be sent.
+ */
+function seRunOptionsOf(
+  algorithm: 'wls' | 'lav',
+  tolText: string,
+  maxIterText: string,
+  runNoiseSeedText: string,
+): SeRunOptions | null {
+  if (
+    validateSeTol(tolText) !== null ||
+    validateSeMaxIter(maxIterText) !== null ||
+    validateSeNoiseSeed(runNoiseSeedText) !== null
+  ) {
+    return null;
+  }
+  const tol = tolText.trim();
+  const maxIter = maxIterText.trim();
+  const seed = runNoiseSeedText.trim();
+  return {
+    ...(algorithm === 'wls' ? {} : { algorithm }),
+    ...(tol.length === 0 ? {} : { tol: Number(tol) }),
+    ...(maxIter.length === 0 ? {} : { maxIter: Number(maxIter) }),
+    ...(seed.length === 0 ? {} : { noiseSeed: Number(seed) }),
+  };
+}
+
+/** Whether two sets of SE run options ask for the same run. */
+function sameSeRunOptions(a: SeRunOptions, b: SeRunOptions): boolean {
+  return (
+    a.algorithm === b.algorithm &&
+    a.tol === b.tol &&
+    a.maxIter === b.maxIter &&
+    a.noiseSeed === b.noiseSeed
+  );
+}
+
 export function AnalyzeSeSubMode() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const lastPf = usePflowStore((s) => s.lastRun);
@@ -660,6 +738,18 @@ export function AnalyzeSeSubMode() {
   // the body so the substrate picks its own seed (unchanged behaviour).
   const [noiseSeedText, setNoiseSeedText] = useState('');
   const noiseSeedError = validateSeNoiseSeed(noiseSeedText);
+
+  // The estimator and the per-run settings (SE-2). Each defaults to
+  // "unset" so a run with nothing changed sends the empty body it always
+  // did and the case's own settings hold: ``'wls'`` is the server's
+  // default estimator and is not sent, and a blank field omits its key.
+  const [algorithm, setAlgorithm] = useState<'wls' | 'lav'>('wls');
+  const [tolText, setTolText] = useState('');
+  const [maxIterText, setMaxIterText] = useState('');
+  const [runNoiseSeedText, setRunNoiseSeedText] = useState('');
+  const tolError = validateSeTol(tolText);
+  const maxIterError = validateSeMaxIter(maxIterText);
+  const runNoiseSeedError = validateSeNoiseSeed(runNoiseSeedText);
 
   // Cross-slice cascade cleanup — same shape as the EIG / CPF panels.
   useEffect(() => {
@@ -677,14 +767,27 @@ export function AnalyzeSeSubMode() {
       ...(trimmed.length === 0 ? {} : { noiseSeed: Number(trimmed) }),
     });
   };
+  const runOptions = seRunOptionsOf(algorithm, tolText, maxIterText, runNoiseSeedText);
   const onRun = () => {
     if (!sessionId) return;
-    seRun.mutate(sessionId);
+    // An invalid field shows its error inline and sends nothing.
+    if (runOptions === null) return;
+    seRun.mutate({ sessionId, ...runOptions });
   };
   // "Run state estimation (SE)" in the Run menu and the palette.
   useRequestedRun(['se'], () => {
     if (!seRun.isPending && !seGenerate.isPending && runReadinessNow('se').ready) onRun();
   });
+
+  // The bad-data test belongs to the run that made it. It is not shown while
+  // a run is under way or after the last one failed, nor once the form asks
+  // for another run than the one that made it (known when that run was
+  // started here: its result is this hook's own).
+  const shownRun = seRun.data === seResult ? seRun.variables : undefined;
+  const optionsChanged =
+    shownRun !== undefined && (runOptions === null || !sameSeRunOptions(runOptions, shownRun));
+  const showBadDataTest =
+    seResult !== null && !seRun.isPending && !seRun.isError && !optionsChanged;
 
   // The currently-active error (generate has priority — if it failed,
   // the run button is disabled and the error came from generate).
@@ -735,6 +838,18 @@ export function AnalyzeSeSubMode() {
           </span>
         ) : null}
       </div>
+
+      <SeAlgorithmPicker algorithm={algorithm} onChange={setAlgorithm} />
+      {algorithm === 'lav' ? (
+        <span
+          data-testid="se-lav-max-iter-hint"
+          className="text-muted-foreground text-[10px] leading-snug"
+        >
+          LAV is for a measurement set that may hold a bad measurement: it weighs large residuals
+          less than WLS does, so one bad value can pull the estimate less. It often needs more
+          iterations; raise max_iter under Advanced if the run does not converge.
+        </span>
+      ) : null}
 
       <RunReadinessNote
         routine="se"
@@ -789,11 +904,209 @@ export function AnalyzeSeSubMode() {
             </span>
           )}
         </div>
+        <div className="mt-2 flex flex-col gap-1">
+          <label htmlFor="se-tol" className="text-muted-foreground text-xs font-medium">
+            tol: convergence tolerance (optional)
+          </label>
+          <Input
+            id="se-tol"
+            data-testid="field-se-tol"
+            value={tolText}
+            onChange={setTolText}
+            placeholder="substrate default"
+            aria-invalid={tolError ? true : undefined}
+            aria-describedby={tolError ? 'se-tol-error' : 'se-tol-hint'}
+            className="h-7 font-mono text-xs"
+          />
+          {tolError ? (
+            <span
+              id="se-tol-error"
+              role="alert"
+              data-testid="error-se-tol"
+              className="text-danger text-[10px]"
+            >
+              {tolError}
+            </span>
+          ) : (
+            <span id="se-tol-hint" className="text-muted-foreground text-[10px] leading-snug">
+              Convergence tolerance on the state correction for this run. Leave blank to keep the
+              case setting (ANDES default 1e-4).
+            </span>
+          )}
+        </div>
+        <div className="mt-2 flex flex-col gap-1">
+          <label htmlFor="se-max-iter" className="text-muted-foreground text-xs font-medium">
+            max_iter: iteration limit (optional)
+          </label>
+          <Input
+            id="se-max-iter"
+            data-testid="field-se-max-iter"
+            inputMode="numeric"
+            value={maxIterText}
+            onChange={setMaxIterText}
+            placeholder="substrate default"
+            aria-invalid={maxIterError ? true : undefined}
+            aria-describedby={maxIterError ? 'se-max-iter-error' : 'se-max-iter-hint'}
+            className="h-7 font-mono text-xs"
+          />
+          {maxIterError ? (
+            <span
+              id="se-max-iter-error"
+              role="alert"
+              data-testid="error-se-max-iter"
+              className="text-danger text-[10px]"
+            >
+              {maxIterError}
+            </span>
+          ) : (
+            <span id="se-max-iter-hint" className="text-muted-foreground text-[10px] leading-snug">
+              Maximum iterations for this run. Leave blank to keep the case setting (ANDES default
+              100).
+            </span>
+          )}
+        </div>
+        <div className="mt-2 flex flex-col gap-1">
+          <label htmlFor="se-run-noise-seed" className="text-muted-foreground text-xs font-medium">
+            noise_seed for this run only (optional)
+          </label>
+          <Input
+            id="se-run-noise-seed"
+            data-testid="field-se-run-noise-seed"
+            inputMode="numeric"
+            value={runNoiseSeedText}
+            onChange={setRunNoiseSeedText}
+            placeholder="generated measurements"
+            aria-invalid={runNoiseSeedError ? true : undefined}
+            aria-describedby={
+              runNoiseSeedError ? 'se-run-noise-seed-error' : 'se-run-noise-seed-hint'
+            }
+            className="h-7 font-mono text-xs"
+          />
+          {runNoiseSeedError ? (
+            <span
+              id="se-run-noise-seed-error"
+              role="alert"
+              data-testid="error-se-run-noise-seed"
+              className="text-danger text-[10px]"
+            >
+              {runNoiseSeedError}
+            </span>
+          ) : (
+            <span
+              id="se-run-noise-seed-hint"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              Draws new measurement noise for this run only, with this seed; the same seed gives the
+              same run. The measurements Generate Measurements made (with the noise_seed above) are
+              kept, and a run with this left blank uses them.
+            </span>
+          )}
+        </div>
       </details>
 
       <AnalyzeRoutineError routine="se" error={activeError ?? null} />
 
+      {showBadDataTest && seResult !== null ? <SeBadDataTest result={seResult} /> : null}
+
       <SEResidualChart className="min-h-[260px] flex-shrink-0" />
+    </div>
+  );
+}
+
+/**
+ * The chi-squared bad-data test of one SE result, or the line that says the
+ * run has none (an LAV run, or no more measurements than states). Passed
+ * means the test found no bad data at its confidence, which is not proof
+ * that every measurement is good; failed means the residuals are larger than
+ * measurement noise alone explains, so at least one measurement is suspect.
+ */
+function SeBadDataTest({ result }: { result: SeResult }) {
+  const test = result.chi_squared;
+  return (
+    <div data-testid="se-chi-squared" className="text-muted-foreground text-xs">
+      {test != null ? (
+        <div className="flex flex-col gap-1">
+          <span
+            data-testid="se-chi-squared-verdict"
+            className={test.passed ? undefined : 'text-danger'}
+          >
+            Bad-data test (chi-squared, {formatSignificant(test.confidence * 100, 3)}% confidence):{' '}
+            {test.passed ? 'passed' : 'failed'}
+          </span>
+          <span data-testid="se-chi-squared-meaning">
+            {test.passed
+              ? 'No bad data detected at this confidence. That does not show every measurement is good.'
+              : 'The residuals are larger than measurement noise alone explains at this confidence, so at least one measurement is suspect.'}
+          </span>
+          <span data-testid="se-chi-squared-numbers">
+            J = {formatSignificant(test.J, 3)}, threshold {formatSignificant(test.threshold, 3)},{' '}
+            {test.dof} degrees of freedom
+          </span>
+        </div>
+      ) : (
+        <span data-testid="se-chi-squared-none">
+          No bad-data test: it needs weighted least squares and more measurements than states.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * SeAlgorithmPicker — the WLS / LAV estimator segmented control (SE-2).
+ * Mirrors the ``CpfSubModePicker`` visual: one radio per estimator with
+ * its hint on hover. ``'wls'`` is the server's default, so picking it
+ * leaves ``algorithm`` out of the run request.
+ */
+function SeAlgorithmPicker({
+  algorithm,
+  onChange,
+}: {
+  algorithm: 'wls' | 'lav';
+  onChange: (next: 'wls' | 'lav') => void;
+}) {
+  const options: ReadonlyArray<{ value: 'wls' | 'lav'; label: string; hint: string }> = [
+    { value: 'wls', label: 'WLS', hint: 'Weighted least squares (Gauss-Newton)' },
+    {
+      value: 'lav',
+      label: 'LAV',
+      hint: 'Least absolute value: weighs a bad measurement less than WLS does',
+    },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="SE estimator"
+      data-testid="se-algorithm-picker"
+      className={cn(
+        'inline-flex self-start overflow-hidden rounded-[var(--radius-md)]',
+        'border-border border text-xs',
+      )}
+    >
+      {options.map((opt, idx) => {
+        const isActive = algorithm === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            data-testid={`se-algorithm-${opt.value}`}
+            title={opt.hint}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              'px-3 py-1 transition-colors',
+              idx > 0 && 'border-border border-l',
+              isActive
+                ? 'bg-primary/15 text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

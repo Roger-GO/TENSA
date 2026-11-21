@@ -48,6 +48,8 @@ import {
 import { useLayoutStore, ACTIVITY_PANEL_TABS, type ActivityPanelTab } from '@/store/layout';
 import { useSessionStore } from '@/store/session';
 import { useCancelJob, useRunPflow, useEigRun, useSeRun, useReloadCase } from '@/api/queries';
+import type { SeRunVars } from '@/api/queries';
+import type { SessionId } from '@/api/types';
 import { kindLabel } from '@/components/shell/jobLabels';
 import { RunHistoryButton } from '@/components/history/RunHistoryButton';
 
@@ -64,6 +66,23 @@ const STATUS_LABELS: Record<JobStatus, string> = {
   failed: 'Failed',
   cancelled: 'Cancelled',
 };
+
+/**
+ * The options of a state estimation run, read back from its job's
+ * ``request_summary``: the body the client sent, or the server's record of it
+ * (every option named, ``null`` where none was given). An option that is
+ * missing or ``null`` is left out, so a retry sends what the run sent.
+ */
+function seRunVarsOf(sessionId: SessionId, summary: Record<string, unknown>): SeRunVars {
+  const { algorithm, tol, max_iter: maxIter, noise_seed: noiseSeed } = summary;
+  return {
+    sessionId,
+    ...(algorithm === 'wls' || algorithm === 'lav' ? { algorithm } : {}),
+    ...(typeof tol === 'number' && Number.isFinite(tol) ? { tol } : {}),
+    ...(typeof maxIter === 'number' && Number.isSafeInteger(maxIter) ? { maxIter } : {}),
+    ...(typeof noiseSeed === 'number' && Number.isSafeInteger(noiseSeed) ? { noiseSeed } : {}),
+  };
+}
 
 /** Format an elapsed duration (seconds) compactly: ``1.2s`` / ``3m 04s``. */
 function formatElapsed(seconds: number): string {
@@ -221,7 +240,8 @@ export function ActivityPanel() {
   const cancelJob = useCancelJob();
   // Retry re-fires the ORIGINAL mutation. We map the small set of
   // session-scoped routine/edit kinds that retry sensibly without extra
-  // vars; richer kinds (cpf/sweep/bundle) carry vars in request_summary and
+  // vars, and SE, whose few options are read back from request_summary
+  // (``seRunVarsOf``); richer kinds (cpf/sweep/bundle) carry vars in request_summary and
   // are out of scope for the in-place Retry (the user re-runs them from
   // their owning surface). Unknown kinds simply render no Retry button.
   const runPflow = useRunPflow();
@@ -265,7 +285,8 @@ export function ActivityPanel() {
       case 'eig':
         return () => runEig.mutate(sessionId);
       case 'se':
-        return () => runSe.mutate(sessionId);
+        // A retry repeats the run that failed, options and all.
+        return () => runSe.mutate(seRunVarsOf(sessionId, job.request_summary));
       case 'case-reload':
         return () => reloadCase.mutate(sessionId);
       default:

@@ -257,4 +257,40 @@ describe('seResidualsToCsv', () => {
       '',
     ]);
   });
+
+  it('says which estimator ran, with what, and what the bad-data test found', async () => {
+    const base: SeResult = {
+      converged: true,
+      iterations: 4,
+      mismatch: 31.5,
+      residuals: [0.01],
+      measurement_count: 1,
+      flagged_indices: [],
+    };
+    const wls = await readBlob(
+      seResidualsToCsv({
+        ...base,
+        algorithm: 'wls',
+        settings: { tol: 0.0001, max_iter: 100, noise_seed: null },
+        chi_squared: { passed: false, J: 31.5, threshold: 25.0, dof: 15, confidence: 0.95 },
+      }),
+    );
+    expect(wls.split('\n').slice(0, 3)).toEqual([
+      '# SE converged in 4 iterations, J = 31.5',
+      '# Estimator: WLS, tol = 0.0001, max_iter = 100',
+      '# Bad-data test (chi-squared, confidence 0.95): failed, J = 31.5, threshold = 25, 15 degrees of freedom',
+    ]);
+    const lav = await readBlob(
+      seResidualsToCsv({
+        ...base,
+        algorithm: 'lav',
+        settings: { tol: 0.0001, max_iter: 400, noise_seed: 7 },
+        chi_squared: null,
+      }),
+    );
+    expect(lav.split('\n').slice(1, 3)).toEqual([
+      '# Estimator: LAV, tol = 0.0001, max_iter = 400, noise drawn for this run with seed 7',
+      '# No bad-data test: it needs weighted least squares and more measurements than states.',
+    ]);
+  });
 });

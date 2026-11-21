@@ -179,6 +179,33 @@ export function seResidualsToCsv(result: SeResult): Blob {
     comments: [
       `SE ${result.converged ? 'converged' : 'did not converge'} in ${result.iterations} iterations, ` +
         `J = ${result.mismatch}`,
+      ...seRunComments(result),
     ],
   });
+}
+
+/**
+ * What a residuals file says of the run besides the residuals: the estimator,
+ * the settings it ran with and the chi-squared bad-data test. A result from
+ * before the server sent these has none of them, and the file says nothing.
+ */
+function seRunComments(result: SeResult): string[] {
+  if (result.algorithm == null) return [];
+  const settings = result.settings;
+  const lines = [
+    `Estimator: ${result.algorithm.toUpperCase()}` +
+      (settings != null ? `, tol = ${settings.tol}, max_iter = ${settings.max_iter}` : '') +
+      (settings?.noise_seed != null
+        ? `, noise drawn for this run with seed ${settings.noise_seed}`
+        : ''),
+  ];
+  const test = result.chi_squared;
+  lines.push(
+    test != null
+      ? `Bad-data test (chi-squared, confidence ${test.confidence}): ` +
+          `${test.passed ? 'passed' : 'failed'}, J = ${test.J}, threshold = ${test.threshold}, ` +
+          `${test.dof} degrees of freedom`
+      : 'No bad-data test: it needs weighted least squares and more measurements than states.',
+  );
+  return lines;
 }

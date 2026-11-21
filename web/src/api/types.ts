@@ -337,6 +337,14 @@ export type CpfDirection = NonNullable<CpfRunRequest['direction']>;
  * - ``flagged_indices`` — indices into ``residuals`` whose normalised
  *   residual ``|r_i| / sigma_i`` exceeds 3-sigma. UI highlights the
  *   corresponding histogram bars in red.
+ * - ``algorithm`` — the estimator that ran (``wls`` or ``lav``).
+ * - ``settings`` — the effective run settings (tol, max_iter, noise_seed).
+ * - ``chi_squared`` — the chi-squared bad-data test; ``null`` for LAV or
+ *   a measurement set without redundancy.
+ *
+ * The fields after ``flagged_indices`` are optional here because a result
+ * kept from before they existed does not have them; the server always
+ * sends them.
  */
 export interface SeResult {
   converged: boolean;
@@ -345,6 +353,28 @@ export interface SeResult {
   residuals: number[];
   measurement_count: number;
   flagged_indices: number[];
+  /** The estimator that produced this result. */
+  algorithm?: 'wls' | 'lav' | null;
+  /** The effective settings the run used. */
+  settings?: SeRunSettings | null;
+  /** The chi-squared bad-data test; ``null`` when it cannot run. */
+  chi_squared?: SeChiSquaredTest | null;
+}
+
+/** The effective settings one SE run used, echoed by the server. */
+export interface SeRunSettings {
+  tol: number;
+  max_iter: number;
+  noise_seed?: number | null;
+}
+
+/** The chi-squared bad-data test of one WLS SE run. */
+export interface SeChiSquaredTest {
+  passed: boolean;
+  J: number;
+  threshold: number;
+  dof: number;
+  confidence: number;
 }
 
 /**

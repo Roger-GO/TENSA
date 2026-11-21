@@ -267,6 +267,29 @@ export function useSeGenerateMeasurements(): UseMutationResult<
   });
 }
 
+/** Request body shape for ``POST /api/sessions/{id}/se``. */
+export interface SeRunVars {
+  sessionId: SessionId;
+  /** The estimator; omitted → the server runs WLS. */
+  algorithm?: 'wls' | 'lav';
+  /** Convergence tolerance for this run only; omitted → the case's SE.config.tol. */
+  tol?: number;
+  /** Iteration limit for this run only; omitted → the case's SE.config.max_iter. */
+  maxIter?: number;
+  /** Seed for this run's measurement noise only; omitted → the cached values are used. */
+  noiseSeed?: number;
+}
+
+/** The body of one SE run: only the options that were given, under the server's names. */
+function seRunBody({ algorithm, tol, maxIter, noiseSeed }: SeRunVars): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (algorithm !== undefined) body.algorithm = algorithm;
+  if (tol !== undefined) body.tol = tol;
+  if (maxIter !== undefined) body.max_iter = maxIter;
+  if (noiseSeed !== undefined) body.noise_seed = noiseSeed;
+  return body;
+}
+
 /**
  * ``POST /api/sessions/{id}/se`` — runs static state estimation
  * against the substrate's cached measurement set.
@@ -283,20 +306,26 @@ export function useSeGenerateMeasurements(): UseMutationResult<
  *   appropriate empty-state CTA.
  * - 422 ``SeUnderDeterminedError`` — measurement set has insufficient
  *   redundancy (gain matrix singular).
- * - 422 ``SeNonConvergentError`` — WLS Gauss-Newton hit max_iter.
+ * - 422 ``SeNonConvergentError`` — the estimator hit max_iter.
+ * - 422 ``SeOptionError`` — an option the route cannot take (an
+ *   unknown algorithm, a tol at or under 0, a max_iter under 1, a
+ *   negative noise_seed).
  */
-export function useSeRun(): UseMutationResult<SeResult, Error, SessionId> {
+export function useSeRun(): UseMutationResult<SeResult, Error, SeRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sessionId: SessionId) => {
+    mutationFn: async (vars: SeRunVars) => {
       return await andesClient.post<SeResult>(
-        `/sessions/${encodeURIComponent(sessionId)}/se`,
+        `/sessions/${encodeURIComponent(vars.sessionId)}/se`,
         // SE iteration cost is comparable to PF; reuse the PF-run timeout.
-        { body: {}, timeoutMs: TIMEOUTS.pflowRun },
+        { body: seRunBody(vars), timeoutMs: TIMEOUTS.pflowRun },
       );
     },
-    onMutate: () => ({ jobId: registerJob('se') }),
-    onSuccess: (data, sessionId, ctx) => {
+    // The job keeps the body it was sent, under the server's names, as the
+    // server's own record of the job does: the Activity panel's Retry reads
+    // the options back from it, so a retried LAV run is a LAV run again.
+    onMutate: (vars) => ({ jobId: registerJob('se', seRunBody(vars)) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setSeResult(data);
       queryClient.setQueryData(queryKeys.se(sessionId), data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
