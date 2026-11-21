@@ -175,6 +175,106 @@ def test_psse_raw_header_without_revision_defaults_to_33() -> None:
     assert identity.freq_hz is None
 
 
+def _two_winding(i: int, j: int, ckt: str) -> str:
+    """A two-winding transformer record (four lines)."""
+    return (
+        f"    {i},     {j},    0,'{ckt}',1,1,1,  0.00000,  0.00000,2,'        ',1,   1,1.0000\n"
+        " 0.00000, 0.05760, 100.00\n"
+        "1.00000,  0.000,   0.000,   0.00,   0.00,   0.00,0,     0, 1.50000, 0.51000, 1.50000, 0.51000,159, 0, 0.00000, 0.00000\n"
+        "1.00000,  0.000\n"
+    )
+
+
+def _three_winding(
+    i: int, j: int, k: int, ckt: str, angles: tuple[float, float, float] = (0.0, 0.0, 0.0)
+) -> str:
+    """A three-winding transformer record (five lines), with ANG1, ANG2, ANG3."""
+    windings = "".join(
+        f"1.00000,  230.00, {angle:8.3f},  100.00,  100.00,  100.00, 0,     4, 1.10000, 0.90000, 1.10000, 0.90000, 33, 0, 0.00000, 0.00000\n"
+        for angle in angles
+    )
+    return (
+        f"    {i},     {j},    {k},'{ckt}',1,1,1,  0.00000,  0.00000,2,'3WINDXFR',1,   1,1.0000\n"
+        " 0.01000, 0.10000, 100.00, 0.02000, 0.20000, 100.00, 0.03000, 0.30000, 100.00, 1.00000, 0.00000\n"
+        + windings
+    )
+
+
+def _raw_with_transformers(records: str) -> str:
+    return (
+        "  0,    100.00, 33, 0, 0, 60.00       /\n"
+        "  TRANSFORMER RECORDS\n"
+        "  SECOND COMMENT LINE\n"
+        "    1,'Bus One    ',  20.0000,3\n"
+        "    2,'Bus Two    ', 230.0000,2\n"
+        "    3,'Bus Three  ', 230.0000,1\n"
+        "    4,'Bus Four   ', 115.0000,1\n"
+        "    5,'Bus Five   ', 115.0000,1\n"
+        " 0 / END OF BUS DATA, BEGIN LOAD DATA\n"
+        " 0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA\n"
+        " 0 / END OF FIXED SHUNT DATA, BEGIN GENERATOR DATA\n"
+        " 0 / END OF GENERATOR DATA, BEGIN BRANCH DATA\n"
+        "    2,     3,'1 ', 0.01000, 0.06800,0.17600\n"
+        " 0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA\n"
+        + records
+        + " 0 / END OF TRANSFORMER DATA, BEGIN AREA DATA\n"
+        " 0 / END OF AREA DATA\n"
+        "Q\n"
+    )
+
+
+_LINE = BranchId(2, 3, "1", transformer=False)
+
+
+# A transformer record's length comes from the K field of the line that opens
+# it. The later lines of a three-winding record carry an angle where K would
+# be, and one of 0 must not end the record a line early.
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("records", "branches", "transformers3"),
+    [
+        pytest.param(
+            _three_winding(2, 3, 4, "T3") + _two_winding(1, 2, "1"),
+            (_LINE, BranchId(1, 2, "1", transformer=True)),
+            (Transformer3Id((2, 3, 4), "T3"),),
+            id="three-then-two",
+        ),
+        pytest.param(
+            _three_winding(2, 3, 4, "T3", angles=(30.0, 0.0, -30.0)) + _two_winding(1, 2, "1"),
+            (_LINE, BranchId(1, 2, "1", transformer=True)),
+            (Transformer3Id((2, 3, 4), "T3"),),
+            id="ang2-zero",
+        ),
+        pytest.param(
+            _three_winding(2, 3, 4, "T3") + _three_winding(3, 4, 5, "T4"),
+            (_LINE,),
+            (Transformer3Id((2, 3, 4), "T3"), Transformer3Id((3, 4, 5), "T4")),
+            id="two-three-winding-in-a-row",
+        ),
+        pytest.param(
+            _two_winding(1, 2, "1") + _three_winding(2, 3, 4, "T3") + _two_winding(4, 5, "2"),
+            (
+                _LINE,
+                BranchId(1, 2, "1", transformer=True),
+                BranchId(4, 5, "2", transformer=True),
+            ),
+            (Transformer3Id((2, 3, 4), "T3"),),
+            id="three-between-two",
+        ),
+    ],
+)
+def test_psse_raw_transformer_record_length(
+    records: str,
+    branches: tuple[BranchId, ...],
+    transformers3: tuple[Transformer3Id, ...],
+) -> None:
+    identity = read_psse_raw_identity(_raw_with_transformers(records))
+    assert identity.branches == branches
+    assert identity.transformers3 == transformers3
+    assert identity.counts["transf"] == len(branches) - 1 + len(transformers3)
+    assert identity.unread_blocks == ()
+
+
 @pytest.mark.unit
 def test_matpower_snippet() -> None:
     identity = read_matpower_identity(MATPOWER_SNIPPET)

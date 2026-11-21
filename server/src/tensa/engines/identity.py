@@ -283,8 +283,10 @@ def read_psse_raw_identity(text: str) -> CaseIdentity:
         pending.append(first_fields)
         if block == "transf":
             # A transformer record is four lines (two-winding, K == 0) or five
-            # (three-winding); the first line's third field tells them apart.
-            k_bus = _int_field(first_fields[2]) if len(first_fields) > 2 else 0
+            # (three-winding); the third field of the line that opens the
+            # record tells them apart (the later lines carry no K).
+            record_first = pending[0]
+            k_bus = _int_field(record_first[2]) if len(record_first) > 2 else 0
             want = 4 if k_bus == 0 else 5
             if len(pending) >= want:
                 take_record(block, pending)
