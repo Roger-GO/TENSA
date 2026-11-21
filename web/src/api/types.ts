@@ -124,6 +124,15 @@ export type AddDisturbancesResponse = components['schemas']['AddDisturbancesResp
 /** One ack entry returned by the disturbance commit endpoint. */
 export type DisturbanceAck = components['schemas']['DisturbanceAck'];
 
+/** Request body for ``POST /sessions/{id}/tds/init``: the check without the run. */
+export type TdsInitRequest = components['schemas']['TdsInitRequest'];
+/** Response body for ``POST /sessions/{id}/tds/init``. */
+export type TdsInitResult = components['schemas']['TdsInitResult'];
+/** One variable of ``TdsInitResult.clamped``: clamped at a limit as it initialised. */
+export type TdsInitClamp = components['schemas']['TdsInitClamp'];
+/** One equation of ``TdsInitResult.residuals``; ``mismatch`` is ``null`` for NaN. */
+export type TdsInitResidual = components['schemas']['TdsInitResidual'];
+
 /**
  * Response body for ``POST /sessions/{id}/abort`` (Unit 1b endpoint).
  *

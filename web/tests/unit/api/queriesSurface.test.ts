@@ -52,6 +52,7 @@ import type {
   StartSweepResponse,
   StartSweepVars,
   SweepParamKind,
+  TdsInitVars,
   UploadProfileVars,
   UploadWorkspaceFileVars,
 } from '@/api/queries';
@@ -102,6 +103,7 @@ export type PublicTypes = [
   StartSweepResponse,
   StartSweepVars,
   SweepParamKind,
+  TdsInitVars,
   UploadProfileVars,
   UploadWorkspaceFileVars,
 ];
@@ -174,6 +176,7 @@ const PUBLIC_VALUES = [
   'useSeRun',
   'useStartSweep',
   'useTdsControllers',
+  'useTdsInit',
   'useTopology',
   'useTopologyRefetching',
   'useTopologySchema',

@@ -30,7 +30,29 @@ vi.mock('@/lib/toast', () => ({
   },
 }));
 
+const tdsInitMutateMock = vi.fn();
+let tdsInitPending = false;
+let tdsInitHandlers: {
+  onSuccess?: (data: unknown) => void;
+  onError?: (err: unknown) => void;
+} = {};
+
+vi.mock('@/api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/queries')>();
+  return {
+    ...actual,
+    useTdsInit: () => ({
+      mutate: (vars: unknown, handlers?: typeof tdsInitHandlers) => {
+        tdsInitHandlers = handlers ?? {};
+        tdsInitMutateMock(vars, handlers);
+      },
+      isPending: tdsInitPending,
+    }),
+  };
+});
+
 import { RunButton } from '@/components/tds/RunButton';
+import { ProblemDetailsError } from '@/api/client';
 import { loadArrowDecoder } from '@/streaming/RunStream';
 import { makeQueryClient, queryKeys, useCurrentTopology } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
@@ -174,6 +196,19 @@ function seedReady(
 function tick(ms = 10): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+const TDS_INIT_OK = {
+  initialized: true,
+  test_ok: true,
+  test_init: true,
+  clamped: [],
+  residuals: [],
+  max_residual: 0,
+  nan_residuals: 0,
+  n_states: 10,
+  n_algeb: 20,
+  diagnostics_truncated: false,
+};
 
 function topologyBody(state: 'pre-setup' | 'committed') {
   return {
@@ -2746,5 +2781,350 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       expect(toastInfoMock).toHaveBeenCalledWith('run-done stays in History', expect.anything());
     });
     expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    tdsInitMutateMock.mockReset();
+    tdsInitHandlers = {};
+    tdsInitPending = false;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    tdsInitPending = false;
+    tdsInitHandlers = {};
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+    });
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+  });
+
+  it('TDS mode, ready: the check button is rendered and enabled', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    const button = screen.getByTestId('tds-init-check');
+    expect(button).toBeEnabled();
+    expect(button).toHaveTextContent('Check initialisation');
+  });
+
+  it('PF mode: the check button is not rendered', () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.queryByTestId('tds-init-check')).not.toBeInTheDocument();
+  });
+
+  it('no case loaded: the check button is disabled with the run button’s reason', async () => {
+    // A disturbance puts the button in TDS mode even with no case behind it.
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: false,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const button = screen.getByTestId('tds-init-check');
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/No case loaded\./);
+    await userEvent.hover(button.parentElement!);
+    const matches = await screen.findAllByText(/No case loaded/i);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('while the check is pending it says Checking…, and both buttons are disabled', async () => {
+    seedReady();
+    tdsInitPending = true;
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    const check = screen.getByTestId('tds-init-check');
+    expect(check).toHaveTextContent(/checking/i);
+    expect(check).toBeDisabled();
+    expect(screen.getByTestId('run-tds-button')).toBeDisabled();
+  });
+
+  it('while a TDS run streams, the check is disabled and the run button still offers Abort', () => {
+    seedReady();
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    useRunsStore.setState({
+      runs: {
+        'run-live': {
+          runId: 'run-live',
+          startedAt: 1,
+          tf: 5,
+          tCurrent: 1,
+          seqCount: 10,
+          t: new Float64Array(0),
+          columns: {},
+          columnNames: [],
+          state: 'streaming',
+          connection: 'connected',
+          abortedLocally: false,
+          errorReason: null,
+        },
+      },
+      activeRunId: 'run-live',
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.getByTestId('tds-init-check')).toBeDisabled();
+    const primary = screen.getByTestId('run-tds-button');
+    expect(primary).toHaveTextContent(/^abort$/i);
+    expect(primary).toBeEnabled();
+  });
+
+  it('a finished run holds the system: the check is disabled and says to Reset first', async () => {
+    seedReady();
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    useRunsStore.setState({
+      runs: {
+        'run-done': {
+          runId: 'run-done',
+          startedAt: 1,
+          tf: 5,
+          tCurrent: 5,
+          seqCount: 100,
+          t: new Float64Array(0),
+          columns: {},
+          columnNames: [],
+          state: 'done',
+          connection: 'connected',
+          abortedLocally: false,
+          errorReason: null,
+        },
+      },
+      activeRunId: 'run-done',
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const check = screen.getByTestId('tds-init-check');
+    expect(check).toBeDisabled();
+    expect(check).toHaveAccessibleDescription(
+      /Reset the run first; the system is already initialised\./,
+    );
+    await userEvent.hover(check.parentElement!);
+    const matches = await screen.findAllByText(/Reset the run first; the system is already/i);
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
+  it('click sends only the session id: no testInit key, so the default request is unchanged', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    expect(tdsInitMutateMock).toHaveBeenCalledTimes(1);
+    const [vars] = tdsInitMutateMock.mock.calls[0] as [Record<string, unknown>, unknown];
+    expect(vars).toEqual({ sessionId: SESSION_ID });
+    expect(vars).not.toHaveProperty('testInit');
+  });
+
+  it('a successful check opens the dialog with the result and leaves Run TDS enabled', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-init-verdict')).toHaveTextContent(
+      'Every dynamic model starts at a steady state.',
+    );
+    // The next run carries on from this initialisation: the check's success
+    // itself does not disable the run button.
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
+  });
+
+  it('a 422 opens the dialog with the server’s detail and fires no toast', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    const error = new ProblemDetailsError({
+      type: 'about:blank',
+      title: 'Unprocessable Entity',
+      status: 422,
+      detail: 'the system is already initialised',
+      instance: null,
+    });
+    act(() => {
+      tdsInitHandlers.onError?.(error);
+    });
+    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
+        'The initialisation could not be checked: the system is already initialised',
+      ),
+    );
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('a non-ProblemDetails failure opens the dialog with the generic line and toasts it', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    act(() => {
+      tdsInitHandlers.onError?.(new Error('socket hang up'));
+    });
+    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
+      'The initialisation could not be checked:',
+    );
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      'Initialisation check failed',
+      expect.objectContaining({ description: expect.stringContaining('socket hang up') }),
+    );
+  });
+
+  it('after a successful check, a second is refused here until the case is read again', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    const check = screen.getByTestId('tds-init-check');
+    expect(check).toBeDisabled();
+    expect(check).toHaveAccessibleDescription(
+      'Reset the run first; the system is already initialised.',
+    );
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
+
+    // The topology read the check asked for says the case is set up: still refused.
+    act(() => {
+      const topology = useCaseStore.getState().topology;
+      if (topology !== null)
+        useCaseStore.setState({ topology: { ...topology, state: 'committed' } });
+    });
+    expect(screen.getByTestId('tds-init-check')).toBeDisabled();
+
+    // Reset run reads the case again, back to pre-setup: the check is offered again.
+    act(() => {
+      const topology = useCaseStore.getState().topology;
+      if (topology !== null)
+        useCaseStore.setState({ topology: { ...topology, state: 'pre-setup' } });
+    });
+    expect(screen.getByTestId('tds-init-check')).toBeEnabled();
+  });
+
+  it('the dialog gives the focus back to the check control when it closes', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await userEvent.click(screen.getByTestId('tds-init-close'));
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    // The button is disabled now, so the span that carries its reason has the focus.
+    expect(document.activeElement).toContainElement(screen.getByTestId('tds-init-check'));
+  });
+
+  it('a refused check (422) leaves the check offered and marks nothing as set up', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    act(() => {
+      tdsInitHandlers.onError?.(
+        new ProblemDetailsError({
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'power flow did not converge; TDS cannot begin',
+          instance: null,
+        }),
+      );
+    });
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    expect(screen.getByTestId('tds-init-check')).toBeEnabled();
+    expect(useCaseStore.getState().topology?.state).toBe('pre-setup');
+  });
+
+  it('an eigenvalue analysis has initialised the run: the check is disabled with the reason', async () => {
+    seedReady({ withDisturbances: true });
+    const { useAnalyzeStore } = await import('@/store/analyze');
+    useAnalyzeStore.setState({
+      eigResult: {
+        eigenvalues: [{ real: -0.1, imag: 1.0 }],
+        damping_ratios: [0.1],
+        frequencies_hz: [0.159],
+        mode_count: 1,
+        state_count: 1,
+        state_names: ['delta_1'],
+        tds_initialized: true,
+      },
+    });
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      const check = screen.getByTestId('tds-init-check');
+      expect(check).toBeDisabled();
+      expect(check).toHaveAccessibleDescription(
+        'Reset the run first; the system is already initialised.',
+      );
+    } finally {
+      useAnalyzeStore.setState({ eigResult: null });
+    }
+  });
+
+  it('a run asked for by a command while the check runs is held back', async () => {
+    seedReady({ withDisturbances: true });
+    tdsInitPending = true;
+    useRunModeStore.setState({ runRequest: null });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    act(() => useRunModeStore.getState().requestRun('tds'));
+    await waitFor(() =>
+      expect(toastInfoMock).toHaveBeenCalledWith('A run is already in progress', expect.anything()),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

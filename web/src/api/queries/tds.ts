@@ -1,6 +1,6 @@
 /**
- * The time-domain run's lifecycle around the stream (commit the disturbances, abort,
- * reset) and the two requests on a run's signals that hold no session.
+ * The time-domain run's lifecycle around the stream (commit the disturbances, check
+ * the initialisation, abort, reset) and the two requests on a run's signals that hold no session.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { UseMutationResult } from '@tanstack/react-query';
@@ -14,6 +14,8 @@ import type {
   ResponseMetricsRequest,
   ResponseMetricsResponse,
   SessionId,
+  TdsInitRequest,
+  TdsInitResult,
   TopologySummary,
 } from '@/api/types';
 import { useCaseStore } from '@/store/case';
@@ -95,6 +97,47 @@ export function useAbortRun(): UseMutationResult<AbortResponse, Error, SessionId
       if (activeRunId !== null) {
         useRunsStore.getState().setAbortedLocally(activeRunId, true);
       }
+    },
+  });
+}
+
+export interface TdsInitVars {
+  sessionId: SessionId;
+  /** ``false`` initialises without ANDES's residual check; omitted → the server checks. */
+  testInit?: boolean;
+}
+
+/**
+ * ``POST /sessions/{id}/tds/init``. Initialises the time-domain run without
+ * stepping it and reports whether every dynamic model starts at a steady
+ * state, with the clamped-limit and residual tables when it does not.
+ *
+ * A quick check rather than a run, so no job is recorded. The result is
+ * returned to the caller (the RunButton keeps it in local state and opens
+ * the results dialog). The route leaves the System set up and initialised,
+ * as a power flow leaves it set up: the topology query is invalidated as
+ * ``useRunPflow`` invalidates it, so its ``state`` reads ``committed`` and
+ * every place that says a run has fixed the system says so now.
+ *
+ * Errors propagate as ``ProblemDetailsError``; the caller renders a 422's
+ * detail in the dialog.
+ */
+export function useTdsInit(): UseMutationResult<TdsInitResult, Error, TdsInitVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, testInit }: TdsInitVars) => {
+      // The server's default (the check on) is not sent: only what was asked.
+      const body: Partial<TdsInitRequest> = {};
+      if (testInit !== undefined) body.test_init = testInit;
+      return await andesClient.post<TdsInitResult>(
+        `/sessions/${encodeURIComponent(sessionId)}/tds/init`,
+        // The eigenvalue analysis initialises the dynamic models too, and
+        // takes the same timeout.
+        { body, timeoutMs: TIMEOUTS.pflowRun },
+      );
+    },
+    onSuccess: (_data, { sessionId }) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.topology(sessionId) });
     },
   });
 }

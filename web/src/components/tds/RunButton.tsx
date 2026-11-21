@@ -12,8 +12,11 @@ import {
   useCommitDisturbances,
   useRefreshTopology,
   useReloadCase,
+  useTdsInit,
   loadOperatingPointIntoStore,
 } from '@/api/queries';
+import type { TdsInitResult } from '@/api/types';
+import { TdsInitResultDialog } from '@/components/tds/TdsInitResultDialog';
 import { ProblemDetailsError } from '@/api/client';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { runHeldNotice } from '@/lib/runLock';
@@ -34,6 +37,8 @@ import type { RunStreamError, TdsIntegratorWire, VarGroup } from '@/streaming/Ru
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useRequestedRun } from '@/lib/useRequestedRun';
+import { useDepsChanged } from '@/lib/useDepsChanged';
+import { useAnalyzeStore } from '@/store/analyze';
 import { reportAbortError } from '@/lib/abortRun';
 import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
@@ -174,6 +179,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   const reloadCase = useReloadCase();
   const refreshTopology = useRefreshTopology();
   const abortRun = useAbortRun();
+  const tdsInit = useTdsInit();
   const resetRun = useResetRunAction({ errorTitle: 'TDS error' });
 
   // Mode = "auto" derived from disturbances + a manual override that
@@ -201,6 +207,33 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // slice's ``abortedLocally`` flag flips on HTTP success — independent
   // of when the substrate actually exits.
   const [aborting, setAborting] = useState(false);
+
+  // The "Check initialisation" action beside the run control: its dialog's
+  // open flag and the payload it shows (the result, or the error). Both are
+  // set only in the mutation callbacks and cleared in the click handler, so
+  // the render stays pure.
+  const [tdsInitOpen, setTdsInitOpen] = useState(false);
+  const [tdsInitResult, setTdsInitResult] = useState<TdsInitResult | null>(null);
+  const [tdsInitError, setTdsInitError] = useState<Error | null>(null);
+  // What the check button gives the focus back to when its dialog closes: the
+  // button, or the span that holds it while it is disabled with a reason.
+  const checkFocusRef = useRef<HTMLElement | null>(null);
+
+  // Whether the check has initialised the run this session holds now. The
+  // server answers a second check 422 until the case is read again, so the
+  // button says so instead. A reload (Reset run, Reload case, another case, a
+  // new session) takes the topology back to pre-setup, which takes the
+  // initialisation with it. The check's own refetch only ever moves the state
+  // to `committed`, so it never clears the mark it was made with.
+  const topologyState = useCaseStore((s) => s.topology?.state ?? null);
+  const [checkedInit, setCheckedInit] = useState(false);
+  const sessionChanged = useDepsChanged([sessionId]);
+  const topologyStateChanged = useDepsChanged([topologyState]);
+  if (checkedInit && (sessionChanged || (topologyStateChanged && topologyState !== 'committed'))) {
+    setCheckedInit(false);
+  }
+  // An eigenvalue analysis initialises the run as well (`tds_initialized`).
+  const eigInitialised = useAnalyzeStore((s) => s.eigResult?.tds_initialized ?? false);
 
   // Cleanup the stream on unmount so a navigation-away mid-run doesn't
   // leave a dangling WS. Idempotent — RunStream.dispose() guards against
@@ -503,6 +536,34 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     stream.start();
   };
 
+  // ---- check-initialisation flow ------------------------------------------
+
+  const onCheckInit = () => {
+    if (!sessionId) return;
+    setTdsInitResult(null);
+    setTdsInitError(null);
+    tdsInit.mutate(
+      { sessionId },
+      {
+        onSuccess: (data) => {
+          setTdsInitResult(data);
+          setCheckedInit(true);
+          setTdsInitOpen(true);
+        },
+        onError: (err) => {
+          // The dialog shows the error either way (a 422 with the server's
+          // detail, anything else with its message); only a failure without a
+          // server detail is also toasted, as a failed start is.
+          setTdsInitError(err);
+          setTdsInitOpen(true);
+          if (!(err instanceof ProblemDetailsError)) {
+            toast.error('Initialisation check failed', { description: describeError(err) });
+          }
+        },
+      },
+    );
+  };
+
   // ---- abort flow ---------------------------------------------------------
 
   const onAbort = () => {
@@ -554,7 +615,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // only this button knows (a run under way, a finished run that holds the
   // system) is said here.
   useRequestedRun(['pflow', 'tds'], (routine) => {
-    if (isPfRunning || isTdsRunning || tdsStarting) {
+    if (isPfRunning || isTdsRunning || tdsStarting || tdsInit.isPending) {
       toast.info('A run is already in progress', {
         description: 'Wait for it to finish, or stop it with the Run button, and ask again.',
       });
@@ -629,7 +690,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     }
   }
 
-  const allDisabled = primaryDisabled || disabledReason !== null;
+  const allDisabled = primaryDisabled || disabledReason !== null || tdsInit.isPending;
 
   const primaryButton = (
     <Button
@@ -710,6 +771,52 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     </div>
   );
 
+  // ---- check-initialisation button ---------------------------------------
+
+  // The check is offered only when a TDS run could start (the readiness of
+  // the run button), and not while a run, a power flow, a reset or the check
+  // itself is under way. Nor once the run is initialised, by a finished run,
+  // an eigenvalue analysis or this check: the route would answer 422 "already
+  // initialised", and Reset run is the way back. The reason is derived during
+  // render, like the run button's own disabled reason.
+  const checkDisabledReason =
+    disabledReason ??
+    (isTdsTerminal || checkedInit || eigInitialised
+      ? 'Reset the run first; the system is already initialised.'
+      : null);
+  const checkDisabled =
+    checkDisabledReason !== null ||
+    isTdsRunning ||
+    tdsStarting ||
+    isPfRunning ||
+    resetRun.isPending ||
+    tdsInit.isPending;
+
+  const checkButton = (
+    <Button
+      ref={(node) => {
+        if (checkDisabledReason === null) checkFocusRef.current = node;
+      }}
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={checkDisabled}
+      onClick={onCheckInit}
+      title="Initialise the time-domain run without stepping it, and report whether every dynamic model starts at a steady state"
+      data-testid="tds-init-check"
+      aria-describedby={checkDisabledReason ? 'tds-init-check-disabled-reason-text' : undefined}
+    >
+      {tdsInit.isPending ? (
+        <>
+          <Spinner />
+          <span>Checking…</span>
+        </>
+      ) : (
+        <span>Check initialisation</span>
+      )}
+    </Button>
+  );
+
   // ---- inline recovery affordance ----------------------------------------
 
   // The Run-readiness hook surfaces a recovery descriptor when one is
@@ -734,32 +841,84 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // ---- render -------------------------------------------------------------
 
   return (
-    <div className="flex items-center gap-2">
-      {disabledReason ? (
-        <TooltipProvider delayDuration={150}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="inline-block">
-                {primaryButton}
-              </span>
-            </TooltipTrigger>
-            <TooltipPortal>
-              <TooltipContent id="run-button-disabled-reason">{disabledReason}</TooltipContent>
-            </TooltipPortal>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        primaryButton
-      )}
-      {/* The tooltip above only exists while it is open, so the reason is also
+    <>
+      <div className="flex items-center gap-2">
+        {disabledReason ? (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="inline-block">
+                  {primaryButton}
+                </span>
+              </TooltipTrigger>
+              <TooltipPortal>
+                <TooltipContent id="run-button-disabled-reason">{disabledReason}</TooltipContent>
+              </TooltipPortal>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          primaryButton
+        )}
+        {/* The tooltip above only exists while it is open, so the reason is also
           kept in the page as text the button's aria-describedby can reach. */}
-      {disabledReason ? (
-        <span id="run-button-disabled-reason-text" className="sr-only">
-          {disabledReason}
-        </span>
-      ) : null}
-      {inlineRecovery}
-      {modeSelector}
-    </div>
+        {disabledReason ? (
+          <span id="run-button-disabled-reason-text" className="sr-only">
+            {disabledReason}
+          </span>
+        ) : null}
+        {inlineRecovery}
+        {mode === 'tds' ? (
+          checkDisabledReason ? (
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    ref={(node) => {
+                      checkFocusRef.current = node;
+                    }}
+                    tabIndex={0}
+                    className="inline-block"
+                  >
+                    {checkButton}
+                  </span>
+                </TooltipTrigger>
+                <TooltipPortal>
+                  <TooltipContent id="tds-init-check-disabled-reason">
+                    {checkDisabledReason}
+                  </TooltipContent>
+                </TooltipPortal>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            checkButton
+          )
+        ) : null}
+        {mode === 'tds' && checkDisabledReason ? (
+          <span id="tds-init-check-disabled-reason-text" className="sr-only">
+            {checkDisabledReason}
+          </span>
+        ) : null}
+        {modeSelector}
+      </div>
+      <TdsInitResultDialog
+        open={tdsInitOpen}
+        onOpenChange={setTdsInitOpen}
+        result={tdsInitResult}
+        error={tdsInitError}
+        discardsEdits={reloadDiscardsEdits}
+        onResetRun={onReset}
+        resetting={resetRun.isPending}
+        disturbancesListed={disturbances.length > 0}
+        onCloseAutoFocus={(event) => {
+          // The button was disabled while the check ran, so Radix has nothing
+          // of its own to give the focus back to.
+          const target = checkFocusRef.current;
+          if (target !== null && target.isConnected) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
+      />
+    </>
   );
 }
