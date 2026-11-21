@@ -297,6 +297,39 @@ def test_transformer_told_by_rated_voltages() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("vn1", "vn2", "bucket"),
+    [
+        (20.0, 230.0, "transformer"),
+        (20.7, 20.9, "transformer"),  # the closest two levels of the ANDES examples
+        (1000.0, 998.9, "transformer"),  # 0.11 % apart
+        (1000.0, 999.0005, "line"),  # 0.09995 % of the larger, 0.10005 % of the smaller
+        (999.0005, 1000.0, "line"),
+        (230.0, 230.0, "line"),
+    ],
+)
+def test_rated_voltages_split_lines_as_the_topology_does(
+    vn1: float, vn2: float, bucket: str
+) -> None:
+    # The bucket of a key and the list the topology puts a branch in are one
+    # rule: two ends rated more than 0.1 % of the larger apart are two levels.
+    from tensa.core.wrapper.topology import _marked_as_transformers
+
+    ss = _system(
+        Bus=_model([1, 5]),
+        Line=_model(
+            [101], bus1=[1], bus2=[5], tap=[1.0], phi=[0.0], trans=[0],
+            Vn1=[vn1], Vn2=[vn2],
+        ),
+    )
+    entry = assign_andes_keys(ss, None).entry_of("branch:1-5-1")
+    assert entry is not None
+    topology = "transformer" if 101 in _marked_as_transformers(ss) else "line"
+    assert topology == bucket
+    assert entry.bucket == bucket, "the key's bucket departs from the topology's"
+
+
+@pytest.mark.unit
 def test_line_and_transformer_of_one_pair_share_the_key_space() -> None:
     # The file holds a line and a transformer between the same buses with the
     # same circuit id: both ask for branch:7-8-1. The second is stored with a

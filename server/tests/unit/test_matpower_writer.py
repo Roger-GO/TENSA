@@ -176,6 +176,94 @@ def test_values_are_written_on_the_system_base_before_setup(tmp_path: Path) -> N
     np.testing.assert_allclose(a1, a0, atol=1e-8)
 
 
+def _off_base() -> andes.system.System:
+    """Two buses at 110 kV whose line and shunt are rated on bases of their
+    own: the line on 200 MVA with ends rated 121 kV, the shunt on 50 MVA. The
+    example cases rate their lines and shunts on the system base and at the
+    voltage of their buses, where every coefficient of the conversion is 1."""
+    ss = andes.System(no_output=True, default_config=True)
+    ss.add("Bus", idx=1, name="Alpha", Vn=110.0)
+    ss.add("Bus", idx=2, name="Beta", Vn=110.0)
+    ss.add("Slack", idx="G1", bus=1, Vn=110.0, Sn=900.0, v0=1.02, p0=0.5)
+    ss.add("PQ", idx="L1", bus=2, Vn=110.0, p0=0.5, q0=0.1)
+    ss.add(
+        "Line",
+        idx="Ln1",
+        bus1=1,
+        bus2=2,
+        Vn1=121.0,
+        Vn2=121.0,
+        Sn=200.0,
+        r=0.01,
+        x=0.1,
+        b=0.02,
+    )
+    ss.add("Shunt", idx="Sh1", bus=2, Vn=110.0, Sn=50.0, b=0.3)
+    return ss
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("set_up", [False, True], ids=["pre-setup", "set-up"])
+def test_values_off_the_system_base_are_written_as_andes_sets_them_up(
+    tmp_path: Path, set_up: bool
+) -> None:
+    """Whether the System is set up or not, the file holds each value as
+    ANDES's own setup puts it on the system base: converted once, never twice
+    and never not at all. The power flow of the file read back is that of the
+    System."""
+    reference = _off_base()
+    reference.setup()
+    mva = float(reference.config.mva)
+    want_r, want_x, want_b = (float(getattr(reference.Line, n).v[0]) for n in ("r", "x", "b"))
+    want_bs = float(reference.Shunt.b.v[0]) * mva
+    # Not a vacuous check: on the system base the values are other numbers.
+    assert want_r != pytest.approx(0.01) and want_b != pytest.approx(0.02)
+    assert want_bs != pytest.approx(0.3 * mva)
+
+    ss = _off_base()
+    if set_up:
+        ss.setup()
+    target = tmp_path / "off-base.m"
+    write_matpower(ss, target)
+
+    mpc = m2mpc(str(target))
+    branch = mpc["branch"][0]
+    assert branch[2] == pytest.approx(want_r, rel=1e-9), "line r not on the system base"
+    assert branch[3] == pytest.approx(want_x, rel=1e-9), "line x not on the system base"
+    assert branch[4] == pytest.approx(want_b, rel=1e-9), "line b not on the system base"
+    assert mpc["bus"][1][5] == pytest.approx(want_bs, rel=1e-9), "shunt Bs not on the system base"
+
+    v0, a0 = _solved(reference)
+    v1, a1 = _solved(_read_back(target))
+    np.testing.assert_allclose(v1, v0, atol=1e-8)
+    np.testing.assert_allclose(a1, a0, atol=1e-8)
+
+
+@pytest.mark.unit
+def test_integral_values_are_written_whole_and_the_file_ends_with_a_newline(
+    tmp_path: Path,
+) -> None:
+    """An integral value is written as an integer with every digit, also past
+    the ten significant digits of ``%.10g``, and the file's lines, the last
+    included, end in LF."""
+    big = 12_345_678_901
+    target = tmp_path / "ints.m"
+    write_matpower(_two_bus(a=big, b=2), target)
+
+    raw = target.read_bytes()
+    assert raw.endswith(b"};\n"), "the last line has no line ending"
+    assert b"\r" not in raw
+    bus_rows = [
+        line.strip().rstrip(";").split()
+        for line in raw.decode("utf-8").split("mpc.bus = [")[1].split("];")[0].splitlines()
+        if line.strip()
+    ]
+    assert [row[:2] for row in bus_rows] == [[str(big), "3"], ["2", "1"]]
+    mpc = m2mpc(str(target))
+    assert [int(row[0]) for row in mpc["bus"]] == [big, 2]
+    assert int(mpc["branch"][0][0]) == big
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("a", "b"), [("alpha", "beta"), (7, "beta"), (0, 3)], ids=["text", "mixed", "zero"]

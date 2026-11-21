@@ -266,6 +266,70 @@ def test_two_machines_one_bus_different_vs_raises() -> None:
         read_psse_raw_facts(_raw(gens=gens))
 
 
+def _gen(bus: int, ckt: str, vs: str) -> str:
+    return (
+        f"    {bus},'{ckt} ',    50.000,     2.000,  9900.000, -9900.000,{vs},    0,"
+        "   100.000,   0.00000,   1.00000,   0.00000,   0.00000,1.00000,1\n"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("vs", ["1.02510", "1.02500001"], ids=["1e-4", "1e-8"])
+def test_two_machines_one_bus_a_small_difference_still_raises(vs: str) -> None:
+    # Any difference a file can state is a conflict, however small.
+    gens = _gen(2, "1", "1.02500") + _gen(2, "2", vs)
+    with pytest.raises(CaseFactsError, match="bus 2"):
+        read_psse_raw_facts(_raw(gens=gens))
+
+
+@pytest.mark.unit
+def test_two_machines_one_bus_same_vs_written_two_ways() -> None:
+    # The same setpoint written with different digits (and so as floats that
+    # can differ in the last place) is one setpoint, not a conflict.
+    gens = _gen(2, "1", "1.025") + _gen(2, "2", "1.0250000000000001")
+    facts = read_psse_raw_facts(_raw(gens=gens))
+    assert facts.v_setpoints == {2: pytest.approx(1.025, abs=1e-12)}
+
+
+@pytest.mark.unit
+def test_record_that_ends_just_before_a_field_takes_its_default() -> None:
+    # A generator record that stops after GTAP (field 14 of 15, so STAT is the
+    # first field missing) is in service; a branch record that stops after X
+    # (B, field 6, is the first missing) has no line charging. A record one
+    # field short must not be read past its end.
+    gens = (
+        "    2,'1 ',   163.000,     4.903,  9900.000, -9900.000,1.02500,    0,"
+        "   250.000,   0.00000,   1.00000,   0.00000,   0.00000,1.00000\n"
+    )
+    branches = "    2,     3,'1 ', 0.01000, 0.06800\n"
+    facts = read_psse_raw_facts(_raw(gens=gens, branches=branches))
+    assert facts.v_setpoints == {2: 1.025}
+    assert facts.lines == (LineFact(2, 3, "1", 0.0),)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "first_line",
+    ["  0,    100.00 /", "  0,    100.00, REV, 0, 0, 60.00 /"],
+    ids=["no-revision", "revision-not-a-number"],
+)
+def test_header_without_a_usable_revision_is_read_as_33(first_line: str) -> None:
+    # Revision 33 has no system-wide block, so the bus block is the first; a
+    # file read as 34 would take the buses for that block and every later
+    # block for the one before it.
+    gens = "    1,'1 ',    71.627,    27.915,  9900.000, -9900.000,1.04000\n"
+    branches = "    2,     3,'1 ', 0.01000, 0.06800,0.17600\n"
+    transformers = _transformer(1, "1.10000,  0.000,   0.000", "1.00000,  0.000")
+    as_33 = _raw(gens=gens, branches=branches, transformers=transformers)
+    header = first_line + "\n" + RAW_HEADER.split("\n", 1)[1]
+    text = _raw(header=header, gens=gens, branches=branches, transformers=transformers)
+    facts = read_psse_raw_facts(text)
+    assert facts == read_psse_raw_facts(as_33)
+    assert facts.v_setpoints == {1: 1.04}
+    assert facts.lines == (LineFact(2, 3, "1", 0.176),)
+    assert facts.transformers == (TransformerFact(1, 2, "1", 1.1, 0.0),)
+
+
 @pytest.mark.unit
 def test_three_winding_transformer_skipped() -> None:
     transformers = (

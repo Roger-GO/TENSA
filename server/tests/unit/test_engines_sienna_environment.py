@@ -49,6 +49,20 @@ def test_julia_executable_missing_tensa_julia_does_not_fall_back(
     assert environment.julia_executable() is None
 
 
+def test_julia_executable_tensa_julia_naming_a_directory_is_not_julia(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A folder (the Julia install's root, say) exists but cannot be run: it is no
+    # binary, and the user's choice still keeps PATH out of it.
+    folder = tmp_path / "julia-1.11"
+    folder.mkdir()
+    monkeypatch.setenv("TENSA_JULIA", str(folder))
+    on_path = tmp_path / "julia"
+    on_path.touch()
+    monkeypatch.setattr(shutil, "which", lambda name: str(on_path))
+    assert environment.julia_executable() is None
+
+
 def test_julia_executable_from_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     on_path = tmp_path / "julia"
     on_path.touch()

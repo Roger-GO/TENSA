@@ -242,3 +242,60 @@ async def test_ybus_without_a_case_is_409_with_load_case(
     resp = await client.get(f"/api/sessions/{sid}/ybus")
     assert resp.status_code == 409, resp.text
     assert resp.json()["recovery"]["kind"] == "load-case"
+
+
+@pytest.mark.integration
+async def test_ybus_maps_a_worker_error_like_every_route(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal from the worker reaches the client with the status and the
+    problem details the shared mapping gives it, recovery included; the route
+    asks the worker for the matrix with no arguments."""
+    from tensa.core.session import WorkerError
+
+    created = await client.post("/api/sessions")
+    sid = str(created.json()["session_id"])
+    mgr = client._transport.app.state.session_manager  # type: ignore[attr-defined]  # noqa: SLF001
+    asked: list[tuple[str, str, object]] = []
+
+    async def refuse(session_id: str, op: str, args: object = None) -> object:
+        asked.append((session_id, op, args))
+        raise WorkerError("SetupFailedError", "ANDES setup() failed")
+
+    monkeypatch.setattr(mgr, "invoke", refuse)
+    resp = await client.get(f"/api/sessions/{sid}/ybus")
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["detail"] == "ANDES setup() failed"
+    assert body["recovery"]["kind"] == "reload-case"
+    # The op takes no arguments and its handler ignores any it is sent, so an
+    # argument here would be a mistake nothing else would catch.
+    assert [(s, op, args or {}) for s, op, args in asked] == [
+        (sid, "bus_admittance_matrix", {})
+    ]
+
+
+@pytest.mark.integration
+async def test_ybus_without_a_session_manager_is_500(tmp_path: Path) -> None:
+    """An app whose lifespan has not run holds no session manager: the route says
+    so with a 500, not a 404 that would read as a session that is gone."""
+    app = make_app(workspace=tmp_path, bind_host="127.0.0.1", bind_port=8000)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8000") as ac:
+        resp = await ac.get("/api/sessions/nope/ybus")
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"] == "session manager is not configured"
+
+
+@pytest.mark.integration
+async def test_ybus_is_described_under_its_operation_id(client: httpx.AsyncClient) -> None:
+    """The web client's generated types and an agent's tools name the route by its
+    operation id, and its refusals are problem details."""
+    spec: dict[str, Any] = (await client.get("/openapi.json")).json()
+    operation = spec["paths"]["/api/sessions/{session_id}/ybus"]["get"]
+    assert operation["operationId"] == "getBusAdmittanceMatrix"
+    ok = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    assert ok.endswith("/YbusResponse")
+    for code in ("404", "409", "422"):
+        schema = operation["responses"][code]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("/ProblemDetails"), code
