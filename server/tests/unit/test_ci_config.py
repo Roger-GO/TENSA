@@ -565,6 +565,15 @@ def test_dependabot_leaves_andes_minor_and_major_upgrades_to_a_person() -> None:
     }
 
 
+def test_dependabot_leaves_juliacall_to_a_person() -> None:
+    """The sienna extra pins the juliacall whose PythonCall the shipped Julia Manifest
+    holds; a new one needs a new Manifest, which no pull request of Dependabot makes."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    (pip,) = [u for u in updates if u["package-ecosystem"] == "pip"]
+    (juliacall,) = [i for i in pip["ignore"] if i["dependency-name"] == "juliacall"]
+    assert "update-types" not in juliacall and "versions" not in juliacall
+
+
 def test_the_node_types_stay_on_the_major_of_the_oldest_supported_node() -> None:
     """``@types/node`` describes one major of Node's API. On a newer one than the oldest
     Node the UI supports (``engines``, the one CI runs), a configuration or a test that

@@ -55,6 +55,9 @@ Sessions:        POST/GET /sessions · GET/DELETE /sessions/{id}
                  (a session with no request for 180 s is reaped; GET /sessions/{id} counts as one;
                  every session descriptor carries "engine")
 Engines:         GET /engines  (the engines a session can be created for and what each can do)
+                 Sienna needs pip install "tensa[sienna]", Julia 1.13 (on PATH or TENSA_JULIA) and a run of
+                 tensa warm-cache --engine sienna, again after a TENSA upgrade; GET /engines' unavailable_reason
+                 says which is missing.
 Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /sessions/{id}/topology
                  GET /sessions/{id}/topology/models/{model}/alterable_params · GET /sessions/{id}/connectivity
                  GET /sessions/{id}/ybus  (the bus admittance matrix ANDES builds from lines, transformers and

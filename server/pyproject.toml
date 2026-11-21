@@ -84,6 +84,16 @@ mcp = [
 desktop = [
     "pywebview>=5,<7",
 ]
+# The Sienna engine (embedded Julia through juliacall). Julia itself and the Sienna
+# packages are not pip packages: install Julia, then `tensa warm-cache --engine sienna`
+# installs the packages into the project folder. juliacall is pinned to one release
+# because each release asks for the PythonCall of its own version exactly (the
+# "=<version>" of its juliapkg.json), and the worker starts it offline on the
+# PythonCall the shipped Manifest holds (engines/sienna/envs/dyn); the two move
+# together, by hand.
+sienna = [
+    "juliacall==0.9.37",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
