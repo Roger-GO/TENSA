@@ -137,13 +137,26 @@ class CpfResult:
       at their limits along the path. When ``False`` only the generators
       the base power flow already held are held (the events at step 0).
     - ``stop_at``: ``"nose"`` for a run that stops at the nose, ``"full"``
-      for one that goes on along the lower branch back to ``lambda = 0``.
+      for one that goes on along the lower branch back to ``lambda = 0``. A
+      run given a target lambda (``stop_at_lambda``) has ``"nose"``: it stops
+      at the target or at the nose, whichever it comes to first.
     - ``complete``: whether the run ended the way ``stop_at`` asked. A full
       curve whose lower branch broke off has a nose (``truncated`` is
-      ``False``) and is not complete; ``done_msg`` says where it stopped.
+      ``False``) and is not complete; ``done_msg`` says where it stopped. A run
+      that reached its target lambda is complete and has no nose (``truncated``
+      is ``True``); one whose nose came first has its nose and is not complete.
     - ``direction``: the direction of the increase a PV run was asked for
       (``"load"``, ``"load-only"``, ``"gen"`` or ``"custom"``); ``None`` for
       a QV curve, which moves the reactive load of one bus.
+    - ``angles_per_bus``: mapping ``bus_idx -> [a0, a1, ...]``, the bus voltage
+      angles in radians (``CPF.theta``), index-aligned with ``lambdas`` and
+      with that bus's ``voltages_per_bus`` row. Empty for a QV curve, and when
+      the angles do not line up with the voltages point for point.
+    - ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``,
+      ``step_max``: the settings of the routine the request gave the run
+      (:mod:`tensa.core.cpf_options`); ``None`` for one left to the case.
+    - ``stop_at_lambda``: the target lambda the run was given, ``None`` when
+      ``stop_at`` was a word.
     """
 
     lambdas: list[float]
@@ -160,6 +173,13 @@ class CpfResult:
     stop_at: str = "nose"  # "nose" or "full"
     complete: bool = True
     direction: str | None = None
+    angles_per_bus: dict[str, list[float]] = dataclasses.field(default_factory=dict)
+    parameterization: str | None = None
+    tol: float | None = None
+    corrector_max_iter: int | None = None
+    step_min: float | None = None
+    step_max: float | None = None
+    stop_at_lambda: float | None = None
 
 
 __all__ = ["CpfGeneratorTrace", "CpfLimitEvent", "CpfResult"]

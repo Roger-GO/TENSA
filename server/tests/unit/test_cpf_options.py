@@ -22,6 +22,8 @@ from pydantic import ValidationError
 from tensa.api.routes.cpf import CpfQvRunRequest, CpfRunRequest
 from tensa.core import worker
 from tensa.core.cpf_options import (
+    MAX_TOL,
+    PARAMETERIZATIONS,
     SWITCH_STEP,
     cpf_run_applied,
     direction_targets,
@@ -131,8 +133,8 @@ def test_a_direction_the_routine_does_not_know_is_refused(direction: Any) -> Non
         validate_cpf_options(direction=direction)
 
 
-@pytest.mark.parametrize("stop_at", ["FULL", "lower", None, 0.5])
-def test_a_stop_at_other_than_nose_or_full_is_refused(stop_at: Any) -> None:
+@pytest.mark.parametrize("stop_at", ["FULL", "lower", None, "0.5", 0, -0.5, True])
+def test_a_stop_at_other_than_nose_full_or_a_positive_lambda_is_refused(stop_at: Any) -> None:
     with pytest.raises(CpfRequestError, match="stop_at"):
         validate_cpf_options(stop_at=stop_at)
 
@@ -341,12 +343,29 @@ def test_the_worker_forwards_every_setting_to_the_wrapper() -> None:
         "generator_increase": None,
         "enforce_q_limits": True,
         "stop_at": "full",
+        "parameterization": None,
+        "tol": None,
+        "corrector_max_iter": None,
+        "step_min": None,
+        "step_max": None,
     }
 
     seen.clear()
     worker._handle_run_cpf(_Wrapper(), {})  # type: ignore[arg-type]  # noqa: SLF001
     assert seen["direction"] == "load" and seen["stop_at"] == "nose"
     assert seen["enforce_q_limits"] is None and seen["step"] is None
+
+    seen.clear()
+    settings = {
+        "stop_at": 0.3,
+        "parameterization": "arclength",
+        "tol": 1e-5,
+        "corrector_max_iter": 30,
+        "step_min": 1e-3,
+        "step_max": 0.2,
+    }
+    worker._handle_run_cpf(_Wrapper(), dict(settings))  # type: ignore[arg-type]  # noqa: SLF001
+    assert {name: seen[name] for name in settings} == settings
 
     seen.clear()
     worker._handle_run_cpf_qv(  # noqa: SLF001
@@ -395,9 +414,19 @@ class _Routine:
 
     def __init__(self, ss: SimpleNamespace) -> None:
         self.system = ss
+        # ANDES 2.0.0's defaults.
         self.config = SimpleNamespace(
-            step=0.1, step_min=1e-4, max_steps=500, stop_at="NOSE", linsolve=0
+            parameterization="pseudo_arclength",
+            step=0.1,
+            step_min=1e-4,
+            step_max=0.5,
+            tol=1e-6,
+            max_iter=20,
+            max_steps=500,
+            stop_at="NOSE",
+            linsolve=0,
         )
+        self.events: list[dict[str, Any]] = []
         self.solver = SimpleNamespace(cleared=0)
         self.solver.clear = lambda: setattr(self.solver, "cleared", self.solver.cleared + 1)
         self.V: Any = None
@@ -811,3 +840,350 @@ def test_the_nose_is_where_lambda_first_goes_down() -> None:
     # A run that ends at its nose never went down.
     assert _first_turn([0.0, 0.5, 0.9]) == 2
     assert _first_turn([0.0]) == 0
+
+
+# ---- the routine's own settings: validation ---------------------------------
+
+
+@pytest.mark.parametrize("parameterization", PARAMETERIZATIONS)
+@pytest.mark.parametrize("stop_at", ["nose", 0.5, 1, 3])
+def test_every_parameterization_and_a_target_lambda_are_valid(
+    parameterization: str, stop_at: Any
+) -> None:
+    validate_cpf_options(
+        stop_at=stop_at,
+        parameterization=parameterization,
+        tol=MAX_TOL,
+        corrector_max_iter=2,
+        step_min=0.01,
+        step_max=0.01,
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"parameterization": "arc"}, "parameterization must be one of"),
+        ({"parameterization": "NATURAL"}, "parameterization must be one of"),
+        ({"parameterization": 1}, "parameterization must be one of"),
+        ({"tol": 0}, "tol must be a number above zero"),
+        ({"tol": -1e-6}, "tol must be a number above zero"),
+        ({"tol": "1e-6"}, "tol must be a number above zero"),
+        ({"tol": True}, "tol must be a number above zero"),
+        ({"tol": float("nan")}, "tol must be a number above zero"),
+        ({"tol": 2 * MAX_TOL}, "tol must be at most"),
+        ({"corrector_max_iter": 0}, "corrector_max_iter"),
+        ({"corrector_max_iter": 1}, "corrector_max_iter must be a whole number of at least 2"),
+        ({"corrector_max_iter": 5.0}, "corrector_max_iter"),
+        ({"corrector_max_iter": True}, "corrector_max_iter"),
+        ({"step_min": 0}, "step_min must be a number above zero"),
+        ({"step_min": -0.1}, "step_min must be a number above zero"),
+        ({"step_max": 0}, "step_max must be a number above zero"),
+        ({"step_max": float("inf")}, "step_max must be a number above zero"),
+        ({"step_min": 0.3, "step_max": 0.2}, r"step_min \(0.3\) must not be above step_max \(0.2\)"),
+        ({"stop_at": -1.0}, "stop_at must be one of nose, full or a target lambda above zero"),
+        ({"stop_at": "full", "parameterization": "natural"}, "cannot trace the lower branch"),
+    ],
+)
+def test_a_setting_of_the_routine_it_cannot_run_with_is_refused(
+    kwargs: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(CpfRequestError, match=message):
+        validate_cpf_options(**kwargs)
+
+
+def test_the_request_takes_the_routines_settings() -> None:
+    body = CpfRunRequest.model_validate(
+        {
+            "stop_at": 0.3,
+            "parameterization": "natural",
+            "tol": 1e-5,
+            "corrector_max_iter": 30,
+            "step_min": 1e-3,
+            "step_max": 0.2,
+        }
+    )
+    assert body.stop_at == 0.3 and body.parameterization == "natural"
+    assert (body.tol, body.corrector_max_iter, body.step_min, body.step_max) == (
+        1e-5,
+        30,
+        1e-3,
+        0.2,
+    )
+    # A whole number is a target lambda too.
+    assert CpfRunRequest.model_validate({"stop_at": 2}).stop_at == 2
+    plain = CpfRunRequest()
+    assert (plain.parameterization, plain.tol, plain.corrector_max_iter) == (None, None, None)
+    assert (plain.step_min, plain.step_max) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"stop_at": 0},
+        {"stop_at": -0.5},
+        {"stop_at": "0.3"},
+        {"stop_at": True},
+        {"parameterization": "arc"},
+        {"tol": 0},
+        {"tol": 1e-3},
+        {"corrector_max_iter": 1},
+        {"corrector_max_iter": 5.0},
+        {"corrector_max_iter": "5"},
+        {"step_min": 0},
+        {"step_max": -1},
+        {"step_min": 0.3, "step_max": 0.2},
+        {"parameterization": "natural", "stop_at": "full"},
+    ],
+)
+def test_the_request_refuses_a_setting_of_the_routine_it_cannot_run_with(
+    body: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError):
+        CpfRunRequest.model_validate(body)
+
+
+# ---- the routine's own settings: one run ------------------------------------
+
+
+_GIVEN: dict[str, Any] = {
+    "parameterization": "arclength",
+    "tol": 1e-5,
+    "corrector_max_iter": 30,
+    "step_min": 1e-3,
+    "step_max": 0.2,
+}
+
+
+def _config(cpf: Any) -> dict[str, Any]:
+    return {
+        name: getattr(cpf.config, name)
+        for name in ("parameterization", "tol", "max_iter", "step_min", "step_max", "stop_at")
+    }
+
+
+def test_the_routines_settings_are_written_for_the_run_and_put_back() -> None:
+    ss = _studied()
+    cpf = ss.CPF
+    before = _config(cpf)
+    with cpf_run_applied(ss, stop_at=0.3, **_GIVEN) as run:
+        assert _config(cpf) == {
+            "parameterization": "arclength",
+            "tol": 1e-5,
+            "max_iter": 30,
+            "step_min": 1e-3,
+            "step_max": 0.2,
+            "stop_at": 0.3,
+        }
+        assert isinstance(cpf.config.stop_at, float)
+        # The run says what it used.
+        assert (run.parameterization, run.tol, run.corrector_max_iter) == ("arclength", 1e-5, 30)
+        assert (run.step_min, run.step_max) == (1e-3, 0.2)
+        assert (run.stop_at, run.stop_at_lambda) == ("nose", 0.3)
+    assert _config(cpf) == before
+
+
+def test_a_setting_left_out_is_the_cases_own() -> None:
+    ss = _studied()
+    cpf = ss.CPF
+    cpf.config.tol = 1e-8
+    cpf.config.parameterization = "natural"
+    with cpf_run_applied(ss, step_max=0.3) as run:
+        assert cpf.config.tol == 1e-8 and cpf.config.parameterization == "natural"
+        assert cpf.config.step_max == 0.3 and cpf.config.max_iter == 20
+        assert cpf.config.stop_at == "NOSE"
+        assert run.tol is None and run.parameterization is None and run.stop_at_lambda is None
+    assert cpf.config.step_max == 0.5
+
+
+def test_the_routines_settings_are_put_back_when_the_routine_raises() -> None:
+    ss = _studied()
+    before = _config(ss.CPF)
+    with pytest.raises(RuntimeError), cpf_run_applied(ss, stop_at=2.0, **_GIVEN):
+        raise RuntimeError("singular")
+    assert _config(ss.CPF) == before
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        # The case keeps a step_max of 0.5.
+        ({"step_min": 0.6}, r"step_min \(0.6\) must not be above step_max \(0.5, the case's\)"),
+        # And a step_min of 1e-4.
+        ({"step_max": 1e-5}, r"step_min \(0.0001, the case's\) must not be above step_max"),
+    ],
+)
+def test_a_step_bound_beyond_the_cases_other_one_is_refused_before_anything_is_written(
+    kwargs: dict[str, Any], message: str
+) -> None:
+    ss = _studied()
+    before = _config(ss.CPF)
+    with pytest.raises(CpfRequestError, match=message), cpf_run_applied(ss, **kwargs):
+        pytest.fail("the run must not start")
+    assert _config(ss.CPF) == before and ss.CPF.solver.cleared == 0
+
+
+def test_a_full_curve_is_refused_for_a_case_that_keeps_the_natural_parameterization() -> None:
+    ss = _studied()
+    ss.CPF.config.parameterization = "natural"
+    with pytest.raises(CpfRequestError, match="lower branch"), cpf_run_applied(ss, stop_at="full"):
+        pytest.fail("the run must not start")
+    # Asking for another for this run lets it go ahead.
+    with cpf_run_applied(ss, stop_at="full", parameterization="arclength"):
+        assert ss.CPF.config.stop_at == "FULL"
+
+
+def test_a_run_with_a_target_refuses_every_step_once_the_nose_is_recorded() -> None:
+    """ANDES only stops for a target it crosses. Past the nose it would follow
+    the lower branch down past lambda 0; the run ends it at the nose instead."""
+    ss = _studied()
+    cpf = ss.CPF
+    with cpf_run_applied(ss, stop_at=5.0) as run:
+        assert "_corrector" in vars(cpf)
+        cpf._bus_vmag()  # noqa: SLF001
+        assert _step(ss, 0.1) == (True, 3, pytest.approx(0.08))
+        assert run.target_beyond_nose is False
+        cpf.events.append({"step": 2, "type": "NOSE", "msg": "Nose point at lambda=0.08"})
+        calls = len(cpf.lengths)
+        for _ in range(3):
+            assert _step(ss, 0.1)[0] is False
+        # Refused without solving anything.
+        assert len(cpf.lengths) == calls
+        assert run.target_beyond_nose is True
+
+
+def test_a_run_without_a_target_goes_on_past_a_recorded_nose() -> None:
+    ss = _studied()
+    with cpf_run_applied(ss, stop_at="full", enforce_q_limits=True) as run:
+        ss.CPF._bus_vmag()  # noqa: SLF001
+        ss.CPF.events.append({"type": "NOSE"})
+        assert _step(ss, 0.1)[0] is True
+        assert run.target_beyond_nose is False
+
+
+# ---- the routine's own settings: the result ---------------------------------
+
+
+def _finished(
+    ss: SimpleNamespace,
+    run: Any,
+    *,
+    lam: list[float],
+    theta: Any,
+    events: list[dict[str, Any]] | None = None,
+    done_msg: str = "Nose point at lambda=0.9",
+) -> None:
+    """What the routine leaves behind: two buses, one column per point."""
+    cpf = ss.CPF
+    cpf.lam = np.array(lam)
+    cpf.V = np.array([[1.0] * len(lam), [0.98 - 0.02 * k for k in range(len(lam))]])
+    cpf.theta = theta
+    cpf.events = events if events is not None else [{"type": "NOSE"}]
+    cpf.done_msg = done_msg
+    cpf.max_lam = max(lam)
+    ss.Bus.idx = SimpleNamespace(v=[1, 2])
+
+
+def _kept(ss: SimpleNamespace, n: int) -> Any:
+    """A run that read the generators at ``n`` points, matching ``_finished``."""
+    with cpf_run_applied(ss, enforce_q_limits=False) as run:
+        for k in range(n):
+            ss.Bus.v.v[:] = [1.0, 0.98 - 0.02 * k]
+            ss.CPF._bus_vmag()  # noqa: SLF001
+    return run
+
+
+def test_the_angles_are_read_per_bus_alongside_the_voltages() -> None:
+    ss = _studied()
+    run = _kept(ss, 4)
+    theta = np.array([[0.0, 0.0, 0.0, 0.0], [-0.1, -0.2, -0.35, -0.3]])
+    _finished(ss, run, lam=[0.0, 0.5, 0.9, 0.8], theta=theta)
+    result = _build_cpf_result(ss, mode="pv", ok=True, run=run)  # type: ignore[arg-type]
+    assert set(result.angles_per_bus) == set(result.voltages_per_bus) == {"1", "2"}
+    assert result.angles_per_bus["2"] == pytest.approx([-0.1, -0.2, -0.35, -0.3])
+    assert result.angles_per_bus["1"] == [0.0] * 4
+
+
+def test_the_angles_are_cut_where_the_voltages_are() -> None:
+    ss = _studied()
+    run = _kept(ss, 3)
+    theta = np.array([[0.0, 0.0, 0.0, 0.0], [-0.1, -0.2, -0.3, -0.4]])
+    _finished(ss, run, lam=[0.0, 0.5, 0.9, float("nan")], theta=theta)
+    result = _build_cpf_result(ss, mode="pv", ok=False, run=run)  # type: ignore[arg-type]
+    assert len(result.lambdas) == 3
+    assert result.angles_per_bus["2"] == pytest.approx([-0.1, -0.2, -0.3])
+
+
+@pytest.mark.parametrize(
+    "theta",
+    [
+        None,
+        np.array([-0.1, -0.2, -0.3]),
+        np.array([[0.0, 0.0], [-0.1, -0.2]]),
+        np.array([[0.0, 0.0, 0.0], [-0.1, float("nan"), -0.3]]),
+    ],
+)
+def test_angles_that_do_not_line_up_with_the_voltages_are_left_out(theta: Any) -> None:
+    ss = _studied()
+    run = _kept(ss, 3)
+    _finished(ss, run, lam=[0.0, 0.5, 0.9], theta=theta)
+    result = _build_cpf_result(ss, mode="pv", ok=True, run=run)  # type: ignore[arg-type]
+    assert result.angles_per_bus == {}
+    # The rest of the result does not depend on them.
+    assert len(result.lambdas) == 3 and len(result.voltages_per_bus["2"]) == 3
+
+
+def test_the_result_reports_the_settings_the_run_used() -> None:
+    ss = _studied()
+    with cpf_run_applied(ss, stop_at=0.9, **_GIVEN) as run:
+        for k in range(3):
+            ss.Bus.v.v[:] = [1.0, 0.98 - 0.02 * k]
+            ss.CPF._bus_vmag()  # noqa: SLF001
+    _finished(
+        ss,
+        run,
+        lam=[0.0, 0.5, 0.9],
+        theta=np.zeros((2, 3)),
+        events=[{"type": "TARGET_LAM"}],
+        done_msg="Reached target lambda=0.9",
+    )
+    result = _build_cpf_result(ss, mode="pv", ok=True, run=run)  # type: ignore[arg-type]
+    assert (result.parameterization, result.tol, result.corrector_max_iter) == (
+        "arclength",
+        1e-5,
+        30,
+    )
+    assert (result.step_min, result.step_max, result.stop_at_lambda) == (1e-3, 0.2, 0.9)
+    # It reached its target: done, though it found no nose.
+    assert result.stop_at == "nose" and result.complete is True
+    assert result.truncated is True and result.done_msg == "Reached target lambda=0.9"
+
+
+def test_a_run_whose_nose_came_before_its_target_says_so() -> None:
+    ss = _studied()
+    with cpf_run_applied(ss, stop_at=5.0) as run:
+        for k in range(4):
+            ss.Bus.v.v[:] = [1.0, 0.98 - 0.02 * k]
+            ss.CPF._bus_vmag()  # noqa: SLF001
+        run.target_beyond_nose = True
+    _finished(
+        ss,
+        run,
+        lam=[0.0, 0.5, 0.9, 0.8],
+        theta=np.zeros((2, 4)),
+        done_msg="Corrector failed at lambda=0.800000",
+    )
+    result = _build_cpf_result(ss, mode="pv", ok=False, run=run)  # type: ignore[arg-type]
+    assert result.nose_idx == 2 and result.max_lam == 0.9 and result.truncated is False
+    assert result.complete is False and result.stop_at_lambda == 5.0
+    assert result.done_msg == "Nose point at lambda=0.900000, short of the target lambda=5"
+
+
+def test_a_plain_run_reports_no_settings_of_its_own() -> None:
+    ss = _studied()
+    run = _kept(ss, 3)
+    _finished(ss, run, lam=[0.0, 0.5, 0.9], theta=np.zeros((2, 3)))
+    result = _build_cpf_result(ss, mode="pv", ok=True, run=run)  # type: ignore[arg-type]
+    assert (result.parameterization, result.tol, result.corrector_max_iter) == (None, None, None)
+    assert (result.step_min, result.step_max, result.stop_at_lambda) == (None, None, None)
+    assert result.complete is True and result.done_msg == "Nose point at lambda=0.9"

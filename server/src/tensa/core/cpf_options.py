@@ -83,8 +83,49 @@ columns of ``CPF.V`` by the voltages themselves.
 **The lower branch.** ``CPF.config.stop_at`` set to ``FULL`` makes the routine
 turn at the nose and follow the lower-voltage solutions back to ``lambda = 0``.
 
+**A target lambda.** ``CPF.config.stop_at`` also takes a number: the routine
+shortens the step that would cross it and refines the point onto it with lambda
+held. It only looks for the crossing, though, so a target past the nose is not
+one it stops for: it turns at the nose, as for ``FULL``, and follows the lower
+branch past ``lambda = 0`` until the corrector fails (on IEEE 14, a target of
+3.5 against a nose of 3.258 ends 98 points later at lambda -9.4, reported as a
+failure). A run with a target therefore refuses every step once the routine has
+recorded its nose, which ends it there with the one point past the nose a
+``NOSE`` run keeps, and the result says the target lies beyond the nose. A
+target of 0 would be the same as ``FULL`` (the crossing is back at the base
+case), so a target is above zero.
+
+**How the routine follows the curve.** ``CPF.config`` has four more settings a
+request may set for one run, all read while the run goes:
+
+- ``parameterization``: the equation that fixes the length of a step in the
+  corrector. ``pseudo_arclength`` (ANDES's default) and ``arclength`` measure
+  it along the curve and go round the nose; ``natural`` fixes lambda, whose
+  corrector cannot converge at the nose, so the routine finds it by halving the
+  step until it fails, takes about twice the points and keeps none past it.
+  It can therefore not trace the lower branch (ANDES ends such a run with
+  "Corrector failed"), and a full curve with it is refused.
+- ``tol`` and ``max_iter``: the corrector's tolerance on the mismatch and its
+  Newton iterations per step. A corrector that runs out of iterations fails
+  the step, and the routine calls the nose where failures pile up; with one
+  iteration no step past the prediction converges and IEEE 14's nose comes out
+  at lambda 0.014 instead of 3.258, so at least two are asked for. The
+  request names ANDES's ``max_iter`` ``corrector_max_iter``, because the
+  request's ``max_iter`` is ``max_steps`` (the wrapper's docstring says why).
+  The tolerance is held to :data:`MAX_TOL` at most: the placing of switches
+  above (``VOLTAGE_MOVE``) rests on points solved closely, and on IEEE 14 with
+  limits enforced a tolerance of 1e-3 moves the nose by 0.0024 in lambda where
+  1e-4 moves it by 1.3e-5.
+- ``step_min`` and ``step_max``: the bounds the routine keeps its adaptive
+  step within. A step halved below ``step_min`` is where it calls the nose, so
+  a larger one ends the search for it sooner (with ``natural``, the nose of
+  IEEE 14 at ``step_min`` 0.01 comes out 0.0024 low); ``step_max`` caps the
+  stride and with it how finely the curve is drawn. ``step_min`` above
+  ``step_max``, the request's or the case's, is refused.
+
 Everything written to the System is put back when the run ends: the routine's
-``step``, ``max_steps``, ``stop_at`` and ``linsolve``, the limiters' ``enable`` and
+``step``, ``step_min``, ``step_max``, ``max_steps``, ``stop_at``, ``tol``,
+``max_iter``, ``parameterization`` and ``linsolve``, the limiters' ``enable`` and
 ``min_iter``, the two wrapped methods, and the limiter flags, which the routine
 does not restore with the rest of the base case.
 """
@@ -107,6 +148,14 @@ if TYPE_CHECKING:
 
 DIRECTIONS: Final = ("load", "load-only", "gen", "custom")
 STOP_AT: Final = ("nose", "full")
+PARAMETERIZATIONS: Final = ("natural", "arclength", "pseudo_arclength")
+
+# The fewest Newton iterations a corrector step may be given: with one, only a
+# prediction that already solves the equations is kept.
+MIN_CORRECTOR_ITER: Final = 2
+
+# The loosest corrector tolerance a request may ask for, on the mismatch in pu.
+MAX_TOL: Final = 1e-4
 
 # The built-in directions aim at twice the base value, so lambda reads as the
 # increase in units of the base case: 0.5 is 50% more load.
@@ -137,7 +186,17 @@ _SET: Final = 0.5
 
 _FLAGS: Final = ("zl", "zu", "zi", "ql", "qu")
 _COUNTS: Final = ("nql", "nqu")
-_CONFIG: Final = ("step", "max_steps", "stop_at", "linsolve")
+_CONFIG: Final = (
+    "step",
+    "step_min",
+    "step_max",
+    "max_steps",
+    "stop_at",
+    "tol",
+    "max_iter",
+    "parameterization",
+    "linsolve",
+)
 
 
 # ---- validation -------------------------------------------------------------
@@ -155,6 +214,41 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def stop_at_target(stop_at: object) -> float | None:
+    """The target lambda of a ``stop_at`` that is a number, ``None`` for a word."""
+    if isinstance(stop_at, str):
+        return None
+    return _number(stop_at)
+
+
+def _positive(name: str, value: object) -> float | None:
+    """``value`` as a finite number above zero, ``None`` when it was not given."""
+    if value is None:
+        return None
+    number = _number(value)
+    if number is None or number <= 0:
+        raise CpfRequestError(f"{name} must be a number above zero, got {short_repr(value)}")
+    return number
+
+
+def _natural_full_message() -> str:
+    return (
+        "parameterization 'natural' cannot pass the nose (its corrector fixes lambda, "
+        "which is singular there), so it cannot trace the lower branch of stop_at 'full'; "
+        "use 'pseudo_arclength' or 'arclength'"
+    )
+
+
+def _step_bounds_message(
+    step_min: float, step_max: float, *, low_whose: str = "", high_whose: str = ""
+) -> str:
+    return (
+        f"step_min ({step_min:g}{low_whose}) must not be above step_max "
+        f"({step_max:g}{high_whose}): the routine halves a failed step and calls the "
+        "nose once it is below step_min"
+    )
+
+
 def validate_cpf_options(
     *,
     direction: object = "load",
@@ -162,27 +256,39 @@ def validate_cpf_options(
     step: object = None,
     max_steps: object = None,
     enforce_q_limits: object = None,
+    parameterization: object = None,
+    tol: object = None,
+    corrector_max_iter: object = None,
+    step_min: object = None,
+    step_max: object = None,
 ) -> None:
     """Refuse a continuation setting before anything is written to the System.
 
     ``None`` means the request leaves the setting alone. The REST body carries
     the same rules as field constraints; the worker calls this too, so a value
-    that did not come through the REST body is held to them.
+    that did not come through the REST body is held to them. ``stop_at`` is
+    ``"nose"``, ``"full"`` or a target lambda above zero; a target past the nose
+    is not reached, and the run ends at the nose (see the module docstring).
+    The two rules that also depend on the case's own settings (``natural`` with
+    a full curve, ``step_min`` above ``step_max``) are checked again against
+    them by :func:`cpf_run_applied`.
 
     Raises:
-        CpfRequestError: a value is of the wrong type or outside its range.
+        CpfRequestError: a value is of the wrong type or outside its range, or
+            two of them do not go together.
     """
     if direction not in DIRECTIONS:
         raise CpfRequestError(
             f"direction must be one of {', '.join(DIRECTIONS)}, got {short_repr(direction)}"
         )
-    if stop_at not in STOP_AT:
-        raise CpfRequestError(
-            f"stop_at must be one of {', '.join(STOP_AT)}, got {short_repr(stop_at)}"
-        )
-    step_size = _number(step)
-    if step is not None and (step_size is None or step_size <= 0):
-        raise CpfRequestError(f"step must be a number above zero, got {short_repr(step)}")
+    if not (isinstance(stop_at, str) and stop_at in STOP_AT):
+        target = stop_at_target(stop_at)
+        if target is None or target <= 0:
+            raise CpfRequestError(
+                f"stop_at must be one of {', '.join(STOP_AT)} or a target lambda above zero, "
+                f"got {short_repr(stop_at)}"
+            )
+    _positive("step", step)
     if max_steps is not None and (
         isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1
     ):
@@ -193,6 +299,35 @@ def validate_cpf_options(
         raise CpfRequestError(
             f"enforce_q_limits must be true or false, got {short_repr(enforce_q_limits)}"
         )
+    if parameterization is not None and not (
+        isinstance(parameterization, str) and parameterization in PARAMETERIZATIONS
+    ):
+        raise CpfRequestError(
+            f"parameterization must be one of {', '.join(PARAMETERIZATIONS)}, "
+            f"got {short_repr(parameterization)}"
+        )
+    tolerance = _positive("tol", tol)
+    if tolerance is not None and tolerance > MAX_TOL:
+        raise CpfRequestError(
+            f"tol must be at most {MAX_TOL:g}: a looser corrector moves the points the nose "
+            f"and the reactive limits are found from, got {short_repr(tol)}"
+        )
+    if corrector_max_iter is not None and (
+        isinstance(corrector_max_iter, bool)
+        or not isinstance(corrector_max_iter, int)
+        or corrector_max_iter < MIN_CORRECTOR_ITER
+    ):
+        raise CpfRequestError(
+            f"corrector_max_iter must be a whole number of at least {MIN_CORRECTOR_ITER} "
+            "(the corrector's Newton iterations per step; with one no step converges and "
+            f"the nose is called at once), got {short_repr(corrector_max_iter)}"
+        )
+    low = _positive("step_min", step_min)
+    high = _positive("step_max", step_max)
+    if low is not None and high is not None and low > high:
+        raise CpfRequestError(_step_bounds_message(low, high))
+    if parameterization == "natural" and stop_at == "full":
+        raise CpfRequestError(_natural_full_message())
 
 
 # ---- the direction of the increase ------------------------------------------
@@ -606,12 +741,46 @@ def _scaled(value: float, mva: float) -> float | None:
     return float(value) * mva if math.isfinite(float(value)) else None
 
 
-class CpfRun:
-    """One continuation run in progress: what it was asked for, and what it read."""
+def _nose_recorded(cpf: Any) -> bool:
+    """Whether the routine has recorded the nose of the run in progress."""
+    events = getattr(cpf, "events", None) or []
+    return any(isinstance(event, dict) and event.get("type") == "NOSE" for event in events)
 
-    def __init__(self, ss: System, *, enforce_q_limits: bool, stop_at: str) -> None:
+
+class CpfRun:
+    """One continuation run in progress: what it was asked for, and what it read.
+
+    ``stop_at`` is ``"nose"`` or ``"full"``; a run given a target lambda has
+    ``"nose"`` there (it stops at the target or at the nose, whichever comes
+    first) and the target in ``stop_at_lambda``. ``parameterization``, ``tol``,
+    ``corrector_max_iter``, ``step_min`` and ``step_max`` are the settings the
+    request gave the run, ``None`` for one it left to the case.
+    ``target_beyond_nose`` turns true when the run reached its nose short of its
+    target and was ended there.
+    """
+
+    def __init__(
+        self,
+        ss: System,
+        *,
+        enforce_q_limits: bool,
+        stop_at: str | float,
+        parameterization: str | None = None,
+        tol: float | None = None,
+        corrector_max_iter: int | None = None,
+        step_min: float | None = None,
+        step_max: float | None = None,
+    ) -> None:
         self.enforce_q_limits = enforce_q_limits
-        self.stop_at = stop_at
+        target = stop_at_target(stop_at)
+        self.stop_at: str = "nose" if target is not None else str(stop_at)
+        self.stop_at_lambda: float | None = target
+        self.parameterization = parameterization
+        self.tol = tol
+        self.corrector_max_iter = corrector_max_iter
+        self.step_min = step_min
+        self.step_max = step_max
+        self.target_beyond_nose = False
         self._ss = ss
         self._groups = _static_generators(ss)
         self._points: list[_Point] = []
@@ -629,14 +798,23 @@ class CpfRun:
             return voltages
 
         cpf._bus_vmag = bus_vmag  # noqa: SLF001
-        if not self.enforce_q_limits:
+        if not self.enforce_q_limits and self.stop_at_lambda is None:
             return
         correct = cpf._corrector  # noqa: SLF001 - contract 11
 
         def corrector(
             lam: Any, xy_prev: Any, lam_prev: Any, step: Any, z: Any, dfg: Any
         ) -> tuple[bool, int, float]:
+            if self.stop_at_lambda is not None and _nose_recorded(cpf):
+                # The target was not crossed on the way up. Every step from here
+                # fails, and the routine ends the run at the point it last kept.
+                self.target_beyond_nose = True
+                if self.enforce_q_limits:
+                    _restore_flag_state(self._groups, self._accepted)
+                return False, 0, float(lam)
             result = correct(lam, xy_prev, lam_prev, step, z, dfg)
+            if not self.enforce_q_limits:
+                return bool(result[0]), int(result[1]), float(result[2])
             if result[0] and float(step) > SWITCH_STEP and self._switched():
                 result = self._place_switch(cpf, correct, xy_prev, lam_prev, float(step), z)
             if result[0]:
@@ -811,9 +989,14 @@ def cpf_run_applied(
     ss: System,
     *,
     enforce_q_limits: bool | None = None,
-    stop_at: str = "nose",
+    stop_at: str | float = "nose",
     step: float | None = None,
     max_steps: int | None = None,
+    parameterization: str | None = None,
+    tol: float | None = None,
+    corrector_max_iter: int | None = None,
+    step_min: float | None = None,
+    step_max: float | None = None,
 ) -> Iterator[CpfRun]:
     """Apply a request's continuation settings for one run and restore them after.
 
@@ -826,6 +1009,9 @@ def cpf_run_applied(
     Raises:
         CpfPrerequisiteError: limits are to be enforced and the solved power
             flow leaves a generator past one. Nothing has been written.
+        CpfRequestError: a setting the request gave does not go with one the
+            case keeps (``natural`` with a full curve, ``step_min`` above
+            ``step_max``). Nothing has been written.
     """
     cpf = ss.CPF
     config = cpf.config
@@ -839,11 +1025,27 @@ def cpf_run_applied(
         past = generators_past_limits(ss)
         if past:
             raise CpfPrerequisiteError(_past_limits_message(past))
+    _check_against_the_case(
+        config,
+        stop_at=stop_at,
+        parameterization=parameterization,
+        step_min=step_min,
+        step_max=step_max,
+    )
 
     before_config = {name: getattr(config, name) for name in _CONFIG if hasattr(config, name)}
     before_limiters = [(g.limiter.enable, g.limiter.min_iter) for g in groups]
     before_flags = _flag_state(groups)
-    run = CpfRun(ss, enforce_q_limits=enforce, stop_at=stop_at)
+    run = CpfRun(
+        ss,
+        enforce_q_limits=enforce,
+        stop_at=stop_at,
+        parameterization=parameterization,
+        tol=tol,
+        corrector_max_iter=corrector_max_iter,
+        step_min=step_min,
+        step_max=step_max,
+    )
     try:
         # A factorisation kept from an earlier run belongs to the limits that run
         # started from, which a power flow since may have changed.
@@ -854,7 +1056,20 @@ def cpf_run_applied(
             config.step = float(step)
         if max_steps is not None:
             config.max_steps = int(max_steps)
-        config.stop_at = "FULL" if stop_at == "full" else "NOSE"
+        if parameterization is not None:
+            config.parameterization = str(parameterization)
+        if tol is not None:
+            config.tol = float(tol)
+        if corrector_max_iter is not None:
+            config.max_iter = int(corrector_max_iter)
+        if step_min is not None:
+            config.step_min = float(step_min)
+        if step_max is not None:
+            config.step_max = float(step_max)
+        if run.stop_at_lambda is not None:
+            config.stop_at = run.stop_at_lambda
+        else:
+            config.stop_at = "FULL" if stop_at == "full" else "NOSE"
         for group in groups:
             group.limiter.enable = enforce
             if enforce:
@@ -875,9 +1090,47 @@ def cpf_run_applied(
         _restore_flag_state(groups, before_flags)
 
 
+def _check_against_the_case(
+    config: Any,
+    *,
+    stop_at: str | float,
+    parameterization: str | None,
+    step_min: float | None,
+    step_max: float | None,
+) -> None:
+    """Refuse a setting the request gave that does not go with one the case keeps.
+
+    :func:`validate_cpf_options` checks the pairs a request gives in full; this
+    checks the ones it gives half of, against the case's ``CPF.config``.
+    """
+    method = (
+        parameterization
+        if parameterization is not None
+        else getattr(config, "parameterization", None)
+    )
+    if stop_at == "full" and method == "natural":
+        raise CpfRequestError(_natural_full_message())
+    if step_min is None and step_max is None:
+        return
+    low = _number(step_min if step_min is not None else getattr(config, "step_min", None))
+    high = _number(step_max if step_max is not None else getattr(config, "step_max", None))
+    if low is not None and high is not None and low > high:
+        raise CpfRequestError(
+            _step_bounds_message(
+                low,
+                high,
+                low_whose="" if step_min is not None else ", the case's",
+                high_whose="" if step_max is not None else ", the case's",
+            )
+        )
+
+
 __all__ = [
     "BASE_MULTIPLE",
     "DIRECTIONS",
+    "MAX_TOL",
+    "MIN_CORRECTOR_ITER",
+    "PARAMETERIZATIONS",
     "PAST_LIMIT_TOLERANCE",
     "STOP_AT",
     "SWITCH_STEP",
@@ -889,5 +1142,6 @@ __all__ = [
     "cpf_run_applied",
     "direction_targets",
     "generators_past_limits",
+    "stop_at_target",
     "validate_cpf_options",
 ]

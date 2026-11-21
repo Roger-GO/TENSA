@@ -779,9 +779,10 @@ def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
     Forwards ``direction`` / ``step`` / ``max_iter`` and the settings of
     :mod:`tensa.core.cpf_options` (``load_increase``,
-    ``generator_increase``, ``enforce_q_limits``, ``stop_at``) from the
-    request body as they are; ``run_cpf`` checks them. Returns a
-    serialized :class:`CpfResult` dict.
+    ``generator_increase``, ``enforce_q_limits``, ``stop_at``,
+    ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``,
+    ``step_max``) from the request body as they are; ``run_cpf`` checks
+    them. Returns a serialized :class:`CpfResult` dict.
     """
     return _serialize_dataclass(
         wrapper.run_cpf(
@@ -792,6 +793,11 @@ def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
             generator_increase=args.get("generator_increase"),
             enforce_q_limits=args.get("enforce_q_limits"),
             stop_at=args.get("stop_at", "nose"),
+            parameterization=args.get("parameterization"),
+            tol=args.get("tol"),
+            corrector_max_iter=args.get("corrector_max_iter"),
+            step_min=args.get("step_min"),
+            step_max=args.get("step_max"),
         )
     )
 

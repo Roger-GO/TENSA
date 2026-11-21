@@ -27,7 +27,7 @@ that run only.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tensa.api._run_as_job import _run_as_job
 from tensa.api.error_mapping import map_worker_error
 from tensa.api.schemas import ProblemDetails
+from tensa.core.cpf_options import MAX_TOL, MIN_CORRECTOR_ITER
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -50,6 +51,9 @@ router = APIRouter()
 # The longest list of increases a custom direction takes: more than any case
 # has loads, and short enough that the body stays small.
 MAX_INCREASES = 100_000
+
+# A target lambda for ``stop_at``: a number, never a numeric string or a boolean.
+_TargetLambda = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
 
 
 class CpfLoadIncrease(BaseModel):
@@ -95,8 +99,11 @@ class CpfRunRequest(BaseModel):
     All fields are optional, and each applies to this run only.
     ``direction`` says what lambda increases, ``enforce_q_limits`` holds
     generators to their reactive limits along the path, ``stop_at`` asks
-    for the lower branch as well, and ``step`` and ``max_iter`` set the
-    corresponding ``ss.CPF.config`` values for the run.
+    for the lower branch as well or names a target lambda, ``step`` and
+    ``max_iter`` set ``ss.CPF.config.step`` and ``max_steps`` for the run,
+    and ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``
+    and ``step_max`` the routine's settings of those names (ANDES calls
+    ``corrector_max_iter`` ``max_iter``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -152,13 +159,81 @@ class CpfRunRequest(BaseModel):
             "have."
         ),
     )
-    stop_at: Literal["nose", "full"] = Field(
+    stop_at: Literal["nose", "full"] | _TargetLambda = Field(
         default="nose",
         description=(
             "``'nose'`` (default) stops at the nose. ``'full'`` turns there "
             "and follows the lower-voltage solutions back to ``lambda = 0`` "
             "(``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` "
-            "are that lower branch."
+            "are that lower branch. A number above zero is a target lambda: "
+            "the routine shortens the step that would cross it and lands on "
+            "it, and the run ends there (``complete`` true, with no nose, so "
+            "``truncated`` true). A target past the nose is never crossed: "
+            "the run ends at the nose (``complete`` false, ``done_msg`` "
+            "naming the target), where ANDES alone would go on down the "
+            "lower branch. Not with ``parameterization: 'natural'`` and "
+            "``'full'`` together."
+        ),
+    )
+    parameterization: Literal["natural", "arclength", "pseudo_arclength"] | None = Field(
+        default=None,
+        description=(
+            "The equation that fixes the length of a step in the corrector "
+            "(``CPF.config.parameterization``). ``'pseudo_arclength'`` is "
+            "ANDES's default and the most robust at the nose; "
+            "``'arclength'`` also goes round it. ``'natural'`` fixes lambda, "
+            "which is singular at the nose: the routine finds the nose by "
+            "halving the step until it fails, with about twice the points "
+            "and none past it, and it cannot trace the lower branch, so it "
+            "is refused with ``stop_at: 'full'``. Left out, the case's "
+            "setting stands."
+        ),
+    )
+    tol: float | None = Field(
+        default=None,
+        gt=0,
+        le=MAX_TOL,
+        allow_inf_nan=False,
+        description=(
+            "The corrector's tolerance on the mismatch, in pu "
+            "(``CPF.config.tol``; ANDES's default 1e-6). At most 1e-4: the "
+            "nose and the switches of reactive limits are found from the "
+            "points the corrector solves. Left out, the case's setting stands."
+        ),
+    )
+    corrector_max_iter: int | None = Field(
+        default=None,
+        ge=MIN_CORRECTOR_ITER,
+        strict=True,
+        description=(
+            "The Newton iterations the corrector takes per continuation step "
+            "(ANDES's own ``CPF.config.max_iter``; its default 20). Not the "
+            "cap on continuation steps, which is what ``max_iter`` sets. A "
+            "step whose corrector runs out of iterations fails, and the "
+            "routine calls the nose where failures pile up, so a low cap can "
+            "call it early; at least 2. Left out, the case's setting stands."
+        ),
+    )
+    step_min: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "The smallest continuation step (``CPF.config.step_min``; ANDES's "
+            "default 1e-4). A failed step is halved, and once it is below "
+            "this the routine calls the nose, so a larger value ends the "
+            "search for it sooner. Not above ``step_max`` (the request's or "
+            "the case's). Left out, the case's setting stands."
+        ),
+    )
+    step_max: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description=(
+            "The largest step the routine grows its adaptive step to "
+            "(``CPF.config.step_max``; ANDES's default 0.5): smaller draws "
+            "the curve with more points. Left out, the case's setting stands."
         ),
     )
     step: float | None = Field(
@@ -183,6 +258,21 @@ class CpfRunRequest(BaseModel):
         ),
         ge=1,
     )
+
+    @model_validator(mode="after")
+    def _settings_go_together(self) -> CpfRunRequest:
+        if (
+            self.step_min is not None
+            and self.step_max is not None
+            and self.step_min > self.step_max
+        ):
+            raise ValueError("step_min must not be above step_max")
+        if self.parameterization == "natural" and self.stop_at == "full":
+            raise ValueError(
+                "parameterization 'natural' cannot pass the nose, so it cannot "
+                "trace the lower branch of stop_at 'full'"
+            )
+        return self
 
     @model_validator(mode="after")
     def _increases_go_with_custom(self) -> CpfRunRequest:
@@ -404,14 +494,20 @@ class CpfResultResponse(BaseModel):
     )
     stop_at: Literal["nose", "full"] = Field(
         default="nose",
-        description="What the run was asked to trace: up to the nose, or the full curve.",
+        description=(
+            "What the run was asked to trace: up to the nose, or the full curve. "
+            "A run given a target lambda has ``'nose'`` here and the target in "
+            "``stop_at_lambda``."
+        ),
     )
     complete: bool = Field(
         default=True,
         description=(
             "Whether the run ended the way ``stop_at`` asked. ``false`` with "
             "``truncated: false`` is a full curve whose lower branch broke "
-            "off; ``done_msg`` says where."
+            "off, or a run whose nose came before its target lambda; "
+            "``done_msg`` says where. A run that reached its target lambda is "
+            "complete, with ``truncated: true`` since it found no nose."
         ),
     )
     direction: Literal["load", "load-only", "gen", "custom"] | None = Field(
@@ -419,6 +515,57 @@ class CpfResultResponse(BaseModel):
         description=(
             "The direction of the increase a PV run was asked for; ``null`` "
             "for a QV curve."
+        ),
+    )
+    angles_per_bus: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description=(
+            "Bus voltage angles in radians at every step (``CPF.theta``), "
+            "keyed by bus idx and index-aligned with ``lambdas`` and that "
+            "bus's ``voltages_per_bus`` row. Empty for a QV curve, and when "
+            "ANDES's angles could not be aligned with the points kept."
+        ),
+    )
+    parameterization: Literal["natural", "arclength", "pseudo_arclength"] | None = Field(
+        default=None,
+        description=(
+            "The parameterization the run used, as the request gave it; "
+            "``null`` where the case's own setting was kept."
+        ),
+    )
+    tol: float | None = Field(
+        default=None,
+        description=(
+            "The corrector tolerance the run used, as the request gave it; "
+            "``null`` where the case's own setting was kept."
+        ),
+    )
+    corrector_max_iter: int | None = Field(
+        default=None,
+        description=(
+            "The corrector's Newton iterations per step the run used, as the "
+            "request gave them; ``null`` where the case's own setting was kept."
+        ),
+    )
+    step_min: float | None = Field(
+        default=None,
+        description=(
+            "The smallest step the run used, as the request gave it; ``null`` "
+            "where the case's own setting was kept."
+        ),
+    )
+    step_max: float | None = Field(
+        default=None,
+        description=(
+            "The largest step the run used, as the request gave it; ``null`` "
+            "where the case's own setting was kept."
+        ),
+    )
+    stop_at_lambda: float | None = Field(
+        default=None,
+        description=(
+            "The target lambda the run was given in ``stop_at``; ``null`` when "
+            "``stop_at`` was ``'nose'`` or ``'full'``."
         ),
     )
     job_id: str | None = Field(
@@ -488,17 +635,9 @@ def _payload_to_response(
                 f"{type(payload).__name__}"
             ),
         )
-    raw_voltages = payload.get("voltages_per_bus") or {}
-    voltages_per_bus: dict[str, list[float]] = {}
-    if isinstance(raw_voltages, dict):
-        for k, v in raw_voltages.items():
-            try:
-                voltages_per_bus[str(k)] = [float(x) for x in (v or [])]
-            except (TypeError, ValueError):
-                voltages_per_bus[str(k)] = []
     return CpfResultResponse(
         lambdas=[float(x) for x in (payload.get("lambdas") or [])],
-        voltages_per_bus=voltages_per_bus,
+        voltages_per_bus=_series_by_bus(payload.get("voltages_per_bus")),
         bus_idxes=[str(b) for b in (payload.get("bus_idxes") or [])],
         nose_idx=int(payload.get("nose_idx", -1)),
         max_lam=float(payload.get("max_lam", 0.0)),
@@ -511,8 +650,27 @@ def _payload_to_response(
         stop_at=payload.get("stop_at") or "nose",
         complete=bool(payload.get("complete", True)),
         direction=payload.get("direction"),
+        angles_per_bus=_series_by_bus(payload.get("angles_per_bus")),
+        parameterization=payload.get("parameterization"),
+        tol=payload.get("tol"),
+        corrector_max_iter=payload.get("corrector_max_iter"),
+        step_min=payload.get("step_min"),
+        step_max=payload.get("step_max"),
+        stop_at_lambda=payload.get("stop_at_lambda"),
         job_id=job_id,
     )
+
+
+def _series_by_bus(raw: object) -> dict[str, list[float]]:
+    """A per-bus mapping of the worker payload as floats, keyed by idx as text."""
+    series: dict[str, list[float]] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                series[str(k)] = [float(x) for x in (v or [])]
+            except (TypeError, ValueError):
+                series[str(k)] = []
+    return series
 
 
 def _rows(raw: object) -> list[Any]:
@@ -573,6 +731,10 @@ async def run_cpf(
         args["max_iter"] = body.max_iter
     if body.enforce_q_limits is not None:
         args["enforce_q_limits"] = body.enforce_q_limits
+    for name in ("parameterization", "tol", "corrector_max_iter", "step_min", "step_max"):
+        value = getattr(body, name)
+        if value is not None:
+            args[name] = value
     if body.load_increase is not None:
         args["load_increase"] = [item.model_dump() for item in body.load_increase]
     if body.generator_increase is not None:
