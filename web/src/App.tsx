@@ -22,6 +22,7 @@ import { EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { KeptResultsNote } from '@/components/history/KeptResultsNote';
 import { makeQueryClient, wireGlobalErrorRecovery } from '@/api/queries';
 import { useSessionRecovery } from '@/api/useSessionRecovery';
+import { useEnginesSync } from '@/api/useEnginesSync';
 import { useSessionHeartbeat } from '@/api/useSessionHeartbeat';
 import { useReopenAfterReload } from '@/api/useReopenAfterReload';
 import { ResetRunHost } from '@/components/shell/ResetRunHost';
@@ -125,6 +126,9 @@ function AppInner({ children }: { children: React.ReactNode }) {
   // unmount that would otherwise kill the recovery cycle once a case is
   // loaded (v0.1.y Unit 5 bug fix).
   useSessionRecovery();
+  // Mirror the engines list into the session store, so the run-readiness gate
+  // reads it without a query client.
+  useEnginesSync();
   // After a reload of the page: open the case the tab had open again, with
   // the edits it kept.
   useReopenAfterReload();

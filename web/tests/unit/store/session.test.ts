@@ -30,11 +30,58 @@ import { parseSessionId } from '@/api/types';
 const FRESH_STATE = {
   sessionId: null,
   engine: null,
+  engines: null,
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],
   recoveryStuckSince: null,
 };
+
+const ENGINES_LIST = {
+  engines: [
+    {
+      name: 'andes',
+      available: true,
+      unavailable_reason: null,
+      versions: {},
+      formats: { read: [], write: [] },
+      routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+      ops: [],
+      editing: true,
+    },
+  ],
+};
+
+describe('session store — engines list mirror', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().engines).toBeNull();
+  });
+
+  it('setEngines sets it', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+
+  it('clearSession keeps it (the list is server-wide, not per session)', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+
+  it('resetSession keeps it', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    useSessionStore.getState().resetSession();
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+});
 
 describe('session store — engine of the session', () => {
   beforeEach(() => {

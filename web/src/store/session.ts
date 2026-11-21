@@ -35,7 +35,7 @@
  * to ``recoveryFailed`` and surface a Reload CTA.
  */
 import { create } from 'zustand';
-import type { SessionId } from '@/api/types';
+import type { EngineList, SessionId } from '@/api/types';
 
 /**
  * Maximum recovery attempts allowed within ``RECOVERY_WINDOW_MS`` before the
@@ -75,6 +75,14 @@ export interface SessionState {
    */
   engine: string | null;
   setEngine: (engine: string | null) => void;
+  /**
+   * The engines the server knows and what each can do (`GET /engines`),
+   * mirrored from the query by `useEnginesSync` so that readers that are not
+   * hooks (the run-readiness gate of a command) can use it. It is server-wide,
+   * not per session: `clearSession` and `resetSession` leave it alone.
+   */
+  engines: EngineList | null;
+  setEngines: (engines: EngineList | null) => void;
   /**
    * True while the session-recovery handler is running (id cleared, waiting
    * for ``useCreateSession`` to resolve). The RecoveryBadge in the top bar
@@ -201,6 +209,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setWorkspaceId: (id) => set({ workspaceId: id }),
   engine: null,
   setEngine: (engine) => set({ engine }),
+  engines: null,
+  setEngines: (engines) => set({ engines }),
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],

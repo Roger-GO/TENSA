@@ -9,8 +9,8 @@
  * inside a real React tree (Zustand selectors are subscription-based
  * and need a reactive context). Stores are reset between tests so the
  * cascade in ``store/index.ts`` doesn't leak state. The hook reads the
- * engines list through ``useEngines``, so every render goes through
- * ``renderReadiness``, which mounts it under a QueryClientProvider.
+ * engines list from the session store (mirrored there by
+ * ``useEnginesSync``), so the engine-gate tests seed it with ``setEngines``.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -45,10 +45,6 @@ const TOPOLOGY_GENCLS_ONLY: TopologySummary = {
 };
 
 import { runReadinessNow, useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
-import { makeQueryClient, queryKeys } from '@/api/queries';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { createElement } from 'react';
-import type { ReactNode } from 'react';
 import { useAnalyzeStore, DEFAULT_EIG_FILTER } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -91,35 +87,19 @@ const SIENNA_PFLOW_ONLY: EngineList = {
 };
 
 /**
- * A wrapper with the engines list already cached, as `useEngines` would leave
- * it. Built with `createElement` rather than JSX so this file stays `.ts`
- * (Prettier parses `.ts` without JSX).
- */
-function wrapperWithEngines(engines: EngineList | undefined) {
-  const client = makeQueryClient();
-  if (engines !== undefined) {
-    client.setQueryData(queryKeys.engines, engines);
-  }
-  function Wrapper({ children }: { children: ReactNode }) {
-    return createElement(QueryClientProvider, { client }, children);
-  }
-  return { client, Wrapper };
-}
-
-/**
- * Mount `useRunReadiness` under a QueryClientProvider with no engines list
- * cached, so the engine gate does not apply (as for every case that predates
- * it). Engine-gate cases build their own wrapper with `wrapperWithEngines`.
+ * Mount `useRunReadiness`. The hook is a pure store reader, so no provider
+ * is needed; the engines list, where a test wants one, is seeded in the
+ * session store with ``setEngines``.
  */
 function renderReadiness(routine: RunRoutine) {
-  const { Wrapper } = wrapperWithEngines(undefined);
-  return renderHook(() => useRunReadiness(routine), { wrapper: Wrapper });
+  return renderHook(() => useRunReadiness(routine));
 }
 
 function resetStores(): void {
   useSessionStore.setState({
     sessionId: null,
     engine: null,
+    engines: null,
     recoveryInProgress: false,
     recoveryFailed: false,
     recoveryAttempts: [],
@@ -625,10 +605,10 @@ describe('useRunReadiness — engine gate', () => {
   it('a routine the engine lacks is not ready, with the reason and no recovery', () => {
     seedReadyBaseline();
     useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
     usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
-    const { Wrapper } = wrapperWithEngines(SIENNA_PFLOW_ONLY);
-    const { result } = renderHook(() => useRunReadiness('tds'), { wrapper: Wrapper });
+    const { result } = renderReadiness('tds');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toBe(
       'Time-domain simulation is not available with the Sienna engine.',
@@ -647,49 +627,58 @@ describe('useRunReadiness — engine gate', () => {
   it('does not fire when the list does not name the engine', () => {
     seedReadyBaseline();
     useSessionStore.getState().setEngine('psse');
+    useSessionStore.getState().setEngines(ANDES_ONLY);
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
-    const { Wrapper } = wrapperWithEngines(ANDES_ONLY);
-    const { result } = renderHook(() => useRunReadiness('tds'), { wrapper: Wrapper });
+    const { result } = renderReadiness('tds');
     expect(result.current.ready).toBe(true);
   });
 
   it('does not fire when the engine lists the routine', () => {
     seedReadyBaseline();
     useSessionStore.getState().setEngine('andes');
+    useSessionStore.getState().setEngines(ANDES_ONLY);
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
-    const { Wrapper } = wrapperWithEngines(ANDES_ONLY);
-    const { result } = renderHook(() => useRunReadiness('tds'), { wrapper: Wrapper });
+    const { result } = renderReadiness('tds');
     expect(result.current.ready).toBe(true);
   });
 
   it('sweep is never gated by it', () => {
     seedReadyBaseline();
     useSessionStore.getState().setEngine('sienna');
-    const { Wrapper } = wrapperWithEngines(SIENNA_PFLOW_ONLY);
-    const { result } = renderHook(() => useRunReadiness('sweep'), { wrapper: Wrapper });
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    const { result } = renderReadiness('sweep');
     expect(result.current.ready).toBe(true);
   });
 
   it('comes after the "no case" reason', () => {
     useSessionStore.getState().setEngine('sienna');
-    const { Wrapper } = wrapperWithEngines(SIENNA_PFLOW_ONLY);
-    const { result } = renderHook(() => useRunReadiness('tds'), { wrapper: Wrapper });
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    const { result } = renderReadiness('tds');
     expect(result.current.disabledReason).toBe('No case loaded.');
   });
 
-  it('runReadinessNow reads the cached engines list without a fetch', () => {
+  it('runReadinessNow reads the engines list from the store', () => {
     seedReadyBaseline();
     useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
-    // Mount the hook once against the client that holds the list, so the
-    // non-hook reader reads the same cache.
-    const { Wrapper } = wrapperWithEngines(SIENNA_PFLOW_ONLY);
-    const { unmount } = renderHook(() => useRunReadiness('tds'), { wrapper: Wrapper });
-    unmount();
     expect(runReadinessNow('tds')).toMatchObject({
       ready: false,
       disabledReason: 'Time-domain simulation is not available with the Sienna engine.',
     });
+  });
+
+  it('runReadinessNow applies the gate with no hook mounted', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    // No renderHook here: the non-hook reader sees the same store.
+    expect(runReadinessNow('eig')).toMatchObject({
+      ready: false,
+      disabledReason: 'Eigenvalue analysis is not available with the Sienna engine.',
+    });
+    expect(runReadinessNow('pflow').ready).toBe(true);
   });
 });
 

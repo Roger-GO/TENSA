@@ -38,11 +38,6 @@
  * topology edits" gate it can land here next to the other reasons.
  */
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import type { QueryClient } from '@tanstack/react-query';
-import { useEngines, queryKeys } from '@/api/queries';
-import type { EngineList } from '@/api/types';
 import type { RecoveryDescriptor } from '@/lib/recovery';
 import { engineLabel, engineRoutines } from '@/lib/engines';
 import { useAnalyzeStore } from '@/store/analyze';
@@ -180,19 +175,12 @@ interface ReadinessInputs {
   /** The engine of the live session, as the session store keeps it. */
   engine: string | null;
   /**
-   * The routines of that engine from the engines query, or null when the
-   * list is not loaded yet or does not name the engine: the engine gate
-   * does not apply then.
+   * The routines of that engine from the engines list the session store
+   * mirrors, or null when the list is not loaded yet or does not name the
+   * engine: the engine gate does not apply then.
    */
   engineRoutines: readonly string[] | null;
 }
-
-/**
- * The query client the last mounted readiness hook read the engines list
- * from. ``runReadinessNow`` is not a hook, so it cannot reach the provider;
- * it reads the cached list from this client instead and never starts a fetch.
- */
-let readinessQueryClient: QueryClient | null = null;
 
 /**
  * Compute the readiness of a Run button.
@@ -220,12 +208,9 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // readiness hook stays a pure store reader — no query side effects.
   const topology = useCaseStore((s) => s.topology);
   const engine = useSessionStore((s) => s.engine);
-  const engines = useEngines();
-  const queryClient = useQueryClient();
-  // Hand the client to ``runReadinessNow`` (an effect, not render state).
-  useEffect(() => {
-    readinessQueryClient = queryClient;
-  }, [queryClient]);
+  // Store mirror of the engines query (kept in sync by `useEnginesSync`), so
+  // the readiness hook stays a pure store reader — no query side effects.
+  const engines = useSessionStore((s) => s.engines);
 
   return readinessFrom(routine, {
     selection,
@@ -239,7 +224,7 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
     sweeps,
     topology,
     engine,
-    engineRoutines: engineRoutines(engines.data, engine),
+    engineRoutines: engineRoutines(engines ?? undefined, engine),
   });
 }
 
@@ -252,9 +237,10 @@ export function runReadinessNow(routine: RunRoutine): RunReadiness {
   const caseState = useCaseStore.getState();
   const analyze = useAnalyzeStore.getState();
   const sweep = useSweepStore.getState();
-  const engine = useSessionStore.getState().engine;
-  // Read the cached engines list only; a command must not start a fetch.
-  const engines = readinessQueryClient?.getQueryData<EngineList>(queryKeys.engines);
+  const session = useSessionStore.getState();
+  const engine = session.engine;
+  // The store mirror of the engines list; a command must not start a fetch.
+  const engines = session.engines;
   return readinessFrom(routine, {
     selection: caseState.selection,
     loadingPath: caseState.loadingPath,
@@ -267,7 +253,7 @@ export function runReadinessNow(routine: RunRoutine): RunReadiness {
     sweeps: sweep.sweeps,
     topology: caseState.topology,
     engine,
-    engineRoutines: engineRoutines(engines, engine),
+    engineRoutines: engineRoutines(engines ?? undefined, engine),
   });
 }
 
