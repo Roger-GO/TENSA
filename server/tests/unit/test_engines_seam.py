@@ -100,7 +100,7 @@ _EXTENSION_OF_FORMAT = {
     "matpower": ".m",
 }
 # The capability name of each ``format`` a save request takes.
-_FORMAT_OF_SAVE = {"xlsx": "xlsx", "json": "json", "raw": "psse-raw"}
+_FORMAT_OF_SAVE = {"xlsx": "xlsx", "json": "json", "raw": "psse-raw", "m": "matpower"}
 
 
 def test_andes_reads_every_kind_of_case_file_the_workspace_takes() -> None:

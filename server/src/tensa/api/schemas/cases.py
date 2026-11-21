@@ -56,8 +56,9 @@ class SaveCaseRequest(BaseModel):
 
     ``filename`` is workspace-relative; the substrate canonicalizes it
     through the workspace path validator (rejects traversal). ``format``
-    selects the writer: ANDES's own for xlsx and json, and the substrate's
-    PSS/E v33 writer for raw (ANDES 2.0 has none).
+    selects the writer: ANDES's own for xlsx and json, the substrate's
+    PSS/E v33 writer for raw and its MATPOWER v2 writer for m (ANDES 2.0
+    has neither).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -67,13 +68,13 @@ class SaveCaseRequest(BaseModel):
         description=(
             "Workspace-relative output filename. Extension must match "
             "``format`` (``.xlsx`` for xlsx, ``.json`` for json, "
-            "``.raw`` for raw). The file name must be portable to "
+            "``.raw`` for raw, ``.m`` for m). The file name must be portable to "
             "Windows: no ``:``, trailing dot or space, or device names "
             "such as ``CON`` or ``nul.xlsx``."
         ),
         min_length=1,
     )
-    format: Literal["xlsx", "json", "raw"] = Field(
+    format: Literal["xlsx", "json", "raw", "m"] = Field(
         ...,
         description=(
             "Output format. ``xlsx`` is the ANDES-native Excel layout. "
@@ -85,7 +86,15 @@ class SaveCaseRequest(BaseModel):
             "empty terminators. A ``.raw`` holds no dynamic data, so "
             "the dynamic models of the case (machines, exciters, a "
             "ZIP load) are left out: save as ``xlsx`` or ``json`` to "
-            "keep them."
+            "keep them. ``m`` is MATPOWER v2 emitted by the substrate's "
+            "writer around ANDES's ``system2mpc``; it covers the "
+            "power-flow data (Bus, PQ, Shunt, PV and Slack generators, "
+            "Line) and holds no dynamic data, so save as ``xlsx`` or "
+            "``json`` to keep machines and controllers; string bus "
+            "idxes come back as integers on a round-trip; bus area and "
+            "zone are written as zero; the loads and shunts of a bus are "
+            "added up into one. What the file leaves out of the system "
+            "is logged as a warning in ``GET /sessions/{id}/messages``."
         ),
     )
     overwrite: bool = Field(

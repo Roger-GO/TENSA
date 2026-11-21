@@ -37,7 +37,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
         "versions": {"andes": importlib.metadata.version("andes")},
         "formats": {
             "read": ["xlsx", "json", "psse-raw", "psse-dyr", "matpower"],
-            "write": ["xlsx", "json", "psse-raw"],
+            "write": ["xlsx", "json", "psse-raw", "matpower"],
         },
         "routines": ["pflow", "tds", "eig", "cpf", "se"],
         "ops": sorted(ENGINE_OPS[name]),

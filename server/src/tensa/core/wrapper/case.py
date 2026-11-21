@@ -325,11 +325,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
             raise
 
     def save_case(
-        self, format: Literal["xlsx", "json", "raw"], filename: str
+        self, format: Literal["xlsx", "json", "raw", "m"], filename: str
     ) -> Path:
         """Write the current System to a workspace file.
 
-        Three formats:
+        Four formats:
 
         - ``xlsx`` — ANDES native, via ``andes.io.xlsx.write``.
         - ``json`` — ANDES JSON, via ``andes.io.json.write``.
@@ -340,6 +340,20 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
           transformer). A ``.raw`` holds no dynamic data, so the dynamic
           models of the case (a ZIP on its PQ, a machine on its PV or
           Slack) are not in it.
+        - ``m``: MATPOWER v2, via the substrate's writer
+          (``tensa.core.matpower_writer.write_matpower``) around ANDES's
+          ``system2mpc``. It covers the power-flow data (Bus, PQ, Shunt,
+          PV and Slack, Line). A ``.m`` holds no dynamic data, so
+          machines, exciters and a ZIP load are not in it: save as
+          ``xlsx`` or ``json`` to keep them. Slack generators precede PV
+          generators in the ``gen`` section. When a bus idx is not a
+          positive integer (text, say) the buses are numbered
+          ``uid + 1``, so such a case comes back with integer bus
+          numbers. Bus area and zone are written as zero because
+          ``system2mpc`` does not export them, and the loads and shunts
+          of a bus are added up into one. What the file leaves out of
+          this System is logged on ``tensa.notice`` once it is saved, so
+          it shows in the session's Messages log.
 
         Writing over the file the case was loaded from makes that file the new
         base of the session: it now holds the edits made since the load, so
@@ -355,9 +369,9 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         """
         ss = self._require_loaded()
         target = Path(filename)
-        if format not in ("xlsx", "json", "raw"):  # pragma: no cover — Literal
+        if format not in ("xlsx", "json", "raw", "m"):  # pragma: no cover — Literal
             raise ElementValidationError(
-                f"unsupported save format {format!r}; supported: xlsx, json, raw"
+                f"unsupported save format {format!r}; supported: xlsx, json, raw, m"
             )
         overwrites_open_case = self._is_open_case_file(target)
         if overwrites_open_case and (self._disturbance_log or self._restored_events):
@@ -387,6 +401,9 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         )
         os.close(fd)
         tmp_path = Path(tmp_name)
+        # What the written file does not hold of the System (the m writer's
+        # notes), said once the file is in place.
+        notes: list[str] = []
         try:
             # ANDES's writers call ``confirm_overwrite`` → ``input()`` when the
             # file exists; the temp always exists (mkstemp created it), so force
@@ -399,10 +416,14 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                 from andes.io import json as andes_json
 
                 andes_json.write(ss, str(tmp_path), overwrite=True)
-            else:  # raw
+            elif format == "raw":
                 from tensa.core.psse_writer import write_raw
 
                 write_raw(ss, str(tmp_path))
+            else:  # m
+                from tensa.core.matpower_writer import write_matpower
+
+                notes = write_matpower(ss, str(tmp_path))
 
             # Validate the artifact BEFORE exposing it. A 0-byte or truncated
             # write must never become a "saved case".
@@ -416,6 +437,26 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                 raise CaseSaveError(
                     "the xlsx writer produced a corrupt (non-zip) file"
                 )
+            if format == "m":
+                # A MATPOWER file is a MATLAB function; ``m2mpc`` skips that
+                # line when reading back. A file whose first non-blank line is
+                # not one is not a valid ``.m``.
+                first_line = next(
+                    (
+                        line.strip()
+                        for line in tmp_path.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                        if line.strip()
+                    ),
+                    "",
+                )
+                if not first_line.startswith("function"):
+                    raise CaseSaveError(
+                        "the m writer produced a file that is not a MATLAB "
+                        "function (the first line does not start with "
+                        "'function')"
+                    )
 
             os.replace(str(tmp_path), str(target))
         except CaseSaveError:
@@ -426,6 +467,9 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
             raise CaseSaveError(_sanitize_message(str(exc))) from exc
+        notice = logging.getLogger("tensa.notice")
+        for note in notes:
+            notice.warning("%s: %s", target.name, note)
         if overwrites_open_case:
             self._edit_log = []
             self._redo_log = []

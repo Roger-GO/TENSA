@@ -104,7 +104,9 @@ Elements:        GET /topology/schema (every buildable model + typed params) · 
                  POST /sessions/{id}/undo-last-edit · POST /sessions/{id}/redo-edit (take back / put back the last add, edit or delete;
                  the topology's "undo" and "redo" name the edit each would act on, null when there is none; a delete put back takes
                  what it took the first time, and is refused with 422 and the list if anything else has come to depend on the element)
-                 POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file; format xlsx, json or raw)
+                 POST /sessions/{id}/blank (start empty system) · POST /sessions/{id}/save (write case file; format xlsx, json, raw or m
+                 (m is MATPOWER v2: power-flow data only, no dynamics, string bus idxes renumbered, bus area and zone written as zero,
+                 the loads and shunts of a bus added up; what it leaves out is logged in GET /sessions/{id}/messages))
 Jobs:            GET /sessions/{id}/jobs[?kind=&status=] · GET/DELETE /sessions/{id}/jobs/{job_id}
                  (statuses: pending running done failed cancelled)
 Messages:        GET /sessions/{id}/messages[?after=&level=&limit=] · DELETE /sessions/{id}/messages  (what ANDES logged while a command ran:

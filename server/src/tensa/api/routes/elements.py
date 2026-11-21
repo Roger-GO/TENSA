@@ -335,7 +335,7 @@ async def create_blank(
 def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path:
     """Reject paths that escape the workspace; verify extension matches
     the chosen format. Returns the canonical absolute target path."""
-    expected_ext = {"xlsx": ".xlsx", "json": ".json", "raw": ".raw"}[format]
+    expected_ext = {"xlsx": ".xlsx", "json": ".json", "raw": ".raw", "m": ".m"}[format]
     if not filename.endswith(expected_ext):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -358,7 +358,7 @@ def _validate_save_filename(workspace: Path, filename: str, format: str) -> Path
     "/sessions/{session_id}/save",
     openapi_extra={"x-tensa-gui-location": "command-palette"},
     operation_id="saveCase",
-    summary="Write the current System to the workspace as xlsx or json.",
+    summary="Write the current System to the workspace as xlsx, json, raw or m.",
     response_model=SaveCaseResponse,
     status_code=status.HTTP_201_CREATED,
     responses={

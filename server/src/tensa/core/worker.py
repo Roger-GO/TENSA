@@ -601,17 +601,24 @@ def _handle_create_blank(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 def _handle_save_case(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     from tensa.core.layout import carry_layout_sidecar
+    from tensa.core.matpower_writer import bus_numbers
 
     path = wrapper.save_case(args["format"], args["filename"])
     # A case saved under a new name opens with the diagram the open one has.
     # (A client that shows the diagram writes its current layout afterwards;
-    # this is what a save through the API alone gets.) A ``.raw`` file keeps no
-    # idx, so the system read back from it is numbered afresh.
-    carry_layout_sidecar(
-        wrapper._case_path,  # noqa: SLF001
-        path,
-        renumbered=args["format"] == "raw",
-    )
+    # this is what a save through the API alone gets.) A ``.raw`` or ``.m``
+    # file keeps no device idx, so the system read back from it is numbered
+    # afresh. A ``.m`` whose buses were numbered afresh as well (a bus idx that
+    # is not a positive integer) keeps nothing a layout could be matched by, so
+    # a copy gets none, and a stale one beside it is removed.
+    source = wrapper._case_path  # noqa: SLF001
+    if (
+        args["format"] == "m"
+        and bus_numbers(wrapper._require_loaded())[1]  # noqa: SLF001
+        and not wrapper._is_open_case_file(path)  # noqa: SLF001
+    ):
+        source = None
+    carry_layout_sidecar(source, path, renumbered=args["format"] in ("raw", "m"))
     return str(path)
 
 
