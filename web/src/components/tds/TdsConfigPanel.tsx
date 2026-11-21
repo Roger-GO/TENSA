@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 import {
@@ -30,7 +30,11 @@ import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
  * - ``tf`` (end time of the run, sec): required, > 0. Default 10. The
  *   Disturbances list of the sidebar shows it and opens this tab.
  * - ``h`` (integration step, sec): optional override of the trapezoidal
- *   fixed step. Blank → ANDES default (1/30 s). QNDF ignores it. Default blank.
+ *   fixed step (hidden for the variable-step integrators, which ignore
+ *   it). Blank → ANDES default (1/30 s). Default blank.
+ * - ``integrator``: one of trapezoidal / backeuler (fixed-step at ``h``)
+ *   or trap_adapt / qndf (variable-step, Auto or Manual tolerances
+ *   ``rtol`` / ``atol`` / ``max_step`` / ``min_step``). Default trapezoidal.
  * - ``vars`` (variable groups to stream): multi-select of ``bus_v`` /
  *   ``gen_state`` / ``gen_power`` / ``line_flow`` / ``load_pq``. At least
  *   one required. Default ``["bus_v", "gen_state"]`` so voltage AND
@@ -83,23 +87,45 @@ const VAR_GROUP_HINTS: Record<TdsVarGroup, string> = {
 
 const INTEGRATOR_OPTIONS: ReadonlyArray<{
   value: TdsIntegrator;
+  step: 'fixed' | 'variable';
   label: string;
   hint: string;
 }> = [
   {
     value: 'trapezoidal',
+    step: 'fixed',
     label: 'Trapezoidal (fixed-step)',
     hint: 'ANDES default. Uses h above; ignores rtol / atol.',
   },
   {
+    value: 'backeuler',
+    step: 'fixed',
+    label: 'Backward Euler (fixed-step)',
+    hint: 'First-order, more damped than trapezoidal. Uses h above; ignores rtol / atol.',
+  },
+  {
+    value: 'trap_adapt-auto',
+    step: 'variable',
+    label: 'Adaptive trapezoidal (Auto)',
+    hint: 'Variable-step trapezoidal with sensible tolerances (rtol=1e-3, atol=1e-6, max_step=0.05). Ignores h.',
+  },
+  {
+    value: 'trap_adapt-manual',
+    step: 'variable',
+    label: 'Adaptive trapezoidal (Manual)',
+    hint: 'Variable-step trapezoidal with hand-tuned tolerances. Ignores h.',
+  },
+  {
     value: 'qndf-auto',
+    step: 'variable',
     label: 'QNDF (adaptive, Auto)',
-    hint: 'Variable-step NDF with sensible tolerances (rtol=1e-3, atol=1e-6, max_step=0.05).',
+    hint: 'Variable-step NDF with sensible tolerances (rtol=1e-3, atol=1e-6, max_step=0.05). Ignores h. Needs a freshly loaded case: refused after a run with another integrator until reload.',
   },
   {
     value: 'qndf-manual',
+    step: 'variable',
     label: 'QNDF (adaptive, Manual)',
-    hint: 'Variable-step NDF with hand-tuned tolerances.',
+    hint: 'Variable-step NDF with hand-tuned tolerances. Ignores h. Needs a freshly loaded case: refused after a run with another integrator until reload.',
   },
 ];
 
@@ -136,6 +162,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const [rtolText, setRtolText] = useState(String(tdsToleranceOverrides.rtol));
   const [atolText, setAtolText] = useState(String(tdsToleranceOverrides.atol));
   const [maxStepText, setMaxStepText] = useState(String(tdsToleranceOverrides.maxStep));
+  const [minStepText, setMinStepText] = useState(String(tdsToleranceOverrides.minStep));
 
   // Unit 14 — the free-form ``tds_config_overrides`` editor owns its row
   // model locally (an ordered list of {key, value} text pairs) so the
@@ -191,14 +218,19 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
 
   const errors = useMemo<Record<string, string>>(() => validateTdsConfig(tdsConfig), [tdsConfig]);
 
+  // Derived mode flags (render-pure): the two fixed-step integrators
+  // step at ``h``; the two variable-step ones ignore it. Manual mode
+  // exposes the tolerance inputs for either variable-step integrator.
+  const isVariableStep = tdsIntegrator !== 'trapezoidal' && tdsIntegrator !== 'backeuler';
+  const isManual = tdsIntegrator === 'trap_adapt-manual' || tdsIntegrator === 'qndf-manual';
+
   // Tolerance errors only surface in Manual mode — Auto mode reads
   // ``DEFAULT_TDS_TOLERANCE_OVERRIDES`` directly and the inputs are
   // hidden, so validation noise from a mid-edit Manual draft would be
   // misleading.
   const toleranceErrors = useMemo<Record<string, string>>(
-    () =>
-      tdsIntegrator === 'qndf-manual' ? validateTdsToleranceOverrides(tdsToleranceOverrides) : {},
-    [tdsIntegrator, tdsToleranceOverrides],
+    () => (isManual ? validateTdsToleranceOverrides(tdsToleranceOverrides) : {}),
+    [isManual, tdsToleranceOverrides],
   );
 
   const setNumber = (key: 'tf' | 'maxRateHz', text: string) => {
@@ -233,7 +265,8 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const setToleranceNumber = (key: keyof TdsToleranceOverrides, text: string) => {
     if (key === 'rtol') setRtolText(text);
     else if (key === 'atol') setAtolText(text);
-    else setMaxStepText(text);
+    else if (key === 'maxStep') setMaxStepText(text);
+    else setMinStepText(text);
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       setTdsToleranceOverrides({ [key]: Number.NaN } as Partial<TdsToleranceOverrides>);
@@ -253,6 +286,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
     setRtolText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.rtol));
     setAtolText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.atol));
     setMaxStepText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.maxStep));
+    setMinStepText(String(DEFAULT_TDS_TOLERANCE_OVERRIDES.minStep));
     setOverrideRows([]);
   };
 
@@ -288,22 +322,24 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         hint="The simulated time the run stops at, in seconds. A disturbance set for a later time is never reached."
       />
 
-      <NumberField
-        id="tds-config-h"
-        label="h — fixed step (s, optional)"
-        value={hText}
-        onChange={setHValue}
-        error={errors.h}
-        hint="Leave blank for the ANDES default (1/30 s). QNDF ignores h; use max_step."
-        placeholder="1/30 (default)"
-      />
+      {!isVariableStep ? (
+        <NumberField
+          id="tds-config-h"
+          label="h — fixed step (s, optional)"
+          value={hText}
+          onChange={setHValue}
+          error={errors.h}
+          hint="Leave blank for the ANDES default (1/30 s). The variable-step integrators ignore h; use max_step."
+          placeholder="1/30 (default)"
+        />
+      ) : null}
 
       <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-integrator">
         <legend className="text-muted-foreground text-xs font-medium">Integrator</legend>
-        {INTEGRATOR_OPTIONS.map((opt) => {
+        {INTEGRATOR_OPTIONS.map((opt, i) => {
           const id = `tds-config-integrator-${opt.value}`;
           const checked = tdsIntegrator === opt.value;
-          return (
+          const radio = (
             <label
               key={opt.value}
               htmlFor={id}
@@ -331,17 +367,33 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
               </span>
             </label>
           );
+          // The six choices stay one radio group (one ``name``, so the
+          // arrow keys move through all of them); a short heading marks
+          // where the fixed-step ones end and the variable-step ones begin.
+          const startsGroup = i === 0 || INTEGRATOR_OPTIONS[i - 1]?.step !== opt.step;
+          if (!startsGroup) return radio;
+          return (
+            <Fragment key={opt.value}>
+              <span
+                data-testid={`tds-config-integrator-group-${opt.step}`}
+                className="text-muted-foreground text-[10px] leading-snug font-medium"
+              >
+                {opt.step === 'fixed' ? 'Fixed step (uses h)' : 'Variable step (ignores h)'}
+              </span>
+              {radio}
+            </Fragment>
+          );
         })}
       </fieldset>
 
-      {tdsIntegrator === 'qndf-manual' ? (
+      {isManual ? (
         <div
           data-testid="tds-config-tolerance-overrides"
           className="border-border/60 bg-muted/30 flex flex-col gap-2 rounded border p-2"
         >
           <p className="text-muted-foreground text-[10px] leading-snug">
-            QNDF tolerances. Tighter values give more accuracy at the cost of step count; too tight
-            and the run may fail to advance.
+            Adaptive tolerances. Tighter values give more accuracy at the cost of step count; too
+            tight and the run may fail to advance.
           </p>
           <NumberField
             id="tds-config-rtol"
@@ -366,6 +418,14 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
             onChange={(t) => setToleranceNumber('maxStep', t)}
             error={toleranceErrors.maxStep}
             hint="Maps to ANDES dtmax."
+          />
+          <NumberField
+            id="tds-config-min-step"
+            label="min_step — lower bound on step (s)"
+            value={minStepText}
+            onChange={(t) => setToleranceNumber('minStep', t)}
+            error={toleranceErrors.minStep}
+            hint="Smallest step the integrator may take, in seconds. 0 leaves the case's own."
           />
         </div>
       ) : null}

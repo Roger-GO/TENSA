@@ -2229,6 +2229,219 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
   });
 });
 
+describe('<RunButton /> — integrator wire mapping (Unit 17)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  let server: MockServerHandle;
+
+  /**
+   * Drive a TDS run to the point the client emits ``start_tds`` and return
+   * the whole payload, so each test can assert the ``integrator`` value and
+   * exactly which override keys the frame carries.
+   */
+  async function captureStartTds(): Promise<Record<string, unknown>> {
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+
+    const captured: { value: Record<string, unknown>; seen: boolean } = { value: {}, seen: false };
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (msg.type === 'start_tds') {
+          captured.value = msg;
+          captured.seen = true;
+          socket.close({ code: 1000 });
+        }
+      });
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => expect(captured.seen).toBe(true));
+    return captured.value;
+  }
+
+  beforeEach(async () => {
+    installMockWebSocket();
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    server = new MockServer(`ws://${WS_HOST}/api/ws/${SESSION_ID}`) as unknown as MockServerHandle;
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  afterEach(async () => {
+    server.stop();
+    fetchSpy.mockRestore();
+    restoreWebSocket();
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+    });
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  it('trapezoidal sends its own name and no tds_config_overrides key', async () => {
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trapezoidal');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('backeuler sends its own name and no tolerance keys', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('backeuler');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('trap_adapt-auto sends trap_adapt with the Auto preset and no min_step', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('an Auto choice never sends min_step, whatever the Manual draft holds', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-auto never sends min_step either', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('backeuler sends no tolerance keys even with a Manual draft in the store', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ rtol: 5e-4, minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('backeuler');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('backeuler sends h as trapezoidal does', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfig({ h: 0.01 });
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('backeuler');
+      expect(start.h).toBe(0.01);
+    } finally {
+      useUiStore.getState().setTdsConfig({ h: null });
+    }
+  });
+
+  it('a variable-step choice still sends h, as QNDF did before (the server ignores it)', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfig({ h: 0.01 });
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('trap_adapt');
+      expect(start.h).toBe(0.01);
+    } finally {
+      useUiStore.getState().setTdsConfig({ h: null });
+    }
+  });
+
+  it('the advanced editor still wins over a Manual min_step of the same key', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-manual');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsConfigOverrides({ min_step: 0.002, max_step: 0.01 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 1e-3,
+      atol: 1e-6,
+      max_step: 0.01,
+      min_step: 0.002,
+    });
+  });
+
+  it('trap_adapt-manual sends trap_adapt with the user values and min_step only above 0', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-manual');
+    useUiStore
+      .getState()
+      .setTdsToleranceOverrides({ rtol: 5e-4, atol: 2e-6, maxStep: 0.02, minStep: 0.0001 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 5e-4,
+      atol: 2e-6,
+      max_step: 0.02,
+      min_step: 0.0001,
+    });
+  });
+
+  it('a Manual min_step of 0 means not set and is never sent', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-manual');
+    // The store default is minStep 0.
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-auto sends qndf with the Auto preset, unchanged from before', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-manual sends qndf with the user values and min_step when set', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-manual');
+    useUiStore
+      .getState()
+      .setTdsToleranceOverrides({ rtol: 5e-4, atol: 2e-6, maxStep: 0.02, minStep: 1e-5 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 5e-4,
+      atol: 2e-6,
+      max_step: 0.02,
+      min_step: 1e-5,
+    });
+  });
+});
+
 describe('<RunButton /> v0.2 — abort + reset', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   let server: MockServerHandle;

@@ -30,7 +30,7 @@ import { useLayoutStore } from '@/store/layout';
 import { useRunsStore } from '@/store/runs';
 import { MAX_TDS_DAE_VARS, useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
-import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
+import type { RunStreamError, TdsIntegratorWire, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useRequestedRun } from '@/lib/useRequestedRun';
@@ -152,10 +152,10 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
   // ``useUiStore``. Props remain as test-only overrides.
   const tdsConfig = useUiStore((s) => s.tdsConfig);
-  // Unit 16: integrator preset + adaptive tolerance overrides. The
-  // ``-auto`` / ``-manual`` suffix is a UI-side distinction; both wire
-  // up to ``integrator: "qndf"`` and forward the overrides. Manual mode
-  // exposes the inputs in TdsConfigPanel; Auto uses the same defaults.
+  // Unit 16/17: integrator preset + adaptive tolerance overrides. The
+  // ``-auto`` / ``-manual`` suffix is a UI-side distinction; the wire
+  // value is the suffix-stripped name. Manual mode exposes the inputs in
+  // TdsConfigPanel; Auto uses the same defaults.
   const tdsIntegrator = useUiStore((s) => s.tdsIntegrator);
   const tdsToleranceOverrides = useUiStore((s) => s.tdsToleranceOverrides);
   // Unit 14: free-form ``tds_config_overrides`` dict from the TDS
@@ -350,26 +350,38 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     // default step" → omit from the wire payload entirely. The
     // ``defaultH`` prop overrides only when explicitly set.
     const h = defaultH !== undefined ? defaultH : (tdsConfig.h ?? undefined);
-    // Unit 16: derive wire-side integrator + override payload from the
-    // UI-side preset. ``trapezoidal`` ships only the integrator key;
-    // both QNDF presets (Auto / Manual) ship the overrides too — the
-    // user's last-edited Manual values are preserved in the store and
-    // re-used in Auto mode (the inputs are hidden but the values stick).
-    const wireIntegrator: 'trapezoidal' | 'qndf' =
-      tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
-    // Base overrides: the structured rtol/atol/max_step preset (QNDF
-    // modes only). Unit 14 then merges the free-form editor dict on top
-    // (the editor wins on key collisions). An empty editor + trapezoidal
-    // integrator → ``undefined`` so the wire stays minimal and behaviour
-    // is unchanged for the default path.
-    const baseOverrides: Record<string, number> | undefined =
-      tdsIntegrator === 'trapezoidal'
-        ? undefined
-        : {
-            rtol: tdsToleranceOverrides.rtol,
-            atol: tdsToleranceOverrides.atol,
-            max_step: tdsToleranceOverrides.maxStep,
-          };
+    // Unit 17: derive wire-side integrator + override payload from the
+    // UI-side preset. The two fixed-step integrators ship only the
+    // integrator key; the variable-step presets (Auto / Manual) ship the
+    // overrides too: the user's last-edited Manual values are preserved
+    // in the store and re-used in Auto mode (the inputs are hidden but
+    // the values stick). Manual mode adds ``min_step`` only when it is
+    // above 0: 0 means "not set" and lets the server keep the case's own
+    // floor. ``h`` goes as before whatever the integrator; the
+    // variable-step ones ignore it on the server.
+    const wireIntegrator: TdsIntegratorWire =
+      tdsIntegrator === 'trapezoidal' || tdsIntegrator === 'backeuler'
+        ? tdsIntegrator
+        : tdsIntegrator === 'trap_adapt-auto' || tdsIntegrator === 'trap_adapt-manual'
+          ? 'trap_adapt'
+          : 'qndf';
+    // Base overrides: the structured rtol/atol/max_step preset
+    // (variable-step modes only). Unit 14 then merges the free-form
+    // editor dict on top (the editor wins on key collisions). An empty
+    // editor + a fixed-step integrator → ``undefined`` so the wire stays
+    // minimal and behaviour is unchanged for the default path.
+    const isFixedStep = tdsIntegrator === 'trapezoidal' || tdsIntegrator === 'backeuler';
+    const isManualPreset = tdsIntegrator === 'trap_adapt-manual' || tdsIntegrator === 'qndf-manual';
+    const baseOverrides: Record<string, number> | undefined = isFixedStep
+      ? undefined
+      : {
+          rtol: tdsToleranceOverrides.rtol,
+          atol: tdsToleranceOverrides.atol,
+          max_step: tdsToleranceOverrides.maxStep,
+          ...(isManualPreset && tdsToleranceOverrides.minStep > 0
+            ? { min_step: tdsToleranceOverrides.minStep }
+            : {}),
+        };
     const hasCustomOverrides = Object.keys(tdsConfigOverridesCustom).length > 0;
     const tdsConfigOverrides =
       baseOverrides === undefined && !hasCustomOverrides
