@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,53 @@ def test_a_session_that_checked_in_is_not_reaped() -> None:
 
     assert mgr._sessions == {"s1": sess}
     assert not sess.closed
+
+
+class _SlowWorker:
+    """A data pipe whose reply comes when the test lets it: a worker busy with a
+    long first op (a Sienna worker starting Julia takes a minute or two)."""
+
+    def __init__(self) -> None:
+        self.reply = threading.Event()
+
+    def send(self, message: dict[str, Any]) -> None:
+        return None
+
+    def recv(self) -> dict[str, Any]:
+        self.reply.wait(10.0)
+        return {"type": "result", "seq": 1, "payload": "done"}
+
+    def close(self) -> None:
+        return None
+
+
+def test_a_session_waiting_for_its_worker_is_not_reaped() -> None:
+    """A request in flight is not idleness: the reaper leaves the session alone
+    however long ago the request was sent, and the reply stamps it."""
+    mgr, sess = _manager_with_idle_session()
+    slow = _SlowWorker()
+    sess.data = slow
+
+    async def scenario() -> Any:
+        request = asyncio.create_task(mgr.invoke("s1", "load_case", {}))
+        # The request is on its way; make it look sent long ago.
+        for _ in range(100):
+            if sess.requests_in_flight:
+                break
+            await asyncio.sleep(0.01)
+        assert sess.requests_in_flight == 1
+        # Past the request's own stamp of `last_active`: it waits in `recv` now.
+        await asyncio.sleep(0.2)
+        sess.last_active = time.monotonic() - LONG_AGO
+        await _let_the_reaper_run(mgr)
+        assert mgr._sessions == {"s1": sess}
+        assert not sess.closed
+        slow.reply.set()
+        return await request
+
+    assert asyncio.run(scenario()) == "done"
+    assert sess.requests_in_flight == 0
+    assert time.monotonic() - sess.last_active < 5.0
 
 
 def test_get_session_counts_as_activity(tmp_path: Path) -> None:

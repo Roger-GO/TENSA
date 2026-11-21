@@ -151,7 +151,7 @@ def events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     # The real hook does nothing without a workspace, and ``_run`` passes none, so
     # only a recorder can tell where in the start-up it is installed.
     monkeypatch.setattr(
-        worker, "_install_strict_fs_audit_hook", lambda _workspace: recorded.append("hook")
+        worker, "_install_strict_fs_audit_hook", lambda _workspace, _engine="andes": recorded.append("hook")
     )
     return recorded
 

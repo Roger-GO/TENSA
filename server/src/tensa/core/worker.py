@@ -427,7 +427,7 @@ def _out_of_workspace_open(
     return real
 
 
-def _install_strict_fs_audit_hook(workspace: str | None) -> None:
+def _install_strict_fs_audit_hook(workspace: str | None, engine: str = "andes") -> None:
     """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
     file opens occurring outside the configured workspace.
 
@@ -436,6 +436,11 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     read of anything else still shows. A worker has no log handler of its own beyond
     Python's default, which prints warnings, so the debug lines are for a developer who
     configures one.
+
+    ``engine`` names the engine the session runs. A Sienna worker's Julia
+    opens ``lock.pid`` and ``pyjuliapkg/meta.json`` in the Sienna project
+    folder when it starts, which is outside the workspace and routine for
+    that engine, so the project folder is a routine tree then and only then.
 
     Best-effort only — the hook fires for ``open()`` events that travel
     through the Python interpreter. Reads from C extensions
@@ -460,6 +465,10 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     except OSError:  # no usable temporary directory: nothing is made in one
         routine_files = _routine_files()
     routine_trees = _routine_trees()
+    if engine == "sienna":
+        from tensa.engines.sienna.environment import sienna_project
+
+        routine_trees = (*routine_trees, _normalized_path(str(sienna_project())))
 
     def _hook(event: str, args: tuple[Any, ...]) -> None:
         if event != "open":
@@ -2017,7 +2026,7 @@ def worker_main(
         # runs ahead of the audit hook on purpose: it reads only library files, and the
         # hook would log some of them (the system's ``mime.types``) as strays.
         _warm_up_if_idle(ctrl, runtime.warm_up)
-        _install_strict_fs_audit_hook(workspace)
+        _install_strict_fs_audit_hook(workspace, engine)
         return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid, engine)
     finally:
         uninstall_capture()

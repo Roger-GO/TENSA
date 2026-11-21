@@ -33,6 +33,15 @@ class LoadCaseRequest(BaseModel):
             "mechanism; pass [.dyr path] when loading a .raw."
         ),
     )
+    on_unsupported: Literal["refuse", "drop"] | None = Field(
+        None,
+        description=(
+            "What the Sienna engine does with a dynamic record it does not "
+            "support: ``refuse`` (the default) fails the load and names "
+            "every such record; ``drop`` loads the case without them and "
+            "logs a warning for each. The ANDES engine ignores this."
+        ),
+    )
 
 
 class BlankSystemResponse(BaseModel):

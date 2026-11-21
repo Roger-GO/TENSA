@@ -37,12 +37,16 @@ def test_andes_ops_match_the_handler_table() -> None:
     )
 
 
-def test_sienna_has_no_ops() -> None:
-    assert ENGINE_OPS["sienna"] == frozenset()
+def test_sienna_ops_match_the_handler_table() -> None:
+    """The Sienna runtime's table cannot drift from the ops table."""
+    from tensa.engines.sienna.runtime import _HANDLERS
+
+    assert ENGINE_OPS["sienna"] == frozenset(_HANDLERS)
 
 
 def test_engines_with_op() -> None:
-    assert engines_with_op("run_pflow") == ["andes"]
+    assert engines_with_op("run_pflow") == ["andes", "sienna"]
+    assert engines_with_op("run_tds") == ["andes"]
     assert engines_with_op("no-such-op") == []
     # ENGINE_NAMES order, in case a later engine shares an op.
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
@@ -71,9 +75,11 @@ def test_is_engine() -> None:
 
 def test_engine_unavailable_reason() -> None:
     assert engine_unavailable_reason("andes") is None
-    assert engine_unavailable_reason("sienna") == (
-        "the Sienna engine is not part of this build yet"
-    )
+    # Sienna's reason comes from the environment check: None when Julia and
+    # the project are set up, the reason otherwise.
+    from tensa.engines.sienna.environment import sienna_unavailable_reason
+
+    assert engine_unavailable_reason("sienna") == sienna_unavailable_reason()
     with pytest.raises(ValueError, match="unknown engine"):
         engine_unavailable_reason("nope")
 
@@ -83,7 +89,16 @@ def test_load_runtime_andes() -> None:
     assert runtime.name == "andes"
 
 
-def test_load_runtime_sienna_is_unavailable() -> None:
+def test_load_runtime_sienna_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the environment says Sienna cannot start, ``load_runtime`` raises
+    with the environment's reason."""
+    from tensa.engines.sienna import environment
+
+    monkeypatch.setattr(
+        environment, "sienna_unavailable_reason", lambda: "no Julia here"
+    )
     with pytest.raises(EngineUnavailableError) as excinfo:
         load_runtime("sienna")
     assert excinfo.value.engine == "sienna"
@@ -153,7 +168,14 @@ def test_engine_capabilities_andes() -> None:
     assert caps["editing"] is True
 
 
-def test_engine_capabilities_sienna() -> None:
+def test_engine_capabilities_sienna_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tensa.engines.sienna import environment
+
+    monkeypatch.setattr(
+        environment, "sienna_unavailable_reason", lambda: "no Julia here"
+    )
     caps = engine_capabilities("sienna")
     assert set(caps) == {
         "name",
@@ -171,6 +193,25 @@ def test_engine_capabilities_sienna() -> None:
     assert caps["formats"] == {"read": [], "write": []}
     assert caps["routines"] == []
     assert caps["ops"] == []
+    assert caps["editing"] is False
+
+
+def test_engine_capabilities_sienna_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tensa.engines.sienna import environment
+
+    monkeypatch.setattr(environment, "sienna_unavailable_reason", lambda: None)
+    caps = engine_capabilities("sienna")
+    assert caps["available"] is True
+    assert caps["unavailable_reason"] is None
+    assert caps["versions"] == {}
+    assert caps["formats"] == {
+        "read": ["psse-raw", "psse-dyr", "matpower"],
+        "write": [],
+    }
+    assert caps["routines"] == ["pflow"]
+    assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
     assert caps["editing"] is False
 
 

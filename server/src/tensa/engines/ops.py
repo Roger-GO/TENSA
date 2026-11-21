@@ -79,7 +79,16 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "run_sweep_iteration",
         }
     ),
-    "sienna": frozenset(),
+    "sienna": frozenset(
+        {
+            "load_case",
+            "reload_case",
+            "topology",
+            "operating_point",
+            "run_pflow",
+            "list_keys",
+        }
+    ),
 }
 
 

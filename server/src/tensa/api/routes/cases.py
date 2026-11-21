@@ -152,13 +152,16 @@ async def load_case(
         async with _run_as_job(
             mgr, session_id, "case-load", request_summary=body.model_dump()
         ) as job_id:
+            invoke_args: dict[str, Any] = {
+                "path": primary_str,
+                "addfiles": canonical_addfiles or None,
+            }
+            if body.on_unsupported is not None:
+                invoke_args["on_unsupported"] = body.on_unsupported
             payload = await mgr.invoke(
                 session_id,
                 "load_case",
-                {
-                    "path": primary_str,
-                    "addfiles": canonical_addfiles or None,
-                },
+                invoke_args,
             )
     except SessionExpiredError as exc:
         raise HTTPException(

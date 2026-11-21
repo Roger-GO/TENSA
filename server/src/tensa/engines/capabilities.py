@@ -30,6 +30,17 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "ops": [],
             "editing": False,
         }
+    if name == "sienna":
+        return {
+            "name": name,
+            "available": True,
+            "unavailable_reason": None,
+            "versions": {},
+            "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
+            "routines": ["pflow"],
+            "ops": sorted(ENGINE_OPS[name]),
+            "editing": False,
+        }
     return {
         "name": name,
         "available": True,

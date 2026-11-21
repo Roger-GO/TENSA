@@ -556,8 +556,12 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
       ``SetupFailedError`` → 422 (corrupt metadata, version mismatch on
       forced dill load, save-time failure inside ANDES).
     - ``no-case-loaded`` → 409 (snapshot ops scope to a loaded case).
+    - ``EngineUnsupportedError`` and ``EngineUnavailableError`` → what the shared
+      mapper answers (409): the session's engine has no snapshots.
     - Anything else → 500.
     """
+    if exc.category in {"EngineUnsupportedError", "EngineUnavailableError"}:
+        return map_worker_error(exc)
     if exc.category == "SnapshotNotFoundError":
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

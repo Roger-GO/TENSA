@@ -420,6 +420,7 @@ class RegistryMixin(JobsMixin):
                 sess.lock.acquire()
             elif not sess.lock.acquire(blocking=False):
                 raise SessionBusyError(current_job=_current_inflight_job(sess))
+            sess.requests_in_flight += 1
             try:
                 sess.seq += 1
                 sess.last_active = time.monotonic()
@@ -447,6 +448,8 @@ class RegistryMixin(JobsMixin):
                     raise self._session_expired_error(session_id, sess)
                 return response
             finally:
+                sess.requests_in_flight -= 1
+                sess.last_active = time.monotonic()
                 sess.lock.release()
 
         if timeout is not None:
@@ -631,6 +634,10 @@ class RegistryMixin(JobsMixin):
                 for sid, sess in list(self._sessions.items()):
                     if sess.closed:
                         del self._sessions[sid]
+                        continue
+                    # A request waiting for the worker is not idleness: the
+                    # worker is busy for it, and the client is waiting.
+                    if sess.requests_in_flight > 0:
                         continue
                     if now - sess.last_active > self._idle_timeout:
                         del self._sessions[sid]

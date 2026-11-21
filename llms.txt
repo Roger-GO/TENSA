@@ -16,11 +16,20 @@ GET /api/version and tensa --version say which version is running.
 
 1. POST /sessions                          → {"session_id": "...", "engine": "andes"}  (one engine per session, isolated
                                              subprocess; optional body {"engine": "andes"} — no body or {} is ANDES;
-                                             "sienna" is declared but not in this build: 409 with the reason)
+                                             {"engine": "sienna"} runs Julia/PowerSystems (409 with the reason where
+                                             Julia is not set up; the worker's first request waits a minute or two
+                                             while Julia starts). A Sienna session reads .raw (+ one .dyr) and .m,
+                                             and answers POST /case, POST /reload, GET /topology, GET /keys,
+                                             POST /pflow (tolerance and max_iterations only; any other setting is
+                                             422) and GET /operating-point; every other session route answers 409
+                                             naming the engines that have it. A .dyr with records PowerSystems does
+                                             not support is refused (422 naming each) unless /case is sent
+                                             "on_unsupported": "drop", which loads without them and logs a warning
+                                             for each to GET /sessions/{id}/messages)
 GET /engines                               → {"engines": [...]}  (every engine the server knows, available or not, each with
                                              available, unavailable_reason, versions, formats read/write, routines, ops,
                                              editing; no session needed)
-2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx, wscc9.xlsx, ieee39_full.xlsx and npcc.xlsx; GET /examples lists more); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]
+2. POST /sessions/{id}/case                {"primary_path": "ieee14_full.xlsx"}  primary_path is RELATIVE to the server's --workspace dir (put a file there with POST /workspace/files; a fresh workspace already holds ieee14_full.xlsx, kundur_full.xlsx, wscc9.xlsx, ieee39_full.xlsx and npcc.xlsx; GET /examples lists more); formats: xlsx raw dyr json m; optional "addfiles": ["...dyr"]; optional "on_unsupported": "refuse" | "drop" (Sienna only, ignored by ANDES)
 3. (pre-setup only) POST /sessions/{id}/disturbances  (add faults/toggles/alters BEFORE running anything)
 4. POST /sessions/{id}/pflow               → converged flag + bus voltages; or POST /sessions/{id}/tds {"tf": 5.0} for time-domain (batch, synchronous)
                                              pflow also returns, per line, P/Q at both ends, the loss and the loading in % of rate_a (null when unrated),
