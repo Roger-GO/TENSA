@@ -1,0 +1,124 @@
+name: sienna
+
+# The Sienna engine's tests that need a real Julia are marked `sienna` and skip
+# wherever Julia or the Julia project is missing, which is every job of the
+# other workflows. This one installs Julia, sets the project up with the
+# project's own command and runs them, so the engine is held by CI and not only
+# on a developer's machine. It runs on Linux only for now: nothing holds the
+# engine on macOS or Windows yet.
+
+on:
+  push:
+    branches: [main, "improve/**", multiengine]
+    paths:
+      - "server/src/tensa/engines/**"
+      - "server/src/tensa/core/worker.py"
+      - "server/tests/integration/test_sienna_*.py"
+      - "server/tests/julia/**"
+      - "server/pyproject.toml"
+      - ".github/workflows/sienna.yml"
+  pull_request:
+    paths:
+      - "server/src/tensa/engines/**"
+      - "server/src/tensa/core/worker.py"
+      - "server/tests/integration/test_sienna_*.py"
+      - "server/tests/julia/**"
+      - "server/pyproject.toml"
+      - ".github/workflows/sienna.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A run takes long, so a newer push to the same ref cancels the one before it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sienna:
+    name: Sienna engine (Julia, Linux)
+    runs-on: ubuntu-latest
+    # A cold depot downloads about 0.8 GB and precompiles the Sienna packages,
+    # which can take 30 minutes on a runner; the tests then take about 15 more,
+    # and a few more each time a test file starts its own workers.
+    timeout-minutes: 90
+    defaults:
+      run:
+        # Named explicitly so that bash runs with -o pipefail: the Julia tests
+        # pipe into tee, and without it a failing run would pass the step.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      # The shipped Manifest (server/src/tensa/engines/sienna/envs/dyn/Manifest.toml)
+      # was resolved for Julia 1.13, and the setup refuses another major.minor.
+      # A test holds this version to the Manifest's julia_version.
+      - name: Set up Julia 1.13.4
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13.4"
+
+      # The depot holds the installed and precompiled Sienna packages, about
+      # 1.1 GB; a cold run downloads about 0.8 GB of it. Keyed on the Julia
+      # version and the Manifest with no restore-keys: a depot built for another
+      # Manifest is not wanted. Julia itself is in the tool cache, not the depot.
+      - name: Cache the Julia depot
+        uses: actions/cache@v6
+        with:
+          path: ~/.julia
+          key: sienna-julia-1.13.4-${{ runner.os }}-${{ hashFiles('server/src/tensa/engines/sienna/envs/dyn/Manifest.toml') }}
+
+      # An editable install needs no built UI.
+      - name: Install tensa with dev and sienna dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "./server[dev,sienna]"
+
+      # The project's own command: copies the shipped project, instantiates and
+      # precompiles it, checks that the engine's module loads and writes the
+      # stamp. It finds the julia that setup-julia put on PATH.
+      - name: Set up the Sienna environment
+        run: tensa warm-cache --engine sienna --project "$RUNNER_TEMP/sienna/dyn"
+
+      # The Julia module's own tests, from the repository root, against the ANDES
+      # cases folder. The file exits non-zero when a test fails. It prints a line
+      # starting with SKIP for a case file missing from the folder, which here
+      # means the ANDES install is not what the job thinks, so that fails too.
+      - name: Julia module tests
+        run: |
+          cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
+          julia --project="$RUNNER_TEMP/sienna/dyn" server/tests/julia/runtests.jl "$cases" | tee "$RUNNER_TEMP/julia-tests.log"
+          if grep '^SKIP ' "$RUNNER_TEMP/julia-tests.log"; then
+            echo "the Julia tests skipped the checks above" >&2
+            exit 1
+          fi
+
+      # The Python tests that need Julia, against the project set up above. A
+      # skipped test in this job means the environment is not what the job
+      # thinks, so the JUnit report is read after the run and any test case in
+      # it that skipped fails the step (as does a report with no test in it).
+      - name: Sienna tests, with no skip allowed
+        working-directory: server
+        env:
+          TENSA_SIENNA_PROJECT: ${{ runner.temp }}/sienna/dyn
+        run: |
+          python -m pytest -m sienna tests/integration -rs --junitxml="$RUNNER_TEMP/sienna-junit.xml"
+          python - "$RUNNER_TEMP/sienna-junit.xml" <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          cases = list(ET.parse(sys.argv[1]).iter("testcase"))
+          skipped = [c for c in cases if c.find("skipped") is not None]
+          for case in skipped:
+              print(f"skipped: {case.get('classname')}.{case.get('name')}", file=sys.stderr)
+          print(f"{len(cases)} Sienna tests in the report, {len(skipped)} skipped")
+          sys.exit(1 if skipped or not cases else 0)
+          EOF

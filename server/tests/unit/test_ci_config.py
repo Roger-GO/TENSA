@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -629,6 +630,115 @@ def test_every_test_id_fits_in_a_windows_environment_variable(
         if len(f"PYTEST_CURRENT_TEST={item.nodeid} (teardown)") > _WINDOWS_ENV_MAX
     ]
     assert too_long == []
+
+
+_SIENNA_WORKFLOW = _WORKFLOWS / "sienna.yml"
+_SIENNA_MANIFEST = (
+    REPO_ROOT / "server" / "src" / "tensa" / "engines" / "sienna" / "envs" / "dyn" / "Manifest.toml"
+)
+
+
+def _sienna_workflow() -> dict[str, Any]:
+    return _load_required(_SIENNA_WORKFLOW)
+
+
+def _sienna_step_using(action: str) -> dict[str, Any]:
+    steps = _sienna_workflow()["jobs"]["sienna"]["steps"]
+    (step,) = [step for step in steps if str(step.get("uses", "")).startswith(action + "@")]
+    return step
+
+
+def test_the_sienna_workflow_exists_parses_and_triggers_on_the_server_push_branches() -> None:
+    """The engine's tests skip in every other job, so this workflow is what holds
+    Sienna on CI. Its push branches are server.yml's exactly, the temporary
+    branch included, so an engine change on such a branch is tested there."""
+    workflow = _sienna_workflow()
+    assert workflow["name"] == "sienna"
+    assert "sienna" in workflow["jobs"]
+    triggers = _triggers(workflow)
+    server_branches = _triggers(_workflow())["push"]["branches"]
+    assert triggers["push"]["branches"] == server_branches
+    assert "pull_request" in triggers
+    assert "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "read"}
+
+
+def test_the_sienna_workflow_installs_the_julia_the_packaged_manifest_was_resolved_for() -> None:
+    """The setup refuses a Julia whose major.minor is not the Manifest's, so the
+    workflow's Julia must be the Manifest's. The test reads ``julia_version`` from
+    the Manifest itself, so a re-resolved Manifest cannot leave CI on another
+    Julia, and the depot's cache key names the Julia the job installs."""
+    manifest = tomllib.loads(_read_required(_SIENNA_MANIFEST))
+    major_minor = ".".join(str(manifest["julia_version"]).split(".")[:2])
+    version = str(_sienna_step_using("julia-actions/setup-julia")["with"]["version"])
+    assert version.startswith(major_minor + "."), (version, manifest["julia_version"])
+    assert f"julia-{version}-" in _sienna_step_using("actions/cache")["with"]["key"]
+
+
+def test_the_sienna_depot_cache_key_hashes_the_manifest_and_names_a_real_path() -> None:
+    """The depot is only wanted for the Manifest it was built from, so the key
+    hashes it and has no restore-keys. A key that named a moved file would hash
+    nothing and silently share one depot across Manifests."""
+    options = _sienna_step_using("actions/cache")["with"]
+    assert options["path"] == "~/.julia"
+    assert "restore-keys" not in options
+    hashed = re.search(r"hashFiles\('([^']+)'\)", options["key"])
+    assert hashed is not None, options["key"]
+    assert hashed.group(1) == _SIENNA_MANIFEST.relative_to(REPO_ROOT).as_posix()
+    assert _SIENNA_MANIFEST.is_file()
+
+
+def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> None:
+    """The project's own command sets the environment up before any test runs,
+    the Julia module's own test file runs against it, and pytest selects the
+    tests marked sienna with the project named. The job must not set
+    TENSA_SIENNA_SKIP_STAMP, which would let a half-set-up project pass for
+    ready, and a test that skips fails the job (the JUnit report is read)."""
+    job = _sienna_workflow()["jobs"]["sienna"]
+    steps = job["steps"]
+    warm = _step_index(steps, "tensa warm-cache --engine sienna")
+    julia_tests = _step_index(steps, "server/tests/julia/runtests.jl")
+    pytest_tests = _step_index(steps, "pytest -m sienna")
+    assert warm < julia_tests < pytest_tests
+    assert (REPO_ROOT / "server" / "tests" / "julia" / "runtests.jl").is_file()
+    assert "TENSA_SIENNA_PROJECT" in steps[pytest_tests]["env"]
+    assert "--junitxml" in steps[pytest_tests]["run"]
+    assert '.find("skipped")' in steps[pytest_tests]["run"]
+    # The steps pipe into tee, which hides a failure unless bash runs with
+    # pipefail, and GitHub gives it that only when the shell is named.
+    assert job["defaults"]["run"]["shell"] == "bash"
+    assert "TENSA_SIENNA_SKIP_STAMP" not in _read_required(_SIENNA_WORKFLOW)
+
+
+def test_the_sienna_job_passes_pytest_no_option_of_a_plugin_the_dev_extra_lacks() -> None:
+    """``--timeout`` is pytest-timeout's, which is not a dependency of the
+    project: on a runner pytest would stop on the unknown option."""
+    run = _run_text(_sienna_workflow()["jobs"]["sienna"])
+    dev = " ".join(pyproject()["project"]["optional-dependencies"]["dev"])
+    if "pytest-timeout" not in dev:
+        assert "--timeout" not in run
+
+
+def _matches_a_file(pattern: str) -> bool:
+    """Whether a workflow ``paths`` pattern matches a file of the checkout. A
+    pattern ending in ``/**`` matches every file under its folder."""
+    if pattern.endswith("/**"):
+        folder = REPO_ROOT / pattern.removesuffix("/**")
+        return folder.is_dir() and any(path.is_file() for path in folder.rglob("*"))
+    return any(path.is_file() for path in REPO_ROOT.glob(pattern))
+
+
+def test_every_path_filter_of_the_sienna_workflow_matches_an_existing_file() -> None:
+    """A paths filter that names a moved file matches nothing, and the job then
+    never runs for the change it was written for, with no error anywhere. Each
+    filter must match at least one file that is in the repository, and the push
+    and pull request filters are the same list."""
+    triggers = _triggers(_sienna_workflow())
+    filters = triggers["push"]["paths"]
+    assert filters == triggers["pull_request"]["paths"]
+    assert filters, "the sienna workflow has no paths filters"
+    for pattern in filters:
+        assert _matches_a_file(pattern), f"paths filter {pattern!r} matches no file"
 
 
 def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_artifact() -> None:
