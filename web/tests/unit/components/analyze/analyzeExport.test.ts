@@ -190,6 +190,38 @@ describe('cpfResultToCsv', () => {
     );
     expect(text).toContain('# the lower branch stops before it is back at the base load\n');
   });
+
+  it('says a run to a target stopped there, or met the nose first, and calls neither truncated', async () => {
+    const reached = await readBlob(
+      cpfResultToCsv({
+        ...pv,
+        truncated: true,
+        nose_idx: -1,
+        complete: true,
+        stop_at: 'nose',
+        done_msg: 'Reached target lambda=1',
+        stop_at_lambda: 1,
+      }),
+    );
+    expect(reached).not.toContain('truncated');
+    expect(reached).toContain(
+      '# Reached target lambda=1\n# stopped at the target lambda = 1, as asked, before any nose\n',
+    );
+
+    const short = await readBlob(
+      cpfResultToCsv({
+        ...pv,
+        complete: false,
+        stop_at: 'nose',
+        done_msg: 'Nose point at lambda=1.000000, short of the target lambda=3',
+        stop_at_lambda: 3,
+      }),
+    );
+    expect(short).toContain(
+      '# the nose came before the target lambda = 3, and the run ended there\n',
+    );
+    expect(short).not.toContain('lower branch');
+  });
 });
 
 describe('cpfGeneratorsToCsv', () => {

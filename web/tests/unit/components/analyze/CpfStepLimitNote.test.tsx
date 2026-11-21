@@ -61,6 +61,29 @@ describe('<CpfStepLimitNote />', () => {
     expect(note).toHaveTextContent('More steps take it further.');
   });
 
+  it('names the target of a run to one that ran out of steps, and says nothing of one that reached it', () => {
+    const { rerender } = render(
+      <CpfStepLimitNote result={{ ...CUT_SHORT, stop_at_lambda: 400 }} onRunAgain={vi.fn()} />,
+    );
+    expect(screen.getByTestId('cpf-step-limit-note')).toHaveTextContent(
+      'stopped at λ = 247.2766, before it reached the nose or its target λ = 400.',
+    );
+    rerender(
+      <CpfStepLimitNote
+        result={{
+          ...CUT_SHORT,
+          lambdas: [0, 100, 200],
+          max_lam: 200,
+          complete: true,
+          done_msg: 'Reached target lambda=200',
+          stop_at_lambda: 200,
+        }}
+        onRunAgain={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('cpf-step-limit-note')).not.toBeInTheDocument();
+  });
+
   it('runs again with four times the steps', async () => {
     const onRunAgain = vi.fn();
     render(<CpfStepLimitNote result={CUT_SHORT} onRunAgain={onRunAgain} />);

@@ -80,7 +80,7 @@ describe('<CpfConfigPanel />', () => {
     expect(screen.queryByTestId('cpf-config-advanced')).not.toBeInTheDocument();
   });
 
-  it('shows the four directions and the lower-branch box without opening anything', () => {
+  it('shows the four directions and the stop-at radios without opening anything', () => {
     renderPanel(vi.fn());
     for (const direction of ['load', 'load-only', 'gen', 'custom']) {
       expect(screen.getByTestId(`cpf-config-direction-${direction}`)).toBeInTheDocument();
@@ -89,7 +89,11 @@ describe('<CpfConfigPanel />', () => {
     expect(screen.getByLabelText(/Loads only/)).toBe(
       screen.getByTestId('cpf-config-direction-load-only'),
     );
+    expect(screen.getByTestId('cpf-config-stop-at-nose')).toBeChecked();
     expect(screen.getByTestId('cpf-config-lower-branch')).not.toBeChecked();
+    expect(screen.getByTestId('cpf-config-stop-at-target')).not.toBeChecked();
+    // The target-lambda field is there only while the target stop is chosen.
+    expect(screen.queryByTestId('field-cpf-config-stop-at-lambda')).not.toBeInTheDocument();
     // The tables of a custom direction are there only when it is chosen.
     expect(screen.queryByTestId('cpf-direction-editor')).not.toBeInTheDocument();
   });
@@ -155,6 +159,242 @@ describe('<CpfConfigPanel />', () => {
     await user.click(screen.getByTestId('analyze-run-cpf'));
 
     expect(onRun).toHaveBeenCalledWith({ direction: 'load-only', stopAt: 'full' });
+  });
+
+  it('sends no solver setting the user left blank', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    const overrides = onRun.mock.calls[0]![0] as Record<string, unknown>;
+    expect(overrides).toEqual({ direction: 'load' });
+    for (const key of [
+      'parameterization',
+      'tol',
+      'correctorMaxIter',
+      'stepMin',
+      'stepMax',
+      'stopAtLambda',
+    ]) {
+      expect(overrides).not.toHaveProperty(key);
+    }
+  });
+
+  it('passes the parameterization through, and the clear button takes it back', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.click(screen.getByTestId('cpf-config-parameterization-natural'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({ direction: 'load', parameterization: 'natural' });
+
+    await user.click(screen.getByTestId('cpf-config-parameterization-clear'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({ direction: 'load' });
+  });
+
+  it('passes the tolerance through, and refuses one looser than 1e-4', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.type(screen.getByTestId('field-cpf-config-tol'), '0.0001');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({ direction: 'load', tol: 0.0001 });
+
+    await user.clear(screen.getByTestId('field-cpf-config-tol'));
+    await user.type(screen.getByTestId('field-cpf-config-tol'), '0.001');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'Tolerance must be at most 1e-4.',
+    );
+    // The offending field is behind the disclosure, which opens on it.
+    expect(screen.getByTestId('cpf-config-advanced')).toBeInTheDocument();
+  });
+
+  it('holds the corrector iterations to an integer of at least 2', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.type(screen.getByTestId('field-cpf-config-corrector-max-iter'), '1');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'Corrector iterations must be an integer of at least 2.',
+    );
+
+    await user.clear(screen.getByTestId('field-cpf-config-corrector-max-iter'));
+    await user.type(screen.getByTestId('field-cpf-config-corrector-max-iter'), '5');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledWith({ direction: 'load', correctorMaxIter: 5 });
+  });
+
+  it('refuses a minimum step above the maximum, and passes the two through in order', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.type(screen.getByTestId('field-cpf-config-step-min'), '0.1');
+    await user.type(screen.getByTestId('field-cpf-config-step-max'), '0.01');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'Minimum step must not be above maximum step.',
+    );
+
+    await user.clear(screen.getByTestId('field-cpf-config-step-min'));
+    await user.clear(screen.getByTestId('field-cpf-config-step-max'));
+    await user.type(screen.getByTestId('field-cpf-config-step-min'), '0.01');
+    await user.type(screen.getByTestId('field-cpf-config-step-max'), '0.1');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledWith({ direction: 'load', stepMin: 0.01, stepMax: 0.1 });
+  });
+
+  it('a target stop shows its lambda field and sends the number, never with stopAt', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-stop-at-target'));
+    expect(screen.getByTestId('field-cpf-config-stop-at-lambda')).toBeInTheDocument();
+    await user.type(screen.getByTestId('field-cpf-config-stop-at-lambda'), '2.5');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledWith({ direction: 'load', stopAtLambda: 2.5 });
+  });
+
+  it('a target stop without a positive lambda is refused', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-stop-at-target'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'Target λ must be a positive number.',
+    );
+
+    await user.type(screen.getByTestId('field-cpf-config-stop-at-lambda'), '0');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent(
+      'Target λ must be a positive number.',
+    );
+  });
+
+  it('refuses the natural parameterization with the full curve before sending', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.click(screen.getByTestId('cpf-config-parameterization-natural'));
+    await user.click(screen.getByTestId('cpf-config-lower-branch'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    expect(screen.getByTestId('cpf-config-error')).toHaveTextContent('cannot trace the full curve');
+  });
+
+  it('refuses natural with the full curve in either order, and lets go when either changes', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    // The full curve first, then the parameterization.
+    await user.click(screen.getByTestId('cpf-config-lower-branch'));
+    await user.click(screen.getByTestId('cpf-config-advanced-toggle'));
+    await user.click(screen.getByTestId('cpf-config-parameterization-natural'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    const natural = screen.getByTestId('cpf-config-parameterization-natural');
+    const message = screen.getByTestId('error-cpf-config-parameterization');
+    expect(message).toHaveTextContent(
+      'The natural parameterization cannot trace the full curve: choose another parameterization, or stop at the nose or at a target λ.',
+    );
+    expect(natural).toHaveAttribute('aria-describedby', message.id);
+
+    // Another parameterization clears it.
+    await user.click(screen.getByTestId('cpf-config-parameterization-arclength'));
+    expect(screen.queryByTestId('cpf-config-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('error-cpf-config-parameterization')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({
+      direction: 'load',
+      stopAt: 'full',
+      parameterization: 'arclength',
+    });
+
+    // Natural again is refused again; stopping at the nose clears it.
+    await user.click(screen.getByTestId('cpf-config-parameterization-natural'));
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('cpf-config-error')).toBeInTheDocument();
+    await user.click(screen.getByTestId('cpf-config-stop-at-nose'));
+    expect(screen.queryByTestId('cpf-config-error')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({ direction: 'load', parameterization: 'natural' });
+  });
+
+  it('the stop-at choice is one named radio group with a legend, and a target is sent as a number', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    const group = screen.getByRole('group', { name: 'Where to stop' });
+    const radios = [
+      screen.getByTestId('cpf-config-stop-at-nose'),
+      screen.getByTestId('cpf-config-lower-branch'),
+      screen.getByTestId('cpf-config-stop-at-target'),
+    ];
+    for (const radio of radios) {
+      expect(group).toContainElement(radio);
+      expect(radio).toHaveAttribute('type', 'radio');
+      expect(radio).toHaveAttribute('name', 'cpf-config-stop-at');
+    }
+    expect(screen.getByLabelText(/Full curve/)).toBe(radios[1]);
+
+    await user.click(radios[2]!);
+    await user.type(screen.getByLabelText('Target λ'), '1.75');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    const overrides = onRun.mock.calls[0]![0] as CpfRunOverrides;
+    expect(typeof overrides.stopAtLambda).toBe('number');
+    expect(overrides.stopAtLambda).toBe(1.75);
+    expect(overrides).not.toHaveProperty('stopAt');
+
+    // Back to the full curve: the string as before, and no target.
+    await user.click(radios[1]!);
+    expect(radios[1]).toBeChecked();
+    expect(radios[0]).not.toBeChecked();
+    expect(radios[2]).not.toBeChecked();
+    expect(screen.queryByTestId('field-cpf-config-stop-at-lambda')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).toHaveBeenLastCalledWith({ direction: 'load', stopAt: 'full' });
+  });
+
+  it('a refused target shows by its field and leaves Advanced shut', async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    renderPanel(onRun);
+
+    await user.click(screen.getByTestId('cpf-config-stop-at-target'));
+    await user.type(screen.getByTestId('field-cpf-config-stop-at-lambda'), '-2');
+    await user.click(screen.getByTestId('analyze-run-cpf'));
+    expect(onRun).not.toHaveBeenCalled();
+    const field = screen.getByTestId('field-cpf-config-stop-at-lambda');
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field.getAttribute('aria-describedby')).toContain('cpf-config-stop-at-lambda-error');
+    expect(screen.getByTestId('error-cpf-config-stop-at-lambda')).toHaveTextContent(
+      'Target λ must be a positive number.',
+    );
+    expect(screen.queryByTestId('cpf-config-advanced')).not.toBeInTheDocument();
   });
 
   it('a custom direction shows the loads and generators and hands over what was typed', async () => {

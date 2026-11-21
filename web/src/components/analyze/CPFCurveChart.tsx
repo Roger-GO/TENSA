@@ -12,8 +12,11 @@ import {
   hasLowerBranch,
   lambdaMeaning,
   limitName,
+  noseBeforeTarget,
+  reachedTarget,
   stepLimitReached,
   switchedAlongThePath,
+  targetLambda,
 } from '@/lib/cpfOptions';
 import type { CpfResult } from '@/api/types';
 import type { ResolvedTheme } from '@/store/theme';
@@ -97,6 +100,8 @@ import type { ResolvedTheme } from '@/store/theme';
  * - ``data-testid="cpf-curve-lower-{busIdx}"`` a bus's lower branch.
  * - ``data-testid="cpf-limit-marker-{model}-{idx}"`` a generator's limit marker.
  * - ``data-testid="cpf-incomplete-banner"`` a lower branch that broke off.
+ * - ``data-testid="cpf-target-reached-note"`` a run that stopped at its target lambda.
+ * - ``data-testid="cpf-target-short-banner"`` a run whose nose came before its target.
  */
 export interface CPFCurveChartProps {
   /** Override for tests; usually pulled from the analyze store. */
@@ -327,6 +332,8 @@ function runCaption(result: CpfResult): string | null {
   if (result.mode === 'qv') return limits;
   const parts = [directionLabel(result.direction), lambdaMeaning(result.direction), limits];
   if (result.stop_at === 'full') parts.push('full curve');
+  const target = targetLambda(result);
+  if (target !== null) parts.push(`stop at λ = ${target}`);
   return parts.join(' · ');
 }
 
@@ -433,7 +440,12 @@ export function CPFCurveChart({
   const limitMarkers = switchedAlongThePath(result);
   // A lower branch that broke off: the curve has its nose, and stops short of
   // the base load.
-  const incomplete = !result.truncated && result.complete === false;
+  // A run given a target lambda ends at it (with no nose, so ``truncated``) or
+  // at the nose short of it (``complete`` false): neither is a curve cut short.
+  const target = targetLambda(result);
+  const atTarget = reachedTarget(result);
+  const shortOfTarget = noseBeforeTarget(result);
+  const incomplete = !result.truncated && result.complete === false && !shortOfTarget;
   // Set when either of the two is down to the run having used up its steps.
   const stepLimit = stepLimitReached(result);
   const caption = runCaption(result);
@@ -519,7 +531,9 @@ export function CPFCurveChart({
           CPF {result.mode === 'qv' ? 'QV-curve' : 'PV-curve / nose-curve'} —{' '}
           {result.lambdas.length} steps, max {result.mode === 'qv' ? 'Q' : 'lambda'} ={' '}
           {result.max_lam.toFixed(4)}
-          {!result.truncated ? null : (
+          {!result.truncated ? null : atTarget ? (
+            ' (at the target)'
+          ) : (
             <>
               {' '}
               <span className="text-warning-foreground">(truncated)</span>
@@ -536,7 +550,16 @@ export function CPFCurveChart({
         />
       </div>
 
-      {result.truncated ? (
+      {atTarget ? (
+        <div
+          data-testid="cpf-target-reached-note"
+          role="status"
+          className="border-border text-foreground border-b px-2 py-1 text-[10px] leading-snug"
+        >
+          The run stopped at the target λ = {target}, as asked, before it reached a nose. The
+          voltage-collapse margin lies beyond it, so this run does not give it.
+        </div>
+      ) : result.truncated ? (
         <div
           data-testid="cpf-truncated-banner"
           role="status"
@@ -545,10 +568,27 @@ export function CPFCurveChart({
             'border-b px-2 py-1 text-[10px] leading-snug',
           )}
         >
-          The run ended before it reached a nose.{' '}
+          {target !== null
+            ? `The run ended before it reached a nose or its target λ = ${target}.`
+            : 'The run ended before it reached a nose.'}{' '}
           {result.done_msg ? `Reason: ${result.done_msg}.` : null} The curve is drawn as far as the
           run got, so the voltage-collapse margin is not known.
           {stepLimit !== null ? ` ${MORE_STEPS_ADVICE}` : null}
+        </div>
+      ) : null}
+
+      {shortOfTarget ? (
+        <div
+          data-testid="cpf-target-short-banner"
+          role="status"
+          className={cn(
+            'border-warning/40 bg-warning/10 text-foreground',
+            'border-b px-2 py-1 text-[10px] leading-snug',
+          )}
+        >
+          The nose came before the target λ = {target}, so the run ended at the nose, λ ={' '}
+          {result.max_lam.toFixed(4)}: no operating point reaches the target. The nose and the upper
+          branch are complete.
         </div>
       ) : null}
 
@@ -800,7 +840,9 @@ export function CPFCurveChart({
             y={PADDING_TOP + 12}
             className="fill-foreground text-[9px]"
           >
-            {`Truncated at λ_max=${result.max_lam.toFixed(2)} (no nose found)`}
+            {atTarget
+              ? `Stopped at the target λ=${target} (no nose before it)`
+              : `Truncated at λ_max=${result.max_lam.toFixed(2)} (no nose found)`}
           </text>
         ) : null}
       </svg>

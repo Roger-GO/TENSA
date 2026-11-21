@@ -283,6 +283,16 @@ export interface EigParticipationResponse {
  *   ``stop_at`` asked (with ``truncated`` false: a lower branch that broke
  *   off).
  * - ``direction`` — what lambda increased on a PV run; ``null`` for QV.
+ * - ``parameterization`` — the corrector's step-length equation the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``tol`` — the corrector's tolerance the run used; ``null`` when the
+ *   case's setting was kept.
+ * - ``corrector_max_iter`` — the corrector iterations per step the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``step_min`` / ``step_max`` — the continuation step bounds the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``stop_at_lambda`` — the target lambda a run asked for; ``null`` when
+ *   none was.
  *
  * The fields after ``mode`` are optional here because a result kept from
  * before they existed does not have them; the server always sends them.
@@ -302,6 +312,18 @@ export interface CpfResult {
   stop_at?: 'nose' | 'full';
   complete?: boolean;
   direction?: CpfDirection | null;
+  /** The corrector's step-length equation the run used; `null` when the case's setting was kept. */
+  parameterization?: ('natural' | 'arclength' | 'pseudo_arclength') | null;
+  /** The corrector's tolerance the run used; `null` when the case's setting was kept. */
+  tol?: number | null;
+  /** The corrector iterations per step the run used; `null` when the case's setting was kept. */
+  corrector_max_iter?: number | null;
+  /** The smallest continuation step the run used; `null` when the case's setting was kept. */
+  step_min?: number | null;
+  /** The largest continuation step the run used; `null` when the case's setting was kept. */
+  step_max?: number | null;
+  /** The target lambda a run asked for; `null` when none was. */
+  stop_at_lambda?: number | null;
 }
 
 /** One PV or slack generator's reactive output along a CPF path. */

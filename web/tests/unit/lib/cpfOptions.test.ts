@@ -17,12 +17,16 @@ import {
   lambdaMeaning,
   limitsSummary,
   moreSteps,
+  noseBeforeTarget,
   noseLimitEvent,
   parseCustomDirection,
   parseIncrease,
+  reachedTarget,
   releaseCaution,
   stepLimitReached,
   switchedAlongThePath,
+  targetLambda,
+  validateCpfAdvanced,
   wouldHaveReleased,
 } from '@/lib/cpfOptions';
 import type {
@@ -95,6 +99,43 @@ describe('cpfRequestBody', () => {
     expect(cpfRequestBody({ direction: 'gen', stopAt: 'nose' })).toEqual({ direction: 'gen' });
   });
 
+  it('sends the new solver settings only when given', () => {
+    expect(cpfRequestBody({ direction: 'load', parameterization: 'natural' })).toEqual({
+      direction: 'load',
+      parameterization: 'natural',
+    });
+    expect(cpfRequestBody({ direction: 'load', tol: 0.0001 })).toEqual({
+      direction: 'load',
+      tol: 0.0001,
+    });
+    expect(cpfRequestBody({ direction: 'load', correctorMaxIter: 10 })).toEqual({
+      direction: 'load',
+      corrector_max_iter: 10,
+    });
+    expect(cpfRequestBody({ direction: 'load', stepMin: 0.001, stepMax: 0.1 })).toEqual({
+      direction: 'load',
+      step_min: 0.001,
+      step_max: 0.1,
+    });
+  });
+
+  it('writes no key at all for a setting left out', () => {
+    // toEqual passes over a key whose value is undefined; the body must not have one.
+    expect(Object.keys(cpfRequestBody({ direction: 'load' }))).toEqual(['direction']);
+  });
+
+  it('sends a target lambda as a number on the stop_at wire field', () => {
+    expect(cpfRequestBody({ direction: 'load', stopAtLambda: 2.5 })).toEqual({
+      direction: 'load',
+      stop_at: 2.5,
+    });
+    // The two never both go out; the full curve alone is unchanged.
+    expect(cpfRequestBody({ direction: 'load', stopAt: 'full' })).toEqual({
+      direction: 'load',
+      stop_at: 'full',
+    });
+  });
+
   it('carries the lists of a custom direction, and of no other', () => {
     const loadIncrease = [{ idx: 'PQ_1', p: 10, q: 3 }];
     const generatorIncrease = [{ idx: '2', p: 10 }];
@@ -111,6 +152,66 @@ describe('cpfRequestBody', () => {
     expect(cpfRequestBody({ direction: 'custom', loadIncrease, generatorIncrease: [] })).toEqual({
       direction: 'custom',
       load_increase: loadIncrease,
+    });
+  });
+});
+
+describe('validateCpfAdvanced', () => {
+  it('accepts all-blank fields with the nose stop', () => {
+    expect(validateCpfAdvanced('', 'nose', '', '', '', '', '')).toEqual({});
+  });
+
+  it('refuses the natural parameterization with the full curve', () => {
+    const errors = validateCpfAdvanced('natural', 'full', '', '', '', '', '');
+    expect(errors.parameterization).toMatch(/cannot trace the full curve/);
+    expect(validateCpfAdvanced('natural', 'nose', '', '', '', '', '')).toEqual({});
+    expect(validateCpfAdvanced('arclength', 'full', '', '', '', '', '')).toEqual({});
+  });
+
+  it('refuses a target stop without a positive lambda', () => {
+    for (const text of ['', '0', 'abc', '-1']) {
+      expect(validateCpfAdvanced('', 'target', text, '', '', '', '')).toEqual({
+        stopAtLambda: 'Target λ must be a positive number.',
+      });
+    }
+    expect(validateCpfAdvanced('', 'target', '2.5', '', '', '', '')).toEqual({});
+    // The lambda is only read while the target stop is chosen.
+    expect(validateCpfAdvanced('', 'nose', 'abc', '', '', '', '')).toEqual({});
+  });
+
+  it('holds the tolerance to a positive number of at most 1e-4', () => {
+    expect(validateCpfAdvanced('', 'nose', '', '0.001', '', '', '')).toEqual({
+      tol: 'Tolerance must be at most 1e-4.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', '0.0001', '', '', '')).toEqual({});
+    expect(validateCpfAdvanced('', 'nose', '', '-1', '', '', '')).toEqual({
+      tol: 'Tolerance must be a positive number.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', 'abc', '', '', '')).toEqual({
+      tol: 'Tolerance must be a positive number.',
+    });
+  });
+
+  it('holds the corrector iterations to an integer of at least 2', () => {
+    expect(validateCpfAdvanced('', 'nose', '', '', '1', '', '')).toEqual({
+      correctorMaxIter: 'Corrector iterations must be an integer of at least 2.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', '', '2.5', '', '')).toEqual({
+      correctorMaxIter: 'Corrector iterations must be an integer of at least 2.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', '', '2', '', '')).toEqual({});
+  });
+
+  it('holds the step bounds to positive numbers, the minimum not above the maximum', () => {
+    expect(validateCpfAdvanced('', 'nose', '', '', '', '0.1', '0.01')).toEqual({
+      stepMin: 'Minimum step must not be above maximum step.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', '', '', '0.01', '0.1')).toEqual({});
+    expect(validateCpfAdvanced('', 'nose', '', '', '', '-1', '')).toEqual({
+      stepMin: 'Minimum step must be a positive number.',
+    });
+    expect(validateCpfAdvanced('', 'nose', '', '', '', '', '0')).toEqual({
+      stepMax: 'Maximum step must be a positive number.',
     });
   });
 });
@@ -397,5 +498,47 @@ describe('reading a result', () => {
     expect(
       wouldHaveReleased(result({ limit_events: [event({ would_release_step: 0 })] })),
     ).toHaveLength(1);
+  });
+});
+
+describe('a run to a target lambda', () => {
+  it('reads the target, and tells a run that reached it from one whose nose came first', () => {
+    // No target: none of it applies, whatever the run found.
+    expect(targetLambda(result())).toBeNull();
+    expect(targetLambda(result({ stop_at_lambda: null }))).toBeNull();
+    expect(reachedTarget(result({ truncated: true, nose_idx: -1, complete: true }))).toBe(false);
+    expect(noseBeforeTarget(result({ complete: false }))).toBe(false);
+
+    // Landed on the target below the nose: no nose, so truncated, and complete.
+    const reached = result({
+      lambdas: [0, 0.2, 0.3],
+      nose_idx: -1,
+      truncated: true,
+      complete: true,
+      stop_at: 'nose',
+      stop_at_lambda: 0.3,
+    });
+    expect(targetLambda(reached)).toBe(0.3);
+    expect(reachedTarget(reached)).toBe(true);
+    expect(noseBeforeTarget(reached)).toBe(false);
+    expect(stepLimitReached(reached)).toBeNull();
+
+    // The nose came first: the nose found, not complete.
+    const short = result({ complete: false, stop_at: 'nose', stop_at_lambda: 3 });
+    expect(reachedTarget(short)).toBe(false);
+    expect(noseBeforeTarget(short)).toBe(true);
+    expect(hasLowerBranch(short)).toBe(false);
+
+    // Out of steps before either: neither.
+    const cut = result({
+      nose_idx: -1,
+      truncated: true,
+      complete: false,
+      done_msg: 'Reached max steps (3)',
+      stop_at_lambda: 3,
+    });
+    expect(reachedTarget(cut)).toBe(false);
+    expect(noseBeforeTarget(cut)).toBe(false);
+    expect(stepLimitReached(cut)).toBe(3);
   });
 });

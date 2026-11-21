@@ -16,6 +16,9 @@ import {
   hasLowerBranch,
   lambdaMeaning,
   limitName,
+  noseBeforeTarget,
+  reachedTarget,
+  targetLambda,
 } from '@/lib/cpfOptions';
 import type { CpfResult, EigResult, ParticipationFactor, SeResult } from '@/api/types';
 
@@ -99,7 +102,16 @@ function cpfComments(result: CpfResult): string[] {
       `full curve: steps 0 to ${result.nose_idx} are the upper branch, the rest the lower branch`,
     );
   }
-  if (!result.truncated && result.complete === false) {
+  const target = targetLambda(result);
+  if (target !== null) {
+    if (reachedTarget(result)) {
+      comments.push(`stopped at the target lambda = ${target}, as asked, before any nose`);
+    } else if (noseBeforeTarget(result)) {
+      comments.push(`the nose came before the target lambda = ${target}, and the run ended there`);
+    } else {
+      comments.push(`target lambda = ${target}, not reached`);
+    }
+  } else if (!result.truncated && result.complete === false) {
     comments.push('the lower branch stops before it is back at the base load');
   }
   return comments;
@@ -125,7 +137,9 @@ export function cpfResultToCsv(result: CpfResult): Blob {
       (generators.length > 0 ? ', generator reactive power in MVAr' : ''),
     `max ${isQv ? 'Q' : 'lambda'} = ${result.max_lam}`,
   ];
-  if (result.truncated) comments.push('truncated: no nose point was reached');
+  if (result.truncated && !reachedTarget(result)) {
+    comments.push('truncated: no nose point was reached');
+  }
   if (result.done_msg) comments.push(result.done_msg);
   comments.push(...cpfComments(result));
   return recordsToCsv({
