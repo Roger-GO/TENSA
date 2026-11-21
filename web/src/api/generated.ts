@@ -557,6 +557,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/tds/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initialise the time-domain simulation without running it, and report the initialisation diagnostics.
+         * @description Runs ANDES's ``TDS.init()`` and stops before the first step: every
+         *     dynamic model is initialised from the power flow (which runs first if it
+         *     has not), and the answer says whether the initialisation test passed and,
+         *     when the case did not start from a steady state, which variables were
+         *     clamped at a limit and which equations kept a residual. The session is left
+         *     set up and initialised: disturbances and edits are refused until a reload,
+         *     as after a first run, and the next run carries on from this
+         *     initialisation. A quick check rather than a run, so no job is recorded.
+         */
+        post: operations["initTds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/dae-variables": {
         parameters: {
             query?: never;
@@ -1328,7 +1355,8 @@ export interface paths {
          *     Failure modes mapped to 422:
          *
          *     - Under-determined measurement set (gain matrix singular).
-         *     - WLS non-convergent within ``config.max_iter``.
+         *     - Estimator non-convergent within ``config.max_iter``.
+         *     - An invalid run option (``SeOptionError``).
          */
         post: operations["runSe"];
         delete?: never;
@@ -2255,6 +2283,37 @@ export interface components {
              * @description Number of generators (static generators, slack included).
              */
             generators: number;
+        };
+        /**
+         * ChiSquaredTest
+         * @description The chi-squared bad-data test on the SE objective ``J`` (WLS only).
+         */
+        ChiSquaredTest: {
+            /**
+             * Passed
+             * @description ``True`` when ``J`` is below the threshold: no bad data detected at this confidence.
+             */
+            passed: boolean;
+            /**
+             * J
+             * @description The WLS objective ``sum(r_i^2 / sigma_i^2)`` the test ran on (equal to ``mismatch``).
+             */
+            J: number;
+            /**
+             * Threshold
+             * @description The chi-squared quantile at ``confidence`` with ``dof`` degrees of freedom; ``J`` is compared against it.
+             */
+            threshold: number;
+            /**
+             * Dof
+             * @description Degrees of freedom, ``measurement_count - 2 * <bus count>``; ``measurement_count`` includes the angle-reference pseudo-measurement, which stands in for the one state it fixes.
+             */
+            dof: number;
+            /**
+             * Confidence
+             * @description The confidence level the threshold was taken at (0.95).
+             */
+            confidence: number;
         };
         /** Citation */
         Citation: {
@@ -5088,12 +5147,12 @@ export interface components {
             converged: boolean;
             /**
              * Iterations
-             * @description Number of WLS Gauss-Newton iterations to convergence. ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim.
+             * @description Number of iterations to convergence (Gauss-Newton for WLS, reweighted steps for LAV). ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim.
              */
             iterations: number;
             /**
              * Mismatch
-             * @description Final WLS objective ``J = sum(w * r^2)``. Smaller is better; the chi-squared test on ``J`` (not surfaced yet) flags whether the measurement set fits the model at a given confidence level.
+             * @description Final objective ``J``: for WLS ``sum(r^2 / sigma^2)``, which ``chi_squared`` tests against its distribution; for LAV ``sum(|r| / sigma)``. Smaller is better.
              */
             mismatch: number;
             /**
@@ -5112,6 +5171,15 @@ export interface components {
              */
             flagged_indices: number[];
             /**
+             * Algorithm
+             * @description The estimator the run used (``"wls"`` or ``"lav"``); ``null`` only from a server that predates the choice, which always ran WLS.
+             */
+            algorithm?: ("wls" | "lav") | null;
+            /** @description The ``tol``, ``max_iter`` and ``noise_seed`` the run used (the effective values, after any per-run override). */
+            settings?: components["schemas"]["SeRunSettings"] | null;
+            /** @description The chi-squared bad-data test on the objective ``J`` at 95% confidence; ``null`` for LAV runs, where ``J`` does not follow a chi-squared distribution. */
+            chi_squared?: components["schemas"]["ChiSquaredTest"] | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the SE run routine (kind ``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
@@ -5121,12 +5189,57 @@ export interface components {
          * SeRunRequest
          * @description Request body for ``POST /sessions/{id}/se``.
          *
-         *     Empty body — the substrate's ``Wrapper.run_se`` reads the cached
-         *     measurement set from the prior generate call. Kept as a model so
-         *     the route can declare ``extra="forbid"`` and reject typos forward-
+         *     Every field is optional and applies to this run only; a body that
+         *     names none behaves exactly as before (WLS with the case's
+         *     ``SE.config`` defaults and the generate step's noise draw). Kept as
+         *     a model with ``extra="forbid"`` so typos are rejected forward-
          *     compatibly.
          */
-        SeRunRequest: Record<string, never>;
+        SeRunRequest: {
+            /**
+             * Algorithm
+             * @description The estimator. ``"wls"`` (default) is weighted least squares (Gauss-Newton); ``"lav"`` is least absolute value via iteratively reweighted least squares, robust to gross measurement errors. LAV converges linearly and often needs more than the default 100 iterations when a measurement is bad, so raise ``max_iter`` with it (a run that runs out answers 422). The chi-squared test is only computed for WLS.
+             */
+            algorithm?: ("wls" | "lav") | null;
+            /**
+             * Tol
+             * @description Convergence tolerance on the max absolute state correction for this run only. ``None`` keeps the case's ``SE.config.tol`` (ANDES default 1e-4).
+             */
+            tol?: number | null;
+            /**
+             * Max Iter
+             * @description Maximum iterations for this run only. ``None`` keeps the case's ``SE.config.max_iter`` (ANDES default 100).
+             */
+            max_iter?: number | null;
+            /**
+             * Noise Seed
+             * @description When set, this run's measurement values are drawn afresh from the power flow solution with this seed (the noise is drawn here, as the generate step draws it), over the cached set's measurements and sigmas; the cached values are left as the generate step made them. The same seed gives the same run. ``None`` runs on the cached values.
+             */
+            noise_seed?: number | null;
+        };
+        /**
+         * SeRunSettings
+         * @description The settings a state-estimation run used: the request's where it gave
+         *     one, the case's ``SE.config`` (ANDES's default unless the case file sets
+         *     one) where it did not.
+         */
+        SeRunSettings: {
+            /**
+             * Tol
+             * @description Convergence tolerance on the max absolute state correction.
+             */
+            tol: number;
+            /**
+             * Max Iter
+             * @description Iteration limit.
+             */
+            max_iter: number;
+            /**
+             * Noise Seed
+             * @description The seed this run's measurement noise was drawn with; ``null`` when the run used the cached values from the generate step.
+             */
+            noise_seed?: number | null;
+        };
         /**
          * SeriesMetrics
          * @description What one signal's response metrics came to. Either ``error`` says why it
@@ -5856,6 +5969,131 @@ export interface components {
              * @description The device's state of charge (``pIG_y``); ``null`` for a model without one.
              */
             soc?: string | null;
+        };
+        /**
+         * TdsInitClamp
+         * @description One variable clamped at a limit during TDS initialisation.
+         */
+        TdsInitClamp: {
+            /**
+             * Model
+             * @description ANDES model of the clamped variable.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description Idx of the device, as a string.
+             */
+            idx: string;
+            /**
+             * Var
+             * @description The clamped variable's name within the model.
+             */
+            var: string;
+            /**
+             * Limit Name
+             * @description The name of the limit parameter.
+             */
+            limit_name: string;
+            /**
+             * Limit Val
+             * @description The limit's value.
+             */
+            limit_val: number;
+            /**
+             * Unconstr
+             * @description The unconstrained value ANDES computed for the variable.
+             */
+            unconstr: number;
+        };
+        /**
+         * TdsInitRequest
+         * @description Request body for ``POST /sessions/{id}/tds/init``.
+         */
+        TdsInitRequest: {
+            /**
+             * Test Init
+             * @description Whether ANDES checks the initialisation residuals against ``TDS.config.tol``, gives its verdict in ``test_ok`` and logs the clamped limits and mismatched equations to the session messages when the check fails. ``false`` initialises without the check: ``test_ok`` is then ``null``, and ``clamped`` and ``residuals`` still list what the System shows. Applies to this call only; the case's own setting is put back.
+             * @default true
+             */
+            test_init: boolean;
+        };
+        /**
+         * TdsInitResidual
+         * @description One equation with a non-zero residual after TDS initialisation.
+         */
+        TdsInitResidual: {
+            /**
+             * Name
+             * @description The variable's ``dae.xy_name`` name.
+             */
+            name: string;
+            /**
+             * Mismatch
+             * @description The equation's residual; ``null`` when the residual is NaN.
+             */
+            mismatch: number | null;
+            /**
+             * Equation
+             * @description ANDES's equation string, empty where the model gives none.
+             */
+            equation: string;
+        };
+        /**
+         * TdsInitResult
+         * @description Result of ``POST /sessions/{id}/tds/init``.
+         */
+        TdsInitResult: {
+            /**
+             * Initialized
+             * @description ``true`` means the System is ready for a time-domain run and a later ``POST /tds`` (or a streamed run) continues from this initialisation, with the integrator it names (QNDF included): its record starts at the first step rather than at 0 s, and it is reported as not converged when ``test_ok`` is ``false``. With a fixed step it solves the steps a run from scratch does; the two variable-step integrators choose other steps before the first event, and the same steps after it.
+             */
+            initialized: boolean;
+            /**
+             * Test Ok
+             * @description ``null`` when the request's ``test_init`` was false and ANDES did not check (it does not mean the case initialised cleanly: read ``residuals``); otherwise the verdict of ANDES's residual test. ``false`` means initialisation residuals reach ``TDS.config.tol`` or are NaN, and the two lists name the causes (clamped variables) and the effects (equations with nonzero residuals), the same tables ANDES logs.
+             */
+            test_ok?: boolean | null;
+            /**
+             * Test Init
+             * @description The ``test_init`` setting the call used, as the pflow result's ``settings`` does.
+             */
+            test_init: boolean;
+            /**
+             * N States
+             * @description Number of state variables (``dae.n``).
+             */
+            n_states: number;
+            /**
+             * N Algeb
+             * @description Number of algebraic variables (``dae.m``).
+             */
+            n_algeb: number;
+            /**
+             * Max Residual
+             * @description The largest absolute initialisation residual that is a number, over the equations ANDES checks; 0 when there are none.
+             */
+            max_residual: number;
+            /**
+             * Nan Residuals
+             * @description How many initialisation residuals are NaN.
+             */
+            nan_residuals: number;
+            /**
+             * Clamped
+             * @description Variables clamped at limits during initialisation, read from the limiters whether or not the test ran. A clamp can stand on a case that passes the test. Empty when nothing clamped.
+             */
+            clamped?: components["schemas"]["TdsInitClamp"][];
+            /**
+             * Residuals
+             * @description Equations whose initialisation residual reaches ``TDS.config.tol`` or is NaN, by the rule of ANDES's test, listed whether or not the test ran. Empty when the case initialised to a steady state.
+             */
+            residuals?: components["schemas"]["TdsInitResidual"][];
+            /**
+             * Diagnostics Truncated
+             * @description ``true`` when ``clamped`` or ``residuals`` was cut at 500 rows; when the test ran and failed, the full tables are in the session messages.
+             */
+            diagnostics_truncated: boolean;
         };
         /**
          * TdsRunRequest
@@ -7882,6 +8120,59 @@ export interface operations {
             };
         };
     };
+    initTds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TdsInitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TdsInitResult"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The power flow did not converge, TDS.init raised, the case has no dynamic models, or the System is already initialised, by this route, a run or an eigenvalue analysis (the detail says which; call POST /api/sessions/{id}/reload to initialise again). A failed initialisation test is not an error: it answers 200 with test_ok false. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     listDaeVariables: {
         parameters: {
             query?: {
@@ -9411,7 +9702,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Either: (a) the measurement set is under-determined (insufficient redundancy; gain matrix singular), or (b) the WLS Gauss-Newton did not converge within ``config.max_iter``. */
+            /** @description Either: (a) the measurement set is under-determined (insufficient redundancy; gain matrix singular), (b) the estimator did not converge within ``config.max_iter``, or (c) an invalid option (``SeOptionError``: unknown algorithm, non-positive tol, max_iter below 1, negative seed). */
             422: {
                 headers: {
                     [name: string]: unknown;
