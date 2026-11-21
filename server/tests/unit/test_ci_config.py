@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -774,3 +776,200 @@ def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_a
     # The action writes the PDF beside the paper, and the upload must read it from there.
     assert steps[upload]["with"]["path"] == "paper/paper.pdf"
     assert steps[upload]["with"]["if-no-files-found"] == "error"
+
+
+def _sienna_step_running(needle: str) -> str:
+    steps = _sienna_workflow()["jobs"]["sienna"]["steps"]
+    return str(steps[_step_index(steps, needle)]["run"])
+
+
+def _heredoc_after(run: str, opener: str) -> str:
+    """The Python a step feeds to ``python -`` through the heredoc that starts on
+    the line holding ``opener``. YAML has already taken the block's indentation
+    off, so the script is as the runner's python reads it."""
+    lines = run.splitlines()
+    (start,) = [i for i, line in enumerate(lines) if opener in line]
+    end = lines.index("EOF", start + 1)
+    return "\n".join(lines[start + 1 : end]) + "\n"
+
+
+def _run_script(script: str, *args: str) -> tuple[int, list[str]]:
+    done = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    return done.returncode, done.stdout.splitlines()
+
+
+def _read_sienna_report(tmp_path: Path, report: str | None, status: int) -> tuple[int, list[str]]:
+    script = _heredoc_after(_sienna_step_running("pytest -m sienna"), "<<'EOF' || report=$?")
+    path = tmp_path / "junit.xml"
+    if report is not None:
+        path.write_text(report, encoding="utf-8")
+    return _run_script(script, str(path), str(status))
+
+
+def _junit(case: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest">'
+        f"{case}</testsuite></testsuites>"
+    )
+
+
+def test_the_sienna_test_step_reads_the_report_whatever_pytest_returned() -> None:
+    """The job runs bash with -e, so a pytest that fails would end the step before
+    the report is read, and the job's only public output, its annotations, would
+    say nothing but the exit code. The step keeps pytest's status, reads the
+    report, and still ends with pytest's status when that failed."""
+    lines = _sienna_step_running("pytest -m sienna").splitlines()
+    (pytest_line,) = [line for line in lines if "python -m pytest -m sienna" in line]
+    assert pytest_line.rstrip().endswith("|| status=$?")
+    assert "junit_logging=system-err" in pytest_line
+    reader = next(i for i, line in enumerate(lines) if "<<'EOF' || report=$?" in line)
+    assert lines.index(pytest_line) < reader
+    assert '"$status"' in lines[reader]
+    assert lines[-4:] == [
+        'if [ "$status" -ne 0 ]; then',
+        '  exit "$status"',
+        "fi",
+        'exit "$report"',
+    ]
+
+
+def test_the_sienna_report_reader_passes_a_clean_run(tmp_path: Path) -> None:
+    passed = _junit('<testcase classname="tests.integration.test_x" name="test_ok" time="1"/>')
+    assert _read_sienna_report(tmp_path, passed, 0) == (
+        0,
+        ["1 Sienna tests in the report, 0 failed, 0 skipped"],
+    )
+
+
+def test_the_sienna_report_reader_writes_a_failure_as_an_escaped_error_annotation(
+    tmp_path: Path,
+) -> None:
+    """A failure becomes one ``::error`` line: the title is the test id with ``:``
+    and ``,`` escaped as a property, and the message is the failure's message,
+    the lines pytest marks with E, the end of the traceback and the end of the
+    test's stderr, with ``%`` and the line breaks escaped as data."""
+    traceback = (
+        "def test_bad():\n"
+        ">       assert ratio == '100%'\n"
+        "E       AssertionError: a: b, c\n"
+        "E       assert '50%' == '100%'\n"
+        "\n"
+        "tests/integration/test_x.py:3: AssertionError"
+    )
+    failed = _junit(
+        '<testcase classname="tests.integration.test_x" name="test_bad[a,b:c]" time="1">'
+        f'<failure message="AssertionError: a: b, c">{traceback}</failure>'
+        "<system-err>julia: one\njulia: two</system-err>"
+        "</testcase>"
+    )
+    message = "%0A".join(
+        [
+            "AssertionError: a: b, c",
+            "",
+            "E       AssertionError: a: b, c",
+            "E       assert '50%25' == '100%25'",
+            "",
+            "def test_bad():",
+            ">       assert ratio == '100%25'",
+            "E       AssertionError: a: b, c",
+            "E       assert '50%25' == '100%25'",
+            "",
+            "tests/integration/test_x.py:3: AssertionError",
+            "",
+            "stderr:",
+            "julia: one",
+            "julia: two",
+        ]
+    )
+    assert _read_sienna_report(tmp_path, failed, 1) == (
+        1,
+        [
+            f"::error title=tests.integration.test_x.test_bad[a%2Cb%3Ac]::{message}",
+            "1 Sienna tests in the report, 1 failed, 0 skipped",
+        ],
+    )
+
+
+def test_the_sienna_report_reader_fails_a_skip_and_warns_of_it(tmp_path: Path) -> None:
+    skipped = _junit(
+        '<testcase classname="tests.integration.test_x" name="test_skip" time="0">'
+        '<skipped type="pytest.skip" message="no julia: at 100%">reason</skipped>'
+        "</testcase>"
+    )
+    assert _read_sienna_report(tmp_path, skipped, 0) == (
+        1,
+        [
+            "::warning title=tests.integration.test_x.test_skip::skipped: no julia: at 100%25",
+            "1 Sienna tests in the report, 0 failed, 1 skipped",
+        ],
+    )
+
+
+def test_the_sienna_report_reader_fails_a_pytest_failure_the_report_does_not_name(
+    tmp_path: Path,
+) -> None:
+    """pytest can fail with every test case passed (an error at the end of the
+    session) or write no report at all; either is an error the annotations say."""
+    passed = _junit('<testcase classname="tests.integration.test_x" name="test_ok" time="1"/>')
+    assert _read_sienna_report(tmp_path, passed, 3) == (
+        1,
+        [
+            "::error title=pytest::pytest exited with status 3 and the report names no failed test",
+            "1 Sienna tests in the report, 0 failed, 0 skipped",
+        ],
+    )
+    (tmp_path / "none").mkdir()
+    assert _read_sienna_report(tmp_path / "none", None, 4) == (
+        1,
+        ["::error title=pytest::pytest exited with status 4 and wrote no report"],
+    )
+
+
+def test_the_sienna_report_reader_keeps_an_annotation_short(tmp_path: Path) -> None:
+    long = _junit(
+        '<testcase classname="t" name="test_long" time="1">'
+        f'<failure message="{"x" * 4000}">tb</failure></testcase>'
+    )
+    status, out = _read_sienna_report(tmp_path, long, 1)
+    assert status == 1
+    (error,) = [line for line in out if line.startswith("::error")]
+    message = error.split("::", 2)[2]
+    assert len(message.replace("%0A", "\n")) == 1500
+    assert message.endswith("%0A...")
+
+
+def test_the_julia_test_step_writes_a_failure_as_an_error_annotation(tmp_path: Path) -> None:
+    """The Julia step keeps julia's status the same way, and a failure or a SKIP
+    line becomes an ``::error`` that carries the end of the log."""
+    run = _sienna_step_running("server/tests/julia/runtests.jl")
+    (julia_line,) = [line for line in run.splitlines() if "runtests.jl" in line]
+    assert "2>&1 | tee" in julia_line
+    assert julia_line.rstrip().endswith("|| status=$?")
+    script = _heredoc_after(run, "\"$status\" <<'EOF'")
+    log = tmp_path / "julia.log"
+
+    def read(text: str, status: int) -> tuple[int, list[str]]:
+        log.write_text(text, encoding="utf-8")
+        return _run_script(script, str(log), str(status))
+
+    assert read("Test Summary: | Pass\nall: 3\n", 0) == (0, [])
+    assert read("one\nTest Failed at x.jl:3\n", 1) == (
+        1,
+        [
+            "::error title=Julia module tests::julia exited with status 1%0A...%0A"
+            "one%0ATest Failed at x.jl:3"
+        ],
+    )
+    assert read("SKIP case.raw\nok\n", 0) == (
+        1,
+        [
+            "::error title=Julia module tests::the Julia tests skipped checks%0A"
+            "SKIP case.raw%0A...%0ASKIP case.raw%0Aok"
+        ],
+    )

@@ -92,33 +92,111 @@ jobs:
       # cases folder. The file exits non-zero when a test fails. It prints a line
       # starting with SKIP for a case file missing from the folder, which here
       # means the ANDES install is not what the job thinks, so that fails too.
+      # The log of a job cannot be read without signing in, but its annotations
+      # can, so a failure is also written as an error annotation that carries the
+      # end of the log. Julia's status is kept rather than left to -e, which would
+      # end the step before the annotation is written.
       - name: Julia module tests
         run: |
           cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
-          julia --project="$RUNNER_TEMP/sienna/dyn" server/tests/julia/runtests.jl "$cases" | tee "$RUNNER_TEMP/julia-tests.log"
-          if grep '^SKIP ' "$RUNNER_TEMP/julia-tests.log"; then
-            echo "the Julia tests skipped the checks above" >&2
-            exit 1
-          fi
+          status=0
+          julia --project="$RUNNER_TEMP/sienna/dyn" server/tests/julia/runtests.jl "$cases" 2>&1 | tee "$RUNNER_TEMP/julia-tests.log" || status=$?
+          python - "$RUNNER_TEMP/julia-tests.log" "$status" <<'EOF'
+          import sys
+          from pathlib import Path
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          status = int(sys.argv[2])
+          skips = [line for line in lines if line.startswith("SKIP ")]
+          problem = ""
+          if status != 0:
+              problem = f"julia exited with status {status}"
+          elif skips:
+              problem = "the Julia tests skipped checks"
+          if problem:
+              tail = "\n".join([problem, *skips[:10], "...", *lines[-30:]])[-1500:]
+              tail = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Julia module tests::{tail}")
+          sys.exit(1 if problem else 0)
+          EOF
 
       # The Python tests that need Julia, against the project set up above. A
       # skipped test in this job means the environment is not what the job
       # thinks, so the JUnit report is read after the run and any test case in
       # it that skipped fails the step (as does a report with no test in it).
+      # The report is read whatever pytest's status, so pytest's is kept rather
+      # than left to -e, and each failed or errored test is written as an error
+      # annotation and each skipped one as a warning: the annotations are the
+      # one part of a run that can be read without signing in. The failure text
+      # in an annotation is the message, the lines pytest marks with E (the
+      # assertion) and the end of the traceback, and the end of what the test
+      # wrote to stderr, which the report holds because of junit_logging.
       - name: Sienna tests, with no skip allowed
         working-directory: server
         env:
           TENSA_SIENNA_PROJECT: ${{ runner.temp }}/sienna/dyn
         run: |
-          python -m pytest -m sienna tests/integration -rs --junitxml="$RUNNER_TEMP/sienna-junit.xml"
-          python - "$RUNNER_TEMP/sienna-junit.xml" <<'EOF'
+          status=0
+          python -m pytest -m sienna tests/integration -rs -o junit_logging=system-err --junitxml="$RUNNER_TEMP/sienna-junit.xml" || status=$?
+          report=0
+          python - "$RUNNER_TEMP/sienna-junit.xml" "$status" <<'EOF' || report=$?
           import sys
           import xml.etree.ElementTree as ET
+          from pathlib import Path
 
-          cases = list(ET.parse(sys.argv[1]).iter("testcase"))
-          skipped = [c for c in cases if c.find("skipped") is not None]
-          for case in skipped:
-              print(f"skipped: {case.get('classname')}.{case.get('name')}", file=sys.stderr)
-          print(f"{len(cases)} Sienna tests in the report, {len(skipped)} skipped")
-          sys.exit(1 if skipped or not cases else 0)
+          LIMIT = 1500
+
+
+          def data(text):
+              return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+          def prop(text):
+              return data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+          def annotate(level, test, text):
+              if len(text) > LIMIT:
+                  text = text[: LIMIT - 4] + "\n..."
+              print(f"::{level} title={prop(test)}::{data(text)}")
+
+
+          def failure_text(element, case):
+              lines = (element.text or "").splitlines()
+              marked = [line for line in lines if line.startswith("E ")]
+              parts = [element.get("message") or element.tag]
+              if marked:
+                  parts += ["", *marked[:12]]
+              parts += ["", *lines[-8:]]
+              stderr = case.find("system-err")
+              if stderr is not None and (stderr.text or "").strip():
+                  parts += ["", "stderr:", *stderr.text.strip().splitlines()[-6:]]
+              return "\n".join(parts)
+
+
+          path = Path(sys.argv[1])
+          status = int(sys.argv[2])
+          if not path.is_file():
+              annotate("error", "pytest", f"pytest exited with status {status} and wrote no report")
+              sys.exit(1)
+          cases = list(ET.parse(path).iter("testcase"))
+          failed = skipped = 0
+          for case in cases:
+              test = f"{case.get('classname')}.{case.get('name')}"
+              for tag in ("failure", "error"):
+                  for element in case.findall(tag):
+                      failed += 1
+                      annotate("error", test, failure_text(element, case))
+              skip = case.find("skipped")
+              if skip is not None:
+                  skipped += 1
+                  annotate("warning", test, "skipped: " + (skip.get("message") or ""))
+          if status != 0 and not failed:
+              annotate("error", "pytest", f"pytest exited with status {status} and the report names no failed test")
+          print(f"{len(cases)} Sienna tests in the report, {failed} failed, {skipped} skipped")
+          sys.exit(1 if failed or skipped or not cases or status != 0 else 0)
           EOF
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          exit "$report"
