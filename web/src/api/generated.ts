@@ -2910,10 +2910,9 @@ export interface components {
             redo?: components["schemas"]["EditStep"] | null;
             /**
              * Has Dynamics
-             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``.
-             * @default false
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``. This server always sends true or false; ``null`` only means a server that does not report it.
              */
-            has_dynamics: boolean;
+            has_dynamics?: boolean | null;
             /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
@@ -5726,10 +5725,9 @@ export interface components {
             redo?: components["schemas"]["EditStep"] | null;
             /**
              * Has Dynamics
-             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``.
-             * @default false
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``. This server always sends true or false; ``null`` only means a server that does not report it.
              */
-            has_dynamics: boolean;
+            has_dynamics?: boolean | null;
             /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
