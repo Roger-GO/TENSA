@@ -5,7 +5,7 @@
  * (the topology reads `committed`, so every place that says a run has fixed the
  * system says it), while a refused one changes nothing.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -35,6 +35,13 @@ import { useRunsStore } from '@/store/runs';
 import { useSessionStore } from '@/store/session';
 
 const SESSION_ID = parseSessionId('sess-init');
+
+// The result dialog is a chunk of its own, fetched when it first opens. Fetched
+// here, so a test waits for its mount and not for a cold import that takes
+// longer than a wait while the whole suite runs.
+beforeAll(async () => {
+  await import('@/components/tds/TdsInitResultDialog');
+});
 
 function topology(state: 'pre-setup' | 'committed'): TopologySummary {
   return {

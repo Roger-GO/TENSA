@@ -72,6 +72,10 @@ import { arrowFrame } from '../../helpers/frames';
 // load it once so the waits below measure the flow and not the first import.
 beforeAll(async () => {
   await loadArrowDecoder();
+  // The Check initialisation dialog is a chunk of its own, fetched when it
+  // first opens. Fetched here, so a test waits for its mount and not for a
+  // cold import that takes longer than a wait while the whole suite runs.
+  await import('@/components/tds/TdsInitResultDialog');
 });
 
 const SESSION_ID = 'sess-1';
@@ -2953,6 +2957,20 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     expect(vars).not.toHaveProperty('testInit');
   });
 
+  it('the result dialog loads on first open: nothing of it is mounted until a check answers', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('tds-init-check'));
+    expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
+  });
+
   it('a successful check opens the dialog with the result and leaves Run TDS enabled', async () => {
     seedReady();
     const { Wrapper } = makeWrapper();
@@ -2962,7 +2980,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
-    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('tds-init-verdict')).toHaveTextContent(
       'Every dynamic model starts at a steady state.',
     );
@@ -2987,7 +3005,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     act(() => {
       tdsInitHandlers.onError?.(error);
     });
-    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
         'The initialisation could not be checked: the system is already initialised',
@@ -3005,7 +3023,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     act(() => {
       tdsInitHandlers.onError?.(new Error('socket hang up'));
     });
-    expect(screen.getByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
       'The initialisation could not be checked:',
     );
@@ -3024,6 +3042,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
+    await screen.findByTestId('tds-init-dialog');
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
     const check = screen.getByTestId('tds-init-check');
@@ -3059,7 +3078,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
     act(() => {
       tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
     });
-    await userEvent.click(screen.getByTestId('tds-init-close'));
+    await userEvent.click(await screen.findByTestId('tds-init-close'));
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
     // The button is disabled now, so the span that carries its reason has the focus.
     expect(document.activeElement).toContainElement(screen.getByTestId('tds-init-check'));
@@ -3082,6 +3101,7 @@ describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
         }),
       );
     });
+    await screen.findByTestId('tds-init-dialog');
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
     expect(screen.getByTestId('tds-init-check')).toBeEnabled();

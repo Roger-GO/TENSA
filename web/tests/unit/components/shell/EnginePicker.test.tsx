@@ -6,7 +6,7 @@
  * closes the case. Sienna is made available here with a stand-in list, since
  * the server does not have it yet; the switch path is the same.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -33,6 +33,13 @@ import { useRunsStore } from '@/store/runs';
 import { useEditJournalStore } from '@/store/editJournal';
 
 const del = vi.mocked(andesClient.delete);
+
+// The confirm is a chunk of its own, fetched when it first opens. Fetched here,
+// so a test waits for its mount and not for a cold import that takes longer
+// than a wait while the whole suite runs.
+beforeAll(async () => {
+  await import('@/components/shell/SwitchEngineConfirmDialog');
+});
 
 const FRESH_SESSION = {
   sessionId: null,
@@ -310,6 +317,17 @@ describe('<EnginePicker /> switching with a case open', () => {
     live();
     act(() => useCaseStore.getState().setCase(CASE));
   }
+
+  it('the confirm loads on first open: nothing of it is mounted until a switch asks', async () => {
+    const user = userEvent.setup();
+    openCase();
+    renderPicker();
+    expect(screen.queryByTestId('switch-engine-confirm')).toBeNull();
+    await openMenu(user);
+    expect(screen.queryByTestId('switch-engine-confirm')).toBeNull();
+    await user.click(option('sienna'));
+    expect(await screen.findByTestId('switch-engine-confirm')).toBeInTheDocument();
+  });
 
   it('asks first, and says the case will be closed', async () => {
     const user = userEvent.setup();

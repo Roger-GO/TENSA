@@ -16,7 +16,8 @@ import {
   loadOperatingPointIntoStore,
 } from '@/api/queries';
 import type { TdsInitResult } from '@/api/types';
-import { TdsInitResultDialog } from '@/components/tds/TdsInitResultDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { ProblemDetailsError } from '@/api/client';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { runHeldNotice } from '@/lib/runLock';
@@ -47,6 +48,14 @@ import { describeScenario } from '@/lib/runLabel';
 import { runDaeVars, summariseResults } from '@/lib/tdsControllers';
 import { stemOf } from '@/lib/paths';
 import { cn } from '@/lib/cn';
+
+// The answer of Check initialisation is its own chunk, fetched the first time
+// a check answers: the run button is on the first screen, the dialog is not.
+const TdsInitResultDialog = lazyNamed(
+  () => import('@/components/tds/TdsInitResultDialog'),
+  'TdsInitResultDialog',
+  'overlay',
+);
 
 /**
  * RunButton (v0.2). The top-bar primary action that consolidates v0.1's
@@ -900,25 +909,27 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
         ) : null}
         {modeSelector}
       </div>
-      <TdsInitResultDialog
-        open={tdsInitOpen}
-        onOpenChange={setTdsInitOpen}
-        result={tdsInitResult}
-        error={tdsInitError}
-        discardsEdits={reloadDiscardsEdits}
-        onResetRun={onReset}
-        resetting={resetRun.isPending}
-        disturbancesListed={disturbances.length > 0}
-        onCloseAutoFocus={(event) => {
-          // The button was disabled while the check ran, so Radix has nothing
-          // of its own to give the focus back to.
-          const target = checkFocusRef.current;
-          if (target !== null && target.isConnected) {
-            event.preventDefault();
-            target.focus();
-          }
-        }}
-      />
+      <LazyMount when={tdsInitOpen} onLoadFailed={() => setTdsInitOpen(false)}>
+        <TdsInitResultDialog
+          open={tdsInitOpen}
+          onOpenChange={setTdsInitOpen}
+          result={tdsInitResult}
+          error={tdsInitError}
+          discardsEdits={reloadDiscardsEdits}
+          onResetRun={onReset}
+          resetting={resetRun.isPending}
+          disturbancesListed={disturbances.length > 0}
+          onCloseAutoFocus={(event) => {
+            // The button was disabled while the check ran, so Radix has nothing
+            // of its own to give the focus back to.
+            const target = checkFocusRef.current;
+            if (target !== null && target.isConnected) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
+        />
+      </LazyMount>
     </>
   );
 }

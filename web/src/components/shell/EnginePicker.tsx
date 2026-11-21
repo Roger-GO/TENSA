@@ -12,7 +12,7 @@
  * (`useSessionRecovery.ts`) closes the session and sets the engine, and the
  * recovery driver creates the next session. A session belongs to one engine,
  * so the switch closes the case; with a case open the user confirms first
- * (`SwitchEngineConfirmDialog`). While a power flow runs, a switch is held
+ * (`SwitchEngineConfirmDialog`, loaded on first open). While a power flow runs, a switch is held
  * back with the words Change case uses; a time-domain run or a sweep under
  * way is stopped by it, as by Change case, and the confirm says so.
  *
@@ -21,7 +21,8 @@
  */
 import { useRef, useState } from 'react';
 import { TopBarMenu, TopBarMenuItem, TopBarMenuLabel } from '@/components/shell/TopBarMenu';
-import { SwitchEngineConfirmDialog } from '@/components/shell/SwitchEngineConfirmDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { startSessionOver } from '@/api/useSessionRecovery';
 import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
@@ -31,6 +32,14 @@ import { useSweepStore } from '@/store/sweep';
 import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
 import { DEFAULT_ENGINE, engineLabel } from '@/lib/engines';
 import { toast } from '@/lib/toast';
+
+// The confirm is its own chunk, fetched the first time a switch asks for it:
+// the picker is on the first screen, the confirm is not.
+const SwitchEngineConfirmDialog = lazyNamed(
+  () => import('@/components/shell/SwitchEngineConfirmDialog'),
+  'SwitchEngineConfirmDialog',
+  'overlay',
+);
 
 /** Why no engine can be chosen now, or null when one can. */
 function switchBlockedReason(args: {
@@ -158,14 +167,16 @@ export function EnginePicker() {
           })
         )}
       </TopBarMenu>
-      <SwitchEngineConfirmDialog
-        engine={pending}
-        unsavedEdits={cloneEdits || journalEdits}
-        runUnderWay={runStreaming || sweepRunning}
-        onCancel={() => setPending(null)}
-        onConfirm={confirm}
-        returnFocus={returnFocus}
-      />
+      <LazyMount when={pending !== null} onLoadFailed={() => setPending(null)}>
+        <SwitchEngineConfirmDialog
+          engine={pending}
+          unsavedEdits={cloneEdits || journalEdits}
+          runUnderWay={runStreaming || sweepRunning}
+          onCancel={() => setPending(null)}
+          onConfirm={confirm}
+          returnFocus={returnFocus}
+        />
+      </LazyMount>
     </span>
   );
 }

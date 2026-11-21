@@ -121,6 +121,8 @@ const LAZY_MODULES = [
   'components/case/SaveSystemDialog.tsx',
   'components/examples/ExampleCasesDialog.tsx',
   'components/examples/ExampleCard.tsx',
+  'components/shell/SwitchEngineConfirmDialog.tsx',
+  'components/tds/TdsInitResultDialog.tsx',
   'components/disturbance/AddEventDialog.tsx',
   'components/disturbance/DisturbanceForm.tsx',
   // What answers a failed run, fetched once a case is open.
