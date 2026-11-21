@@ -33,6 +33,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "redo_edit",
             "delete_element",
             "run_pflow",
+            "init_tds",
             "alterable_params",
             "supported_models",
             "model_doc",

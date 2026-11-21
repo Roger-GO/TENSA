@@ -461,6 +461,122 @@ class DaeVariableList(BaseModel):
     )
 
 
+class TdsInitRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/tds/init``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_init: bool = Field(
+        True,
+        description=(
+            "Whether ANDES checks the initialisation residuals against "
+            "``TDS.config.tol``, gives its verdict in ``test_ok`` and logs the "
+            "clamped limits and mismatched equations to the session messages "
+            "when the check fails. ``false`` initialises without the check: "
+            "``test_ok`` is then ``null``, and ``clamped`` and ``residuals`` "
+            "still list what the System shows. Applies to this call only; the "
+            "case's own setting is put back."
+        ),
+    )
+
+
+class TdsInitClamp(BaseModel):
+    """One variable clamped at a limit during TDS initialisation."""
+
+    model: str = Field(..., description="ANDES model of the clamped variable.")
+    idx: str = Field(..., description="Idx of the device, as a string.")
+    var: str = Field(..., description="The clamped variable's name within the model.")
+    limit_name: str = Field(..., description="The name of the limit parameter.")
+    limit_val: float = Field(..., description="The limit's value.")
+    unconstr: float = Field(
+        ..., description="The unconstrained value ANDES computed for the variable."
+    )
+
+
+class TdsInitResidual(BaseModel):
+    """One equation with a non-zero residual after TDS initialisation."""
+
+    name: str = Field(..., description="The variable's ``dae.xy_name`` name.")
+    mismatch: float | None = Field(
+        ...,
+        description="The equation's residual; ``null`` when the residual is NaN.",
+    )
+    equation: str = Field(
+        ...,
+        description="ANDES's equation string, empty where the model gives none.",
+    )
+
+
+class TdsInitResult(BaseModel):
+    """Result of ``POST /sessions/{id}/tds/init``."""
+
+    initialized: bool = Field(
+        ...,
+        description=(
+            "``true`` means the System is ready for a time-domain run and a "
+            "later ``POST /tds`` (or a streamed run) continues from this "
+            "initialisation, with the integrator it names (QNDF included): its "
+            "record starts at the first step rather than at 0 s, and it is "
+            "reported as not converged when ``test_ok`` is ``false``. With a "
+            "fixed step it solves the steps a run from scratch does; the two "
+            "variable-step integrators choose other steps before the first "
+            "event, and the same steps after it."
+        ),
+    )
+    test_ok: bool | None = Field(
+        default=None,
+        description=(
+            "``null`` when the request's ``test_init`` was false and ANDES did "
+            "not check (it does not mean the case initialised cleanly: read "
+            "``residuals``); otherwise the verdict of ANDES's residual test. "
+            "``false`` means initialisation residuals reach ``TDS.config.tol`` "
+            "or are NaN, and the two lists name the causes (clamped variables) "
+            "and the effects (equations with nonzero residuals), the same "
+            "tables ANDES logs."
+        ),
+    )
+    test_init: bool = Field(
+        ...,
+        description="The ``test_init`` setting the call used, as the pflow result's ``settings`` does.",
+    )
+    n_states: int = Field(..., description="Number of state variables (``dae.n``).")
+    n_algeb: int = Field(..., description="Number of algebraic variables (``dae.m``).")
+    max_residual: float = Field(
+        ...,
+        description=(
+            "The largest absolute initialisation residual that is a number, over "
+            "the equations ANDES checks; 0 when there are none."
+        ),
+    )
+    nan_residuals: int = Field(
+        ..., description="How many initialisation residuals are NaN."
+    )
+    clamped: list[TdsInitClamp] = Field(
+        default_factory=list,
+        description=(
+            "Variables clamped at limits during initialisation, read from the "
+            "limiters whether or not the test ran. A clamp can stand on a case "
+            "that passes the test. Empty when nothing clamped."
+        ),
+    )
+    residuals: list[TdsInitResidual] = Field(
+        default_factory=list,
+        description=(
+            "Equations whose initialisation residual reaches ``TDS.config.tol`` "
+            "or is NaN, by the rule of ANDES's test, listed whether or not the "
+            "test ran. Empty when the case initialised to a steady state."
+        ),
+    )
+    diagnostics_truncated: bool = Field(
+        ...,
+        description=(
+            "``true`` when ``clamped`` or ``residuals`` was cut at 500 rows; "
+            "when the test ran and failed, the full tables are in the session "
+            "messages."
+        ),
+    )
+
+
 class AbortResponse(BaseModel):
     """Response body for ``POST /sessions/{id}/abort``.
 

@@ -27,6 +27,10 @@ from tensa.api.schemas import (
     TdsBatchResult,
     TdsControllerCatalogue,
     TdsControllerResult,
+    TdsInitClamp,
+    TdsInitRequest,
+    TdsInitResidual,
+    TdsInitResult,
     TdsRunRequest,
     TdsTraces,
     TdsTraceSeries,
@@ -225,6 +229,83 @@ async def run_tds(
             if controllers
             else None
         ),
+    )
+
+
+# parity-reviewed: 2026-11-21. No web surface initialises without a run yet; the
+# route is for scripts and agents, and will later be a pre-flight check beside
+# the run button of the run controls.
+@router.post(
+    "/sessions/{session_id}/tds/init",
+    openapi_extra={
+        "x-tensa-gui-location": "none",
+        "x-tensa-parity-deferred": (
+            "No web surface initialises the time-domain run without running it "
+            "yet; the route is for scripts and agents. It will later be a "
+            "pre-flight check beside the run button of the run controls."
+        ),
+    },
+    operation_id="initTds",
+    summary="Initialise the time-domain simulation without running it, and report the initialisation diagnostics.",
+    response_model=TdsInitResult,
+    responses={
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": "No case has been loaded into this session.",
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "The power flow did not converge, TDS.init raised, the case has "
+                "no dynamic models, or the System is already initialised, by "
+                "this route, a run or an eigenvalue analysis (the detail says "
+                "which; call POST /api/sessions/{id}/reload to initialise again)."
+                " A failed initialisation test is not an error: it answers 200 "
+                "with test_ok false."
+            ),
+        },
+    },
+)
+async def init_tds(
+    session_id: str,
+    request: Request,
+    body: TdsInitRequest = TdsInitRequest(test_init=True),
+) -> TdsInitResult:
+    """Runs ANDES's ``TDS.init()`` and stops before the first step: every
+    dynamic model is initialised from the power flow (which runs first if it
+    has not), and the answer says whether the initialisation test passed and,
+    when the case did not start from a steady state, which variables were
+    clamped at a limit and which equations kept a residual. The session is left
+    set up and initialised: disturbances and edits are refused until a reload,
+    as after a first run, and the next run carries on from this
+    initialisation. A quick check rather than a run, so no job is recorded."""
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(
+            session_id,
+            "init_tds",
+            {"test_init": body.test_init},
+            timeout=300.0,
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _to_http_error(exc) from exc
+    return TdsInitResult(
+        initialized=bool(payload["initialized"]),
+        test_ok=payload["test_ok"],
+        test_init=bool(payload["test_init"]),
+        n_states=int(payload["n_states"]),
+        n_algeb=int(payload["n_algeb"]),
+        max_residual=float(payload["max_residual"]),
+        nan_residuals=int(payload["nan_residuals"]),
+        clamped=[TdsInitClamp(**row) for row in payload["clamped"]],
+        residuals=[TdsInitResidual(**row) for row in payload["residuals"]],
+        diagnostics_truncated=bool(payload["diagnostics_truncated"]),
     )
 
 

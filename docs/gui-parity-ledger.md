@@ -22,7 +22,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `inspector` | 9 |
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
-| `none` | 9 |
+| `none` | 10 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -30,7 +30,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `snapshot-dialog` | 4 |
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
-| **total** | **77** |
+| **total** | **78** |
 
 ## OpenAPI routes
 
@@ -103,6 +103,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/sweep` | `sweep-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/tds` | `none` | Batch (synchronous) TDS; the GUI runs TDS exclusively through the streaming WS channel (/ws/{session_id}) for live plotting. The batch POST is retained for CLI/agent/scripted use. |
 | `GET` | `/api/sessions/{session_id}/tds/controllers` | `run-controls` |  |
+| `POST` | `/api/sessions/{session_id}/tds/init` | `none` | No web surface initialises the time-domain run without running it yet; the route is for scripts and agents. It will later be a pre-flight check beside the run button of the run controls. |
 | `GET` | `/api/sessions/{session_id}/topology` | `workspace` |  |
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |

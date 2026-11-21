@@ -89,6 +89,20 @@ TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrat
                  GET /sessions/{id}/tds/controllers  (the devices of the loaded case a controller can command, each with
                  "p_limit" in MW and "variables": dae_vars names for its command "Pext", frequency "fHz", current and
                  state of charge; "coi_available" false means only "frequency":"bus" works; needs no run)
+                 POST /sessions/{id}/tds/init  (initialise the dynamic models and stop before the first step, to find
+                 what does not start from a steady state; body optional {"test_init": true}, false skips ANDES's check
+                 for this call only. Returns initialized, test_ok (null when not checked, which does not mean clean;
+                 false when a residual reaches TDS.config.tol or is NaN), test_init, n_states, n_algeb, max_residual,
+                 nan_residuals, clamped [{model, idx, var, limit_name, limit_val, unconstr}] and residuals [{name,
+                 mismatch (null for NaN), equation}], both listed whether or not the test ran, each capped at 500 rows
+                 with diagnostics_truncated. A failed test is 200 with test_ok false, and ANDES's tables are in the
+                 messages. Runs setup and the power flow first, so like a first run it closes the case to disturbances
+                 and edits until a reload; the next POST /tds carries on from it, with the integrator it names (qndf
+                 included): with a fixed step the same steps as a run from scratch (trap_adapt and qndf choose other
+                 steps before the first event), its traces starting at the first step rather than at 0 s, and
+                 converged false when test_ok was false.
+                 422 on a case with no dynamic models, a power flow that does not converge, or a System already
+                 initialised by this route, a run or an eigenvalue analysis: POST /sessions/{id}/reload first)
                  POST /sessions/{id}/abort  (cooperative abort of a running TDS)
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,

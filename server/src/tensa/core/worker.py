@@ -1811,6 +1811,13 @@ def _handle_run_tds(
     return payload
 
 
+def _handle_init_tds(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Initialise TDS without stepping and report the diagnostics. A run, not a
+    read: with no case loaded it raises the same no-case error as ``run_tds``."""
+    # Passed on as sent: the wrapper refuses a value that is not a bool.
+    return _serialize_dataclass(wrapper.init_tds(test_init=args.get("test_init", True)))
+
+
 def _handle_list_tds_controllers(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """The kinds of controller a run takes and the devices of the loaded case
     they can command (see ``tensa.core.tds_controllers``). A listing is a read:
@@ -1858,6 +1865,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "redo_edit": _handle_redo_edit,
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
+    "init_tds": _handle_init_tds,
     "alterable_params": _handle_alterable_params,
     "supported_models": _handle_supported_models,
     "model_doc": _handle_model_doc,

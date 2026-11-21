@@ -263,3 +263,56 @@ class YbusResult:
     bus_idx: list[str]
     bus_key: list[str | None]
     entries: list[YbusEntry]
+
+
+@dataclass
+class TdsInitClamp:
+    """One variable clamped at a limit during TDS initialisation.
+
+    The row ANDES's ``TDS.test_init()`` draws in its clamped-limits table:
+    model, idx, variable, the limit parameter's name, the limit value, and the
+    unconstrained value ANDES computed.
+    """
+
+    model: str
+    idx: str
+    var: str
+    limit_name: str
+    limit_val: float
+    unconstr: float
+
+
+@dataclass
+class TdsInitResidual:
+    """One equation with a non-zero residual after TDS initialisation.
+
+    ``name`` is the variable's ``dae.xy_name`` name, ``mismatch`` the residual
+    (``None`` when it is NaN, which does not survive JSON), and ``equation``
+    ANDES's equation string, empty where the model gives none.
+    """
+
+    name: str
+    mismatch: float | None
+    equation: str
+
+
+@dataclass
+class TdsInitResult:
+    """What ``Wrapper.init_tds`` reports: whether the System initialised, the
+    verdict of ANDES's initialisation test, and the two diagnostic tables.
+
+    ``test_ok`` is ``None`` when the call ran with ``test_init`` off and ANDES
+    never checked. The lists are empty, not ``None``, when there is nothing to
+    report, and each is capped at 500 rows (``diagnostics_truncated``).
+    """
+
+    initialized: bool
+    test_ok: bool | None
+    test_init: bool
+    n_states: int
+    n_algeb: int
+    max_residual: float
+    nan_residuals: int
+    clamped: list[TdsInitClamp] = field(default_factory=list)
+    residuals: list[TdsInitResidual] = field(default_factory=list)
+    diagnostics_truncated: bool = False

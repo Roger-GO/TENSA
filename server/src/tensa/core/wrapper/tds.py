@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
 from threading import Event
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
+import numpy as np
+
 from tensa.core.errors import SetupFailedError, TdsRequestError, short_repr
 from tensa.core.tds_controllers import ControllerBank, ControllerSpec, controller_catalogue
 from tensa.core.tds_steps import land_on_time
 from tensa.core.wrapper.base import WrapperBase
-from tensa.core.wrapper.results import TdsBatchResult
+from tensa.core.wrapper.results import (
+    TdsBatchResult,
+    TdsInitClamp,
+    TdsInitResidual,
+    TdsInitResult,
+)
 
 if TYPE_CHECKING:
     from andes.system import System
@@ -34,6 +42,12 @@ _ANDES_METHOD: dict[str, str] = {
 # The integrators that choose their own steps (ANDES's ``requires_variable_step``),
 # which run with ``fixt = 0`` and ignore ``h``.
 _VARIABLE_STEP: frozenset[str] = frozenset({"trap_adapt", "qndf"})
+
+_notice = logging.getLogger("tensa.notice")
+
+# The most rows of each diagnostic table a result carries; the full text of the
+# tables remains in the session messages, where ``TDS.test_init()`` logs them.
+_INIT_DIAGNOSTICS_CAP = 500
 
 
 class TdsMixin(WrapperBase):
@@ -64,10 +78,11 @@ class TdsMixin(WrapperBase):
 
         # ANDES builds its integrator object once, in ``TDS.init()``, and a
         # System that has already run keeps it. QNDF also needs the history
-        # cache ``init()`` builds. Where nothing has stepped yet (an eigenvalue
-        # analysis calls ``init()`` and stops there) ``run_tds`` builds the cache
-        # itself. Past the first step it cannot be swapped in, so refuse rather
-        # than run with another integrator's object under a QNDF request. The
+        # cache ``init()`` builds. Where nothing has stepped yet (``init_tds`` and
+        # an eigenvalue analysis call ``init()`` and stop there) ``run_tds``
+        # builds the cache itself. Past the first step it cannot be swapped in, so
+        # refuse rather than run with another integrator's object under a QNDF
+        # request. The
         # other three keep no history and are swapped in at any point.
         if integrator == "qndf" and _qndf_needs_init(ss):
             if not _tds_unstepped(ss):
@@ -122,6 +137,124 @@ class TdsMixin(WrapperBase):
         the loaded case they can command; no devices when no case is loaded."""
         return controller_catalogue(self._ss)
 
+    def init_tds(self, test_init: bool = True) -> TdsInitResult:
+        """Initialise the time-domain run on the loaded System without stepping it.
+
+        Calls ANDES ``TDS.init()``: it restores the power-flow solution into the
+        DAE, initialises every dynamic model, compacts the DAE, and builds the
+        mass matrix and the integrator. No step is taken: ``dae.t`` stays 0 and
+        ``dae.kcount`` stays 0. The System is left initialised, so a later
+        :meth:`run_tds` resumes from it through ANDES's own ``init_resume()``
+        path, as ``TDS.run()`` does after ``init()``. Its record has no row at
+        0 s, which a run from scratch stores and which holds the initial values.
+        ``init()`` builds the integrator the System's config names now (the
+        case's own, the trapezoidal method); the run that follows steps with
+        the integrator it names, which :meth:`run_tds` swaps in, QNDF with its
+        history, since nothing has stepped. With a fixed step that run solves
+        the same steps as a run with no initialise before it; the two
+        variable-step integrators choose other steps before the first event
+        (a run from scratch solves the point at 0 s as its first step and grows
+        its steps from there), and the same steps after it. A run that starts
+        from an initialisation that failed its test is reported as not
+        converged, as it would be from scratch (see :meth:`run_tds`).
+
+        ``test_init`` applies to this call only and is put back afterwards, even
+        when ``TDS.init()`` raises: with it on (the default) ANDES checks the
+        initialisation residuals against ``TDS.config.tol``, logs the two
+        diagnostic tables when the check fails (variables clamped at limits,
+        equations with non-zero residuals) and gives its verdict in
+        ``test_ok``; with it off ANDES does not check and ``test_ok`` is
+        ``None``. The result reports the setting used. The diagnostics are read
+        from the System either way, by the rule ANDES's test applies (see
+        :func:`_init_diagnostics`), so a call with the test off still names what
+        did not initialise rather than reading as a clean start.
+
+        The call runs setup and a power flow first (``TDS.init()`` reads
+        ``PFlow.x_sol`` / ``y_sol``), so the case closes to new disturbances
+        and edits exactly as a first :meth:`run_tds` would; that is intended.
+
+        Raises:
+            TdsRequestError: ``test_init`` is not a bool.
+            SetupFailedError: the loaded case has no dynamic models, the System
+                is already initialised (ANDES ``init()`` is a no-op then and
+                would report the stale verdict of the first initialisation;
+                reload the case to initialise again), the power flow did not
+                converge, or ``TDS.init()`` itself raised.
+        """
+        if not isinstance(test_init, bool):
+            raise TdsRequestError(
+                f"test_init must be true or false, got {short_repr(test_init)}"
+            )
+        ss = self._require_loaded()
+        self._ensure_setup()
+        if not _dynamic_models(ss):
+            raise SetupFailedError(
+                "the loaded case has no dynamic models; there is no time-domain "
+                "run to initialise"
+            )
+        if bool(ss.TDS.initialized):
+            raise SetupFailedError(
+                "TDS is already initialised on this System; reload the case to "
+                "initialise again"
+            )
+
+        # ANDES TDS requires a converged power-flow solution as initial
+        # conditions, exactly as ``run_tds`` does it.
+        if not bool(getattr(ss.PFlow, "converged", False)):
+            ss.PFlow.run()
+            if not bool(getattr(ss.PFlow, "converged", False)):
+                raise SetupFailedError(
+                    "power flow did not converge; TDS cannot begin"
+                )
+
+        # ``test_init`` for this call only, put back even when ``init()`` raises.
+        old_test_init = ss.TDS.config.test_init
+        ss.TDS.config.test_init = 1 if test_init else 0
+        # Judge this call on its own, as ``run_tds`` does.
+        ss.exit_code = 0
+        try:
+            ss.TDS.init()
+            if not test_init:
+                # The test is also where ``init()`` leaves the Jacobians evaluated
+                # at the initial point. An eigenvalue analysis on an initialised
+                # System builds its state matrix from them without evaluating them
+                # again, so without this one that follows would read the
+                # Jacobians of the power flow.
+                ss.j_update(models=ss.exist.pflow_tds)
+        except Exception as exc:  # noqa: BLE001
+            raise SetupFailedError(f"TDS.init raised: {exc}") from exc
+        finally:
+            ss.TDS.config.test_init = old_test_init
+
+        clamped, residuals, truncated = _init_diagnostics(ss)
+        fg = _checked_residuals(ss)
+        test_ok = ss.TDS.test_ok
+        result = TdsInitResult(
+            initialized=bool(ss.TDS.initialized),
+            test_ok=None if test_ok is None else bool(test_ok),
+            test_init=test_init,
+            n_states=int(ss.dae.n),
+            n_algeb=int(ss.dae.m),
+            max_residual=float(np.nanmax(np.abs(fg))) if fg.size and not np.isnan(fg).all() else 0.0,
+            nan_residuals=int(np.count_nonzero(np.isnan(fg))),
+            clamped=clamped,
+            residuals=residuals,
+            diagnostics_truncated=truncated,
+        )
+        verdict = (
+            "not run"
+            if result.test_ok is None
+            else ("passed" if result.test_ok else "failed")
+        )
+        _notice.info(
+            "tds init: initialised %d states, %d algebraic variables; "
+            "initialisation test %s",
+            result.n_states,
+            result.n_algeb,
+            verdict,
+        )
+        return result
+
     def run_tds(
         self,
         tf: float,
@@ -143,6 +276,11 @@ class TdsMixin(WrapperBase):
         ahead of ``on_step``: each reads the frequency once a sample period and
         sets the power of its device. What they wrote is taken back when the
         run ends, however it ends.
+
+        A run on a System that :meth:`init_tds` (or an eigenvalue analysis)
+        initialised and that has not stepped since carries on from that
+        initialisation, and when its test failed the run is reported as not
+        converged, as the same run from scratch is.
 
         ``h`` (seconds) is written to ``ss.TDS.config.tstep``, the field
         ANDES 2.0.0 reads. With the trapezoidal integrator it is the fixed
@@ -174,14 +312,14 @@ class TdsMixin(WrapperBase):
         run, because every run writes both again before ANDES reads them, so no
         run inherits an earlier run's integrator. ANDES builds
         its integrator object once, in ``TDS.init()``, so on a System that has
-        already been initialised (a run, an eigenvalue analysis, a restored
-        snapshot) the wrapper swaps the object for the one requested. The
+        already been initialised (a run, :meth:`init_tds`, an eigenvalue
+        analysis, a restored snapshot) the wrapper swaps the object for the one requested. The
         trapezoidal, backward Euler and adaptive trapezoidal objects keep no
         state between steps, and ANDES works the step bounds out again when a
         run carries on, so any of them replaces any other at any point. QNDF
         keeps a history that ``TDS.init()`` builds: a QNDF request on a System
         initialised without it builds the history itself while nothing has
-        stepped (after an eigenvalue analysis), and raises
+        stepped (after :meth:`init_tds` or an eigenvalue analysis), and raises
         ``SetupFailedError`` once the System has taken steps, and the caller
         must reload the case first.
 
@@ -288,7 +426,8 @@ class TdsMixin(WrapperBase):
                 setattr(ss.TDS.config, _TDS_OVERRIDE_ALIASES.get(key, key), value)
 
         # QNDF on a System whose ``TDS.init()`` already ran, with another
-        # integrator (an eigenvalue analysis does that): ``init()`` is skipped, so
+        # integrator (``init_tds`` and an eigenvalue analysis do that, with the
+        # case's own): ``init()`` is skipped, so
         # build what it would have built for QNDF. Last, because the history takes
         # its tolerances from the config at construction, overrides included.
         if integrator == "qndf" and _qndf_needs_init(ss):
@@ -333,8 +472,11 @@ class TdsMixin(WrapperBase):
         # pre-check that failed, a failed setup) and only a power flow sets it back to 0, so the
         # code a run leaves says what the runs before it did as well. This run is judged on its
         # own: a run that reaches its end time cleanly, in a session where a continuation power
-        # flow failed, is not one that failed.
-        ss.exit_code = 0
+        # flow failed, is not one that failed. A run that starts where ``TDS.init()``
+        # left the System (``init_tds``, or an eigenvalue analysis) does not call
+        # ``init()`` again, so the failed initialisation test that adds 1 to the code
+        # of a run from scratch is carried over from that call.
+        ss.exit_code = 1 if _starts_from_failed_init(ss) else 0
         try:
             ss.TDS.run()
         except Exception as exc:  # noqa: BLE001
@@ -384,6 +526,99 @@ def _live_integrator(ss: System) -> str | None:
     return None
 
 
+def _dynamic_models(ss: System) -> list[str]:
+    """The models of the set-up System that only a time-domain run uses
+    (machines, exciters, governors, ...), leaving out the timed events.
+
+    ``exist.tds`` alone is no test: the network and the static devices are in
+    it on a case with no dynamic data as well.
+    """
+    exist = getattr(ss, "exist", None)
+    models = getattr(exist, "tds", None) or {}
+    return [
+        name
+        for name, model in models.items()
+        if not bool(getattr(getattr(model, "flags", None), "pflow", False))
+        and getattr(model, "group", None) != "TimedEvent"
+    ]
+
+
+def _checked_residuals(ss: System) -> np.ndarray:
+    """A copy of ``dae.fg`` as ``TDS.test_init()`` judges it: with the
+    differential equations ANDES does not check at initialisation
+    (``System.no_check_init``) at zero. The test zeroes them in place; with the
+    test off they still hold whatever ``init()`` left there."""
+    fg = np.array(ss.dae.fg, dtype=float)
+    unchecked = list(getattr(ss, "no_check_init", None) or [])
+    if unchecked:
+        fg[unchecked] = 0.0
+    return fg
+
+
+def _starts_from_failed_init(ss: System) -> bool:
+    """Whether a run would start where ``TDS.init()`` left the System, after
+    the initialisation test failed: initialised, no step taken, ``test_ok``
+    false. ``TDS.run()`` does not call ``init()`` on such a System."""
+    tds = ss.TDS
+    return (
+        bool(getattr(tds, "initialized", False))
+        and getattr(tds, "test_ok", None) is False
+        and _tds_unstepped(ss)
+    )
+
+
+def _init_diagnostics(ss: System) -> tuple[list[TdsInitClamp], list[TdsInitResidual], bool]:
+    """The two diagnostic tables of ``TDS.test_init()``, re-derived from the
+    state ``TDS.init()`` leaves behind, each capped at ``_INIT_DIAGNOSTICS_CAP``
+    rows; the third value is whether either list was cut.
+
+    The clamped-limits rows come from each model's discrete
+    ``get_limit_report()``, which reads the limiters' state and holds the same
+    rows whether or not the test ran (a variable can be clamped on a System
+    that passes the test). The residual rows are the indices of the checked
+    residuals (:func:`_checked_residuals`) at or over ``TDS.config.tol``, plus
+    the NaN ones, with the name from ``dae.xy_name`` and the equation string
+    from ``dae.x_map`` / ``dae.y_map``, the lookup ``test_init()`` does; a NaN
+    mismatch is reported as ``None``, since NaN does not survive JSON. Nothing
+    here writes to the System.
+    """
+    clamped: list[TdsInitClamp] = []
+    for model in ss.exist.pflow_tds.values():
+        for item in model.discrete.values():
+            for r in item.get_limit_report():
+                clamped.append(
+                    TdsInitClamp(
+                        model=r["model"],
+                        idx=str(r["idx"]),
+                        var=r["var"],
+                        limit_name=r["limit_name"],
+                        limit_val=float(r["limit_val"]),
+                        unconstr=float(r["unconstr"]),
+                    )
+                )
+
+    fg = _checked_residuals(ss)
+    fail_idx = np.ravel(np.where(abs(fg) >= ss.TDS.config.tol))
+    nan_idx = np.ravel(np.where(np.isnan(fg)))
+    bad_idx = np.hstack([fail_idx, nan_idx])
+    residuals: list[TdsInitResidual] = []
+    n = int(ss.dae.n)
+    for i in bad_idx:
+        ii = int(i)
+        entry = ss.dae.x_map.get(ii) if ii < n else ss.dae.y_map.get(ii - n)
+        mismatch = float(fg[ii])
+        residuals.append(
+            TdsInitResidual(
+                name=ss.dae.xy_name[ii],
+                mismatch=None if math.isnan(mismatch) else mismatch,
+                equation=entry[1].e_str if entry and entry[1].e_str else "",
+            )
+        )
+
+    truncated = len(clamped) > _INIT_DIAGNOSTICS_CAP or len(residuals) > _INIT_DIAGNOSTICS_CAP
+    return clamped[:_INIT_DIAGNOSTICS_CAP], residuals[:_INIT_DIAGNOSTICS_CAP], truncated
+
+
 def _qndf_needs_init(ss: System) -> bool:
     """Whether ``TDS.init()`` has already run with an integrator other than QNDF.
 
@@ -398,7 +633,7 @@ def _qndf_needs_init(ss: System) -> bool:
 def _tds_unstepped(ss: System) -> bool:
     """Whether the DAE is where ``TDS.init()`` left it: at time 0, no step taken.
 
-    An eigenvalue analysis leaves a System like this. ``dae.t`` moves off 0 when a
+    ``init_tds`` and an eigenvalue analysis leave a System like this. ``dae.t`` moves off 0 when a
     run starts and ``dae.kcount`` counts the steps it takes, so a System that ran
     at all, or that was restored from a snapshot taken after a run, is not.
     """
