@@ -38,8 +38,9 @@ Two caps keep a flood from costing memory. The worker holds at most
 that; the session holds at most :data:`MESSAGE_LOG_CAPACITY`. Both count what
 they dropped, and the count is reported with the messages.
 
-Sensitivity sweeps and report generation are not captured: a sweep runs hundreds
-of power flows and time-domain runs whose messages would bury the user's own (the
+Sensitivity sweeps, eigenvalue sweeps and report generation are not captured: a
+sweep runs hundreds of power flows and time-domain runs (an eigenvalue sweep reads
+and solves the case once per value) whose messages would bury the user's own (the
 plan the server asks the worker for before it spreads one over sub-workers is part
 of the sweep), and a report re-prints a summary ANDES logged when the run ended. A
 warning from any of them still goes to the server's console, as it did before.
@@ -81,8 +82,16 @@ MAX_MESSAGE_CHARS: Final = 20_000
 # Commands whose messages are not captured (see the module docstring). Their
 # warnings and errors still reach stderr. ``sweep_plan`` is the check the server asks
 # the worker for before it spreads a sweep over sub-workers, so it is part of the sweep.
+# An eigenvalue sweep reads, sets up and solves the case again for every value.
 UNCAPTURED_OPS: Final[frozenset[str]] = frozenset(
-    {"run_sweep", "run_sweep_iteration", "adopt_sweep_source", "generate_report", "sweep_plan"}
+    {
+        "run_sweep",
+        "run_sweep_iteration",
+        "adopt_sweep_source",
+        "generate_report",
+        "sweep_plan",
+        "run_eig_sweep",
+    }
 )
 
 

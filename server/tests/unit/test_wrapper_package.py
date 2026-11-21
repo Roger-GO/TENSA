@@ -126,6 +126,7 @@ PUBLIC_METHODS: tuple[str, ...] = (
     "run_cpf",
     "run_cpf_qv",
     "run_eig",
+    "run_eig_sweep",
     "run_pflow",
     "run_se",
     "run_sweep",

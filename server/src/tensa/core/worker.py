@@ -760,6 +760,24 @@ def _handle_run_eig(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.run_eig())
 
 
+def _handle_run_eig_sweep(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_eig_sweep``: the eigenvalues at each value of one
+    parameter of one device, each on a System of its own.
+
+    Returns the serialized :class:`EigSweepResult` dict. The wrapper validates
+    the target and the values; the worker does not rely on the REST body's
+    checks.
+    """
+    return _serialize_dataclass(
+        wrapper.run_eig_sweep(
+            model=args["model"],
+            idx=args["idx"],
+            param=args["param"],
+            values=args["values"],
+        )
+    )
+
+
 def _handle_eig_participation(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Slice ``EIG.pfactors[mode_idx]`` and return per-state participation.
 
@@ -1837,6 +1855,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "import_bundle": _handle_import_bundle,
     "generate_report": _handle_generate_report,
     "run_eig": _handle_run_eig,
+    "run_eig_sweep": _handle_run_eig_sweep,
     "eig_participation": _handle_eig_participation,
     "eig_state_matrix": _handle_eig_state_matrix,
     # Unit 12 — CPF (continuation power flow): full PV-curve sweep + per-bus QV.

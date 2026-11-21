@@ -125,6 +125,13 @@ Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
                  POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as
                  GET .../case/clone/diff/{model}/{idx}
 Eigenanalysis:   POST /sessions/{id}/eig · GET .../eig/modes/{mode_idx}/participation · GET .../eig/state-matrix.mat
+                 POST /sessions/{id}/eig/sweep {"model": "GENROU", "idx": "1", "param": "M", "values": [4, 6, 8]} (root loci data;
+                 needs a converged pflow; 1 to 200 finite values, on the base the case file holds the param in) → "points", one per
+                 value in order, each {value, eigenvalues: [{real, imag}], damping_ratios, frequencies_hz} (index-aligned), mode_count.
+                 Each point is the case with the session's edits and the param at that value, read, set up, solved with the last
+                 pflow's settings and analysed afresh: the session's own system is not changed (a pflow can still follow), and a
+                 point costs a case load. Eigenvalue order is not comparable across points (match modes yourself for root loci).
+                 404 unknown model/idx/param; 422 bad values or a point that fails (the detail names the value)
 CPF:             POST /sessions/{id}/cpf · POST /sessions/{id}/cpf/qv  (needs a converged pflow; every setting is for that run only)
                  cpf body, all optional: {"direction": "load", "enforce_q_limits": false, "stop_at": "nose", "step": 0.1, "max_iter": 500,
                  "parameterization": "pseudo_arclength", "tol": 1e-6, "corrector_max_iter": 20, "step_min": 1e-4, "step_max": 0.5}

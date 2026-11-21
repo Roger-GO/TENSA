@@ -47,6 +47,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "import_bundle",
             "generate_report",
             "run_eig",
+            "run_eig_sweep",
             "eig_participation",
             "eig_state_matrix",
             "run_cpf",

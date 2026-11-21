@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from andes.system import System
 
     from tensa.core.clone_manager import CloneManager
+    from tensa.core.pflow_options import PflowSettings
     from tensa.engines.identity import CaseIdentity
 
 
@@ -124,6 +126,11 @@ class WrapperBase:
         # the same path after the file changed on disk, starts them afresh; a
         # reload of the unchanged file keeps them.
         self._keyed_case: tuple[Path, int, int] | None = None
+        # The settings of the last power flow ``run_pflow`` ran, with the System it
+        # ran on (held weakly, so a System that was replaced is not kept alive). An
+        # eigenvalue sweep solves the power flow of each System it builds with them,
+        # so its points are taken at the operating point the session has.
+        self._pflow_settings: tuple[weakref.ref[System], PflowSettings] | None = None
 
     def _require_loaded(self) -> System:
         if self._ss is None:

@@ -6,6 +6,7 @@ import contextlib
 import io
 import logging
 import math
+import weakref
 from typing import TYPE_CHECKING
 
 from tensa.core.errors import EigDirtyDaeError
@@ -47,6 +48,37 @@ def _residual(ss: System) -> float:
         (np.ravel(np.asarray(ss.dae.f, dtype=float)), np.ravel(np.asarray(ss.dae.g, dtype=float)))
     )
     return float(np.max(np.abs(values))) if values.size else 0.0
+
+
+def solve_pflow(ss: System, method: str) -> None:
+    """Run `ss.PFlow` with the settings already applied, `method` being the
+    one in effect. A Newton-Krylov run that did not converge is left with
+    `PFlow.converged` False instead of raising, and SciPy's printing is kept
+    off stdout; any other failure is raised as it is."""
+    # ANDES 2.0.0 runs `newton_krylov` with `verbose=True` whatever its log
+    # level, and SciPy prints a line per iteration: kept off the server's
+    # console, as a debug record of this module.
+    printed = io.StringIO()
+    quiet = (
+        contextlib.redirect_stdout(printed)
+        if method == "NK"
+        else contextlib.nullcontext()
+    )
+    try:
+        with quiet:
+            ss.PFlow.run()
+    except Exception as exc:
+        if method != "NK" or not _is_nk_failure(exc):
+            raise
+        # A Newton-Krylov run that did not converge, which ANDES 2.0.0 raises
+        # from instead of returning False: SciPy's `NoConvergence` is not
+        # caught at all, and after the `ValueError` it does catch, `run()`
+        # reads `mis[-2]` from a list `newton_krylov` never appended to.
+        ss.PFlow.converged = False
+        _log.warning("Newton-Krylov power flow did not converge: %s", exc)
+    finally:
+        for line in printed.getvalue().splitlines():
+            _debug.debug("newton_krylov: %s", line)
 
 
 def _result_keys(wrapper: WrapperBase, result: PflowResult) -> dict[str, dict[str, str]]:
@@ -153,31 +185,12 @@ class PflowMixin(WrapperBase):
             n_factorize=n_factorize,
             linesearch=linesearch,
         ) as settings:
-            # ANDES 2.0.0 runs ``newton_krylov`` with ``verbose=True`` whatever
-            # its log level, and SciPy prints a line per iteration: kept off the
-            # server's console, as a debug record of this module.
-            printed = io.StringIO()
-            quiet = (
-                contextlib.redirect_stdout(printed)
-                if settings.method == "NK"
-                else contextlib.nullcontext()
-            )
-            try:
-                with quiet:
-                    ss.PFlow.run()
-            except Exception as exc:
-                if settings.method != "NK" or not _is_nk_failure(exc):
-                    raise
-                # A Newton-Krylov run that did not converge, which ANDES 2.0.0
-                # raises from instead of returning False: SciPy's
-                # ``NoConvergence`` is not caught at all, and after the
-                # ``ValueError`` it does catch, ``run()`` reads ``mis[-2]`` from
-                # a list ``newton_krylov`` never appended to.
-                ss.PFlow.converged = False
-                _log.warning("Newton-Krylov power flow did not converge: %s", exc)
-            finally:
-                for line in printed.getvalue().splitlines():
-                    _debug.debug("newton_krylov: %s", line)
+            solve_pflow(ss, settings.method)
+        # What an eigenvalue sweep solves the power flow of its own Systems with.
+        try:
+            self._pflow_settings = (weakref.ref(ss), settings)
+        except TypeError:  # a stand-in System that takes no weak reference
+            self._pflow_settings = None
         converged = bool(getattr(ss.PFlow, "converged", False))
         iterations = int(getattr(ss.PFlow, "niter", 0))
         if settings.method == "NK":
