@@ -422,6 +422,168 @@ def test_loads_not_matched_when_the_file_has_more_records() -> None:
 
 
 @pytest.mark.unit
+def test_added_load_takes_the_first_free_ordinal_on_its_bus() -> None:
+    # Kundur's shape: the only load on bus 7 has id 2. A load added there
+    # takes the first ordinal no element holds, 1, and not 2 with a suffix.
+    identity = _identity(buses=(7, 8), loads=(DeviceId(7, "2"), DeviceId(8, "1")))
+    ss = _system(Bus=_model([7, 8]), PQ=_model([1, 2], bus=[7, 8]))
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("PQ", 1) == "load:7-2"
+
+    ss.PQ = _model([1, 2, 3], bus=[7, 8, 7])
+    ss.models["PQ"] = ss.PQ
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("PQ", 1) == "load:7-2"
+    assert book.key_of("PQ", 2) == "load:8-1"
+    assert book.key_of("PQ", 3) == "load:7-1"
+    ss.PQ = _model([1, 2, 3, 4], bus=[7, 8, 7, 7])
+    ss.models["PQ"] = ss.PQ
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("PQ", 4) == "load:7-3"
+    assert all("~" not in entry.key for entry in book.entries())
+    assert book.problems == []
+
+
+@pytest.mark.unit
+def test_added_load_after_a_file_load_with_id_one() -> None:
+    identity = _identity(buses=(4,), loads=(DeviceId(4, "1"),))
+    ss = _system(Bus=_model([4]), PQ=_model([1], bus=[4]))
+    book = assign_andes_keys(ss, identity)
+    ss.PQ = _model([1, "PQ_new"], bus=[4, 4])
+    ss.models["PQ"] = ss.PQ
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("PQ", 1) == "load:4-1"
+    assert book.key_of("PQ", "PQ_new") == "load:4-2"
+    assert book.problems == []
+
+
+@pytest.mark.unit
+def test_added_parallel_line_keeps_the_corridors_orientation() -> None:
+    # IEEE 14's shape: the file writes the branch 6 to 5. A line added from 5
+    # to 6 is a second circuit of that corridor, branch:6-5-2, not branch:5-6-1.
+    identity = _identity(buses=(5, 6, 9), branches=(BranchId(6, 5, "1", transformer=False),))
+    ss = _system(Bus=_model([5, 6, 9]), Line=_model(["Line_1"], bus1=[6], bus2=[5]))
+    book = assign_andes_keys(ss, identity)
+    assert book.key_of("Line", "Line_1") == "branch:6-5-1"
+    ss.Line = _model(["Line_1", "Line_new"], bus1=[6, 5], bus2=[5, 6])
+    ss.models["Line"] = ss.Line
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("Line", "Line_1") == "branch:6-5-1"
+    assert book.key_of("Line", "Line_new") == "branch:6-5-2"
+    # A line added on a pair with no branch yet is written in bus-number order.
+    ss.Line = _model(["Line_1", "Line_new", "Line_far"], bus1=[6, 5, 9], bus2=[5, 6, 5])
+    ss.models["Line"] = ss.Line
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("Line", "Line_far") == "branch:5-9-1"
+    assert all("~" not in entry.key for entry in book.entries())
+    assert book.problems == []
+
+
+@pytest.mark.unit
+def test_line_added_after_a_file_line_was_deleted_takes_a_free_circuit() -> None:
+    # Kundur's 5-6 corridor has circuits 1 and 2. Circuit 1 is deleted and a
+    # line of the pair added: the queue hands the added line the record of
+    # circuit 2, whose key the remaining line holds, so it takes the first
+    # circuit the file does not give and no branch holds, 3.
+    identity = _identity(
+        buses=(5, 6),
+        branches=(
+            BranchId(5, 6, "1", transformer=False),
+            BranchId(5, 6, "2", transformer=False),
+        ),
+    )
+    ss = _system(Bus=_model([5, 6]), Line=_model([1, 2], bus1=[5, 5], bus2=[6, 6]))
+    book = assign_andes_keys(ss, identity)
+    assert [book.key_of("Line", i) for i in (1, 2)] == ["branch:5-6-1", "branch:5-6-2"]
+    book.retain({("Bus", "5"), ("Bus", "6"), ("Line", "2")})
+    ss.Line = _model([2, 3], bus1=[5, 6], bus2=[6, 5])
+    ss.models["Line"] = ss.Line
+    book = assign_andes_keys(ss, identity, book)
+    assert book.key_of("Line", 2) == "branch:5-6-2"
+    assert book.key_of("Line", 3) == "branch:5-6-3"
+    assert all("~" not in entry.key for entry in book.entries())
+    assert book.problems == []
+
+
+@pytest.mark.unit
+def test_added_generator_takes_the_first_free_id_on_its_bus() -> None:
+    ss = _system(Bus=_model([1]), PV=_model([1], bus=[1], subidx=[1]))
+    book = assign_andes_keys(ss, None)
+    assert book.key_of("PV", 1) == "gen:1-1"
+    # One with no machine id, then one whose machine id another holds.
+    ss.PV = _model([1, 2, 3], bus=[1, 1, 1], subidx=[1, None, 1])
+    ss.models["PV"] = ss.PV
+    book = assign_andes_keys(ss, None, book)
+    assert book.key_of("PV", 1) == "gen:1-1"
+    assert book.key_of("PV", 2) == "gen:1-2"
+    assert book.key_of("PV", 3) == "gen:1-3"
+    # One whose own machine id is free keeps it.
+    ss.PV = _model([1, 2, 3, 4], bus=[1, 1, 1, 1], subidx=[1, None, 1, 7])
+    ss.models["PV"] = ss.PV
+    book = assign_andes_keys(ss, None, book)
+    assert book.key_of("PV", 4) == "gen:1-7"
+    assert all("~" not in entry.key for entry in book.entries())
+    assert book.problems == []
+
+
+SHUNTS_RAW = """\
+  0,    100.00, 33, 0, 0, 60.00       /
+  FIXED AND SWITCHED SHUNTS ON ONE BUS
+  SECOND COMMENT LINE
+    9,'Bus Nine    ',  69.0000,1,   1,   1,   1,1.00000,   0.0000
+   14,'Bus Fourteen',  69.0000,1,   1,   1,   1,1.00000,   0.0000
+ 0 / END OF BUS DATA, BEGIN LOAD DATA
+ 0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA
+    9,'1 ',1,   0.000,  10.000
+ 0 / END OF FIXED SHUNT DATA, BEGIN GENERATOR DATA
+ 0 / END OF GENERATOR DATA, BEGIN BRANCH DATA
+ 0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA
+ 0 / END OF TRANSFORMER DATA, BEGIN AREA DATA
+ 0 / END OF AREA DATA, BEGIN TWO-TERMINAL DC DATA
+ 0 / END OF TWO-TERMINAL DC DATA, BEGIN VOLTAGE SOURCE CONVERTER DATA
+ 0 / END OF VOLTAGE SOURCE CONVERTER DATA, BEGIN IMPEDANCE CORRECTION DATA
+ 0 / END OF IMPEDANCE CORRECTION DATA, BEGIN MULTI-TERMINAL DC DATA
+ 0 / END OF MULTI-TERMINAL DC DATA, BEGIN MULTI-SECTION LINE DATA
+ 0 / END OF MULTI-SECTION LINE DATA, BEGIN ZONE DATA
+ 0 / END OF ZONE DATA, BEGIN INTER-AREA TRANSFER DATA
+ 0 / END OF INTER-AREA TRANSFER DATA, BEGIN OWNER DATA
+ 0 / END OF OWNER DATA, BEGIN FACTS CONTROL DEVICE DATA
+ 0 / END OF FACTS CONTROL DEVICE DATA, BEGIN SWITCHED SHUNT DATA
+    9,1,0,1,1.02500,0.96000,     0,  100.0,'            ',   19.00, 3,   5.00
+   14,1,0,1,1.02500,0.96000,     0,  100.0,'            ',   15.00, 3,   5.00
+   14,1,0,1,1.02500,0.96000,     0,  100.0,'            ',   10.00, 2,   5.00
+ 0 / END OF SWITCHED SHUNT DATA, BEGIN GNE DEVICE DATA
+ 0 / END OF GNE DEVICE DATA
+Q
+"""
+
+
+@pytest.mark.unit
+def test_fixed_and_switched_shunts_on_one_bus_each_get_a_key() -> None:
+    # ANDES makes one Shunt per fixed and per switched shunt record, the fixed
+    # ones first, in file order. A switched shunt has no id: it takes the
+    # first ordinal on its bus that no shunt before it holds, so a bus with a
+    # fixed shunt of id 1 and a switched shunt, or two switched shunts, gives
+    # every shunt a key of its own and no "~" suffix.
+    from tensa.engines.identity import read_psse_raw_identity
+
+    identity = read_psse_raw_identity(SHUNTS_RAW)
+    ss = _system(
+        Bus=_model([9, 14]),
+        Shunt=_model([1, 2, 3, 4], bus=[9, 9, 14, 14]),
+    )
+    book = assign_andes_keys(ss, identity)
+    assert [book.key_of("Shunt", i) for i in (1, 2, 3, 4)] == [
+        "shunt:9-1",
+        "shunt:9-2",
+        "shunt:14-1",
+        "shunt:14-2",
+    ]
+    assert all(entry.source == "file" for entry in book.entries() if entry.model == "Shunt")
+    assert book.problems == []
+
+
+@pytest.mark.unit
 def test_exciter_and_governor_resolve_to_their_unit() -> None:
     ss = _system(
         Bus=_model([1]),

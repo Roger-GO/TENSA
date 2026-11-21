@@ -19,6 +19,8 @@ parameter is skipped rather than raised.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from tensa.engines.identity import CaseIdentity
@@ -159,6 +161,38 @@ def is_transformer_row(ss: Any, i: int) -> bool:
     return False
 
 
+def _first_free_id(
+    book: KeyBook,
+    *makers: Callable[[str], str],
+    reserved: frozenset[str] | set[str] = frozenset(),
+) -> str:
+    """The first ordinal, from ``"1"``, that is not in ``reserved`` and whose
+    key, as each of ``makers`` writes it from the id, no element of ``book``
+    holds.
+
+    Every ordinal key (a load, shunt, generator or circuit made up from order)
+    is chosen this way: an element added to a case takes an id that no element
+    holds, and never reaches the ``~N`` suffix of ``KeyBook.assign``.
+    """
+    ordinal = 1
+    while str(ordinal) in reserved or any(
+        book.entry_of(make(str(ordinal))) is not None for make in makers
+    ):
+        ordinal += 1
+    return str(ordinal)
+
+
+def _branch_ends(key: str) -> tuple[int, int] | None:
+    """The ``(from, to)`` bus numbers of a ``branch:<from>-<to>-<ckt>`` key, or
+    ``None`` for any other key."""
+    if not key.startswith("branch:"):
+        return None
+    parts = key[len("branch:"):].split("-", 2)
+    if len(parts) != 3 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    return (int(parts[0]), int(parts[1]))
+
+
 def _assign_buses(
     ss: Any, identity: CaseIdentity | None, book: KeyBook
 ) -> tuple[dict[str, int], set[int]]:
@@ -218,10 +252,17 @@ def _assign_lines(
     next record of its pair and kind (of the other kind when its own is out),
     keeping the record's circuit, bus order and kind as its bucket. A line
     with an end on a bus the engine added gets an engine key. A line with no
-    record left gets a circuit by ordinal, counted over all branches of its
-    bus pair (lines and transformers together) and skipping the circuits
-    already used for that pair. Every key is a ``branch:`` key; the bucket
-    (``"line"`` or ``"transformer"``) says which kind the branch is.
+    record left (or whose record's key another line already holds) gets a
+    circuit by ordinal: the first one, counted over all branches of its bus
+    pair (lines and transformers together), that the file does not give the
+    pair and no branch of the book holds in either orientation. It is written
+    in the orientation the pair's other branches have, so an added parallel
+    circuit is ``branch:6-5-2`` beside ``branch:6-5-1``; a pair with none is
+    written in bus-number order. A line the book has keyed keeps its key. Every
+    key is a ``branch:`` key; the bucket (``"line"`` or ``"transformer"``)
+    says which kind the branch is. The notes about lines and records that did
+    not match are made the first time the case is keyed, when they say
+    something about the file.
     """
     model = getattr(ss, "Line", None)
     if model is None:
@@ -264,12 +305,35 @@ def _assign_lines(
                 position
             )
 
-    # Circuits already used per unordered pair, so an ordinal circuit never
-    # repeats one the file gave for that pair.
-    used_ckts: dict[tuple[int, int], set[str]] = {}
-    ordinal_counts: dict[tuple[int, int], int] = {}
+    # The circuits the file gives each unordered pair, so an ordinal circuit
+    # never repeats one of them, whichever line of the pair ANDES lists first.
+    file_ckts: dict[tuple[int, int], set[str]] = {}
+    if identity is not None:
+        for branch in identity.branches:
+            file_ckts.setdefault(
+                (min(branch.from_bus, branch.to_bus), max(branch.from_bus, branch.to_bus)),
+                set(),
+            ).add(branch.ckt)
+    # The orientation every branch key of an unordered pair already has in the
+    # book, so a circuit added to a corridor is written as the corridor is
+    # (``branch:6-5-2`` beside the file's ``branch:6-5-1``), not reversed.
+    oriented: dict[tuple[int, int], tuple[int, int]] = {}
+    for entry in book.entries():
+        if entry.model == "Line" and entry.key.startswith("branch:"):
+            ends = _branch_ends(entry.key)
+            if ends is not None:
+                oriented.setdefault((min(ends), max(ends)), ends)
+    # Lines are measured against the file the first time the case is keyed;
+    # a line an edit adds later matches no record and is no problem of the file.
+    first_keying = not any(entry.model == "Line" for entry in book.entries())
     unmatched_lines = 0
     added_bus_lines = 0
+
+    def assign_line(entry: KeyEntry, line_pair: tuple[int, int] | None) -> None:
+        stored = book.assign(entry)
+        ends = _branch_ends(stored.key)
+        if line_pair is not None and ends is not None:
+            oriented.setdefault(line_pair, ends)
 
     for i in range(n):
         idx = idx_values[i] if i < len(idx_values) else i
@@ -296,13 +360,23 @@ def _assign_lines(
                     other_kind = by_kind[not want_transformer]
                     if other_kind:
                         record_position = other_kind.pop(0)
+        if book.has("Line", idx):
+            # Keyed before (a reload, an edit): the book keeps its key. The
+            # record it took above stays taken, so the lines after it are
+            # matched as they were.
+            continue
         if record_position is not None and identity is not None:
             branch = identity.branches[record_position]
             key = branch_key(branch.from_bus, branch.to_bus, branch.ckt)
-            bucket = "transformer" if branch.transformer else "line"
-            used_ckts.setdefault(line_pair, set()).add(branch.ckt)  # type: ignore[arg-type]
-            book.assign(KeyEntry(key, bucket, "Line", idx, "file"))
-            continue
+            if first_keying or book.entry_of(key) is None:
+                # On the first keying a held key is the file's own clash (two
+                # records with one circuit): it is stored with a suffix and a
+                # note, so the file's fault is seen.
+                bucket = "transformer" if branch.transformer else "line"
+                assign_line(KeyEntry(key, bucket, "Line", idx, "file"), line_pair)
+                continue
+            # The record's key is held (a line of the file was deleted and a
+            # line of the pair added): the added line takes an ordinal below.
         if line_pair is None:
             # A line whose buses have no number cannot be keyed by pair; give
             # it an engine key so it is still named.
@@ -310,22 +384,27 @@ def _assign_lines(
                 KeyEntry(engine_key("andes", "Line", idx), "other", "Line", idx, "engine")
             )
             continue
-        if identity is not None:
+        if identity is not None and first_keying and record_position is None:
             unmatched_lines += 1
-        count = ordinal_counts.get(line_pair, 0) + 1
-        ordinal_counts[line_pair] = count
-        taken = used_ckts.setdefault(line_pair, set())
-        ckt = str(count)
-        while ckt in taken:
-            count += 1
-            ckt = str(count)
-        ordinal_counts[line_pair] = count
-        taken.add(ckt)
+        # A circuit by ordinal: the first one of the pair that the file does not
+        # give and no branch of the book holds, in either orientation, written
+        # in the orientation the pair already has (the pair in bus order when
+        # it has none).
+        from_bus, to_bus = oriented.get(line_pair, line_pair)
+        taken = file_ckts.get(line_pair, set())
+        ckt = _first_free_id(
+            book,
+            partial(branch_key, from_bus, to_bus),
+            partial(branch_key, to_bus, from_bus),
+            reserved=taken,
+        )
         bucket = "transformer" if is_transformer_row(ss, i) else "line"
-        key = branch_key(line_pair[0], line_pair[1], ckt)
-        book.assign(KeyEntry(key, bucket, "Line", idx, "ordinal"))
+        assign_line(
+            KeyEntry(branch_key(from_bus, to_bus, ckt), bucket, "Line", idx, "ordinal"),
+            line_pair,
+        )
 
-    if identity is not None:
+    if identity is not None and first_keying:
         unused = sum(len(by_kind[kind]) for by_kind in queues.values() for kind in (False, True))
         if unused > 0:
             book.problems.append(
@@ -347,8 +426,13 @@ def _assign_lines(
 
 
 def _assign_generators(ss: Any, book: KeyBook, bus_numbers: dict[str, int]) -> None:
-    """Step 3: key the static generators, ``ss.PV`` then ``ss.Slack``."""
-    ordinals: dict[int, int] = {}
+    """Step 3: key the static generators, ``ss.PV`` then ``ss.Slack``.
+
+    A generator keeps the key the book has for it. A new one takes the machine
+    id ANDES holds (``subidx``) when no element holds that key, and otherwise,
+    or with no id, the first ordinal on its bus that no element holds.
+    """
+    first_keying = not any(entry.model in ("PV", "Slack") for entry in book.entries())
     for model_name in ("PV", "Slack"):
         model = getattr(ss, model_name, None)
         if model is None:
@@ -369,12 +453,17 @@ def _assign_generators(ss: Any, book: KeyBook, bus_numbers: dict[str, int]) -> N
                     )
                 )
                 continue
+            if book.has(model_name, idx):
+                continue
             id_text = _id_text(subidx_values[i]) if i < len(subidx_values) else None
-            if id_text is not None:
+            if id_text is not None and (
+                first_keying or book.entry_of(generator_key(bus, id_text)) is None
+            ):
+                # On the first keying a held key is the file's own clash (two
+                # machines of one id on a bus), stored with a suffix and a note.
                 source = "engine"
             else:
-                ordinals[bus] = ordinals.get(bus, 0) + 1
-                id_text = str(ordinals[bus])
+                id_text = _first_free_id(book, partial(generator_key, bus))
                 source = "ordinal"
             book.assign(
                 KeyEntry(
@@ -390,7 +479,9 @@ def _assign_devices_on_buses(
     bus_numbers: dict[str, int],
 ) -> None:
     """Steps 4 and 5: key the loads and the shunts, from the identity when the
-    count and the buses match, else by ordinal on the bus."""
+    count and the buses match, else by ordinal on the bus: a device not keyed
+    yet takes the first ordinal whose key no element of the book holds, which
+    for a fresh book is its place among the devices of its bus."""
     plans: list[tuple[list[str], str, str]] = [
         (["PQ"], "load", "load"),
         (["Shunt", "ShuntSw", "ShuntTD"], "shunt", "shunt"),
@@ -432,7 +523,7 @@ def _assign_devices_on_buses(
                 for i, (_, _, bus) in enumerate(devices)
             )
         )
-        ordinals: dict[int, int] = {}
+        make_key = load_key if key_kind == "load" else shunt_key
         for i, (model_name, idx, bus) in enumerate(devices):
             if bus is None:
                 book.assign(
@@ -448,12 +539,16 @@ def _assign_devices_on_buses(
             if matched:
                 id_text = wanted[i][1]
                 source = "file"
+            elif book.has(model_name, idx):
+                # Keyed before (a reload, an edit): the book keeps its key.
+                continue
             else:
-                ordinals[bus] = ordinals.get(bus, 0) + 1
-                id_text = str(ordinals[bus])
+                # The first ordinal on the bus whose key no element holds, so a
+                # device added beside one whose file id is not its ordinal (a
+                # load with id 2 alone on its bus) takes a key of its own.
+                id_text = _first_free_id(book, partial(make_key, bus))
                 source = "ordinal"
-            key = load_key(bus, id_text) if key_kind == "load" else shunt_key(bus, id_text)
-            book.assign(KeyEntry(key, bucket, model_name, idx, source))
+            book.assign(KeyEntry(make_key(bus, id_text), bucket, model_name, idx, source))
 
 
 def _model_index(ss: Any) -> dict[str, list[tuple[str, int]]]:

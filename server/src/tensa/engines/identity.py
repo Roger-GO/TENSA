@@ -48,7 +48,9 @@ class DeviceId:
     """One device on a bus: the bus number and the PSS/E ``ID`` field stripped.
 
     For a format with no id (MATPOWER), ``id`` is the ordinal of the device on
-    that bus as a string, from ``"1"``.
+    that bus as a string, from ``"1"``. A PSS/E switched shunt has no ``ID``
+    field either: its ``id`` is the first ordinal no fixed shunt or earlier
+    switched shunt on its bus holds, so two shunts of a bus never share one.
     """
 
     bus: int
@@ -221,6 +223,22 @@ def read_psse_raw_identity(text: str) -> CaseIdentity:
         else:
             transformers3.append(Transformer3Id((i_bus, j_bus, k_bus), ckt))
 
+    def _next_free_shunt_id(bus: int) -> str:
+        """The id of a switched shunt on ``bus``: a switched shunt record has
+        no id, so it takes the ordinal, from 1, that no shunt read before it on
+        that bus holds. The fixed shunt block comes first in the file, so the
+        ids the fixed shunts use are skipped, then those of the switched shunts
+        before it; an empty fixed id counts as ``"1"``, as its key has it."""
+        taken = {
+            device.id or "1"
+            for device in (*fixed_shunts, *switched_shunts)
+            if device.bus == bus
+        }
+        ordinal = 1
+        while str(ordinal) in taken:
+            ordinal += 1
+        return str(ordinal)
+
     def take_record(block: str, record: list[list[str]]) -> None:
         if block == "transf":
             flush_transformer(record)
@@ -255,7 +273,8 @@ def read_psse_raw_identity(text: str) -> CaseIdentity:
             if isw != 0:
                 area_slack_buses[_int_field(row[0])] = isw
         elif block == "swshunt":
-            switched_shunts.append(DeviceId(_int_field(row[0]), "1"))
+            bus = _int_field(row[0])
+            switched_shunts.append(DeviceId(bus, _next_free_shunt_id(bus)))
 
     for raw_line in lines[3:]:
         line = raw_line.strip()

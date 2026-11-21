@@ -130,7 +130,9 @@ def test_psse_raw_snippet() -> None:
     assert identity.transformers3 == (Transformer3Id((2, 3, 4), "T3"),)
     # The area with ISW 0 is left out.
     assert identity.area_slack_buses == {1: 2}
-    assert identity.switched_shunts == (DeviceId(3, "1"),)
+    # A switched shunt has no id: it takes the first ordinal on its bus that
+    # no shunt before it holds, here 2, since bus 3's fixed shunt has id 1.
+    assert identity.switched_shunts == (DeviceId(3, "2"),)
     # Every block of the revision is counted, zero included.
     assert identity.counts["bus"] == 4
     assert identity.counts["transf"] == 2
@@ -158,6 +160,57 @@ def test_psse_raw_ends_early() -> None:
     assert identity.counts["load"] == 1
     assert identity.counts["gen"] == 0
     assert identity.branches == ()
+
+
+@pytest.mark.unit
+def test_switched_shunts_take_the_first_free_ordinal_on_their_bus() -> None:
+    # Bus 9: fixed shunts with ids 1 and 3, then two switched shunts (2, 4).
+    # Bus 14: no fixed shunt, two switched shunts (1, 2). Bus 5: a fixed shunt
+    # with an empty id, which its key reads as 1, then a switched one (2).
+    text = """\
+  0,    100.00, 33, 0, 0, 60.00       /
+  SWITCHED SHUNTS
+  SECOND COMMENT LINE
+    5,'Five',  69.0000,1,   1,   1,   1,1.00000,   0.0000
+    9,'Nine',  69.0000,1,   1,   1,   1,1.00000,   0.0000
+   14,'Fourteen',  69.0000,1,   1,   1,   1,1.00000,   0.0000
+ 0 / END OF BUS DATA, BEGIN LOAD DATA
+ 0 / END OF LOAD DATA, BEGIN FIXED SHUNT DATA
+    9,'1 ',1,   0.000,  10.000
+    9,'3 ',1,   0.000,  10.000
+    5,'  ',1,   0.000,  10.000
+ 0 / END OF FIXED SHUNT DATA, BEGIN GENERATOR DATA
+ 0 / END OF GENERATOR DATA, BEGIN BRANCH DATA
+ 0 / END OF BRANCH DATA, BEGIN TRANSFORMER DATA
+ 0 / END OF TRANSFORMER DATA, BEGIN AREA DATA
+ 0 / END OF AREA DATA, BEGIN TWO-TERMINAL DC DATA
+ 0 / END OF TWO-TERMINAL DC DATA, BEGIN VOLTAGE SOURCE CONVERTER DATA
+ 0 / END OF VOLTAGE SOURCE CONVERTER DATA, BEGIN IMPEDANCE CORRECTION DATA
+ 0 / END OF IMPEDANCE CORRECTION DATA, BEGIN MULTI-TERMINAL DC DATA
+ 0 / END OF MULTI-TERMINAL DC DATA, BEGIN MULTI-SECTION LINE DATA
+ 0 / END OF MULTI-SECTION LINE DATA, BEGIN ZONE DATA
+ 0 / END OF ZONE DATA, BEGIN INTER-AREA TRANSFER DATA
+ 0 / END OF INTER-AREA TRANSFER DATA, BEGIN OWNER DATA
+ 0 / END OF OWNER DATA, BEGIN FACTS CONTROL DEVICE DATA
+ 0 / END OF FACTS CONTROL DEVICE DATA, BEGIN SWITCHED SHUNT DATA
+   14,1,0,1,1.02500,0.96000,     0,  100.0,'',   15.00, 3,   5.00
+    9,1,0,1,1.02500,0.96000,     0,  100.0,'',   19.00, 3,   5.00
+   14,1,0,1,1.02500,0.96000,     0,  100.0,'',   10.00, 2,   5.00
+    9,1,0,1,1.02500,0.96000,     0,  100.0,'',   19.00, 3,   5.00
+    5,1,0,1,1.02500,0.96000,     0,  100.0,'',   19.00, 3,   5.00
+ 0 / END OF SWITCHED SHUNT DATA, BEGIN GNE DEVICE DATA
+ 0 / END OF GNE DEVICE DATA
+Q
+"""
+    identity = read_psse_raw_identity(text)
+    assert identity.fixed_shunts == (DeviceId(9, "1"), DeviceId(9, "3"), DeviceId(5, ""))
+    assert identity.switched_shunts == (
+        DeviceId(14, "1"),
+        DeviceId(9, "2"),
+        DeviceId(14, "2"),
+        DeviceId(9, "4"),
+        DeviceId(5, "2"),
+    )
 
 
 @pytest.mark.unit
