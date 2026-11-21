@@ -13,6 +13,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { PflowOptionsForm } from '@/components/pflow/PflowOptionsForm';
+import { DEFAULT_PFLOW_OPTIONS } from '@/lib/pflowOptions';
 import { makeQueryClient } from '@/api/queries';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
 import { useCaseStore } from '@/store/case';
@@ -55,7 +56,7 @@ afterEach(() => {
 });
 
 describe('<PflowOptionsForm /> fields', () => {
-  it('starts blank, with ANDES’s defaults as placeholders and nothing ticked', () => {
+  it('starts blank, with ANDES’s defaults as placeholders and the switches at ANDES’s own', () => {
     render(<PflowOptionsForm />, { wrapper: Wrapper });
     expect(field('pflow-tolerance')).toHaveValue('');
     expect(field('pflow-tolerance')).toHaveAttribute('placeholder', '1e-6');
@@ -63,7 +64,39 @@ describe('<PflowOptionsForm /> fields', () => {
     expect(field('pflow-max-iterations')).toHaveAttribute('placeholder', '25');
     expect(screen.getByTestId('pflow-flat-start')).not.toBeChecked();
     expect(screen.getByTestId('pflow-enforce-q-limits')).not.toBeChecked();
+    expect(screen.getByTestId('pflow-method-default')).toBeChecked();
+    expect(screen.getByTestId('pflow-method-nr')).not.toBeChecked();
+    expect(screen.getByTestId('pflow-method-dishonest')).not.toBeChecked();
+    expect(screen.getByTestId('pflow-method-nk')).not.toBeChecked();
+    expect(field('pflow-n-factorize')).toHaveValue('');
+    expect(field('pflow-n-factorize')).toHaveAttribute('placeholder', '4');
+    // Untouched, a switch shows ANDES's own, and ANDES's line search is on.
+    expect(screen.getByTestId('pflow-linesearch')).toBeChecked();
+    expect(screen.queryByTestId('pflow-nk-note')).not.toBeInTheDocument();
     expect(screen.getByTestId('pflow-options-reset')).toBeDisabled();
+  });
+
+  it('groups the methods under one name, with a legend and the hint', () => {
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    const group = screen.getByRole('group', { name: 'Solver method' });
+    expect(group).toHaveAttribute('aria-describedby', 'pflow-method-hint');
+    expect(document.getElementById('pflow-method-hint')).toHaveTextContent(/ANDES: NR/);
+    const radios = screen.getAllByRole('radio');
+    expect(radios).toHaveLength(4);
+    for (const radio of radios) expect(radio).toHaveAttribute('name', 'pflow-method');
+    expect(screen.getByRole('radio', { name: /Dishonest Newton-Raphson/ })).toHaveAttribute(
+      'value',
+      'dishonest',
+    );
+  });
+
+  it('moves between the methods with the arrow keys, as a radio group does', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-nr'));
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('pflow-method-dishonest')).toHaveFocus();
+    expect(usePflowOptionsStore.getState().options.method).toBe('dishonest');
   });
 
   it('commits a typed tolerance and iteration limit to the store', async () => {
@@ -139,6 +172,94 @@ describe('<PflowOptionsForm /> fields', () => {
     expect(usePflowOptionsStore.getState().options.maxIterations).toBeNull();
   });
 
+  it('commits a chosen solver method to the store, and the default choice clears it', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    await user.click(screen.getByTestId('pflow-method-dishonest'));
+    expect(usePflowOptionsStore.getState().options.method).toBe('dishonest');
+
+    await user.click(screen.getByTestId('pflow-method-default'));
+    expect(usePflowOptionsStore.getState().options.method).toBeNull();
+  });
+
+  it('commits a typed refactorisation count to the store', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    await user.type(field('pflow-n-factorize'), '10');
+    expect(usePflowOptionsStore.getState().options.nFactorize).toBe(10);
+    expect(screen.queryByTestId('error-pflow-n-factorize')).not.toBeInTheDocument();
+
+    await user.clear(field('pflow-n-factorize'));
+    expect(usePflowOptionsStore.getState().options.nFactorize).toBeNull();
+  });
+
+  it.each(['2.5', '0'])(
+    'says what is wrong with a refactorisation count of %s, and does not send it',
+    async (text) => {
+      const user = userEvent.setup();
+      render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+      await user.type(field('pflow-n-factorize'), text);
+
+      const error = screen.getByTestId('error-pflow-n-factorize');
+      expect(error).toHaveTextContent(/1 to 100/);
+      expect(error).toHaveTextContent(/case's own count is used/i);
+      expect(field('pflow-n-factorize')).toHaveAttribute('aria-invalid', 'true');
+      expect(usePflowOptionsStore.getState().options.nFactorize).toBeNull();
+    },
+  );
+
+  it('commits the line-search checkbox either way', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    // Shown on (ANDES's own), so the first click turns it off.
+    await user.click(screen.getByTestId('pflow-linesearch'));
+    expect(usePflowOptionsStore.getState().options.linesearch).toBe(false);
+    expect(screen.getByTestId('pflow-linesearch')).not.toBeChecked();
+
+    await user.click(screen.getByTestId('pflow-linesearch'));
+    expect(usePflowOptionsStore.getState().options.linesearch).toBe(true);
+    expect(screen.getByTestId('pflow-linesearch')).toBeChecked();
+  });
+
+  it('under Newton-Krylov says that tolerance, iterations and line search do not apply', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    await user.click(screen.getByTestId('pflow-method-nk'));
+
+    const note = screen.getByTestId('pflow-nk-note');
+    expect(note).toHaveTextContent(/tolerance, iteration limit and line search do not apply/i);
+    expect(note).toHaveTextContent(/0 iterations/i);
+    expect(document.getElementById('pflow-tolerance-hint')).toHaveTextContent(
+      /does not apply under Newton-Krylov/i,
+    );
+    expect(document.getElementById('pflow-max-iterations-hint')).toHaveTextContent(
+      /does not apply under Newton-Krylov/i,
+    );
+    expect(screen.getByTestId('pflow-linesearch').parentElement).toHaveTextContent(
+      /does not apply under Newton-Krylov/i,
+    );
+
+    expect(screen.getByRole('group', { name: 'Solver method' })).toHaveAttribute(
+      'aria-describedby',
+      'pflow-method-hint pflow-nk-note',
+    );
+
+    await user.click(screen.getByTestId('pflow-method-nr'));
+    expect(screen.queryByTestId('pflow-nk-note')).not.toBeInTheDocument();
+    expect(document.getElementById('pflow-tolerance-hint')).not.toHaveTextContent(/Newton-Krylov/i);
+
+    await user.click(screen.getByTestId('pflow-method-dishonest'));
+    expect(screen.queryByTestId('pflow-nk-note')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pflow-linesearch').parentElement).not.toHaveTextContent(
+      /Newton-Krylov/i,
+    );
+  });
+
   it('keeps what was typed while focus is in the field, and tidies it on leaving', async () => {
     const user = userEvent.setup();
     render(<PflowOptionsForm />, { wrapper: Wrapper });
@@ -160,6 +281,16 @@ describe('<PflowOptionsForm /> and the store', () => {
     expect(field('pflow-max-iterations')).toHaveValue('50');
     expect(field('pflow-tolerance')).toHaveValue('1e-5');
     expect(screen.getByTestId('pflow-flat-start')).toBeChecked();
+  });
+
+  it('follows a solver change made elsewhere', () => {
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    act(() => {
+      usePflowOptionsStore.getState().setOptions({ method: 'NK', nFactorize: 20 });
+    });
+    expect(screen.getByTestId('pflow-method-nk')).toBeChecked();
+    expect(field('pflow-n-factorize')).toHaveValue('20');
+    expect(screen.getByTestId('pflow-nk-note')).toBeInTheDocument();
   });
 
   it('follows a change made elsewhere even after the user typed in the field', async () => {
@@ -194,7 +325,54 @@ describe('<PflowOptionsForm /> and the store', () => {
       maxIterations: null,
       flatStart: null,
       enforceQLimits: null,
+      method: null,
+      nFactorize: null,
+      linesearch: null,
     });
+  });
+
+  it('Reset blanks the solver settings too', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-dishonest'));
+    await user.type(field('pflow-n-factorize'), '10');
+    await user.click(screen.getByTestId('pflow-linesearch'));
+    expect(screen.getByTestId('pflow-linesearch')).not.toBeChecked();
+
+    await user.click(screen.getByTestId('pflow-options-reset'));
+
+    expect(field('pflow-n-factorize')).toHaveValue('');
+    expect(screen.getByTestId('pflow-method-default')).toBeChecked();
+    // Back to the case's own, which the box shows as ANDES's: on.
+    expect(screen.getByTestId('pflow-linesearch')).toBeChecked();
+    expect(screen.getByTestId('pflow-options-reset')).toBeDisabled();
+    expect(usePflowOptionsStore.getState().options).toEqual({
+      ...DEFAULT_PFLOW_OPTIONS,
+      method: null,
+      nFactorize: null,
+      linesearch: null,
+    });
+  });
+
+  it('Reset clears a refactorisation count that was refused', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    // A refused value stays as typed when the field loses focus.
+    await user.type(field('pflow-n-factorize'), '0');
+    expect(screen.getByTestId('pflow-options-reset')).toBeEnabled();
+
+    await user.click(screen.getByTestId('pflow-options-reset'));
+
+    expect(field('pflow-n-factorize')).toHaveValue('');
+    expect(screen.queryByTestId('error-pflow-n-factorize')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pflow-options-reset')).toBeDisabled();
+  });
+
+  it('Reset is offered for a solver setting alone', async () => {
+    const user = userEvent.setup();
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-linesearch'));
+    expect(screen.getByTestId('pflow-options-reset')).toBeEnabled();
   });
 });
 
@@ -302,6 +480,93 @@ describe('<PflowOptionsForm /> Run PF', () => {
     expect(JSON.parse(String(init.body))).toEqual({
       max_iterations: 40,
       enforce_q_limits: true,
+    });
+  });
+
+  it('sends an empty body when nothing was touched', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useCaseStore.getState().setCase({
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CONVERGED), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+
+    await user.click(screen.getByTestId('pflow-options-run'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({});
+  });
+
+  it('sends the solver settings the form holds', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useCaseStore.getState().setCase({
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CONVERGED), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-dishonest'));
+    await user.type(field('pflow-n-factorize'), '10');
+    await user.click(screen.getByTestId('pflow-linesearch'));
+
+    await user.click(screen.getByTestId('pflow-options-run'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    // The line search was shown on and unticked: an explicit off is sent.
+    expect(JSON.parse(String(init.body))).toEqual({
+      method: 'dishonest',
+      n_factorize: 10,
+      linesearch: false,
+    });
+  });
+
+  it('under Newton-Krylov still sends a typed tolerance and limit; the server ignores them', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useCaseStore.getState().setCase({
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CONVERGED), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-nk'));
+    await user.type(field('pflow-tolerance'), '1e-8');
+    await user.type(field('pflow-max-iterations'), '40');
+
+    await user.click(screen.getByTestId('pflow-options-run'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      method: 'NK',
+      tolerance: 1e-8,
+      max_iterations: 40,
     });
   });
 

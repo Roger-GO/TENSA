@@ -12,7 +12,9 @@ import {
   PFLOW_LIMITS,
   formatTolerance,
   isDefaultPflowOptions,
+  nkIgnores,
   parseMaxIterations,
+  parseNFactorize,
   parseTolerance,
   shownSwitch,
   type ParsedField,
@@ -29,10 +31,14 @@ import {
  *   (a case can turn either on itself), and once touched they are sent either way,
  *   so a case that turns Q limits on can be run without. The box shows what the
  *   case sets once a run has shown it.
+ * - Solver method, Refactorize first N iterations and Line search: the same
+ *   "blank keeps the case's own" rule. Under Newton-Krylov the tolerance, the
+ *   iteration limit and the line search do not apply; the form says so and leaves
+ *   them set for when the user switches back.
  *
  * The values live in `usePflowOptionsStore`, which every control that starts a
  * power flow reads, and they reset when another case is opened. The text of the
- * two number fields is a draft kept here, shown while it still means what the
+ * number fields is a draft kept here, shown while it still means what the
  * store holds; once the store changes from elsewhere (a retry button on the
  * non-convergence banner, a case change) the field follows the store.
  */
@@ -74,11 +80,23 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
 
   const [tolDraft, setTolDraft] = useState<string | null>(null);
   const [iterDraft, setIterDraft] = useState<string | null>(null);
+  const [nFactorizeDraft, setNFactorizeDraft] = useState<string | null>(null);
+
+  const method = options.method;
 
   const tolText = shownText(tolDraft, options.tolerance, parseTolerance, formatTolerance);
   const iterText = shownText(iterDraft, options.maxIterations, parseMaxIterations, String);
+  const nFactorizeText = shownText(nFactorizeDraft, options.nFactorize, parseNFactorize, String);
   const tolParsed = parseTolerance(tolText);
   const iterParsed = parseMaxIterations(iterText);
+  const nFactorizeParsed = parseNFactorize(nFactorizeText);
+
+  const nk = nkIgnores(method);
+  const nkSuffix = ' Does not apply under Newton-Krylov.';
+  const tolHint = `Stop when the largest mismatch is below this, from ${formatTolerance(PFLOW_LIMITS.toleranceMin)} to ${formatTolerance(PFLOW_LIMITS.toleranceMax)}. Blank keeps the case's own (ANDES: ${formatTolerance(ANDES_PFLOW_DEFAULTS.tolerance)}).`;
+  const iterHint = `Give up after this many, from ${PFLOW_LIMITS.maxIterationsMin} to ${PFLOW_LIMITS.maxIterationsMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.maxIterations}).`;
+  const linesearchHint =
+    "Shorten a Newton step whose residual would grow; can pull a run that overshoots back to convergence. Read by NR and dishonest only. Untouched, the case's own stands (ANDES: on).";
 
   const onTolerance = (text: string) => {
     setTolDraft(text);
@@ -90,10 +108,16 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
     const parsed = parseMaxIterations(text);
     setOptions({ maxIterations: parsed.ok ? parsed.value : null });
   };
+  const onNFactorize = (text: string) => {
+    setNFactorizeDraft(text);
+    const parsed = parseNFactorize(text);
+    setOptions({ nFactorize: parsed.ok ? parsed.value : null });
+  };
   const onReset = () => {
     resetOptions();
     setTolDraft(null);
     setIterDraft(null);
+    setNFactorizeDraft(null);
   };
 
   const runDisabled = !readiness.ready || isRunning;
@@ -111,7 +135,12 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
           variant="ghost"
           size="sm"
           onClick={onReset}
-          disabled={isDefaultPflowOptions(options) && tolDraft === null && iterDraft === null}
+          disabled={
+            isDefaultPflowOptions(options) &&
+            tolDraft === null &&
+            iterDraft === null &&
+            nFactorizeDraft === null
+          }
           data-testid="pflow-options-reset"
         >
           Reset
@@ -128,7 +157,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <FieldRow
           id="pflow-tolerance"
           label="Tolerance (pu)"
-          hint={`Stop when the largest mismatch is below this, from ${formatTolerance(PFLOW_LIMITS.toleranceMin)} to ${formatTolerance(PFLOW_LIMITS.toleranceMax)}. Blank keeps the case's own (ANDES: ${formatTolerance(ANDES_PFLOW_DEFAULTS.tolerance)}).`}
+          hint={nk ? `${tolHint}${nkSuffix}` : tolHint}
           error={tolParsed.ok ? undefined : `${tolParsed.error} The case's own tolerance is used.`}
         >
           <TextInput
@@ -144,7 +173,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <FieldRow
           id="pflow-max-iterations"
           label="Max iterations"
-          hint={`Give up after this many, from ${PFLOW_LIMITS.maxIterationsMin} to ${PFLOW_LIMITS.maxIterationsMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.maxIterations}).`}
+          hint={nk ? `${iterHint}${nkSuffix}` : iterHint}
           error={iterParsed.ok ? undefined : `${iterParsed.error} The case's own limit is used.`}
         >
           <TextInput
@@ -154,6 +183,77 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
             invalid={!iterParsed.ok}
             onChange={onMaxIterations}
             onBlur={() => iterParsed.ok && setIterDraft(null)}
+          />
+        </FieldRow>
+
+        <fieldset
+          className="flex flex-col gap-1"
+          data-testid="pflow-method"
+          aria-describedby={nk ? 'pflow-method-hint pflow-nk-note' : 'pflow-method-hint'}
+        >
+          <legend className="text-muted-foreground text-xs font-medium">Solver method</legend>
+          <MethodRadio
+            testId="pflow-method-default"
+            value=""
+            label="Case's own (NR unless the case says otherwise)"
+            checked={method === null}
+            onChange={() => setOptions({ method: null })}
+          />
+          <MethodRadio
+            testId="pflow-method-nr"
+            value="NR"
+            label="Newton-Raphson (NR)"
+            checked={method === 'NR'}
+            onChange={() => setOptions({ method: 'NR' })}
+          />
+          <MethodRadio
+            testId="pflow-method-dishonest"
+            value="dishonest"
+            label="Dishonest Newton-Raphson"
+            checked={method === 'dishonest'}
+            onChange={() => setOptions({ method: 'dishonest' })}
+          />
+          <MethodRadio
+            testId="pflow-method-nk"
+            value="NK"
+            label="Newton-Krylov (NK)"
+            checked={method === 'NK'}
+            onChange={() => setOptions({ method: 'NK' })}
+          />
+          <span id="pflow-method-hint" className="text-muted-foreground text-[10px] leading-snug">
+            Which solver runs. Dishonest Newton-Raphson reuses the Jacobian after the first
+            iterations; Newton-Krylov is SciPy&apos;s solver. Case&apos;s own keeps what the case
+            sets (ANDES: NR).
+          </span>
+          {nk ? (
+            <span
+              id="pflow-nk-note"
+              data-testid="pflow-nk-note"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              Under Newton-Krylov the tolerance, iteration limit and line search do not apply: SciPy
+              stops by its own rule and reports 0 iterations.
+            </span>
+          ) : null}
+        </fieldset>
+
+        <FieldRow
+          id="pflow-n-factorize"
+          label="Refactorize first N iterations"
+          hint={`With the dishonest method, the Jacobian is refactorized only while the iteration count is below this, from ${PFLOW_LIMITS.nFactorizeMin} to ${PFLOW_LIMITS.nFactorizeMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.nFactorize}).`}
+          error={
+            nFactorizeParsed.ok
+              ? undefined
+              : `${nFactorizeParsed.error} The case's own count is used.`
+          }
+        >
+          <TextInput
+            id="pflow-n-factorize"
+            value={nFactorizeText}
+            placeholder={String(ANDES_PFLOW_DEFAULTS.nFactorize)}
+            invalid={!nFactorizeParsed.ok}
+            onChange={onNFactorize}
+            onBlur={() => nFactorizeParsed.ok && setNFactorizeDraft(null)}
           />
         </FieldRow>
 
@@ -174,6 +274,16 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
           onChange={(checked) => setOptions({ enforceQLimits: checked })}
           note={caseNote(options.enforceQLimits, caseSettings.enforceQLimits)}
         />
+
+        <CheckRow
+          id="pflow-linesearch"
+          label="Line search"
+          hint={nk ? `${linesearchHint}${nkSuffix}` : linesearchHint}
+          // Untouched it shows ANDES's own, which is on, as the two switches above
+          // show theirs (off).
+          checked={options.linesearch ?? ANDES_PFLOW_DEFAULTS.linesearch}
+          onChange={(checked) => setOptions({ linesearch: checked })}
+        />
       </div>
 
       <div className="flex flex-col gap-2 pt-1">
@@ -193,6 +303,34 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <RunReadinessNote routine="pflow" testId="pflow-options-run" />
       </div>
     </section>
+  );
+}
+
+interface MethodRadioProps {
+  testId: string;
+  value: string;
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}
+
+function MethodRadio({ testId, value, label, checked, onChange }: MethodRadioProps) {
+  return (
+    <label className="text-foreground flex items-start gap-2 text-xs">
+      <input
+        type="radio"
+        name="pflow-method"
+        value={value}
+        data-testid={testId}
+        checked={checked}
+        onChange={onChange}
+        className={cn(
+          'border-border mt-0.5 h-3.5 w-3.5 rounded border',
+          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        )}
+      />
+      {label}
+    </label>
   );
 }
 

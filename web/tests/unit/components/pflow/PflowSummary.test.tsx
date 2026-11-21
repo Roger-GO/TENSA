@@ -110,6 +110,22 @@ describe('<PflowSummary />', () => {
     );
   });
 
+  it('names Newton-Krylov in place of an iteration count it does not keep', () => {
+    usePflowStore.setState({
+      lastRun: result({
+        iterations: 0,
+        settings: { ...SETTINGS, method: 'NK', n_factorize: 4, linesearch: true },
+      }),
+    });
+    render(<PflowSummary />);
+    const status = screen.getByTestId('pflow-summary-status');
+    expect(status).toHaveTextContent('Converged by Newton-Krylov, final mismatch 6.96e-12.');
+    expect(status).not.toHaveTextContent(/0 iterations|tolerance/);
+    expect(screen.getByTestId('pflow-summary-settings')).toHaveTextContent(
+      "Ran with Newton-Krylov (SciPy's own stopping rule).",
+    );
+  });
+
   it('states the share the lines lose, and how the figures add up', () => {
     usePflowStore.setState({ lastRun: result() });
     render(<PflowSummary />);

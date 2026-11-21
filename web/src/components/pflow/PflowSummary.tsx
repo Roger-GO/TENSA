@@ -7,7 +7,7 @@ import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { openPflowComparePanel } from '@/lib/openPflowPanel';
-import { describeSettings } from '@/lib/pflowOptions';
+import { describeSettings, iterationsPhrase } from '@/lib/pflowOptions';
 import { lossShare, summaryRows } from '@/lib/pflowSummary';
 
 /**
@@ -53,12 +53,12 @@ export function PflowSummary({ className }: PflowSummaryProps) {
   if (lastRun === null) {
     status = 'Run a power flow to see what the system generates, draws and loses.';
   } else if (!lastRun.converged) {
-    status = `The last power flow did not converge in ${lastRun.iterations} iterations, so there are no totals. The banner above the diagram has adjusted retries.`;
+    status = `The last power flow did not converge ${iterationsPhrase(lastRun)}, so there are no totals. The banner above the diagram has adjusted retries.`;
   } else if (summary === null) {
     status =
       'The operating point on screen was read after a time-domain run, which gives no totals. Run a power flow for them.';
   } else {
-    status = `Converged in ${lastRun.iterations} iterations, final mismatch ${lastRun.mismatch.toExponential(2)}.`;
+    status = `Converged ${iterationsPhrase(lastRun)}, final mismatch ${lastRun.mismatch.toExponential(2)}.`;
   }
 
   const share = summary === null ? null : lossShare(summary);

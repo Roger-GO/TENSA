@@ -110,6 +110,7 @@ describe('store cascade — case change', () => {
   it('puts the power-flow options back to the defaults, so a setting made for one case does not follow to the next', () => {
     useCaseStore.getState().setCase(caseOf('kundur_full.xlsx'));
     usePflowOptionsStore.getState().setOptions({ flatStart: true, tolerance: 1e-3 });
+    usePflowOptionsStore.getState().setOptions({ method: 'NK', nFactorize: 10, linesearch: false });
     // What a run showed about the old case (its file turns Q limits on) is not
     // true of the next one either.
     usePflowOptionsStore.getState().noteCaseSettings({ enforceQLimits: true });
@@ -121,6 +122,9 @@ describe('store cascade — case change', () => {
       maxIterations: null,
       flatStart: null,
       enforceQLimits: null,
+      method: null,
+      nFactorize: null,
+      linesearch: null,
     });
     expect(usePflowOptionsStore.getState().caseSettings).toEqual({
       flatStart: null,

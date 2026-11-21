@@ -28,7 +28,7 @@ import {
   comparisonTables,
   type PflowComparison,
 } from '@/lib/pflowCompare';
-import { describeSettings } from '@/lib/pflowOptions';
+import { describeSettings, iterationsPhrase } from '@/lib/pflowOptions';
 import { lossShare, summaryRows } from '@/lib/pflowSummary';
 import { formatSignificant } from '@/lib/series';
 import { radToDeg } from '@/lib/units';
@@ -459,7 +459,7 @@ function pflowSection({ result, names, violations, origin }: ReportPflow): Secti
   const parts: string[] = [];
   if (!result.converged) {
     parts.push(
-      `<p>The power flow did not converge in ${escapeHtml(result.iterations)} iterations (last mismatch ${escapeHtml(result.mismatch.toExponential(2))}), so it has no results to report.</p>`,
+      `<p>The power flow did not converge ${escapeHtml(iterationsPhrase(result))} (last mismatch ${escapeHtml(result.mismatch.toExponential(2))}), so it has no results to report.</p>`,
     );
     return { id: 'power-flow', title: 'Power flow', html: parts.join('\n') };
   }
@@ -479,7 +479,7 @@ function pflowSection({ result, names, violations, origin }: ReportPflow): Secti
   if (summary !== null) {
     const settings = result.settings ? ` It ran with ${describeSettings(result.settings)}.` : '';
     parts.push(
-      `<p>Converged in ${escapeHtml(result.iterations)} iterations, final mismatch ${escapeHtml(result.mismatch.toExponential(2))}.${escapeHtml(settings)}</p>`,
+      `<p>Converged ${escapeHtml(iterationsPhrase(result))}, final mismatch ${escapeHtml(result.mismatch.toExponential(2))}.${escapeHtml(settings)}</p>`,
     );
     const share = lossShare(summary);
     parts.push(

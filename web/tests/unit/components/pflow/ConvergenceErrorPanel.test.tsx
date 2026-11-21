@@ -87,6 +87,28 @@ describe('<ConvergenceErrorPanel />', () => {
     expect(screen.getByText(/30 iterations/i)).toBeInTheDocument();
   });
 
+  it('names Newton-Krylov rather than "0 iterations" for a run of that method', () => {
+    const settings: PflowSettings = {
+      tolerance: 1e-6,
+      max_iterations: 25,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'NK',
+      n_factorize: 4,
+      linesearch: true,
+    };
+    usePflowStore.setState({
+      lastRun: makeNonConvergedResult({ iterations: 0, settings }),
+      isRunning: false,
+      error: null,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<ConvergenceErrorPanel />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/by Newton-Krylov\./)).toBeInTheDocument();
+    expect(screen.queryByText(/0 iterations/i)).not.toBeInTheDocument();
+  });
+
   it('renders via the single error primitive (role=alert banner; "Run again" is the recovery CTA)', () => {
     usePflowStore.setState({
       lastRun: makeNonConvergedResult({ iterations: 30 }),

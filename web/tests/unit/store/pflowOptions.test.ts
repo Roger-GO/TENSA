@@ -23,11 +23,32 @@ describe('usePflowOptionsStore', () => {
       maxIterations: 50,
       flatStart: true,
       enforceQLimits: null,
+      method: null,
+      nFactorize: null,
+      linesearch: null,
+    });
+  });
+
+  it('starts with the solver settings unset', () => {
+    expect(DEFAULT_PFLOW_OPTIONS).toEqual({
+      tolerance: null,
+      maxIterations: null,
+      flatStart: null,
+      enforceQLimits: null,
+      method: null,
+      nFactorize: null,
+      linesearch: null,
     });
   });
 
   it('resets to the defaults', () => {
     usePflowOptionsStore.getState().setOptions({ tolerance: 1e-4, enforceQLimits: true });
+    usePflowOptionsStore.getState().resetOptions();
+    expect(usePflowOptionsStore.getState().options).toEqual(DEFAULT_PFLOW_OPTIONS);
+  });
+
+  it('resets the solver settings too', () => {
+    usePflowOptionsStore.getState().setOptions({ method: 'NK', nFactorize: 10, linesearch: false });
     usePflowOptionsStore.getState().resetOptions();
     expect(usePflowOptionsStore.getState().options).toEqual(DEFAULT_PFLOW_OPTIONS);
   });
