@@ -29,6 +29,7 @@ def _payload() -> dict[str, Any]:
         "network_model": "copper_plate",
         "objective_per_h": 1500.0,
         "objective_check_per_h": 1500.0,
+        "fixed_per_h": 0.0,
         "base_mva": 100.0,
         "total_load_mw": 150.0,
         "total_dispatch_mw": 150.0,
@@ -182,6 +183,18 @@ def test_distinct_objectives_are_carried_apart() -> None:
     result = dispatch_result(payload, _book())
     assert result.objective_per_h == 1500.0
     assert result.objective_check_per_h == 1500.0001
+
+
+def test_the_constant_terms_are_carried_apart() -> None:
+    """The solver's objective leaves the gencost constant terms out, the
+    recomputed cost holds them, and fixed_per_h is the difference."""
+    payload = _payload()
+    payload["objective_per_h"] = 1500.0
+    payload["objective_check_per_h"] = 1650.0
+    payload["fixed_per_h"] = 150.0
+    result = dispatch_result(payload, _book())
+    assert result.fixed_per_h == 150.0
+    assert result.objective_per_h + result.fixed_per_h == result.objective_check_per_h
 
 
 def test_slacks_and_duals_pass_through() -> None:

@@ -566,10 +566,11 @@ def run_dispatch(
     """Run the one-period economic dispatch of the loaded case (Sienna only).
 
     network_model is copper_plate (the default), dc, ptdf or ac (the full
-    AC equations, solved with Ipopt). The answer holds objective_per_h (the
-    solver's objective in $/h) and objective_check_per_h (recomputed from
-    the dispatch and the file's gencost; the route's description says how
-    the two relate), generators keyed by neutral key
+    AC equations, solved with Ipopt). The answer holds objective_check_per_h
+    (the cost as MATPOWER counts it, recomputed from the dispatch and the
+    file's gencost, the constant terms included), objective_per_h (the
+    solver's objective in $/h, which leaves the constant terms out) and
+    fixed_per_h (their sum, the difference between the two), generators keyed by neutral key
     (gen:<bus>-<id>) each with p_mw, bus, id and idx, slacks (every slack
     variable past 1e-6 MW), and duals only when duals is true. The case
     needs generator cost data: a PSS/E .raw carries none (422); a MATPOWER

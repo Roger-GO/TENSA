@@ -82,7 +82,8 @@ class UcGeneratorSchema(BaseModel):
     energy: float = Field(
         description=(
             "The generator's energy cost over the horizon, in $: the "
-            "quadratic and linear gencost terms at the dispatched MW."
+            "quadratic and linear gencost terms at the dispatched MW, times "
+            "the period length in hours."
         )
     )
     startup: float = Field(
@@ -90,8 +91,9 @@ class UcGeneratorSchema(BaseModel):
     )
     fixed: float = Field(
         description=(
-            "The generator's fixed cost over the horizon, in $: the constant "
-            "gencost term per committed hour."
+            "The generator's fixed cost over the horizon, in $: the gencost "
+            "constant term c0 ($/h) per committed period, times the period "
+            "length in hours."
         )
     )
 
@@ -130,7 +132,15 @@ class UcResponse(BaseModel):
         description="The period start times, ISO strings, one per period."
     )
     base_mva: float = Field(description="The system MVA base.")
-    objective: float = Field(description="The solver's objective over the horizon, in $.")
+    objective: float = Field(
+        description=(
+            "The solver's objective over the horizon, in $. The gencost "
+            "constant term is put on the model as c0 times the period length "
+            "per committed period, so it equals objective_check, except that "
+            "PowerSimulations leaves the constant term of a must-run "
+            "generator out of its objective."
+        )
+    )
     objective_check: float = Field(
         description=(
             "The cost recomputed from the commitment and dispatch and the "

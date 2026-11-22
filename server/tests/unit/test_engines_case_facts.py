@@ -660,6 +660,50 @@ def test_matpower_snippet() -> None:
     assert document["notes"] == []
 
 
+def _ramp_gen_row(ramp_agc: float, ramp_10: float) -> str:
+    """A 21-column mpc.gen row of bus 1 with the two ramp columns given."""
+    return f"    1 0 0 50 -40 1.0 100 1 200 0 0 0 0 0 0 0 {ramp_agc} {ramp_10} 0 0 0;"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("ramp_agc", "ramp_10", "expected"),
+    [
+        # RAMP_AGC, in MW per minute, where the file gives it.
+        (2.5, 40.0, 2.5),
+        # RAMP_10 is MW in 10 minutes: 30 MW is 3 MW per minute.
+        (0.0, 30.0, 3.0),
+        # No ramp data: never a limit of 0.
+        (0.0, 0.0, None),
+    ],
+)
+def test_matpower_ramp_rate(ramp_agc: float, ramp_10: float, expected: float | None) -> None:
+    text = (
+        "function mpc = ramp\nmpc.version = '2';\nmpc.baseMVA = 100;\n"
+        "mpc.bus = [\n    1 3 0 0 0 0 1 1.0 0 230 1 1.1 0.9;\n];\n"
+        f"mpc.gen = [\n{_ramp_gen_row(ramp_agc, ramp_10)}\n];\n"
+        "mpc.branch = [\n];\n"
+    )
+    (op,) = read_matpower_facts(text).generator_ops
+    assert op.ramp_up_mw_per_min == expected
+    assert op.ramp_down_mw_per_min == expected
+    rows = corrections_document(read_matpower_facts(text))["generator_ops"]
+    assert isinstance(rows, list)
+    assert rows[0]["ramp_up_mw_per_min"] == expected
+
+
+@pytest.mark.unit
+def test_matpower_generator_ops_carry_their_row() -> None:
+    """Each operations entry carries its mpc.gen row, from 1, the number
+    PowerSystems names the generator by (gen-<row>), whatever bus it is on."""
+    facts = read_matpower_facts(MATPOWER_SNIPPET)
+    assert [op.row for op in facts.generator_ops] == [1, 2, 3]
+    assert [(op.bus, op.gen_id) for op in facts.generator_ops] == [(1, "1"), (2, "1"), (2, "2")]
+    rows = corrections_document(facts)["generator_ops"]
+    assert isinstance(rows, list)
+    assert [row["row"] for row in rows] == [1, 2, 3]
+
+
 @pytest.mark.unit
 def test_matpower_transformer_charging() -> None:
     # A row with a ratio and a b is a transformer whose charging is half at

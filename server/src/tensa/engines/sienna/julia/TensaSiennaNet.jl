@@ -37,21 +37,46 @@ function _write_matrix(file::AbstractString, matrix)
     return nothing
 end
 
+# Write the nonzero entries of a complex matrix as raw Float64, an n_entries
+# by 4 matrix column-major with no header: the 0-based row, the 0-based
+# column, the real part and the imaginary part of each entry, the entries in
+# row-major order. An entry whose two parts are both zero is left out. The
+# Ybus of a large case is mostly zeros, so it is never made dense: its file
+# holds 32 bytes per nonzero, and the Python side refuses an answer with too
+# many of them before it reads the file. Answers the entry count.
+function _write_triplets(file::AbstractString, matrix)
+    cells = sort!(findall(!iszero, matrix); by = c -> (c[1], c[2]))
+    out = Matrix{Float64}(undef, length(cells), 4)
+    for (k, c) in enumerate(cells)
+        value = matrix[c]
+        out[k, 1] = c[1] - 1
+        out[k, 2] = c[2] - 1
+        out[k, 3] = Float64(real(value))
+        out[k, 4] = Float64(imag(value))
+    end
+    open(file, "w") do io
+        write(io, out)
+    end
+    return length(cells)
+end
+
 """
     network_matrix_json(s::TS.Session; kind, file) -> String
 
 Build one network matrix of the loaded case with PowerNetworkMatrices and
 write it to `file` as raw Float64, column-major, with no header. `kind` is
-"ptdf", "lodf", "ybus" or "incidence". A complex matrix (ybus) is written as
-two files, `<file>.re` and `<file>.im`. The answer is a JSON object with the
-kind, the shape, the axes (arc entries `{"from", "to"}` or bus numbers), the
-basename of the file or files written, the reference buses (not for ybus) and
+"ptdf", "lodf", "ybus" or "incidence". The Ybus, complex and sparse, is
+written as its nonzero entries (`_write_triplets`) and never made dense; its
+answer carries their count as `n_entries`. The answer is a JSON object with
+the kind, the shape, the axes (arc entries `{"from", "to"}` or bus numbers),
+the basename of the file written, the reference buses (not for ybus) and
 `distributed_slack` false. Throws an `ArgumentError` for a kind it does not
 know; a matrix PowerNetworkMatrices cannot build propagates as thrown.
 """
 function network_matrix_json(s::TS.Session; kind::AbstractString, file::AbstractString)::String
     kind in KINDS || throw(ArgumentError("unknown network matrix kind: $(kind)"))
     base = basename(String(file))
+    n_entries = nothing
     if kind == "ptdf"
         m = PNM.PTDF(s.sys)
         data = PNM.get_ptdf_data(m)
@@ -72,14 +97,13 @@ function network_matrix_json(s::TS.Session; kind::AbstractString, file::Abstract
         files = Any[base]
     elseif kind == "ybus"
         m = PNM.Ybus(s.sys)
-        data = Matrix(m.data)
-        _write_matrix(String(file) * ".re", real(data))
-        _write_matrix(String(file) * ".im", imag(data))
+        data = m.data
+        n_entries = _write_triplets(String(file), data)
         rows = Any[Int(b) for b in PNM.get_bus_axis(m)]
         cols = Any[Int(b) for b in PNM.get_bus_axis(m)]
         ref_buses = nothing
         complex = true
-        files = Any[base * ".re", base * ".im"]
+        files = Any[base]
     else
         m = PNM.IncidenceMatrix(s.sys)
         data = Float64.(Matrix(m.data))
@@ -103,6 +127,7 @@ function network_matrix_json(s::TS.Session; kind::AbstractString, file::Abstract
         "distributed_slack" => false,
     )
     ref_buses === nothing || (answer["ref_buses"] = ref_buses)
+    n_entries === nothing || (answer["n_entries"] = n_entries)
     return TS._to_json(answer)
 end
 

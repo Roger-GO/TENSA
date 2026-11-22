@@ -28,8 +28,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 from tensa.core.disturbance import DisturbanceSpec, FaultSpec, ToggleSpec
 from tensa.core.edit_log import EditStep
 from tensa.core.eig_math import (
@@ -1331,21 +1329,22 @@ class SiennaState:
             ]
 
         what = f"{kind} matrix"
-        files = [Path(str(file) + ".re"), Path(str(file) + ".im")] if kind == "ybus" else [file]
+        files = [file]
         try:
             if kind == "ybus":
-                re = read_matrix(files[0], n_rows, n_cols, what=what, error=SiennaError)
-                im = read_matrix(files[1], n_rows, n_cols, what=what, error=SiennaError)
-                # The nonzero entries, row by row, as the ANDES route lists them.
-                nonzero_rows, nonzero_cols = np.nonzero((re != 0.0) | (im != 0.0))
-                if nonzero_rows.size > MAX_YBUS_ENTRIES:
-                    raise NetworkMatrixTooLargeError(
-                        kind, int(nonzero_rows.size), MAX_YBUS_ENTRIES
-                    )
-                answer["n_entries"] = int(nonzero_rows.size)
+                # The Julia side writes the nonzero entries alone, row by row
+                # as the ANDES route lists them (0-based row, 0-based column,
+                # real part, imaginary part), and says how many: the count is
+                # refused by its size before the file is read, and a large
+                # case's Ybus is never written dense.
+                n_entries = int(descriptor["n_entries"])
+                if n_entries > MAX_YBUS_ENTRIES:
+                    raise NetworkMatrixTooLargeError(kind, n_entries, MAX_YBUS_ENTRIES)
+                triplets = read_matrix(file, n_entries, 4, what=what, error=SiennaError)
+                answer["n_entries"] = n_entries
                 answer["entries"] = [
-                    {"row": int(r), "col": int(c), "re": float(re[r, c]), "im": float(im[r, c])}
-                    for r, c in zip(nonzero_rows, nonzero_cols, strict=True)
+                    {"row": int(r), "col": int(c), "re": float(re), "im": float(im)}
+                    for r, c, re, im in triplets.tolist()
                 ]
             else:
                 # A dense answer: refused by its size before the file is read.

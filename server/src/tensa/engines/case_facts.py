@@ -96,11 +96,14 @@ class GeneratorOpFact:
     """The operations data of one generator of a MATPOWER case.
 
     ``p_min_mw`` and ``p_max_mw`` are the PMIN and PMAX columns (10 and 9).
-    ``ramp_up_mw_per_min`` and ``ramp_down_mw_per_min`` are the RAMP_10 column
-    (18) divided by 10, or None where the column is 0. ``cost`` is the gencost
-    row: ``kind`` is "polynomial" for model 2, "piecewise" for model 1;
-    ``coefficients`` or ``points`` hold the row's numbers; ``startup_usd`` and
-    ``shutdown_usd`` are the row's second and third columns.
+    ``ramp_up_mw_per_min`` and ``ramp_down_mw_per_min`` are the ramp rate in
+    MW per minute (``matpower_ramp_mw_per_min``): RAMP_AGC (column 17) where
+    it is non-zero, else RAMP_10 (column 18) divided by 10, else None. ``cost``
+    is the gencost row: ``kind`` is "polynomial" for model 2, "piecewise" for
+    model 1; ``coefficients`` or ``points`` hold the row's numbers;
+    ``startup_usd`` and ``shutdown_usd`` are the row's second and third
+    columns. ``row`` is the generator's row of ``mpc.gen``, from 1, which is
+    the number PowerSystems names it by (``gen-<row>``).
     """
 
     bus: int
@@ -114,6 +117,30 @@ class GeneratorOpFact:
     cost_points: tuple[tuple[float, float], ...] | None
     startup_usd: float | None
     shutdown_usd: float | None
+    row: int | None = None
+
+
+def matpower_ramp_mw_per_min(gen_row: list[float]) -> float | None:
+    """The ramp rate of a MATPOWER ``mpc.gen`` row, in MW per minute.
+
+    The MATPOWER manual (table B-2) gives three ramp columns: RAMP_AGC
+    (column 17), the ramp rate for load following and AGC, in MW per minute;
+    RAMP_10 (column 18), the ramp rate for 10 minute reserves, in MW; and
+    RAMP_30 (column 19), in MW per 30 minutes. A dispatch or commitment step
+    is load following, so RAMP_AGC is the rate where the file gives one; a
+    file that gives only RAMP_10 has its 10 minute capability spread over the
+    10 minutes, RAMP_10 / 10. A column of 0 is MATPOWER's "no data", never a
+    limit (as a limit it would pin the generator), and with neither column
+    the answer is None. This is the rate the ``op`` block publishes and the
+    rate the Sienna engine's commitment and simulation enforce.
+    """
+    ramp_agc = gen_row[16] if len(gen_row) > 16 else 0.0
+    if ramp_agc != 0.0:
+        return abs(ramp_agc)
+    ramp_10 = gen_row[17] if len(gen_row) > 17 else 0.0
+    if ramp_10 != 0.0:
+        return abs(ramp_10) / 10.0
+    return None
 
 
 @dataclass(frozen=True)
@@ -383,8 +410,9 @@ def read_matpower_facts(text: str) -> CaseFacts:
     ``identity.py`` assigns it. Every row
     gives a rating, its ``rateA`` (column 6); ``ratings`` holds the lines'
     first and then the transformers', as ``identity.py`` orders ``branches``.
-    ``generator_ops`` reads the PMIN, PMAX and RAMP_10 columns of ``mpc.gen``
-    and the ``mpc.gencost`` rows.
+    ``generator_ops`` reads the PMIN, PMAX, RAMP_AGC and RAMP_10 columns of
+    ``mpc.gen`` and the ``mpc.gencost`` rows, one entry per ``mpc.gen`` row in
+    file order.
     """
     gen_rows = _matpower_rows(text, "gen")
     branch_rows = _matpower_rows(text, "branch")
@@ -436,10 +464,10 @@ def read_matpower_facts(text: str) -> CaseFacts:
         p_min_mw = row[9] if len(row) > 9 else None
         p_max_mw = row[8] if len(row) > 8 else None
 
-        # RAMP_10 is column 18 (index 17), in MW per 10 minutes
-        ramp_10 = row[17] if len(row) > 17 else 0.0
-        ramp_up_mw_per_min = ramp_10 / 10.0 if ramp_10 != 0.0 else None
-        ramp_down_mw_per_min = ramp_10 / 10.0 if ramp_10 != 0.0 else None
+        # RAMP_AGC (column 17) in MW per minute, else RAMP_10 (column 18) in
+        # MW per 10 minutes, divided by 10; the same rate up and down.
+        ramp_up_mw_per_min = matpower_ramp_mw_per_min(row)
+        ramp_down_mw_per_min = ramp_up_mw_per_min
 
         # Read gencost if available
         cost_kind = None
@@ -481,6 +509,7 @@ def read_matpower_facts(text: str) -> CaseFacts:
             cost_points=cost_points,
             startup_usd=startup_usd,
             shutdown_usd=shutdown_usd,
+            row=i + 1,
         ))
 
     # The lines' ratings, then the transformers', each in row order: the order
@@ -567,6 +596,7 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
                 "cost_points": [list(p) for p in op.cost_points] if op.cost_points else None,
                 "startup_usd": op.startup_usd,
                 "shutdown_usd": op.shutdown_usd,
+                "row": op.row,
             }
             for op in facts.generator_ops
         ],
@@ -581,6 +611,7 @@ __all__ = [
     "RatingFact",
     "TransformerFact",
     "corrections_document",
+    "matpower_ramp_mw_per_min",
     "read_case_facts",
     "read_matpower_facts",
     "read_psse_raw_facts",

@@ -63,28 +63,32 @@ end
 # one line 1-2 of r = 0.02 pu, x = 0.1 pu, b = 0, no rating, on a 100 MVA
 # base. The MATPOWER rows have exactly the format's columns: 13 for a bus,
 # 21 for a generator (PMAX column 9, MBASE column 7), 13 for a branch.
-function two_bus_ac_case(dir)
+# `tap` is the branch's ratio column (0 for a line; exactly 1.0 makes
+# PowerSystems read the branch as a Transformer2W, which with b = 0 is the
+# same series impedance), `gs_2` the shunt conductance at bus 2 in MW at
+# 1 pu (the bus row's Gs column), `name` the file's name.
+function two_bus_ac_case(dir; tap = 0, gs_2 = 0, name = "two_bus")
     lines = [
-        "function mpc = two_bus",
+        "function mpc = $(name)",
         "mpc.version = '2';",
         "mpc.baseMVA = 100.0;",
         "mpc.bus = [",
         "  1  3  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
-        "  2  1  100.0  30.0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+        "  2  1  100.0  30.0  $(gs_2)  0  1  1.0  0.0  230.0  1  1.1  0.9;",
         "];",
         "mpc.gen = [",
         "  1  0  0  9999  -9999  1.0  100.0  1  200.0  0  0  0  0  0  0  0  0  0  0  0  0;",
         "  2  0  0  9999  -9999  1.0  100.0  1  200.0  0  0  0  0  0  0  0  0  0  0  0  0;",
         "];",
         "mpc.branch = [",
-        "  1  2  0.02  0.1  0.0  0  0  0  0  0  1  -360  360;",
+        "  1  2  0.02  0.1  0.0  0  0  0  $(tap)  0  1  -360  360;",
         "];",
         "mpc.gencost = [",
         "  2  0  0  3  0.0  10.0  0.0;",
         "  2  0  0  3  0.0  20.0  0.0;",
         "];",
     ]
-    path = joinpath(dir, "two_bus.m")
+    path = joinpath(dir, "$(name).m")
     write(path, join(lines, "\n") * "\n")
     return path
 end
@@ -243,6 +247,29 @@ end
         @test abs(answer[:objective_check_per_h] - 3250.0) <= 1e-6 * 3250.0
     end
 
+    @testset "the gencost constant term is in the cost, as MATPOWER counts it" begin
+        # Costs 10 P + 100 and 20 P + 50 ($/h), load 150 MW, copper plate.
+        # PowerSystems keeps each c0 out of the curve, in
+        # ThermalGenerationCost.fixed. By hand: A takes all 150 MW; MATPOWER's
+        # objective, every unit on, is 10 * 150 + 100 + 0 + 50 = 1650 $/h. The
+        # solver's objective has no constant term: 1500 $/h, and the answer's
+        # fixed_per_h is the 150 $/h between them.
+        path = two_gen_case(dir, "2  0  0  3  0.0  10.0  100.0", "2  0  0  3  0.0  20.0  50.0")
+        s = load_session(path)
+        scratch_before = Set(readdir(s.scratch))
+        answer = JSON3.read(TensaSiennaOps.dispatch_json(s; network_model = "copper_plate"))
+        dispatch = dispatch_of(answer)
+        @test abs(dispatch["gen-1"] - 150.0) <= 1e-6
+        @test abs(answer[:objective_check_per_h] - 1650.0) <= 1e-6 * 1650.0
+        @test abs(answer[:fixed_per_h] - 150.0) <= 1e-9
+        @test abs(answer[:objective_per_h] - 1500.0) <= 1e-6 * 1500.0
+        @test abs(
+            answer[:objective_per_h] + answer[:fixed_per_h] - answer[:objective_check_per_h]
+        ) <= 1e-6 * 1650.0
+        # The build's folder is gone once the answer is made.
+        @test Set(readdir(s.scratch)) == scratch_before
+    end
+
     @testset "dc and ptdf with a line limit that binds" begin
         # By hand: on a triangle of equal reactances, a megawatt from bus 1 to
         # bus 3 takes two thirds of its way over the direct line, and one from
@@ -386,6 +413,53 @@ end
         q_of = Dict(String(row[:name]) => Float64(row[:q_mvar]) for row in answer[:generators])
         @test abs(Float64(branch[:losses_mvar]) - 8.5495) <= 1e-2
         @test abs(q_of["gen-1"] + q_of["gen-2"] - (30.0 + Float64(branch[:losses_mvar]))) <= 1e-3
+        # A case without shunts carries no shunt note.
+        @test !any(occursin("shunt", String(n[:text])) for n in answer[:notes])
+    end
+
+    @testset "ac: a Transformer2W branch is in the flows and the losses" begin
+        # The two-bus case with the branch's ratio exactly 1.0: PowerSystems
+        # reads it as a Transformer2W, which with b = 0 is the same series
+        # impedance, so the hand values of the two-bus case hold: A at
+        # 101.7099 MW, losses 1.7099 MW on the one branch. Without the
+        # Transformer2W flows the losses would read 0 and the balance check
+        # would refuse a correct solve.
+        path = two_bus_ac_case(dir; tap = 1.0, name = "two_bus_t2w")
+        s = load_session(path)
+        @test length(collect(PSY.get_components(PSY.Transformer2W, s.sys))) == 1
+        @test isempty(collect(PSY.get_components(PSY.Line, s.sys)))
+        answer = JSON3.read(TensaSiennaOps.dispatch_json(s; network_model = "ac"))
+        @test answer[:status] == "completed"
+        dispatch = dispatch_of(answer)
+        @test abs(dispatch["gen-1"] - 101.7099) <= 1e-3
+        branch = only(answer[:branches])
+        @test (Int(branch[:from]), Int(branch[:to])) == (1, 2)
+        @test abs(Float64(branch[:losses_mw]) - 1.7099) <= 1e-3
+        @test abs(Float64(answer[:total_losses_mw]) - 1.7099) <= 1e-3
+        @test abs(
+            Float64(answer[:total_dispatch_mw]) - Float64(answer[:total_load_mw]) -
+            Float64(answer[:total_losses_mw])
+        ) <= 1e-3
+    end
+
+    @testset "ac: bus shunts are left out, and the answer says so" begin
+        # The two-bus case with a shunt conductance of 10 MW (at 1 pu) at
+        # bus 2. Were it in the model, A would carry about 10 MW more. The
+        # answer is the shunt-free hand case's: PowerSimulations' AC model
+        # hands PowerModels no shunt table, and a note names the shunt.
+        path = two_bus_ac_case(dir; gs_2 = 10.0, name = "two_bus_shunt")
+        s = load_session(path)
+        @test length(collect(PSY.get_components(PSY.FixedAdmittance, s.sys))) == 1
+        answer = JSON3.read(TensaSiennaOps.dispatch_json(s; network_model = "ac"))
+        dispatch = dispatch_of(answer)
+        @test abs(dispatch["gen-1"] - 101.7099) <= 1e-3
+        @test abs(answer[:objective_per_h] - 1017.099) <= 1e-2
+        texts = [String(n[:text]) for n in answer[:notes]]
+        note = only(filter(t -> occursin("leaves bus shunts out", t), texts))
+        @test occursin("at bus 2", note)
+        # The linear models carry no such note.
+        linear = JSON3.read(TensaSiennaOps.dispatch_json(s; network_model = "dc"))
+        @test !any(occursin("shunt", String(n[:text])) for n in linear[:notes])
     end
 
     @testset "ac: the session's system is unchanged" begin
@@ -437,8 +511,9 @@ end
     #   {2,3}:   one start; A at 120 and 150, B at 40+40:
     #            500 + 10*(120+150) + 30*80 = 500 + 2700 + 2400 = 5600 $
     # The optimum is A on in hours 2 and 3 with one start-up: 5600 $, split
-    # energy 10*270 + 30*80 = 5100 $, start-up 500 $, fixed 0 $.
-    function uc_case(dir; startup_a = 500.0)
+    # energy 10*270 + 30*80 = 5100 $, start-up 500 $, fixed 0 $. `c0_a` is
+    # A's gencost constant term in $/h (0 in the hand case).
+    function uc_case(dir; startup_a = 500.0, c0_a = 0.0)
         lines = [
             "function mpc = uc_case",
             "mpc.version = '2';",
@@ -458,7 +533,7 @@ end
             "  2  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
             "];",
             "mpc.gencost = [",
-            "  2  $(startup_a)  0  3  0.0  10.0  0.0;",
+            "  2  $(startup_a)  0  3  0.0  10.0  $(c0_a);",
             "  2  0  0  3  0.0  30.0  0.0;",
             "];",
         ]
@@ -467,14 +542,31 @@ end
         return path
     end
 
-    # The case facts' generator_ops rows for the case: the start-up cost the
-    # Python side reads from the gencost row's second number and sends
-    # because PowerSystems does not carry it into ThermalGenerationCost.
+    # The case facts' generator_ops rows for the case, as the Python side
+    # reads them (tensa.engines.case_facts): one per mpc.gen row, with its row
+    # number, and no ramp (both ramp columns are 0). The start-up cost in
+    # them is not what the commitment uses: PowerSystems carries the gencost
+    # row's STARTUP column into ThermalGenerationCost.start_up itself.
     function uc_ops(startup_a)
         return JSON3.write([
-            Dict("bus" => 1, "gen_id" => "1", "startup_usd" => startup_a),
-            Dict("bus" => 2, "gen_id" => "1", "startup_usd" => 0.0),
+            Dict("bus" => 1, "gen_id" => "1", "row" => 1, "startup_usd" => startup_a,
+                 "ramp_up_mw_per_min" => nothing, "ramp_down_mw_per_min" => nothing),
+            Dict("bus" => 2, "gen_id" => "1", "row" => 2, "startup_usd" => 0.0,
+                 "ramp_up_mw_per_min" => nothing, "ramp_down_mw_per_min" => nothing),
         ])
+    end
+
+    # A commitment of the hand case over four periods of `resolution_min`.
+    function uc_run(s; resolution_min = 60, ops_json = uc_ops(500.0), overrides_json = "{}")
+        return JSON3.read(TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 4 * resolution_min ÷ 60,
+            resolution_min = resolution_min,
+            series_json = "[0.4, 1.2, 1.5, 0.4]",
+            overrides_json = overrides_json,
+            ops_json = ops_json,
+        ))
     end
 
     function uc_of(answer)
@@ -517,6 +609,187 @@ end
         @test abs(Float64(gens["gen-1"][:startup]) - 500.0) <= 1e-6 * 500.0
         @test abs(Float64(gens["gen-2"][:energy]) - 2400.0) <= 1e-6 * 2400.0
         @test abs(Float64(gens["gen-2"][:startup]) - 0.0) <= 1e-6
+    end
+
+    @testset "uc: the start-up cost is the gencost row's, without the case facts" begin
+        # PowerSystems carries the STARTUP column (make_thermal_gen reads
+        # d["startup"]), so with no operations rows at all the hand optimum,
+        # its one start-up of 500 $ included, is the same 5600 $.
+        s = load_session(uc_case(dir))
+        answer = uc_run(s; ops_json = "null")
+        @test abs(Float64(answer[:cost][:startup]) - 500.0) <= 1e-6 * 500.0
+        @test abs(Float64(answer[:cost][:total]) - 5600.0) <= 1e-6 * 5600.0
+        @test abs(Float64(answer[:objective]) - 5600.0) <= 1e-6 * 5600.0
+    end
+
+    @testset "uc: the gencost constant term is paid per committed hour" begin
+        # The hand case with A's constant term c0 = 40 $/h, which
+        # PowerSystems keeps in ThermalGenerationCost.fixed. The patterns of
+        # the enumeration each gain 40 $ per hour A is on, which does not
+        # change the optimum: A on in hours 2 and 3, 5600 + 2 * 40 = 5680 $,
+        # fixed 80 $. The solver charges `fixed` per committed step, so its
+        # objective is the same 5680 $.
+        s = load_session(uc_case(dir; c0_a = 40.0))
+        answer = uc_run(s)
+        gens = uc_of(answer)
+        @test [Bool(v) for v in gens["gen-1"][:on]] == [false, true, true, false]
+        @test abs(Float64(answer[:cost][:fixed]) - 80.0) <= 1e-6
+        @test abs(Float64(gens["gen-1"][:fixed]) - 80.0) <= 1e-6
+        @test abs(Float64(answer[:cost][:total]) - 5680.0) <= 1e-6 * 5680.0
+        @test abs(Float64(answer[:objective_check]) - 5680.0) <= 1e-6 * 5680.0
+        @test abs(Float64(answer[:objective]) - 5680.0) <= 1e-6 * 5680.0
+    end
+
+    @testset "uc: four 15-minute periods" begin
+        # The hand case over one hour in four 15-minute periods, with the same
+        # factors 0.4, 1.2, 1.5, 0.4 and A's constant term c0 = 40 $/h. A
+        # step of a quarter hour costs a quarter of the $/h curve, and A's
+        # constant term 40 * 0.25 = 10 $ per committed step; a start-up is
+        # 500 $ whatever the step. The patterns that are feasible (A cannot
+        # run at 40 MW, as in the hourly case):
+        #   {}:      B alone: 0.25 * 30 * 350 = 2625 $
+        #   {2}:     500 + 10 + 0.25 * (10*120 + 30*230) = 510 + 2025 = 2535 $
+        #   {3}:     500 + 10 + 0.25 * (10*150 + 30*200) = 510 + 1875 = 2385 $
+        #   {2,3}:   500 + 20 + 0.25 * (10*270 + 30*80) = 520 + 1275 = 1795 $
+        # The optimum is A on in periods 2 and 3: 1795 $, split energy
+        # 1275 $, start-up 500 $, fixed 20 $.
+        s = load_session(uc_case(dir; c0_a = 40.0))
+        answer = uc_run(s; resolution_min = 15)
+        @test answer[:status] == "completed"
+        @test answer[:resolution_min] == 15
+        @test String.(answer[:periods]) == [
+            "2026-01-01T00:00:00", "2026-01-01T00:15:00",
+            "2026-01-01T00:30:00", "2026-01-01T00:45:00",
+        ]
+        gens = uc_of(answer)
+        @test [Bool(v) for v in gens["gen-1"][:on]] == [false, true, true, false]
+        @test all(abs.(Float64.(gens["gen-1"][:p_mw]) .- [0.0, 120.0, 150.0, 0.0]) .<= 1e-4)
+        @test all(abs.(Float64.(gens["gen-2"][:p_mw]) .- [40.0, 0.0, 0.0, 40.0]) .<= 1e-4)
+        @test abs(Float64(answer[:cost][:energy]) - 1275.0) <= 1e-6 * 1275.0
+        @test abs(Float64(answer[:cost][:startup]) - 500.0) <= 1e-6 * 500.0
+        @test abs(Float64(answer[:cost][:fixed]) - 20.0) <= 1e-6
+        @test abs(Float64(answer[:cost][:total]) - 1795.0) <= 1e-6 * 1795.0
+        @test abs(Float64(answer[:objective]) - 1795.0) <= 1e-6 * 1795.0
+    end
+
+    @testset "uc: a failed commitment leaves no build folder" begin
+        # A must run in every hour, which hour 1's 40 MW cannot hold.
+        s = load_session(uc_case(dir))
+        scratch_before = Set(readdir(s.scratch))
+        @test_throws ErrorException uc_run(s; overrides_json = "{\"gen-1\": {\"must_run\": true}}")
+        @test Set(readdir(s.scratch)) == scratch_before
+        uc_run(s)
+        @test Set(readdir(s.scratch)) == scratch_before
+    end
+
+    # The ramp case: generator A (bus 1), 10 $/MWh, 0 to 300 MW, RAMP_AGC 0
+    # and RAMP_10 30 MW, which the op block publishes as 3 MW/min (180 MW in
+    # an hour); generator B (bus 2), 30 $/MWh, 0 to 300 MW, no ramp data; a
+    # load at bus 3 of 100 MW whose profile is 100, 300, 300 MW over three
+    # hours. With `wind_first` the file has a wind unit (out of service) on
+    # bus 1 as row 1, so A is row 2 and B row 3: a row that is not a thermal
+    # unit comes before A on its bus. `startup_a` is A's start-up cost.
+    function ramp_case(dir; wind_first = false, startup_a = 0.0)
+        wind = wind_first ?
+            ["  1  0  0  9999  -9999  1.0  100.0  0  100.0  0  0  0  0  0  0  0  0  0  0  0  0;"] :
+            String[]
+        wind_cost = wind_first ? ["  2  0  0  3  0.0  0.0  0.0;"] : String[]
+        fuel = wind_first ?
+            ["mpc.genfuel = {", "  'wind';", "  'coal';", "  'coal';", "};",
+             "mpc.gentype = {", "  'WT';", "  'ST';", "  'ST';", "};"] :
+            String[]
+        lines = vcat([
+            "function mpc = ramp_case",
+            "mpc.version = '2';",
+            "mpc.baseMVA = 100.0;",
+            "mpc.bus = [",
+            "  1  3  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "  2  2  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "  3  1  100.0  30.0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "];",
+            "mpc.gen = [",
+        ], wind, [
+            "  1  0  0  9999  -9999  1.0  100.0  1  300.0  0  0  0  0  0  0  0  0  30  0  0  0;",
+            "  2  0  0  9999  -9999  1.0  100.0  1  300.0  0  0  0  0  0  0  0  0  0  0  0  0;",
+            "];",
+            "mpc.branch = [",
+            "  1  2  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "  1  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "  2  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "];",
+            "mpc.gencost = [",
+        ], wind_cost, [
+            "  2  $(startup_a)  0  3  0.0  10.0  0.0;",
+            "  2  0  0  3  0.0  30.0  0.0;",
+            "];",
+        ], fuel)
+        path = joinpath(dir, wind_first ? "ramp_case_wind.m" : "ramp_case.m")
+        write(path, join(lines, "\n") * "\n")
+        return path
+    end
+
+    # The operations rows of the ramp case as tensa.engines.case_facts reads
+    # them: A's ramp 3 MW/min (RAMP_10 / 10), none for B or the wind unit.
+    function ramp_ops(; wind_first = false)
+        row(n, bus, ramp) = Dict(
+            "bus" => bus, "row" => n, "startup_usd" => 0.0,
+            "ramp_up_mw_per_min" => ramp, "ramp_down_mw_per_min" => ramp,
+        )
+        rows = wind_first ?
+            [row(1, 1, nothing), row(2, 1, 3.0), row(3, 2, nothing)] :
+            [row(1, 1, 3.0), row(2, 2, nothing)]
+        return JSON3.write(rows)
+    end
+
+    function ramp_run(s, ops_json)
+        return JSON3.read(TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 3,
+            resolution_min = 60,
+            series_json = "[1.0, 3.0, 3.0]",
+            overrides_json = "{}",
+            ops_json = ops_json,
+        ))
+    end
+
+    @testset "uc: the ramp the op block publishes is the one enforced" begin
+        # By hand: A starts from 0 MW (every unit starts off) and climbs at
+        # most 180 MW an hour. Hour 1: A 100 MW. Hour 2: A at most 280 MW, B
+        # makes up 20 MW. Hour 3: A 300 MW. The cost is
+        # 10 * (100 + 280 + 300) + 30 * 20 = 6800 + 600 = 7400 $. Without the
+        # limit A takes all 700 MWh at 7000 $; with RAMP_10 read as MW per
+        # minute (30, 1800 MW an hour) it would not bind either.
+        s = load_session(ramp_case(dir))
+        answer = ramp_run(s, ramp_ops())
+        gens = uc_of(answer)
+        @test all(abs.(Float64.(gens["gen-1"][:p_mw]) .- [100.0, 280.0, 300.0]) .<= 1e-4)
+        @test all(abs.(Float64.(gens["gen-2"][:p_mw]) .- [0.0, 20.0, 0.0]) .<= 1e-4)
+        @test abs(Float64(answer[:cost][:total]) - 7400.0) <= 1e-6 * 7400.0
+        @test abs(Float64(answer[:objective]) - 7400.0) <= 1e-6 * 7400.0
+        # With no operations rows nothing is published and nothing enforced.
+        free = ramp_run(load_session(ramp_case(dir)), "null")
+        @test abs(Float64(free[:cost][:total]) - 7000.0) <= 1e-6 * 7000.0
+    end
+
+    @testset "uc: an operations row is matched to its generator by its row" begin
+        # The ramp case with a wind unit (out of service) as row 1 on bus 1,
+        # A as row 2 with a start-up of 500 $. A row-by-bus match would give
+        # A the wind row's data: no ramp and, from the operations rows, no
+        # start-up. Matched by row, A has its 3 MW/min and the gencost row's
+        # 500 $: A on in all three hours as in the ramp case, one start,
+        # 7400 + 500 = 7900 $ (A off in hour 1 would cost 3000 $ for B's
+        # 100 MW and limit A to 180 MW in hour 2: 11900 $).
+        path = ramp_case(dir; wind_first = true, startup_a = 500.0)
+        s = load_session(path)
+        @test PSY.get_component(PSY.ThermalStandard, s.sys, "gen-1") === nothing
+        @test PSY.get_component(PSY.ThermalStandard, s.sys, "gen-2") !== nothing
+        answer = ramp_run(s, ramp_ops(; wind_first = true))
+        gens = uc_of(answer)
+        @test all(abs.(Float64.(gens["gen-2"][:p_mw]) .- [100.0, 280.0, 300.0]) .<= 1e-4)
+        @test all(abs.(Float64.(gens["gen-3"][:p_mw]) .- [0.0, 20.0, 0.0]) .<= 1e-4)
+        @test abs(Float64(answer[:cost][:startup]) - 500.0) <= 1e-6 * 500.0
+        @test abs(Float64(answer[:cost][:total]) - 7900.0) <= 1e-6 * 7900.0
     end
 
     @testset "uc: start-up from an override when the gencost row has none" begin
@@ -731,7 +1004,10 @@ end
     end
 
     @testset "sim: the hand-worked two-stage day" begin
-        path = uc_case(dir)
+        # With A's constant term c0 = 40 $/h, paid in each of A's two
+        # committed day-ahead hours: 29600 + 80 = 29680 $ (the commitment is
+        # the same: 40 $ an hour does not undo a saving of 20 $/MWh).
+        path = uc_case(dir; c0_a = 40.0)
         s = load_session(path)
         scratch_before = Set(readdir(s.scratch))
         answer = JSON3.read(TensaSiennaOps.sim_json(
@@ -773,13 +1049,32 @@ end
         @test all(abs.(p_rt["gen-1"][9:12] .- 150.0) .<= 1e-4)
         @test all(abs.(p_rt["gen-2"][1:4] .- 40.0) .<= 1e-4)
         @test all(abs.(p_rt["gen-2"][13:96] .- 40.0) .<= 1e-4)
-        # The costs, recomputed from each stage's dispatch: DA 29600 $ (energy
-        # 29100, one start-up 500, fixed 0), RT the energy alone, 29100 $.
-        @test abs(Float64(da[:objective]) - 29600.0) <= 1e-6 * 29600.0
+        # The costs, recomputed from each stage's dispatch: DA 29680 $ (energy
+        # 29100, one start-up 500, fixed 2 * 40), RT the energy alone, 29100 $.
+        @test abs(Float64(da[:objective]) - 29680.0) <= 1e-6 * 29680.0
         @test abs(Float64(rt[:objective]) - 29100.0) <= 1e-6 * 29100.0
         @test isempty(answer[:slacks])
         # The store went under the session's scratch and is removed.
         @test startswith(String(answer[:store_dir]), "sim-")
+        @test Set(readdir(s.scratch)) == scratch_before
+    end
+
+    @testset "sim: a day that cannot be met leaves no store" begin
+        # Five times the load (500 MW) against 400 MW of generation: the
+        # day-ahead stage cannot solve, and the store's folder goes with it.
+        path = uc_case(dir)
+        s = load_session(path)
+        scratch_before = Set(readdir(s.scratch))
+        err = try
+            TensaSiennaOps.sim_json(
+                s; load_profile = fill(5.0, 96), network_model = "copper_plate",
+                ops_json = uc_ops(500.0),
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
         @test Set(readdir(s.scratch)) == scratch_before
     end
 

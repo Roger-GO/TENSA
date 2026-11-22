@@ -136,6 +136,11 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, Path
     (workspace / "quadratic_200.m").write_text(
         _TWO_GEN.format(mbase_b="200.0", cost_a="0.1  10.0", cost_b="0.1  20.0")
     )
+    (workspace / "linear_c0.m").write_text(
+        _TWO_GEN.format(mbase_b="100.0", cost_a="0.0  10.0", cost_b="0.0  20.0")
+        .replace("10.0  0.0;", "10.0  100.0;")
+        .replace("20.0  0.0;", "20.0  50.0;")
+    )
     (workspace / "no_cost.m").write_text(_NO_COST)
     (workspace / "limited.m").write_text(_LIMITED)
     (workspace / "two_bus.m").write_text(_TWO_BUS_AC)
@@ -182,6 +187,22 @@ def test_linear_costs_copper_plate(client: tuple[Any, Path]) -> None:
     assert body["total_load_mw"] == 150.0
     assert body["total_dispatch_mw"] == pytest.approx(150.0, abs=1e-6)
     assert body["slacks"] == []
+
+
+def test_the_constant_terms_are_in_the_cost(client: tuple[Any, Path]) -> None:
+    """Costs 10 P + 100 and 20 P + 50 $/h, load 150 MW: A takes all of it,
+    and MATPOWER's objective, every unit on, is 1500 + 100 + 50 = 1650 $/h.
+    The solver's objective leaves the constant terms out (1500 $/h), and
+    fixed_per_h is the 150 $/h between them."""
+    test_client, _ = client
+    session = _session(test_client, "linear_c0.m")
+    response = _dispatch(test_client, session, {"network_model": "copper_plate"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["generators"]["gen:1-1"]["p_mw"] == pytest.approx(150.0, abs=1e-6)
+    assert body["objective_check_per_h"] == pytest.approx(1650.0, rel=1e-6)
+    assert body["objective_per_h"] == pytest.approx(1500.0, rel=1e-6)
+    assert body["fixed_per_h"] == pytest.approx(150.0, rel=1e-9)
 
 
 def test_quadratic_costs_equal_marginal_cost_split(client: tuple[Any, Path]) -> None:
@@ -333,14 +354,17 @@ def test_dc_case14_is_the_published_optimum(client: tuple[Any, Path]) -> None:
 def test_ac_case14(client: tuple[Any, Path]) -> None:
     """MATPOWER case14. The published MATPOWER AC OPF objective is
     8081.53 $/h (MATPOWER runopf('case14')); this engine gives 8088.22 $/h,
-    0.08 percent above, with 0.17 MW more losses (268.45 MW generated
-    against MATPOWER's 268.28). Not the network: the admittance matrix of a
-    Sienna session of this file equals the ANDES one to 1.5e-6 (the single
-    precision PowerNetworkMatrices keeps), the generator, voltage and shunt
-    data equal the file's, the DC optimum is MATPOWER's to the cent, and
-    making every branch rating unlimited does not move the AC result. The
-    difference is in PowerSimulations' AC formulation and is not yet
-    explained; the test holds the measured value within 1e-4 relative."""
+    0.08 percent above, with 0.17 MW more losses. The whole difference is
+    the 19 MVAr capacitor at bus 9 (the bus row's Bs), which
+    PowerSimulations' AC model leaves out: it hands PowerModels an empty
+    shunt table (pm_translator.jl) and has no device model for a
+    FixedAdmittance. Measured on this environment: the Sienna AC dispatch of
+    the file, and of the same System with the shunt removed, both give
+    8088.223850710725 $/h with bus 9 at 1.0178795 pu; PowerModels'
+    solve_ac_opf with Ipopt on the file gives 8081.5247 $/h (MATPOWER's
+    figure), and on the file with its shunt table emptied 8088.22385 $/h
+    with bus 9 at 1.0178795 pu. The answer carries a note naming the shunt.
+    The test holds the measured value within 1e-4 relative."""
     test_client, _ = client
     session = _session(test_client, "case14.m")
     response = _dispatch(test_client, session, {"network_model": "ac"})
@@ -348,6 +372,10 @@ def test_ac_case14(client: tuple[Any, Path]) -> None:
     body = response.json()
     assert body["objective_per_h"] == pytest.approx(8088.22, rel=1e-4)
     assert body["objective_check_per_h"] == pytest.approx(8088.22, rel=1e-4)
+    # case14's gencost constant terms are all 0.
+    assert body["fixed_per_h"] == 0.0
+    (note,) = [n for n in body["notes"] if "leaves bus shunts out" in n]
+    assert "at bus 9" in note
     for key in body["branches"]:
         assert key.startswith("branch:")
         parts = key.split(":", 1)[1].split("-")

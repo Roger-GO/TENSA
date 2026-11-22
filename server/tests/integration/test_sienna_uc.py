@@ -45,6 +45,32 @@ mpc.gencost = [
 ];
 """
 
+# The ramp case of runtests_ops.jl: generator A (bus 1), 10 $/MWh, 0 to
+# 300 MW, RAMP_AGC 0 and RAMP_10 30 MW (columns 17 and 18); generator B
+# (bus 2), 30 $/MWh, 0 to 300 MW, no ramp data; a load of 100 MW at bus 3.
+_RAMP_CASE = """function mpc = ramp_case
+mpc.version = '2';
+mpc.baseMVA = 100.0;
+mpc.bus = [
+  1  3  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;
+  2  2  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;
+  3  1  100.0  30.0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;
+];
+mpc.gen = [
+  1  0  0  9999  -9999  1.0  100.0  1  300.0  0  0  0  0  0  0  0  0  30  0  0  0;
+  2  0  0  9999  -9999  1.0  100.0  1  300.0  0  0  0  0  0  0  0  0  0  0  0  0;
+];
+mpc.branch = [
+  1  2  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;
+  1  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;
+  2  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;
+];
+mpc.gencost = [
+  2  0  0  3  0.0  10.0  0.0;
+  2  0  0  3  0.0  30.0  0.0;
+];
+"""
+
 
 @pytest.fixture(scope="module")
 def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, Path]]:
@@ -57,12 +83,30 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, Path
 
     workspace = tmp_path_factory.mktemp("uc-ws")
     (workspace / "uc_case.m").write_text(_UC_CASE)
+    (workspace / "ramp_case.m").write_text(_RAMP_CASE)
     cases = _andes_cases_dir()
     assert cases is not None
     (workspace / "kundur.raw").write_bytes((cases / "kundur" / "kundur.raw").read_bytes())
     app = make_app(workspace=workspace, bind_host="127.0.0.1", bind_port=8000)
     with TestClient(app, base_url="http://127.0.0.1:8000") as test_client:
         yield test_client, workspace
+
+
+@pytest.fixture(autouse=True)
+def _close_sessions(client: tuple[Any, Path]) -> Iterator[None]:
+    """Close every session a test opened: the app keeps at most four, and each
+    Sienna session holds a Julia worker."""
+    yield
+    test_client, _ = client
+    listed = test_client.get("/api/sessions")
+    if listed.status_code != 200:
+        return
+    body = listed.json()
+    sessions = body.get("sessions", body) if isinstance(body, dict) else body
+    for entry in sessions:
+        session = entry.get("session_id") if isinstance(entry, dict) else entry
+        if session:
+            test_client.delete(f"/api/sessions/{session}")
 
 
 def _session(client: Any, case: str, engine: str = "sienna") -> str:
@@ -180,3 +224,56 @@ def test_uc_andes_session_is_409(client: tuple[Any, Path]) -> None:
     detail = response.json()["detail"]
     assert "'run_uc' is not available with the andes engine" in detail
     assert "sienna" in detail
+
+
+def test_uc_quarter_hours(client: tuple[Any, Path]) -> None:
+    """The hand case over one hour in four 15-minute periods. A period costs
+    a quarter of the $/h curve; a start-up is 500 $ whatever the period. A on
+    in periods 2 and 3: 500 + 0.25 * (10*270 + 30*80) = 1775 $, against
+    2625 $ for B alone and 2375 $ for A in period 3 alone (runtests_ops.jl
+    has the enumeration)."""
+    test_client, _ = client
+    session = _session(test_client, "uc_case.m")
+    response = _uc(
+        test_client, session, {**_body(), "horizon_h": 1, "resolution_min": 15}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["resolution_min"] == 15
+    assert body["generators"]["gen:1-1"]["on"] == [False, True, True, False]
+    assert body["cost"]["energy"] == pytest.approx(1275.0, rel=1e-6)
+    assert body["cost"]["startup"] == pytest.approx(500.0, rel=1e-6)
+    assert body["cost"]["total"] == pytest.approx(1775.0, rel=1e-6)
+    assert body["objective"] == pytest.approx(1775.0, rel=1e-6)
+
+
+def test_uc_enforces_the_ramp_the_op_block_publishes(client: tuple[Any, Path]) -> None:
+    """Generator A of the ramp case has RAMP_AGC 0 and RAMP_10 30 MW: the op
+    block publishes 3 MW/min, and the commitment holds A to it. A climbs from
+    0 MW at most 180 MW an hour, so over loads of 100, 300 and 300 MW it runs
+    at 100, 280 and 300 MW and B makes up 20 MW in hour 2:
+    10 * 680 + 30 * 20 = 7400 $, where without the limit A takes all 700 MWh
+    at 7000 $."""
+    test_client, _ = client
+    session = _session(test_client, "ramp_case.m")
+    document = test_client.get(f"/api/sessions/{session}/case/neutral")
+    assert document.status_code == 200, document.text
+    (a,) = [g for g in document.json()["generators"] if g["bus"] == 1]
+    assert a["op"]["ramp_up_mw_per_min"] == pytest.approx(3.0)
+    assert a["op"]["ramp_down_mw_per_min"] == pytest.approx(3.0)
+    response = _uc(
+        test_client,
+        session,
+        {
+            "network_model": "copper_plate",
+            "horizon_h": 3,
+            "resolution_min": 60,
+            "series": [1.0, 3.0, 3.0],
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["generators"][a["key"]]["p_mw"] == pytest.approx(
+        [100.0, 280.0, 300.0], abs=1e-4
+    )
+    assert body["cost"]["total"] == pytest.approx(7400.0, rel=1e-6)

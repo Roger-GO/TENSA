@@ -171,11 +171,23 @@ end
         answer = JSON3.read(TensaSiennaNet.network_matrix_json(s; kind = "ybus", file = file))
         @test answer[:kind] == "ybus"
         @test answer[:complex] == true
-        @test answer[:files] == ["ybus.bin.re", "ybus.bin.im"]
+        @test answer[:files] == ["ybus.bin"]
         @test !haskey(answer, :ref_buses)
         @test Set(Int.(answer[:rows])) == Set([1, 2, 3])
-        re = read_matrix(file * ".re", 3, 3)
-        im = read_matrix(file * ".im", 3, 3)
+        @test (answer[:n_rows], answer[:n_cols]) == (3, 3)
+        # The nonzero entries, never the dense matrix: nine here, every bus
+        # joined to every other.
+        @test answer[:n_entries] == 9
+        triplets = read_matrix(file, 9, 4)
+        # Row-major order of 0-based (row, column).
+        @test [(Int(triplets[k, 1]), Int(triplets[k, 2])) for k in 1:9] ==
+              [(i, j) for i in 0:2 for j in 0:2]
+        re = zeros(3, 3)
+        im = zeros(3, 3)
+        for k in 1:9
+            re[Int(triplets[k, 1]) + 1, Int(triplets[k, 2]) + 1] = triplets[k, 3]
+            im[Int(triplets[k, 1]) + 1, Int(triplets[k, 2]) + 1] = triplets[k, 4]
+        end
         # Each line is -1j / 0.1 = -10j siemens per unit: the diagonal of a
         # bus with two lines is -20j, the off-diagonal of a line +10j.
         @test re == zeros(3, 3)

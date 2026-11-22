@@ -22,6 +22,7 @@ def _payload() -> dict[str, Any]:
         "network_model": "copper_plate",
         "objective_per_h": 1500.0,
         "objective_check_per_h": 1500.0,
+        "fixed_per_h": 0.0,
         "base_mva": 100.0,
         "total_load_mw": 150.0,
         "total_dispatch_mw": 150.0,

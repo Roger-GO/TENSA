@@ -65,7 +65,8 @@ class SimStageSchema(BaseModel):
         description=(
             "The stage's cost over the day, in $, recomputed from its "
             "dispatch and the case file's own gencost coefficients (the "
-            "day-ahead stage's includes the start-up costs)."
+            "day-ahead stage's includes the start-up costs and the gencost "
+            "constant term per committed hour)."
         )
     )
     commitment: dict[str, SimGeneratorSeriesSchema] = Field(

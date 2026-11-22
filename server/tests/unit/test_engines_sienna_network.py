@@ -1,7 +1,8 @@
 """Unit tests of ``SiennaState.network_matrix`` with a fake bridge.
 
 No Julia is started: the fake bridge writes a recorded matrix to the file it
-is given (and ``.re`` / ``.im`` for ybus) and answers a recorded descriptor,
+is given (for ybus its nonzero entries, one row of row, column, real and
+imaginary part each) and answers a recorded descriptor,
 the way the Julia module answers. The recorded case is the three-bus triangle
 of the unit: buses 1, 2, 3, lines 1-2, 1-3 and 2-3, each r = 0 and x = 0.1,
 bus 1 the reference. The PTDF is worked by hand in the comment of
@@ -134,17 +135,25 @@ class _FakeBridge:
                 "Singular value in factorization. Possibly there is an islanded bus"
             )
         if self._kind == "ybus":
-            # tofile writes C order, so the transpose is written: the file then
-            # holds the matrix column-major, as the Julia side writes it.
-            numpy.asarray(_YBUS_RE, dtype=numpy.float64).T.tofile(str(file) + ".re")
-            numpy.asarray(_YBUS_IM, dtype=numpy.float64).T.tofile(str(file) + ".im")
+            # The nonzero entries as the Julia side writes them: one row of
+            # (0-based row, 0-based column, re, im) per entry, row-major, the
+            # n_entries by 4 matrix written column-major. tofile writes C
+            # order, so the transpose is written.
+            triplets = [
+                [float(r), float(c), _YBUS_RE[r][c], _YBUS_IM[r][c]]
+                for r in range(3)
+                for c in range(3)
+                if _YBUS_RE[r][c] != 0.0 or _YBUS_IM[r][c] != 0.0
+            ]
+            numpy.asarray(triplets, dtype=numpy.float64).T.tofile(file)
             return {
                 "kind": "ybus",
                 "n_rows": 3,
                 "n_cols": 3,
+                "n_entries": len(triplets),
                 "complex": True,
-                "file": "ybus.bin.re",
-                "files": ["ybus.bin.re", "ybus.bin.im"],
+                "file": "ybus.bin",
+                "files": ["ybus.bin"],
                 "rows": [1, 2, 3],
                 "cols": [1, 2, 3],
                 "distributed_slack": False,
@@ -296,16 +305,20 @@ def test_too_large_dense_is_refused_before_the_file_is_read(
 
 def test_too_many_ybus_nonzeros(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The Ybus cap counts the nonzeros the answer would list (seven), not the
-    nine cells of the dense file."""
+    nine cells of a dense matrix, and refuses them by the count the Julia side
+    gives, before the file is read."""
     monkeypatch.setattr("tensa.engines.sienna.state.MAX_YBUS_ENTRIES", 7)
     assert _state(tmp_path, _FakeBridge("ybus")).network_matrix("ybus")["n_entries"] == 7
+
+    def _never(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the file was read")
+
     monkeypatch.setattr("tensa.engines.sienna.state.MAX_YBUS_ENTRIES", 6)
+    monkeypatch.setattr("tensa.engines.sienna.state.read_matrix", _never)
     bridge = _FakeBridge("ybus")
     with pytest.raises(NetworkMatrixTooLargeError, match="7"):
         _state(tmp_path, bridge).network_matrix("ybus")
-    file = bridge.calls[0][1]
-    assert not Path(str(file) + ".re").exists()
-    assert not Path(str(file) + ".im").exists()
+    assert not bridge.calls[0][1].exists()
 
 
 @pytest.mark.parametrize("kind", ["ptdf", "ybus"])

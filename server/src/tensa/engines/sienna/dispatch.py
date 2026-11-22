@@ -81,6 +81,7 @@ class DispatchResult:
     network_model: str
     objective_per_h: float
     objective_check_per_h: float
+    fixed_per_h: float
     base_mva: float
     total_load_mw: float
     total_dispatch_mw: float
@@ -169,6 +170,7 @@ def dispatch_result(dispatch: dict[str, Any], book: KeyBook) -> DispatchResult:
         network_model=_text(dispatch.get("network_model")),
         objective_per_h=_float(dispatch.get("objective_per_h")),
         objective_check_per_h=_float(dispatch.get("objective_check_per_h")),
+        fixed_per_h=_float(dispatch.get("fixed_per_h")),
         base_mva=_float(dispatch.get("base_mva")),
         total_load_mw=_float(dispatch.get("total_load_mw")),
         total_dispatch_mw=_float(dispatch.get("total_dispatch_mw")),

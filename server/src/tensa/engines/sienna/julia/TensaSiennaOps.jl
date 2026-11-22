@@ -51,11 +51,12 @@ function _optimizer_for(network)
     return HiGHS.Optimizer
 end
 
-# The quadratic, linear and constant coefficients of a generator's cost curve,
-# or nothing when the generator has no cost data. A MATPOWER gencost model 2
-# row is read by PowerSystems as a CostCurve of QuadraticCurve(a, b, c) with
-# the file's own numbers ($/MW^2h, $/MWh, $/h).
-function _cost_coefficients(g)
+# The quadratic, linear and constant coefficients of a generator's cost curve
+# as PowerSystems holds it, or nothing when the generator has no curve of that
+# shape. A MATPOWER gencost model 2 row is read by PowerSystems as a CostCurve
+# of QuadraticCurve(a, b, 0) with the file's own numbers ($/MW^2h, $/MWh):
+# the constant term is not in the curve (see `_cost_coefficients`).
+function _curve_coefficients(g)
     cost = PSY.get_operation_cost(g)
     cost isa PSY.ThermalGenerationCost || return nothing
     variable = PSY.get_variable(cost)
@@ -65,8 +66,140 @@ function _cost_coefficients(g)
     a = PSY.get_quadratic_term(curve)
     b = PSY.get_proportional_term(curve)
     c = PSY.get_constant_term(curve)
-    (a == 0.0 && b == 0.0 && c == 0.0) && return nothing
     return (a, b, c)
+end
+
+# The cost of a generator as the case file gives it: the quadratic and linear
+# coefficients and the constant term c0 of a*P^2 + b*P + c0 ($/MW^2h, $/MWh,
+# $/h), or nothing when the generator has no cost data. PowerSystems splits a
+# MATPOWER polynomial: every term but the last goes into the curve and the
+# last, c0, into ThermalGenerationCost.fixed (make_thermal_gen in
+# PowerSystems' power_models_data.jl), so c0 is the curve's constant term
+# plus `fixed`.
+function _cost_coefficients(g)
+    curve = _curve_coefficients(g)
+    curve === nothing && return nothing
+    a, b, c = curve
+    c0 = c + Float64(PSY.get_fixed(PSY.get_operation_cost(g)))
+    (a == 0.0 && b == 0.0 && c0 == 0.0) && return nothing
+    return (a, b, c0)
+end
+
+# The cost of every thermal generator of a system, by component name, as
+# `_cost_coefficients` reads it. Taken before an operation changes the copy's
+# cost data, so the recomputed costs use the file's own numbers.
+function _costs_by_name(sys)
+    out = Dict{String, Union{Nothing, NTuple{3, Float64}}}()
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        coefficients = _cost_coefficients(g)
+        out[PSY.get_name(g)] = coefficients === nothing ? nothing : Float64.(coefficients)
+    end
+    return out
+end
+
+# Put each thermal generator's constant cost term on the copy as a cost per
+# commitment step. PowerSimulations charges `get_fixed(cost)` and the curve's
+# constant term once per step a unit is committed (`proportional_cost` for
+# OnVariable in its thermal_generation.jl, with no step length), while it
+# charges the energy terms times the step length in hours. A constant term is
+# in $/h, so on a step of `step_h` hours it is c0 * step_h: the curve keeps
+# its quadratic and linear terms and `fixed` becomes c0 * step_h, and the
+# objective is then the true cost at any resolution. Called after
+# `_costs_in_natural_units!`.
+function _fixed_cost_per_step!(sys, step_h::Float64)
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        coefficients = _cost_coefficients(g)
+        coefficients === nothing && continue
+        a, b, c0 = coefficients
+        cost = PSY.get_operation_cost(g)
+        old = PSY.get_variable(cost)
+        PSY.set_variable!(
+            cost,
+            PSY.CostCurve(
+                PSY.QuadraticCurve(a, b, 0.0),
+                PSY.UnitSystem.NATURAL_UNITS,
+                PSY.get_vom_cost(old),
+            ),
+        )
+        PSY.set_fixed!(cost, c0 * step_h)
+    end
+    return nothing
+end
+
+# A fresh folder for one PowerSimulations build, inside the session's scratch
+# folder (spec section 12: an engine writes only there), never the system's
+# temporary directory. `_in_run_dir` removes it once the operation has read
+# its results, whether it succeeded or not; `cleanup = true` is the fallback
+# when Julia exits first.
+_run_dir(s::TS.Session, prefix::AbstractString) =
+    mktempdir(s.scratch; prefix = prefix * "-", cleanup = true)
+
+# Call `f` with a fresh run folder and remove the folder afterwards. A folder
+# that cannot be removed (a file still held open on Windows) is left to the
+# `cleanup` of `_run_dir` and logged at debug level; it never fails the call.
+function _in_run_dir(f, s::TS.Session, prefix::AbstractString)
+    dir = _run_dir(s, prefix)
+    try
+        return f(dir)
+    finally
+        try
+            rm(dir; recursive = true, force = true)
+        catch e
+            @debug "the run folder could not be removed" dir exception = e
+        end
+    end
+end
+
+# The operations rows of the case facts (the Python side's `generator_ops`,
+# one per mpc.gen row in file order), keyed by the name PowerSystems gives the
+# generator of each row: gen-<row of mpc.gen>, from the row's own `row` field
+# or, for a row without one, its place in the list. A row whose name no
+# component of the system has is left out.
+function _ops_by_name(sys, ops)
+    out = Dict{String, Any}()
+    ops === nothing && return out
+    for (i, row) in enumerate(ops)
+        number = get(row, "row", nothing)
+        number = number === nothing ? i : Int(number)
+        name = "gen-$(number)"
+        PSY.get_component(PSY.ThermalStandard, sys, name) === nothing && continue
+        out[name] = row
+    end
+    return out
+end
+
+# A ramp field of an operations row as a number, or nothing.
+function _ramp_field(row, field::AbstractString)
+    row === nothing && return nothing
+    value = get(row, field, nothing)
+    value === nothing && return nothing
+    return Float64(value)
+end
+
+# Set every thermal generator's ramp limit on the copy to the rate the case
+# facts' operations row publishes in its `op` block (RAMP_AGC where the file
+# gives it, else RAMP_10 / 10, in MW per minute; see
+# tensa.engines.case_facts.matpower_ramp_mw_per_min), and no limit where the
+# row gives none or there is no row. PowerSystems' own reading is not used: it
+# takes the RAMP_AGC column whenever the column exists, so a RAMP_AGC of 0 (no
+# data) becomes a limit of 0, and without the column it takes RAMP_10, in MW
+# per 10 minutes, as MW per minute (calculate_ramp_limit in its common.jl).
+function _ramps_as_published!(sys, ops)
+    by_name = _ops_by_name(sys, ops)
+    PSY.with_units_base(sys, PSY.UnitSystem.NATURAL_UNITS) do
+        for g in PSY.get_components(PSY.ThermalStandard, sys)
+            row = get(by_name, PSY.get_name(g), nothing)
+            up = _ramp_field(row, "ramp_up_mw_per_min")
+            down = _ramp_field(row, "ramp_down_mw_per_min")
+            down === nothing && (down = up)
+            if up === nothing || up <= 0.0 || down <= 0.0
+                PSY.set_ramp_limits!(g, nothing)
+            else
+                PSY.set_ramp_limits!(g, (up = up, down = down))
+            end
+        end
+    end
+    return nothing
 end
 
 # Label every thermal generator's cost curve as being in natural units, so
@@ -83,7 +216,7 @@ end
 # gave 150 MW and 0 MW.
 function _costs_in_natural_units!(sys)
     for g in PSY.get_components(PSY.ThermalStandard, sys)
-        coefficients = _cost_coefficients(g)
+        coefficients = _curve_coefficients(g)
         coefficients === nothing && continue
         a, b, c = coefficients
         cost = PSY.get_operation_cost(g)
@@ -114,7 +247,7 @@ end
 # VoltageMagnitude__ACBus for the buses, ReactivePowerVariable__ThermalStandard
 # for the generators, and FlowActivePowerFromToVariable__Line and its three
 # counterparts (ToFrom, ReactivePowerFromTo, ReactivePowerToFrom) per branch
-# type, the same four for __TapTransformer.
+# type, the same four for __Transformer2W and __TapTransformer.
 function _ac_quantities(res, sys, generators)
     names = Set(String(n) for n in PSI.list_variable_names(res))
 
@@ -147,10 +280,25 @@ function _ac_quantities(res, sys, generators)
         end
     end
 
+    # Every branch type the results hold the four flows of: Line,
+    # Transformer2W (a MATPOWER branch whose ratio is exactly 1.0, or 0 with a
+    # shift of 0 marked a transformer), TapTransformer and any other the
+    # template models. The type is read off the variable key's suffix.
+    branch_types = Any[]
+    for name in names
+        m = match(r"^FlowActivePowerFromToVariable__(\w+)$", name)
+        m === nothing && continue
+        tag = String(m.captures[1])
+        isdefined(PSY, Symbol(tag)) || continue
+        T = getfield(PSY, Symbol(tag))
+        T isa Type && T <: PSY.ACBranch || continue
+        push!(branch_types, (T, tag))
+    end
+    sort!(branch_types; by = last)
+
     branches = Any[]
     total_losses_mw = 0.0
-    for T in (PSY.Line, PSY.TapTransformer)
-        tag = T === PSY.Line ? "Line" : "TapTransformer"
+    for (T, tag) in branch_types
         keys = (
             "FlowActivePowerFromToVariable__$(tag)",
             "FlowActivePowerToFromVariable__$(tag)",
@@ -194,13 +342,21 @@ function _ac_quantities(res, sys, generators)
     return buses, branches, q_of, total_losses_mw
 end
 
-
-# A fresh folder for one PowerSimulations build, inside the session's scratch
-# folder (spec section 12: an engine writes only there), never the system's
-# temporary directory. It goes with the session's scratch folder, and at the
-# latest when the worker's Julia exits.
-_run_dir(s::TS.Session, prefix::AbstractString) =
-    mktempdir(s.scratch; prefix = prefix * "-", cleanup = true)
+# The bus shunts of a system (FixedAdmittance and SwitchedAdmittance that are
+# available), as "<name> at bus <number>". PowerSimulations' AC model hands
+# PowerModels an empty shunt table (`"shunt" => Dict()` in its
+# pm_translator.jl) and has no device model for either type, so an AC
+# dispatch leaves them out; the answer says which.
+function _bus_shunts(sys)
+    out = String[]
+    for T in (PSY.FixedAdmittance, PSY.SwitchedAdmittance)
+        for c in PSY.get_components(T, sys)
+            PSY.get_available(c) || continue
+            push!(out, "$(PSY.get_name(c)) at bus $(PSY.get_number(PSY.get_bus(c)))")
+        end
+    end
+    return sort!(out)
+end
 
 """
     dispatch_json(s::TS.Session; network_model, duals = false) -> String
@@ -214,18 +370,29 @@ copy so that the objective is the true cost in \$/h of power in MW (see
 `_costs_in_natural_units!`). The linear models solve with HiGHS; the AC model
 holds the full AC power flow equations and solves with Ipopt.
 
-The answer carries `objective_per_h` (the solver's objective, in \$/h) and
-`objective_check_per_h` (the cost recomputed from the dispatch in MW and the
-file's own coefficients); the two agree to solver tolerance. `generators`
+The answer carries `objective_check_per_h`, the cost of the dispatch as
+MATPOWER counts it: a * P^2 + b * P + c0 of every dispatched generator, from
+the dispatch in MW and the file's own coefficients, the constant term c0
+included for every unit, since in a dispatch every available unit is on.
+`fixed_per_h` is the sum of those c0. `objective_per_h` is the solver's
+objective, in \$/h, which has no constant term: PowerSystems keeps c0 out of
+the curve (in ThermalGenerationCost.fixed) and PowerSimulations' dispatch
+formulation charges `fixed` only through a commitment variable, which a
+dispatch has none of. So `objective_per_h + fixed_per_h` equals
+`objective_check_per_h` to solver tolerance. `generators`
 lists every dispatched generator with its bus, id and MW. With
 `network_model = "ac"` the answer also carries `buses` (voltage in pu and
 angle in radians per bus), `branches` (P and Q at both ends and the losses,
 in MW and MVAr), each generator's `q_mvar`, and `total_losses_mw`; the load
 balance is dispatch against load plus losses, since the AC model is not
-lossless. `slacks` lists every slack variable whose value is past 1e-6 MW
-(spec section 13: slack variables always read back and reported when
-non-zero). `duals` is empty unless `duals` is true; the copper plate model
-has no duals, the dc and ptdf models may.
+lossless. The AC model leaves bus shunts out (PowerSimulations hands
+PowerModels no shunt table), so an AC dispatch of a case with fixed or
+switched shunts carries a warning note naming them. `slacks` lists every
+slack variable whose value is past 1e-6 MW (spec section 13: slack variables
+always read back and reported when non-zero). `duals` is empty unless
+`duals` is true; the copper plate model has no duals, the dc and ptdf models
+may. The build's folder under the session's scratch folder is removed before
+the answer is returned.
 
 Throws an `ArgumentError` for a network model it does not know, an
 `ErrorException` with the no-cost-data message when no generator of the case
@@ -238,8 +405,21 @@ function dispatch_json(
     duals::Bool = false,
 )::String
     network = _network_model(network_model)
+    return _in_run_dir(s, "ed") do dir
+        _dispatch_json(s, dir, network, network_model, duals)
+    end
+end
+
+function _dispatch_json(
+    s::TS.Session,
+    dir::AbstractString,
+    network,
+    network_model::AbstractString,
+    duals::Bool,
+)::String
     sys = deepcopy(s.sys)
     base_mva = PSY.get_base_power(sys)
+    costs = _costs_by_name(sys)
 
     # Refuse a case without cost data: the check the probe's output supports
     # (a MATPOWER case without gencost gives generators with zero or missing
@@ -296,7 +476,6 @@ function dispatch_json(
             store_variable_names = true,
         )
         # Spec section 12: simulation files only under the session's scratch.
-        dir = _run_dir(s, "ed")
         built = PSI.build!(model; output_dir = dir)
         built == PSI.ModelBuildStatus.BUILT || throw(
             ErrorException("economic dispatch did not build: $(built)"),
@@ -311,6 +490,15 @@ function dispatch_json(
         Dict{String, Any}("level" => TS._level_name(l), "text" => TS._scrub(t, (s.raw, s.dyr))) for
         (l, t) in logger.records
     ]
+    shunts = network == PSI.ACPPowerModel ? _bus_shunts(sys) : String[]
+    if !isempty(shunts)
+        push!(notes, Dict{String, Any}(
+            "level" => "warning",
+            "text" => "PowerSimulations' AC model leaves bus shunts out of the " *
+                      "optimization; the dispatch is solved without " *
+                      join(shunts, ", "),
+        ))
+    end
 
     objective_per_h = PSI.get_objective_value(res)
 
@@ -349,14 +537,16 @@ function dispatch_json(
     end
 
     # The cost recomputed from the dispatch in MW and the file's own
-    # coefficients, as PowerSystems holds them: a * P_mw^2 + b * P_mw + c.
+    # coefficients, as MATPOWER counts it: a * P_mw^2 + b * P_mw + c0 of every
+    # dispatched unit (every available unit is on in a dispatch).
     objective_check_per_h = 0.0
+    fixed_per_h = 0.0
     for row in generators
-        g = PSY.get_component(PSY.ThermalStandard, sys, row.name)
-        coefficients = _cost_coefficients(g)
+        coefficients = get(costs, row.name, nothing)
         coefficients === nothing && continue
-        a, b, c = coefficients
-        objective_check_per_h += a * row.p_mw^2 + b * row.p_mw + c
+        a, b, c0 = coefficients
+        objective_check_per_h += a * row.p_mw^2 + b * row.p_mw + c0
+        fixed_per_h += c0
     end
 
     duals_list = Any[]
@@ -424,6 +614,7 @@ function dispatch_json(
         network_model = String(network_model),
         objective_per_h = objective_per_h,
         objective_check_per_h = objective_check_per_h,
+        fixed_per_h = fixed_per_h,
         base_mva = base_mva,
         total_load_mw = total_load_mw,
         total_dispatch_mw = total_dispatch_mw,
@@ -448,18 +639,6 @@ end
 # horizon.
 const UC_BAD_SERIES = "the series block must give one positive finite factor per period"
 
-# The ramp limit of a generator in MW/min, or nothing when the file gives
-# none. PowerSystems stores ramp limits as a named tuple in MW/min on the
-# device base; a limit of 0 is MATPOWER's "no data" (the RAMP_10 column),
-# which as a limit would pin the generator, so it is answered as nothing.
-function _ramp_mw_per_min(g)
-    limits = PSY.get_ramp_limits(g)
-    limits === nothing && return nothing
-    up = Float64(limits.up)
-    up == 0.0 && return nothing
-    return up
-end
-
 # Set every generator's initial state to off: MATPOWER carries no commitment
 # state, and the unit's rule is that a generator on in the first period pays
 # its start-up.
@@ -470,37 +649,6 @@ function _initial_state_off!(sys)
         PSY.set_time_at_status!(g, 10000.0)
     end
     return nothing
-end
-
-# The start-up cost of the gencost rows, keyed by generator component name:
-# the operations data's startup_usd of each generator, in the order of the
-# file's rows on each bus, matched to the generators PowerSystems holds on
-# that bus in the order of their rows (it names a MATPOWER generator
-# gen-<row of mpc.gen>, so the row number orders them). PowerSystems 5.12.5
-# does not carry the STARTUP column into ThermalGenerationCost.start_up, so
-# uc_json sets it on the copy from this.
-function _startup_costs(sys, ops)
-    out = Dict{String, Float64}()
-    ops === nothing && return out
-    on_bus = Dict{Int, Vector{Any}}()
-    for g in PSY.get_components(PSY.ThermalStandard, sys)
-        push!(get!(on_bus, PSY.get_number(PSY.get_bus(g)), Any[]), g)
-    end
-    row_of(g) = something(tryparse(Int, last(split(PSY.get_name(g), "-"))), typemax(Int))
-    for gens in values(on_bus)
-        sort!(gens; by = row_of)
-    end
-    seen = Dict{Int, Int}()
-    for row in ops
-        bus = Int(row["bus"])
-        seen[bus] = get(seen, bus, 0) + 1
-        startup = row["startup_usd"]
-        startup === nothing && continue
-        gens = get(on_bus, bus, Any[])
-        seen[bus] <= length(gens) || continue
-        out[PSY.get_name(gens[seen[bus]])] = Float64(startup)
-    end
-    return out
 end
 
 # Apply the per-generator overrides: a JSON object keyed by component name,
@@ -539,16 +687,18 @@ function _apply_uc_overrides!(sys, overrides_json::AbstractString)
 end
 
 # The cost of one generator over the horizon, split into energy (the
-# quadratic and linear terms at the dispatched MW), start-up (one start per
-# period the generator comes on, the initial state being off) and fixed (the
-# constant term per committed hour).
-function _commitment_cost_parts(g, on_mw::Vector{Float64}, p_mw::Vector{Float64}, resolution_h::Float64)
-    coefficients = _cost_coefficients(g)
+# quadratic and linear terms at the dispatched MW, times the step length in
+# hours: the curve is in $/h), start-up (one start per period the generator
+# comes on, the initial state being off, at the copy's start-up cost) and
+# fixed (the constant term c0, in $/h, per committed step times the step
+# length). `coefficients` is the file's (a, b, c0), taken before the copy's
+# cost data was changed.
+function _commitment_cost_parts(g, coefficients, on::Vector{Float64}, p_mw::Vector{Float64}, step_h::Float64)
     coefficients === nothing && return (energy = 0.0, startup = 0.0, fixed = 0.0)
-    a, b, c = coefficients
-    energy = sum(a * p^2 + b * p for p in p_mw)
-    fixed = c * resolution_h * count(==(1.0), on_mw)
-    starts = count(t -> on_mw[t] == 1.0 && (t == 1 || on_mw[t - 1] == 0.0), 1:length(on_mw))
+    a, b, c0 = coefficients
+    energy = step_h * sum((a * p^2 + b * p for p in p_mw); init = 0.0)
+    fixed = c0 * step_h * count(==(1.0), on)
+    starts = count(t -> on[t] == 1.0 && (t == 1 || on[t - 1] == 0.0), 1:length(on))
     startup = Float64(PSY.get_start_up(PSY.get_operation_cost(g))) * starts
     return (energy = energy, startup = startup, fixed = fixed)
 end
@@ -563,11 +713,23 @@ array of one positive factor per period; the Python side lists every load of
 the case with those factors in the series payload. `overrides_json` is a
 JSON object of per-generator additions (start-up cost, minimum up and down
 times, must-run) keyed by component name. `ops_json` carries the case facts'
-`startup_usd` per generator, which PowerSystems does not read from the
-gencost row, so the start-up cost is set on the copy from it. Every
+operations rows (`generator_ops`, one per mpc.gen row), whose ramp rate is
+set on the copy (`_ramps_as_published!`), so the commitment enforces the
+ramp the `op` block publishes. The start-up cost is the gencost row's
+STARTUP column, which PowerSystems carries into
+ThermalGenerationCost.start_up, unless an override replaces it. Every
 generator starts off, so one committed in the first period pays a start-up.
+
 The answer lists, per period, each generator's on/off and MW, the cost split
-into energy, start-up and fixed, and every slack variable past 1e-6 MW.
+into energy (the quadratic and linear terms times the step length), start-up
+and fixed (the gencost constant term c0, in \$/h, per committed step times
+the step length), and every slack variable past 1e-6 MW. `objective` is the
+solver's: the constant term is put on the copy as c0 times the step length
+per committed step (`_fixed_cost_per_step!`), so it equals `objective_check`
+to solver tolerance, except that PowerSimulations leaves the constant term of
+a must-run unit out of its objective, which `objective_check` keeps. The
+build's folder under the session's scratch folder is removed before the
+answer is returned.
 """
 function uc_json(
     s::TS.Session;
@@ -579,8 +741,29 @@ function uc_json(
     ops_json::AbstractString = "null",
 )::String
     network = _network_model(network_model)
+    return _in_run_dir(s, "uc") do dir
+        _uc_json(
+            s, dir, network, network_model, horizon_h, resolution_min,
+            series_json, overrides_json, ops_json,
+        )
+    end
+end
+
+function _uc_json(
+    s::TS.Session,
+    dir::AbstractString,
+    network,
+    network_model::AbstractString,
+    horizon_h::Int,
+    resolution_min::Int,
+    series_json::AbstractString,
+    overrides_json::AbstractString,
+    ops_json::AbstractString,
+)::String
     sys = deepcopy(s.sys)
     base_mva = PSY.get_base_power(sys)
+    costs = _costs_by_name(sys)
+    step_h = resolution_min / 60
 
     factors = JSON3.read(series_json, Vector{Float64})
     n = length(factors)
@@ -600,27 +783,15 @@ function uc_json(
     has_cost || throw(ErrorException(NO_COST_DATA))
 
     _costs_in_natural_units!(sys)
+    _fixed_cost_per_step!(sys, step_h)
 
-    # A ramp of 0 from the file (no data) becomes no limit; a real one is
-    # kept as PowerSystems read it. Never 0, which would pin the generator.
-    for g in PSY.get_components(PSY.ThermalStandard, sys)
-        limit = _ramp_mw_per_min(g)
-        PSY.set_ramp_limits!(g, limit === nothing ? nothing : (up = limit, down = limit))
-    end
+    # The ramp the op block publishes, in MW per minute; no limit where it
+    # publishes none.
+    _ramps_as_published!(sys, JSON3.read(ops_json))
 
     # Every generator starts off, so one committed in the first period pays
     # its start-up (MATPOWER carries no commitment state).
     _initial_state_off!(sys)
-
-    # The start-up cost of the gencost rows, which PowerSystems does not
-    # carry into ThermalGenerationCost.start_up, set on the copy from the
-    # case facts.
-    ops = JSON3.read(ops_json)
-    for (name, startup) in _startup_costs(sys, ops)
-        g = PSY.get_component(PSY.ThermalStandard, sys, name)
-        cost = PSY.get_operation_cost(g)
-        cost isa PSY.ThermalGenerationCost && PSY.set_start_up!(cost, startup)
-    end
 
     missed = _apply_uc_overrides!(sys, overrides_json)
     isempty(missed) || throw(ArgumentError("no generator named " * join(missed, ", ")))
@@ -665,12 +836,11 @@ function uc_json(
                 "mip_rel_gap" => 1e-9,
             ),
             horizon = Hour(horizon_h),
-            resolution = Hour(resolution_min / 60),
+            resolution = Minute(resolution_min),
             name = "tensa_uc",
             store_variable_names = true,
         )
         # Spec section 12: simulation files only under the session's scratch.
-        dir = _run_dir(s, "uc")
         built = PSI.build!(model; output_dir = dir)
         built == PSI.ModelBuildStatus.BUILT || throw(
             ErrorException("unit commitment did not build: $(built)"),
@@ -712,7 +882,6 @@ function uc_json(
         on_of[(name, stamp)] = rounded
     end
 
-    resolution_h = resolution_min / 60
     generators = Any[]
     cost_energy = 0.0
     cost_startup = 0.0
@@ -722,7 +891,7 @@ function uc_json(
         bus = PSY.get_number(PSY.get_bus(g))
         on = [get(on_of, (name, periods[t]), 0.0) for t in 1:n]
         p_mw = [get(p_of, (name, periods[t]), 0.0) for t in 1:n]
-        parts = _commitment_cost_parts(g, on, p_mw, resolution_h)
+        parts = _commitment_cost_parts(g, get(costs, name, nothing), on, p_mw, step_h)
         cost_energy += parts.energy
         cost_startup += parts.startup
         cost_fixed += parts.fixed
@@ -860,26 +1029,22 @@ end
 const BAD_PROFILE = "load_profile must hold 96 numbers, one per 15-minute step of the day"
 
 # The cost of one stage over the day, recomputed from its dispatch in MW and
-# the file's own coefficients, as uc_json's objective_check is: the quadratic
-# and linear terms at the dispatched MW, the constant term per committed
-# hour, and one start-up per period the generator comes on (the initial state
-# being off). `on` is the commitment per stage step (nothing for the
-# real-time stage, whose cost has no start-up or fixed part: the commitment
-# is the day-ahead stage's), `p_mw` the dispatch per step, `step_h` the step
-# length in hours.
-function _stage_cost(g, on, p_mw::Vector{Float64}, step_h::Float64)
-    coefficients = _cost_coefficients(g)
+# the file's own coefficients, as uc_json's objective_check is
+# (`_commitment_cost_parts`): the quadratic and linear terms at the dispatched
+# MW times the step length, the constant term c0 per committed step times the
+# step length, and one start-up per period the generator comes on (the
+# initial state being off). `on` is the commitment per stage step (nothing
+# for the real-time stage, whose cost has no start-up or fixed part: the
+# commitment is the day-ahead stage's), `p_mw` the dispatch per step,
+# `step_h` the step length in hours, `coefficients` the file's (a, b, c0).
+function _stage_cost(g, coefficients, on, p_mw::Vector{Float64}, step_h::Float64)
     coefficients === nothing && return 0.0
-    a, b, c = coefficients
-    cost = sum(a * p^2 + b * p for p in p_mw) * 1.0
-    # The curve is in $/h of power in MW; a step of step_h hours at p MW
-    # costs the curve's value times step_h.
-    cost *= step_h
-    on === nothing && return cost
-    cost += c * step_h * count(==(1.0), on)
-    starts = count(t -> on[t] == 1.0 && (t == 1 || on[t - 1] == 0.0), 1:length(on))
-    cost += Float64(PSY.get_start_up(PSY.get_operation_cost(g))) * starts
-    return cost
+    if on === nothing
+        a, b, _ = coefficients
+        return step_h * sum((a * p^2 + b * p for p in p_mw); init = 0.0)
+    end
+    parts = _commitment_cost_parts(g, coefficients, on, p_mw, step_h)
+    return parts.energy + parts.fixed + parts.startup
 end
 
 """
@@ -887,8 +1052,9 @@ end
 
 Run the two-stage simulation of the loaded case: a day-ahead unit commitment
 at hourly resolution over the day (the `uc_json` model:
-`template_unit_commitment` with `ThermalStandardUnitCommitment`, the start-up
-costs set on the copy, every unit starting off), then a real-time economic
+`template_unit_commitment` with `ThermalStandardUnitCommitment`, the ramp
+rates the `op` block publishes and the constant cost term per committed step
+set on the copy, every unit starting off), then a real-time economic
 dispatch at 15 minutes (the `dispatch_json` model:
 `template_economic_dispatch`) held to that commitment through a
 `SemiContinuousFeedforward` on `OnVariable`, one simulation step over the
@@ -897,18 +1063,20 @@ per 15-minute step of the day (1.0 is the case's load); the day-ahead stage's
 hourly value at hour h is the mean of the four quarter-hours, which is what
 `transform_single_time_series!` makes of the 15-minute series at hourly
 resolution. The system is deep-copied first: the time series, the relabelled
-cost curves, the start-up costs and the initial state go to the copy, never
-to the session's system.
+cost curves, the ramp rates and the initial state go to the copy, never to
+the session's system. `ops_json` is the case facts' operations rows, as for
+`uc_json`.
 
 The answer lists, per stage and per period, each generator's on/off
 (day-ahead) and MW, the cost of each stage recomputed from its dispatch and
-the file's own gencost coefficients, and every slack variable past 1e-6 MW
-with its step. Times are implicit: step i of DA is hour i - 1 of the day from
+the file's own gencost coefficients (the day-ahead stage's with its start-up
+costs and the gencost constant term c0 per committed hour), and every slack
+variable past 1e-6 MW with its step. Times are implicit: step i of DA is hour i - 1 of the day from
 2026-01-01T00:00:00, step j of RT is 15 minutes times j - 1; the Python side
 reconstructs timestamps from `resolution_minutes` and that fixed start date.
 The simulation's store goes in a fresh folder `sim-<stamp>` inside the
 session's scratch folder (spec section 12) and is removed once the results
-are read.
+are read, or once the build or the solve has failed.
 
 Throws an `ArgumentError` for a bad profile or network model, an
 `ErrorException` with the no-cost-data message when no generator of the case
@@ -930,8 +1098,22 @@ function sim_json(
                     "got $(load_profile[bad]) at step $(bad)"),
     )
     network = _network_model(network_model)
+    return _in_run_dir(s, "sim") do out_dir
+        _sim_json(s, out_dir, load_profile, network, network_model, ops_json)
+    end
+end
+
+function _sim_json(
+    s::TS.Session,
+    out_dir::AbstractString,
+    load_profile::Vector{Float64},
+    network,
+    network_model::AbstractString,
+    ops_json::AbstractString,
+)::String
     sys = deepcopy(s.sys)
     base_mva = PSY.get_base_power(sys)
+    costs = _costs_by_name(sys)
 
     has_cost = any(
         g -> _cost_coefficients(g) !== nothing,
@@ -940,27 +1122,17 @@ function sim_json(
     has_cost || throw(ErrorException(NO_COST_DATA))
 
     _costs_in_natural_units!(sys)
+    # The day-ahead stage commits by the hour; the real-time stage has no
+    # commitment variable and so no constant term.
+    _fixed_cost_per_step!(sys, 1.0)
 
-    # A ramp of 0 from the file (no data) becomes no limit; a real one is
-    # kept as PowerSystems read it. Never 0, which would pin the generator.
-    for g in PSY.get_components(PSY.ThermalStandard, sys)
-        limit = _ramp_mw_per_min(g)
-        PSY.set_ramp_limits!(g, limit === nothing ? nothing : (up = limit, down = limit))
-    end
+    # The ramp the op block publishes, in MW per minute; no limit where it
+    # publishes none.
+    _ramps_as_published!(sys, JSON3.read(ops_json))
 
     # Every generator starts off, so one committed in the first hour pays a
     # start-up (MATPOWER carries no commitment state).
     _initial_state_off!(sys)
-
-    # The start-up cost of the gencost rows, which PowerSystems does not
-    # carry into ThermalGenerationCost.start_up, set on the copy from the
-    # case facts the Python side sends.
-    ops = JSON3.read(ops_json)
-    for (name, startup) in _startup_costs(sys, ops)
-        g = PSY.get_component(PSY.ThermalStandard, sys, name)
-        cost = PSY.get_operation_cost(g)
-        cost isa PSY.ThermalGenerationCost && PSY.set_start_up!(cost, startup)
-    end
 
     # The load profile as two time series of every load, one per stage, as
     # PowerSimulations' own two-stage test sets them up: the day-ahead
@@ -995,7 +1167,6 @@ function sim_json(
     )
 
     logger = TS._NoteLogger()
-    out_dir = _run_dir(s, "sim")
     store_name = basename(out_dir)
     results = Logging.with_logger(logger) do
         # The keyword is `network`: the template takes any keyword and keeps
@@ -1126,119 +1297,115 @@ function sim_json(
         return nothing
     end
 
-    try
-        results_da = PSI.get_decision_problem_results(results, "DA")
-        results_rt = PSI.get_decision_problem_results(results, "RT")
+    results_da = PSI.get_decision_problem_results(results, "DA")
+    results_rt = PSI.get_decision_problem_results(results, "RT")
 
-        on_da = realized(results_da, "OnVariable__ThermalStandard", 24)
-        p_da = realized(results_da, "ActivePowerVariable__ThermalStandard", 24)
-        p_rt = realized(results_rt, "ActivePowerVariable__ThermalStandard", 96)
-        read_slacks(results_da, "DA")
-        read_slacks(results_rt, "RT")
+    on_da = realized(results_da, "OnVariable__ThermalStandard", 24)
+    p_da = realized(results_da, "ActivePowerVariable__ThermalStandard", 24)
+    p_rt = realized(results_rt, "ActivePowerVariable__ThermalStandard", 96)
+    read_slacks(results_da, "DA")
+    read_slacks(results_rt, "RT")
 
-        # The commitment must be integral; a value not within 1e-3 of an
-        # integer means HiGHS solved the relaxation, which is an error.
-        for (name, series) in on_da
-            for (t, value) in enumerate(series)
-                rounded = round(value)
-                abs(value - rounded) <= 1e-3 || throw(ErrorException(
-                    "the commitment is not integral: $(name) in hour $(t) is $(value)",
-                ))
-                series[t] = rounded
-            end
+    # The commitment must be integral; a value not within 1e-3 of an
+    # integer means HiGHS solved the relaxation, which is an error.
+    for (name, series) in on_da
+        for (t, value) in enumerate(series)
+            rounded = round(value)
+            abs(value - rounded) <= 1e-3 || throw(ErrorException(
+                "the commitment is not integral: $(name) in hour $(t) is $(value)",
+            ))
+            series[t] = rounded
         end
-
-        # The dispatch must meet the load in every step of each stage, unless
-        # a slack variable made up the difference (reported in slacks). The
-        # day-ahead stage's hourly load is the mean of the four quarter-hours.
-        slack_by_time = Dict{String, Float64}()
-        for row in slacks
-            slack_by_time[row.time] = get(slack_by_time, row.time, 0.0) + abs(row.value)
-        end
-        names = sort(collect(keys(p_da)))
-        for t in 1:24
-            load = base_load_mw * sum(load_profile[(4 * t - 3):(4 * t)]) / 4
-            dispatched = sum(get(p_da, name, zeros(24))[t] for name in names)
-            stamp = string(t0 + Hour(t - 1))
-            if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
-               get(slack_by_time, stamp, 0.0) == 0.0
-                throw(ErrorException(
-                    "DA did not meet the load at $(stamp): $(dispatched) MW " *
-                    "dispatched for $(load) MW of load",
-                ))
-            end
-        end
-        for t in 1:96
-            load = base_load_mw * load_profile[t]
-            dispatched = sum(get(p_rt, name, zeros(96))[t] for name in keys(p_rt))
-            stamp = string(t0 + Minute(15) * (t - 1))
-            if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
-               get(slack_by_time, stamp, 0.0) == 0.0
-                throw(ErrorException(
-                    "RT did not meet the load at $(stamp): $(dispatched) MW " *
-                    "dispatched for $(load) MW of load",
-                ))
-            end
-        end
-
-        commitment = Any[]
-        dispatch_da = Any[]
-        dispatch_rt = Any[]
-        cost_da = 0.0
-        cost_rt = 0.0
-        for g in PSY.get_components(PSY.ThermalStandard, sys)
-            name = PSY.get_name(g)
-            bus = PSY.get_number(PSY.get_bus(g))
-            id = TS._generator_id(name, bus)
-            on = get(on_da, name, zeros(24))
-            p_day = get(p_da, name, zeros(24))
-            p_quarter = get(p_rt, name, zeros(96))
-            cost_da += _stage_cost(g, on, p_day, 1.0)
-            cost_rt += _stage_cost(g, nothing, p_quarter, 0.25)
-            push!(commitment, (name = name, bus = bus, id = id, on = on))
-            push!(dispatch_da, (name = name, bus = bus, id = id, p_mw = p_day))
-            push!(dispatch_rt, (name = name, bus = bus, id = id, p_mw = p_quarter))
-        end
-        by_key = x -> (x.bus, x.id, x.name)
-        sort!(commitment; by = by_key)
-        sort!(dispatch_da; by = by_key)
-        sort!(dispatch_rt; by = by_key)
-
-        answer = (
-            status = "completed",
-            network_model = String(network_model),
-            base_mva = base_mva,
-            interval_minutes = 60,
-            stages = [
-                (
-                    name = "DA",
-                    kind = "uc",
-                    resolution_minutes = 60,
-                    steps = 24,
-                    horizon_hours = 24,
-                    commitment = commitment,
-                    dispatch = dispatch_da,
-                    objective = cost_da,
-                ),
-                (
-                    name = "RT",
-                    kind = "dispatch",
-                    resolution_minutes = 15,
-                    steps = 96,
-                    horizon_hours = 1,
-                    dispatch = dispatch_rt,
-                    objective = cost_rt,
-                ),
-            ],
-            slacks = slacks,
-            store_dir = store_name,
-            notes = notes,
-        )
-        return TS._to_json(answer)
-    finally
-        # The store is read; the scratch folder keeps nothing of it.
-        rm(out_dir; recursive = true, force = true)
     end
+
+    # The dispatch must meet the load in every step of each stage, unless
+    # a slack variable made up the difference (reported in slacks). The
+    # day-ahead stage's hourly load is the mean of the four quarter-hours.
+    slack_by_time = Dict{String, Float64}()
+    for row in slacks
+        slack_by_time[row.time] = get(slack_by_time, row.time, 0.0) + abs(row.value)
+    end
+    names = sort(collect(keys(p_da)))
+    for t in 1:24
+        load = base_load_mw * sum(load_profile[(4 * t - 3):(4 * t)]) / 4
+        dispatched = sum(get(p_da, name, zeros(24))[t] for name in names)
+        stamp = string(t0 + Hour(t - 1))
+        if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
+           get(slack_by_time, stamp, 0.0) == 0.0
+            throw(ErrorException(
+                "DA did not meet the load at $(stamp): $(dispatched) MW " *
+                "dispatched for $(load) MW of load",
+            ))
+        end
+    end
+    for t in 1:96
+        load = base_load_mw * load_profile[t]
+        dispatched = sum(get(p_rt, name, zeros(96))[t] for name in keys(p_rt))
+        stamp = string(t0 + Minute(15) * (t - 1))
+        if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
+           get(slack_by_time, stamp, 0.0) == 0.0
+            throw(ErrorException(
+                "RT did not meet the load at $(stamp): $(dispatched) MW " *
+                "dispatched for $(load) MW of load",
+            ))
+        end
+    end
+
+    commitment = Any[]
+    dispatch_da = Any[]
+    dispatch_rt = Any[]
+    cost_da = 0.0
+    cost_rt = 0.0
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        name = PSY.get_name(g)
+        bus = PSY.get_number(PSY.get_bus(g))
+        id = TS._generator_id(name, bus)
+        on = get(on_da, name, zeros(24))
+        p_day = get(p_da, name, zeros(24))
+        p_quarter = get(p_rt, name, zeros(96))
+        coefficients = get(costs, name, nothing)
+        cost_da += _stage_cost(g, coefficients, on, p_day, 1.0)
+        cost_rt += _stage_cost(g, coefficients, nothing, p_quarter, 0.25)
+        push!(commitment, (name = name, bus = bus, id = id, on = on))
+        push!(dispatch_da, (name = name, bus = bus, id = id, p_mw = p_day))
+        push!(dispatch_rt, (name = name, bus = bus, id = id, p_mw = p_quarter))
+    end
+    by_key = x -> (x.bus, x.id, x.name)
+    sort!(commitment; by = by_key)
+    sort!(dispatch_da; by = by_key)
+    sort!(dispatch_rt; by = by_key)
+
+    answer = (
+        status = "completed",
+        network_model = String(network_model),
+        base_mva = base_mva,
+        interval_minutes = 60,
+        stages = [
+            (
+                name = "DA",
+                kind = "uc",
+                resolution_minutes = 60,
+                steps = 24,
+                horizon_hours = 24,
+                commitment = commitment,
+                dispatch = dispatch_da,
+                objective = cost_da,
+            ),
+            (
+                name = "RT",
+                kind = "dispatch",
+                resolution_minutes = 15,
+                steps = 96,
+                horizon_hours = 1,
+                dispatch = dispatch_rt,
+                objective = cost_rt,
+            ),
+        ],
+        slacks = slacks,
+        store_dir = store_name,
+        notes = notes,
+    )
+    return TS._to_json(answer)
 end
 
 end # module

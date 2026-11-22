@@ -123,14 +123,26 @@ class DispatchResponse(BaseModel):
         description=(
             "The solver's objective, in $/h: the cost curves are labelled as "
             "natural units before the model is built, so the objective is the "
-            "true cost of the dispatch with power in MW."
+            "cost of the dispatch with power in MW. It has no gencost "
+            "constant term: PowerSystems keeps that term apart from the "
+            "curve and PowerSimulations' dispatch does not charge it, so "
+            "objective_per_h + fixed_per_h = objective_check_per_h."
         )
     )
     objective_check_per_h: float = Field(
         description=(
-            "The cost recomputed from the dispatch in MW and the case file's "
-            "own gencost coefficients, in $/h; equal to objective_per_h "
-            "within solver tolerance."
+            "The cost of the dispatch as MATPOWER counts it, in $/h: "
+            "a*P^2 + b*P + c0 of every dispatched generator, recomputed from "
+            "the dispatch in MW and the case file's own gencost "
+            "coefficients, the constant term c0 included for every unit "
+            "(every available unit is on in a dispatch)."
+        )
+    )
+    fixed_per_h: float = Field(
+        description=(
+            "The sum of the gencost constant terms c0 of the dispatched "
+            "generators, in $/h: what objective_check_per_h holds and "
+            "objective_per_h does not."
         )
     )
     base_mva: float = Field(description="The system MVA base.")

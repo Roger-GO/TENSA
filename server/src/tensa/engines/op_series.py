@@ -73,9 +73,11 @@ class GeneratorOp(BaseModel):
     ramp_up_mw_per_min: float | None = Field(
         default=None,
         description=(
-            "The ramp-up limit, in MW per minute, from the MATPOWER ramp "
-            "column where it is non-zero; null where the column is 0 (the "
-            "file gives no ramp data, and 0 must never become a limit)."
+            "The ramp-up limit, in MW per minute: MATPOWER's RAMP_AGC "
+            "(MW/min) where it is non-zero, else RAMP_10 (MW in 10 minutes) "
+            "divided by 10; null where both are 0 (the file gives no ramp "
+            "data, and 0 must never become a limit). It is the limit the "
+            "Sienna engine's unit commitment and simulation enforce."
         ),
     )
     ramp_down_mw_per_min: float | None = Field(

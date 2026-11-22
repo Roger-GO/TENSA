@@ -272,7 +272,8 @@
    ],
    "cost_points": null,
    "startup_usd": 0.0,
-   "shutdown_usd": 0.0
+   "shutdown_usd": 0.0,
+   "row": 1
   },
   {
    "bus": 2,
@@ -289,7 +290,8 @@
    ],
    "cost_points": null,
    "startup_usd": 0.0,
-   "shutdown_usd": 0.0
+   "shutdown_usd": 0.0,
+   "row": 2
   },
   {
    "bus": 3,
@@ -306,7 +308,8 @@
    ],
    "cost_points": null,
    "startup_usd": 0.0,
-   "shutdown_usd": 0.0
+   "shutdown_usd": 0.0,
+   "row": 3
   },
   {
    "bus": 6,
@@ -323,7 +326,8 @@
    ],
    "cost_points": null,
    "startup_usd": 0.0,
-   "shutdown_usd": 0.0
+   "shutdown_usd": 0.0,
+   "row": 4
   },
   {
    "bus": 8,
@@ -340,7 +344,8 @@
    ],
    "cost_points": null,
    "startup_usd": 0.0,
-   "shutdown_usd": 0.0
+   "shutdown_usd": 0.0,
+   "row": 5
   }
  ],
  "notes": []
