@@ -122,6 +122,13 @@ Results:         POST /results/convert  (no session; body {"kind": "pflow"|"tds"
                  "keys" the session's keys lookup for an ANDES tds result; "skipped" names each column left out and why
                  (a dae_vars raw state is not part of the document yet), "notes" reports a truncated result; 413 over
                  128 MiB, 422 for a result that does not fit its kind or a power flow that did not converge)
+                 POST /compare  (no session; body {"reference", "comparison", optional "tolerances"}, two results
+                 documents as POST /results/convert answers them -> power flow first (rows per key, "operating_point_differs"
+                 when a row is outside its tolerance), then per series the largest and time-weighted RMS difference over
+                 the overlap of the time ranges with the swing of the reference, then the eigenvalues matched as modes;
+                 differences are comparison minus reference, rad differences wrapped to [-pi, pi); unmatched keys and
+                 modes are listed, "not_comparable" holds the pairs that cannot be compared with the reason; 413 over
+                 128 MiB, 422 for a document with problems (the detail names the side and each problem) or a unit mismatch)
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
                  overshoot_pct, damping {ratio, frequency_hz}; not the "traces" object itself, which is 422: build "series" from a batch

@@ -43,6 +43,7 @@ from tensa.api.request_log import make_request_log_middleware
 from tensa.api.routes.bundle import router as bundle_import_router
 from tensa.api.routes.cases import router as cases_router
 from tensa.api.routes.clone import router as clone_router
+from tensa.api.routes.compare import router as compare_router
 from tensa.api.routes.comtrade import router as comtrade_router
 from tensa.api.routes.cpf import router as cpf_router
 from tensa.api.routes.disturbances import router as disturbances_router
@@ -374,6 +375,7 @@ def make_app(
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
     app.include_router(results_doc_router, prefix="/api", tags=["results"])
+    app.include_router(compare_router, prefix="/api", tags=["results"])
     app.include_router(external_results_router, prefix="/api", tags=["external-results"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])

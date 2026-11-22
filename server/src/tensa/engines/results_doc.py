@@ -7,15 +7,19 @@ client sends back. Pure Python; imports no engine.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tensa.api.schemas.tds import TdsTraces
 from tensa.core.eig_result import EigResult
 from tensa.core.wrapper.results import PflowResult
 from tensa.engines.keys import KeyBook, is_key
 from tensa.engines.series_names import QUANTITY_BY_NAME, neutral_name_andes, parse_state_name
+
+if TYPE_CHECKING:
+    # Only a type here: importing the API schemas package from this engines module
+    # would make it import itself through the schemas that re-export the document.
+    from tensa.api.schemas.tds import TdsTraces
 
 __all__ = [
     "EngineBlock",

@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 5 |
+| `none` | 6 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,12 +32,13 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **79** |
+| **total** | **80** |
 
 ## OpenAPI routes
 
 | Method | Path | GUI location | Deferral reason |
 | --- | --- | --- | --- |
+| `POST` | `/api/compare` | `none` | No web surface yet; the comparison view of the Phase 6 web unit adds it. |
 | `POST` | `/api/comtrade` | `analysis-panel` |  |
 | `GET` | `/api/engines` | `auto` |  |
 | `GET` | `/api/examples` | `example-dialog` |  |
