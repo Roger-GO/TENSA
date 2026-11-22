@@ -924,6 +924,30 @@ def test_ratings_given_replace_the_engines_where_both_rate() -> None:
 
 
 @pytest.mark.unit
+def test_report_messages_phase_shift_and_bus_type() -> None:
+    report = {
+        "applied": [
+            {"kind": "phase_shift", "from_bus": 7637, "to_bus": 8581,
+             "shift_rad": math.radians(-0.428189)},
+            {"kind": "bustype", "bus": 38, "from": "PV", "to": "PQ"},
+        ],
+    }
+    assert report_messages(report) == [
+        (
+            "info",
+            "Sienna: the branch 7637-8581 has a ratio of 0 and a phase shift of "
+            "-0.428189 deg in the file, which MATPOWER reads as a phase shifter "
+            "of ratio 1; it is held as one",
+        ),
+        (
+            "info",
+            "Sienna: bus 38 is type PV in the file with no generator in service, "
+            "and is solved as a PQ bus",
+        ),
+    ]
+
+
+@pytest.mark.unit
 def test_report_messages_order_and_levels() -> None:
     report = {
         "buses": 1,

@@ -134,6 +134,7 @@
    0.0
   ]
  ],
+ "transformer_charging": [],
  "ratings": [
   [
    1,
@@ -256,5 +257,6 @@
    50.0
   ]
  ],
+ "generator_ops": [],
  "notes": []
 }

@@ -253,7 +253,10 @@ def matpower_branch_rows(text: str) -> dict[tuple[int, int, str], int]:
 def julia_corrections(path: Path, document: Mapping[str, Any]) -> dict[str, Any]:
     """What the bridge's ``corrections`` argument takes for the case at ``path``:
     the ``transformers`` and ``line_charging`` rows of its corrections document,
-    the only keys the Julia module knows.
+    the only keys the Julia module knows. The ``transformer_charging`` rows (a
+    MATPOWER transformer row with a ``b``) go with the ``line_charging`` ones:
+    the Julia module puts back the charging of any branch it holds as a
+    transformer the same way, half at each end of the file's pi.
 
     The Julia module names a branch of a PSS/E file by the record's circuit id
     and a branch of a MATPOWER file by its row number in the file, so for a
@@ -264,6 +267,7 @@ def julia_corrections(path: Path, document: Mapping[str, Any]) -> dict[str, Any]
     """
     transformers = [list(row) for row in document.get("transformers", [])]
     line_charging = [list(row) for row in document.get("line_charging", [])]
+    line_charging += [list(row) for row in document.get("transformer_charging", [])]
     if path.suffix.lower() == ".m":
         numbers = matpower_branch_rows(_read_text(path))
         for rows in (transformers, line_charging):

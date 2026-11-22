@@ -133,6 +133,7 @@
    0.0
   ]
  ],
+ "transformer_charging": [],
  "ratings": [
   [
    1,
@@ -254,6 +255,93 @@
    "1",
    0.0
   ]
+ ],
+ "generator_ops": [
+  {
+   "bus": 1,
+   "gen_id": "1",
+   "p_min_mw": 0.0,
+   "p_max_mw": 332.4,
+   "ramp_up_mw_per_min": null,
+   "ramp_down_mw_per_min": null,
+   "cost_kind": "polynomial",
+   "cost_coefficients": [
+    0.0430292599,
+    20.0,
+    0.0
+   ],
+   "cost_points": null,
+   "startup_usd": 0.0,
+   "shutdown_usd": 0.0
+  },
+  {
+   "bus": 2,
+   "gen_id": "1",
+   "p_min_mw": 0.0,
+   "p_max_mw": 140.0,
+   "ramp_up_mw_per_min": null,
+   "ramp_down_mw_per_min": null,
+   "cost_kind": "polynomial",
+   "cost_coefficients": [
+    0.25,
+    20.0,
+    0.0
+   ],
+   "cost_points": null,
+   "startup_usd": 0.0,
+   "shutdown_usd": 0.0
+  },
+  {
+   "bus": 3,
+   "gen_id": "1",
+   "p_min_mw": 0.0,
+   "p_max_mw": 100.0,
+   "ramp_up_mw_per_min": null,
+   "ramp_down_mw_per_min": null,
+   "cost_kind": "polynomial",
+   "cost_coefficients": [
+    0.01,
+    40.0,
+    0.0
+   ],
+   "cost_points": null,
+   "startup_usd": 0.0,
+   "shutdown_usd": 0.0
+  },
+  {
+   "bus": 6,
+   "gen_id": "1",
+   "p_min_mw": 0.0,
+   "p_max_mw": 100.0,
+   "ramp_up_mw_per_min": null,
+   "ramp_down_mw_per_min": null,
+   "cost_kind": "polynomial",
+   "cost_coefficients": [
+    0.01,
+    40.0,
+    0.0
+   ],
+   "cost_points": null,
+   "startup_usd": 0.0,
+   "shutdown_usd": 0.0
+  },
+  {
+   "bus": 8,
+   "gen_id": "1",
+   "p_min_mw": 0.0,
+   "p_max_mw": 100.0,
+   "ramp_up_mw_per_min": null,
+   "ramp_down_mw_per_min": null,
+   "cost_kind": "polynomial",
+   "cost_coefficients": [
+    0.01,
+    40.0,
+    0.0
+   ],
+   "cost_points": null,
+   "startup_usd": 0.0,
+   "shutdown_usd": 0.0
+  }
  ],
  "notes": []
 }

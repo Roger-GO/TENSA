@@ -756,6 +756,26 @@ def test_matpower_row_numbers_when_the_first_row_is_a_transformer(tmp_path: Path
     assert [row[:3] for row in document["line_charging"]] == [[2, 3, "1"], [3, 2, "2"]]
 
 
+def test_transformer_charging_goes_with_the_line_charging(tmp_path: Path) -> None:
+    """A MATPOWER transformer row with a b (rows 86-87 and 68-116 of case118.m,
+    ratio 1) is sent in ``line_charging``, numbered by its row like every
+    other, so the Julia module puts back the half of its charging that
+    PowerSystems moves onto the from end."""
+    case = tmp_path / "three.m"
+    case.write_text(
+        _THREE_ROWS.replace(
+            "\t1\t2\t0.01\t0.1\t0\t0\t0\t0\t0.98\t0\t1\t-360\t360;",
+            "\t1\t2\t0.01\t0.1\t0.05\t0\t0\t0\t0.98\t0\t1\t-360\t360;",
+        ),
+        encoding="utf-8",
+    )
+    document = _document(case)
+    assert document["transformer_charging"] == [[1, 2, "1", 0.05]]
+    sent = julia_corrections(case, document)
+    assert set(sent) == {"transformers", "line_charging"}
+    assert sent["line_charging"] == [[2, 3, "2", 0.02], [3, 2, "3", 0.04], [1, 2, "1", 0.05]]
+
+
 def test_a_raw_file_keeps_its_circuit_ids(workspace: Path) -> None:
     case = _kundur(workspace)
     document = _document(case)

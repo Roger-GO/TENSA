@@ -100,6 +100,70 @@ const KUNDUR_ANDES_FLOWS = Dict(
     (1, 5, "1") => (726.8029, 109.4634, -721.4006, -44.6364),
 )
 
+# A four-bus MATPOWER case written by a test: bus 1 the reference, bus 2 a
+# generator bus, buses 3 and 4 loads. `branch34` is the row of the branch
+# from 3 to 4 (r x b rateA rateB rateC ratio angle), `bus4` the bus row's type,
+# and `gens` the generator rows (bus Pg Qg Qmax Qmin Vg mBase status Pmax Pmin).
+function four_bus_case(dir, name; branch34 = "0.005 0.04 0.10 0 0 0 0 0",
+                       bus4 = 1, gens = nothing)
+    gens === nothing && (gens = [
+        "1 0 0 300 -300 1.02 100 1 300 0",
+        "2 80 0 100 -100 1.01 100 1 200 0",
+    ])
+    path = joinpath(dir, name)
+    text = """
+    function mpc = $(splitext(name)[1])
+    mpc.version = '2';
+    mpc.baseMVA = 100;
+    mpc.bus = [
+        1 3 0 0 0 0 1 1.02 0 230 1 1.1 0.9;
+        2 2 50 20 0 0 1 1.01 0 230 1 1.1 0.9;
+        3 1 100 40 0 0 1 1.0 0 230 1 1.1 0.9;
+        4 $(bus4) 60 25 0 0 1 1.0 0 230 1 1.1 0.9;
+    ];
+    mpc.gen = [
+    $(join(["    " * g * ";" for g in gens], "\n"))
+    ];
+    mpc.branch = [
+        1 2 0.01 0.05 0.04 0 0 0 0 0 1 -360 360;
+        1 3 0.01 0.06 0.05 0 0 0 0 0 1 -360 360;
+        2 3 0.012 0.07 0.06 0 0 0 0 0 1 -360 360;
+        3 4 $(branch34) 1 -360 360;
+    ];
+    """
+    write(path, text)
+    return path
+end
+
+# The corrections the Python side sends for `four_bus_case`: each branch row
+# by its row number, a row with a ratio as a transformer, and every row's
+# charging in `line_charging` (a transformer's as its `transformer_charging`).
+function four_bus_corrections(branch34)
+    f = parse.(Float64, split(branch34))
+    b, ratio, angle = f[3], f[7], f[8]
+    charging = Any[[1, 2, "1", 0.04], [1, 3, "2", 0.05], [2, 3, "3", 0.06]]
+    transformers = Any[]
+    if ratio != 0.0
+        push!(transformers, [3, 4, "4", ratio, deg2rad(angle)])
+        b != 0.0 && push!(charging, [3, 4, "4", b])
+    else
+        push!(charging, [3, 4, "4", b])
+    end
+    return JSON3.write(Dict("transformers" => transformers, "line_charging" => charging))
+end
+
+function solved_buses(s)
+    pf = JSON3.read(TensaSienna.pflow_json(s))
+    @test pf[:converged] == true
+    return Dict(Int(b[:number]) => (Float64(b[:v_pu]), Float64(b[:angle_rad])) for b in pf[:buses]), pf
+end
+
+function largest_gap(a, b)
+    dv = maximum(abs(a[k][1] - b[k][1]) for k in keys(a))
+    da = maximum(abs(wrap_pi(a[k][2] - b[k][2])) for k in keys(a))
+    return max(dv, da)
+end
+
 @testset "TensaSienna" begin
     for name in FIXTURE_NAMES
         fx = load_fixture(name)
@@ -478,6 +542,190 @@ const KUNDUR_ANDES_FLOWS = Dict(
             @test length(pf[:buses]) == 14
         else
             println("SKIP MATPOWER case: matpower/case14.m is not in $(CASES_DIR)")
+        end
+    end
+
+    @testset "a MATPOWER transformer row keeps its charging at both ends" begin
+        # MATPOWER defines a ratio of 0 as 1, so a row of ratio 1 is the same
+        # branch as the line: PowerSystems makes a transformer of it and
+        # moves its whole charging onto the from end (case118.m rows 86-87
+        # and 68-116, 1.7e-3 pu at bus 86), and the correction puts half back
+        # on each end.
+        dir = mktempdir()
+        line = "0.005 0.04 0.10 0 0 0 0 0"
+        unit = "0.005 0.04 0.10 0 0 0 1 0"
+        s_line = TensaSienna.load_case(four_bus_case(dir, "line.m"; branch34 = line);
+                                       corrections = four_bus_corrections(line))
+        s_unit = TensaSienna.load_case(four_bus_case(dir, "unit.m"; branch34 = unit);
+                                       corrections = four_bus_corrections(unit))
+        @test any(a -> a["kind"] == "charging", s_unit.applied)
+        v_line, _ = solved_buses(s_line)
+        v_unit, _ = solved_buses(s_unit)
+        # The two are the same network up to the rounding of the admittance
+        # matrix, which PowerNetworkMatrices holds in single precision and
+        # builds for a line and a transformer by different sums (1.4e-7).
+        @test largest_gap(v_line, v_unit) < 1e-6
+        topo = JSON3.read(TensaSienna.topology_json(s_unit))
+        br = only(b for b in topo[:branches] if (b[:from], b[:to]) == (3, 4))
+        @test br[:kind] == "transformer"
+        @test br[:b_pu] ≈ 0.10 atol = 1e-12
+        # Without the correction the two differ, by more than the tolerance
+        # the engines are held to.
+        s_bare = TensaSienna.load_case(joinpath(dir, "unit.m"))
+        v_bare, _ = solved_buses(s_bare)
+        @test largest_gap(v_line, v_bare) > 1e-4
+
+        # With a ratio other than 1, the from end is (y + j b/2) / tap^2 and
+        # the to end y + j b/2, as MATPOWER's makeYbus has them.
+        ratio = "0.005 0.04 0.10 0 0 0 0.95 0"
+        s_tap = TensaSienna.load_case(four_bus_case(dir, "tap.m"; branch34 = ratio);
+                                      corrections = four_bus_corrections(ratio))
+        sys = s_tap.sys
+        PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+            br = only(b for b in PSY.get_components(PSY.ACBranch, sys) if
+                      TensaSienna._arc_numbers(b) == (3, 4))
+            y11, _, _, y22 = TensaSienna.PNM.ybus_branch_entries(br)
+            added = TensaSienna._added_charging(sys)[PSY.get_name(br)]
+            ys = 1 / complex(0.005, 0.04)
+            @test y11 ≈ (ys + 0.05im) / 0.95^2 atol = 1e-6
+            @test y22 + added * im ≈ ys + 0.05im atol = 1e-6
+        end
+        topo = JSON3.read(TensaSienna.topology_json(s_tap))
+        br = only(b for b in topo[:branches] if (b[:from], b[:to]) == (3, 4))
+        @test br[:b_pu] ≈ 0.10 atol = 1e-9
+        @test br[:tap] ≈ 0.95
+    end
+
+    @testset "a MATPOWER row with a ratio of 0 and a phase shift" begin
+        # PowerSystems' parser fails on it ("base_voltage_from" not found,
+        # case89pegase.m); MATPOWER applies the shift with a ratio of 1.
+        dir = mktempdir()
+        ratio0 = "0.005 0.04 0.10 0 0 0 0 3"
+        ratio1 = "0.005 0.04 0.10 0 0 0 1 3"
+        s_zero = TensaSienna.load_case(four_bus_case(dir, "zero.m"; branch34 = ratio0);
+                                       corrections = four_bus_corrections(ratio0))
+        shifts = [a for a in s_zero.applied if a["kind"] == "phase_shift"]
+        @test length(shifts) == 1
+        @test (shifts[1]["from_bus"], shifts[1]["to_bus"]) == (3, 4)
+        @test shifts[1]["shift_rad"] ≈ deg2rad(3)
+        s_one = TensaSienna.load_case(four_bus_case(dir, "one.m"; branch34 = ratio1);
+                                      corrections = four_bus_corrections(ratio1))
+        @test !any(a -> a["kind"] == "phase_shift", s_one.applied)
+        v_zero, _ = solved_buses(s_zero)
+        v_one, _ = solved_buses(s_one)
+        @test largest_gap(v_zero, v_one) < 1e-9
+        # The shift is applied: bus 4 hangs off bus 3 by this branch alone,
+        # so its angle moves by the shift.
+        line = "0.005 0.04 0.10 0 0 0 0 0"
+        s_line = TensaSienna.load_case(four_bus_case(dir, "noshift.m"; branch34 = line);
+                                       corrections = four_bus_corrections(line))
+        v_line, _ = solved_buses(s_line)
+        @test abs(wrap_pi(v_zero[4][2] - v_line[4][2])) ≈ deg2rad(3) atol = 1e-6
+        topo = JSON3.read(TensaSienna.topology_json(s_zero))
+        br = only(b for b in topo[:branches] if (b[:from], b[:to]) == (3, 4))
+        @test br[:shift_rad] ≈ deg2rad(3)
+        @test br[:b_pu] ≈ 0.10 atol = 1e-12
+    end
+
+    @testset "a PV bus with no generator in service is solved as PQ" begin
+        # case_ACTIVSg200.m gives buses 168, 169, 196 and 197 type PV with
+        # their units out of service; PowerFlows refuses such a bus.
+        dir = mktempdir()
+        gens = [
+            "1 0 0 300 -300 1.02 100 1 300 0",
+            "2 80 0 100 -100 1.01 100 1 200 0",
+            "4 20 0 50 -50 1.03 100 0 100 0",
+        ]
+        s = TensaSienna.load_case(four_bus_case(dir, "off.m"; bus4 = 2, gens = gens);
+                                  corrections = four_bus_corrections("0.005 0.04 0.10 0 0 0 0 0"))
+        @test any(a -> a["kind"] == "bustype" && a["bus"] == 4 && a["to"] == "PQ", s.applied)
+        topo = JSON3.read(TensaSienna.topology_json(s))
+        @test only(b for b in topo[:buses] if b[:number] == 4)[:type] == "PQ"
+        v_off, _ = solved_buses(s)
+        s_pq = TensaSienna.load_case(four_bus_case(dir, "pq.m");
+                                     corrections = four_bus_corrections("0.005 0.04 0.10 0 0 0 0 0"))
+        v_pq, _ = solved_buses(s_pq)
+        @test largest_gap(v_off, v_pq) < 1e-9
+        # An edit that puts the unit in service makes the bus PV again.
+        name = only(g[:name] for g in topo[:generators] if g[:bus] == 4)
+        answer = JSON3.read(TensaSienna.apply_edits_json(s, JSON3.write([Dict(
+            "op" => "set", "key" => "gen:4-$(TensaSienna._generator_id(name, 4))",
+            "name" => name, "field" => "in_service", "value" => true,
+        )])))
+        @test isempty(answer[:refused])
+        @test any(r -> r[:bus] == 4 && r[:type] == "PV", answer[:retyped])
+        topo = JSON3.read(TensaSienna.topology_json(s))
+        @test only(b for b in topo[:buses] if b[:number] == 4)[:type] == "PV"
+        solved_buses(s)
+    end
+
+    @testset "a bus that needs more than its units' limits" begin
+        # PowerFlows shares a bus's power among its units clamped to their
+        # limits, and fails with "AssertionError: Int64[]" when the bus needs
+        # more (pglib_opf_case24_ieee_rts.m: bus 13 and bus 15). The units are
+        # then shared past their limits, and the bus totals are the solved
+        # ones: those of the same case with one unit per bus.
+        dir = mktempdir()
+        units_split = [
+            "1 0 0 300 -300 1.02 100 1 40 0",
+            "1 0 0 300 -300 1.02 100 1 40 0",
+            "2 40 0 5 -5 1.01 100 1 100 0",
+            "2 40 0 5 -5 1.01 100 1 100 0",
+        ]
+        units_merged = [
+            "1 0 0 600 -600 1.02 100 1 600 0",
+            "2 80 0 200 -200 1.01 100 1 200 0",
+        ]
+        line = "0.005 0.04 0.10 0 0 0 0 0"
+        s_split = TensaSienna.load_case(four_bus_case(dir, "split.m"; gens = units_split);
+                                        corrections = four_bus_corrections(line))
+        s_merged = TensaSienna.load_case(four_bus_case(dir, "merged.m"; gens = units_merged);
+                                         corrections = four_bus_corrections(line))
+        v_split, pf_split = solved_buses(s_split)
+        v_merged, pf_merged = solved_buses(s_merged)
+        @test largest_gap(v_split, v_merged) < 1e-9
+        total(pf, bus, field) = sum(Float64(g[field]) for g in pf[:generators] if g[:bus] == bus)
+        @test total(pf_merged, 1, :p_mw) > 80.0  # more than the two 40 MW units
+        @test total(pf_merged, 2, :q_mvar) > 10.0  # more than the two 5 MVAr units
+        for (bus, field) in ((1, :p_mw), (1, :q_mvar), (2, :p_mw), (2, :q_mvar))
+            @test total(pf_split, bus, field) ≈ total(pf_merged, bus, field) atol = 1e-6
+        end
+        # Equal ratings and ranges: equal shares.
+        for bus in (1, 2)
+            units = [g for g in pf_split[:generators] if g[:bus] == bus]
+            @test units[1][:p_mw] ≈ units[2][:p_mw] atol = 1e-9
+            @test units[1][:q_mvar] ≈ units[2][:q_mvar] atol = 1e-9
+        end
+        texts = [String(n[:text]) for n in pf_split[:notes]]
+        @test any(t -> occursin("PowerFlows could not share the active and reactive power of bus 1", t), texts)
+        @test any(t -> occursin("PowerFlows could not share the reactive power of bus 2", t), texts)
+        # A bus inside its units' limits is shared by PowerFlows as before.
+        @test !any(t -> occursin("could not share", t), [String(n[:text]) for n in pf_merged[:notes]])
+    end
+
+    @testset "a synchronous condenser" begin
+        # PowerSystems reads a PSS/E machine with no active power and no
+        # active limits as a SynchronousCondenser (RTS-GMLC has three), which
+        # has no active power getter.
+        raw = joinpath(CASES_DIR, "ieee14", "ieee14.raw")
+        if isfile(raw)
+            dir = mktempdir()
+            text = read(raw, String)
+            old = "     8,'1 ',    35.000,    10.000,    10.000,    -6.000,1.03000,     0,   100.000, 0.00000E+0, 1.20000E-1, 0.00000E+0, 0.00000E+0,1.00000,1,  100.0,    50.000,    10.000,"
+            new = "     8,'1 ',     0.000,    10.000,    10.000,    -6.000,1.03000,     0,   100.000, 0.00000E+0, 1.20000E-1, 0.00000E+0, 0.00000E+0,1.00000,1,  100.0,     0.000,     0.000,"
+            @test occursin(old, text)
+            path = joinpath(dir, "condenser.raw")
+            write(path, replace(text, old => new))
+            s = TensaSienna.load_case(path)
+            topo = JSON3.read(TensaSienna.topology_json(s))
+            g8 = only(g for g in topo[:generators] if g[:bus] == 8)
+            @test g8[:sienna_type] == "SynchronousCondenser"
+            @test g8[:p_mw] == 0.0
+            pf = JSON3.read(TensaSienna.pflow_json(s))
+            @test pf[:converged] == true
+            @test only(g for g in pf[:generators] if g[:bus] == 8)[:p_mw] == 0.0
+        else
+            println("SKIP synchronous condenser: ieee14/ieee14.raw is not in $(CASES_DIR)")
         end
     end
 

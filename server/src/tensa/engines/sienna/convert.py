@@ -451,6 +451,25 @@ def report_messages(report: Mapping[str, Any]) -> list[tuple[str, str]]:
                     f"the file's {to_text}, where PowerSystems kept {from_text}",
                 )
             )
+        elif kind == "phase_shift":
+            shift_deg = _g6(math.degrees(_float(row.get("shift_rad"))))
+            messages.append(
+                (
+                    "info",
+                    f"Sienna: the branch {_text(row.get('from_bus'))}-"
+                    f"{_text(row.get('to_bus'))} has a ratio of 0 and a phase shift of "
+                    f"{shift_deg} deg in the file, which MATPOWER reads as a phase "
+                    f"shifter of ratio 1; it is held as one",
+                )
+            )
+        elif kind == "bustype":
+            messages.append(
+                (
+                    "info",
+                    f"Sienna: bus {_text(row.get('bus'))} is type PV in the file with "
+                    f"no generator in service, and is solved as a PQ bus",
+                )
+            )
     reported = {_text(row.get("reason")) for row in _rows(report, "unsupported")}
     taps = [
         (_float(row.get("from"), math.nan), _float(row.get("to"), math.nan))

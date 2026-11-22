@@ -243,7 +243,7 @@ function dc_pflow_json(s::TS.Session; method::AbstractString)::String
         for c in PSY.get_components(PSY.StaticInjection, sys)
             TS._is_generator(c) && PSY.get_available(c) || continue
             n = PSY.get_number(PSY.get_bus(c))
-            scheduled[n] = get(scheduled, n, 0.0) + PSY.get_active_power(c) * base_mva
+            scheduled[n] = get(scheduled, n, 0.0) + TS._active_power(c) * base_mva
             count_on[n] = get(count_on, n, 0) + 1
         end
         for c in PSY.get_components(PSY.StaticInjection, sys)
@@ -251,7 +251,7 @@ function dc_pflow_json(s::TS.Session; method::AbstractString)::String
             n = PSY.get_number(PSY.get_bus(c))
             p_mw = 0.0
             if PSY.get_available(c)
-                p_mw = PSY.get_active_power(c) * base_mva
+                p_mw = TS._active_power(c) * base_mva
                 if bus_type_of[n] == PSY.ACBusTypes.REF
                     p_mw += (get(p_gen_of, n, 0.0) - scheduled[n]) / count_on[n]
                 end

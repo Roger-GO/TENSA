@@ -517,6 +517,8 @@ def test_corrections_document_shape() -> None:
         "v_setpoints": {"2": 1.025},
         "transformers": [[1, 2, "1", 1.1, math.radians(10.0)]],
         "line_charging": [[2, 3, "1", 0.176]],
+        # A PSS/E transformer record has no line charging.
+        "transformer_charging": [],
         # The branch's seventh field, RATEA, is 1; the transformer's third
         # line ends before RATA1.
         "ratings": [[2, 3, "1", 1.0], [1, 2, "1", 0.0]],
@@ -656,6 +658,32 @@ def test_matpower_snippet() -> None:
         [1, 3, "1", 100.0],
     ]
     assert document["notes"] == []
+
+
+@pytest.mark.unit
+def test_matpower_transformer_charging() -> None:
+    # A row with a ratio and a b is a transformer whose charging is half at
+    # each end inside the ratio (MATPOWER's pi); PowerSystems keeps it on the
+    # from end only, so the facts carry it as transformer_charging. A row with
+    # a ratio and no b gives none, and a line's charging stays in
+    # line_charging.
+    text = MATPOWER_SNIPPET.replace(
+        "    1 3 0.0 0.0576 0 100 100 100 1.02 -5 1 -360 360;\n",
+        "    1 3 0.0 0.0576 0 100 100 100 1.02 -5 1 -360 360;\n"
+        "    2 3 0.005 0.04 0.10 0 0 0 1 0 1 -360 360;\n",
+    )
+    facts = read_matpower_facts(text)
+    assert facts.transformers == (
+        TransformerFact(1, 3, "1", 1.02, math.radians(-5.0), 0.0),
+        TransformerFact(2, 3, "3", 1.0, 0.0, 0.1),
+    )
+    document = corrections_document(facts)
+    assert document["transformer_charging"] == [[2, 3, "3", 0.1]]
+    assert [row[:3] for row in document["line_charging"]] == [
+        [1, 2, "1"],
+        [2, 3, "1"],
+        [3, 2, "2"],
+    ]
 
 
 @pytest.mark.unit
@@ -941,9 +969,15 @@ def test_corrections_document_keeps_the_committed_keys(name: str) -> None:
     case_path = Path(cases_dir) / SAMPLE_CASE_FILES[name]
     assert case_path.is_file(), f"ANDES case file missing: {case_path}"
     document = corrections_document(read_case_facts(case_path))
-    # The committed documents predate "ratings" and "generator_ops"; every
-    # key they have is what it was, value and serialised text.
-    assert set(document) == set(committed) | {"ratings", "generator_ops"}, name
+    # The committed documents predate "ratings", "generator_ops" and
+    # "transformer_charging"; every key they have is what it was, value and
+    # serialised text. None of these cases has a transformer with charging.
+    assert set(document) == set(committed) | {
+        "ratings",
+        "generator_ops",
+        "transformer_charging",
+    }, name
+    assert document["transformer_charging"] == [], name
     for key, value in committed.items():
         assert document[key] == value, f"{name}: {key}"
         assert json.dumps(document[key]) == json.dumps(value), f"{name}: {key}"

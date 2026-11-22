@@ -285,6 +285,12 @@ _is_reported_branch(br) =
 
 _is_line(br) = br isa PSY.Line || br isa PSY.MonitoredLine
 
+# Active power of a generator, per unit in the units the caller set. A
+# `SynchronousCondenser` (a PSS/E machine PowerSystems reads as one, such as
+# the condensers of RTS-GMLC) has no active power field and no getter for it:
+# it produces none.
+_active_power(c) = c isa PSY.SynchronousCondenser ? 0.0 : PSY.get_active_power(c)
+
 _arc_numbers(br) =
     (PSY.get_number(PSY.get_from(PSY.get_arc(br))), PSY.get_number(PSY.get_to(PSY.get_arc(br))))
 
@@ -354,9 +360,41 @@ function _note!(notes, text; level = "warning")
     return nothing
 end
 
-function _build_system(raw, sanitized, ext)
+"""
+    _matpower_system(raw, shifted) -> PSY.System
+
+Read a MATPOWER case the way `PSY.System(raw; runchecks = false)` does
+(`PSY.PowerModelsData`, then `PSY.System` of it), with one repair between the
+two. MATPOWER applies a branch's phase shift whatever its ratio, a ratio of 0
+meaning 1 (`makeYbus`), so a row with a ratio of 0 and a shift is a phase
+shifter of ratio 1. PowerSystems' parser makes it a `PhaseShiftingTransformer`
+but sets the base voltages a transformer needs only for a row with a ratio,
+and then fails with `KeyError: key "base_voltage_from" not found`. The repair
+gives such a row the base voltages of its two buses, as PowerSystems does for
+the transformers it finds itself (`correct_pm_transformer_status!`), so the
+shift is read as the file has it. Each repaired row is pushed to `shifted` as
+`(from, to, shift_rad)`. Its charging, which PowerSystems keeps on the `from`
+end only, is put back by the `line_charging` correction (`_apply_corrections!`).
+"""
+function _matpower_system(raw, shifted)
+    pm = PSY.PowerModelsData(raw)
+    data = pm.data
+    for key in sort(collect(keys(data["branch"])); by = k -> parse(Int, string(k)))
+        branch = data["branch"][key]
+        haskey(branch, "base_voltage_from") && continue
+        shift = Float64(get(branch, "shift", 0.0))
+        shift == 0.0 && continue
+        branch["transformer"] = true
+        branch["base_voltage_from"] = data["bus"][branch["f_bus"]]["base_kv"]
+        branch["base_voltage_to"] = data["bus"][branch["t_bus"]]["base_kv"]
+        push!(shifted, (Int(branch["f_bus"]), Int(branch["t_bus"]), shift))
+    end
+    return PSY.System(pm; runchecks = false)
+end
+
+function _build_system(raw, sanitized, ext, shifted)
     if ext == ".m"
-        return PSY.System(raw; runchecks = false)
+        return _matpower_system(raw, shifted)
     end
     # PowerSystems names a PSS/E branch "<from>-<to>-i_<n>" with n a running
     # count of the branches on that bus pair, taken in the order of a Dict,
@@ -387,10 +425,15 @@ put back what PowerSystems read differently from the file:
   each `PV` or `REF` bus it names (`PSY.set_magnitude!`);
 - `corrections` (JSON object with `transformers` `[from, to, ckt, tap,
   shift_rad]` and `line_charging` `[from, to, ckt, b_total]`) puts back a
-  transformer's ratio (`PSY.get_tap`, `PSY.set_tap!`) and the half of a
-  branch's charging that PowerSystems leaves out when it makes a transformer
-  of a branch record (`PSY.get_primary_shunt`; the rest goes on the arc's `to`
-  bus as a `PSY.FixedAdmittance` named `charging-<from>-<to>-<ckt>`).
+  transformer's ratio (`PSY.get_tap`, `PSY.set_tap!`) and the charging of a
+  branch PowerSystems holds as a transformer, which it keeps on the `from` end
+  only: the `from` half in the primary shunt (`_set_primary_shunt!`), the
+  `to` half on the arc's `to` bus as a `PSY.FixedAdmittance` named
+  `charging-<from>-<to>-<ckt>`;
+- a MATPOWER row with a ratio of 0 and a phase shift is read as the phase
+  shifter of ratio 1 it is (`_matpower_system`);
+- a PV bus with no generator in service is made a PQ bus
+  (`_retype_sourceless_pv!`).
 
 Each change is an entry of the session's `applied` list. What PowerSystems
 warns about becomes a note; nothing is printed. Throws an `ArgumentError`
@@ -448,9 +491,10 @@ function load_case(
     end
 
     logger = _NoteLogger()
+    shifted = Tuple{Int, Int, Float64}[]
     sys = try
         Logging.with_logger(logger) do
-            _build_system(raw, sanitized, ext)
+            _build_system(raw, sanitized, ext, shifted)
         end
     catch err
         # The PSS/E parser logs why it stopped and throws `nothing`, which
@@ -475,6 +519,12 @@ function load_case(
         _normalise_slack!(sys, normalised_buses, notes)
         v_setpoints === nothing || _apply_setpoints!(sys, v_setpoints, applied, notes)
         corrections === nothing || _apply_corrections!(sys, corrections, applied, notes)
+    end
+    for (f, t, shift) in shifted
+        push!(applied, Dict{String, Any}("kind" => "phase_shift", "from_bus" => f, "to_bus" => t, "shift_rad" => shift))
+    end
+    for n in _retype_sourceless_pv!(sys)
+        push!(applied, Dict{String, Any}("kind" => "bustype", "bus" => n, "from" => "PV", "to" => "PQ"))
     end
 
     for (level, text) in logger.records
@@ -519,6 +569,34 @@ function load_case(
     )
 end
 
+# True when the bus has a generator in service.
+_has_source(sys, bus) = any(
+    c -> _is_generator(c) && PSY.get_available(c) && PSY.get_bus(c) === bus,
+    PSY.get_components(PSY.StaticInjection, sys),
+)
+
+"""
+    _retype_sourceless_pv!(sys) -> Vector{Int}
+
+Make every PV bus that has no generator in service a PQ bus, and answer their
+numbers, lowest first. A case file may give such a bus type PV with its
+generators out of service (case_ACTIVSg200.m, buses 168, 169, 196 and 197);
+MATPOWER and ANDES then hold the bus at no voltage, as a PQ bus, while
+PowerFlows refuses the case ("No available sources at bus ..."). A reference
+bus is left as it is: without a source the case has no slack, and the power
+flow says so.
+"""
+function _retype_sourceless_pv!(sys)
+    retyped = Int[]
+    for bus in PSY.get_components(PSY.ACBus, sys)
+        PSY.get_bustype(bus) == PSY.ACBusTypes.PV || continue
+        _has_source(sys, bus) && continue
+        PSY.set_bustype!(bus, PSY.ACBusTypes.PQ)
+        push!(retyped, PSY.get_number(bus))
+    end
+    return sort!(retyped)
+end
+
 # PowerSystems 5.12 marks the PSS/E area-interchange slack bus as SLACK, which
 # PowerFlows 0.16 and PowerSimulationsDynamics 0.16 do not know. Read it as
 # PV, or as REF (the lowest bus number first) when the System has no REF bus.
@@ -556,6 +634,17 @@ function _apply_setpoints!(sys, v_setpoints, applied, notes)
         push!(applied, Dict{String, Any}("kind" => "setpoint", "bus" => n, "from" => old, "to" => target))
     end
     sort!(applied; by = a -> a["bus"])
+    return nothing
+end
+
+# Set a transformer's primary shunt to `y_system`, per unit on the system base.
+# PowerSystems 5.12 converts a complex value it reads from a branch to the
+# unit system in effect, but has no conversion for one written to it
+# (`set_primary_shunt!` warns "conversion not implemented for ComplexF64" and
+# stores the value as given), so the value is converted to the device base,
+# the base the field is stored on, and written to the field.
+function _set_primary_shunt!(sys, br, y_system::ComplexF64)
+    br.primary_shunt = y_system * PSY.get_base_power(sys) / PSY.get_base_power(br)
     return nothing
 end
 
@@ -604,19 +693,35 @@ function _apply_corrections!(sys, corrections, applied, notes)
                 abs(have - b_total) > 1e-9 && _note!(notes, "line $(PSY.get_name(br)) has charging $(have) in the System and $(b_total) in the file; left as read")
                 continue
             end
-            # PowerSystems keeps half the charging of a branch record it made
-            # a transformer of, as primary_shunt (on the arc's `from` bus);
-            # the rest goes on the `to` bus.
-            have = imag(PSY.get_primary_shunt(br))
-            abs(have - b_total) > 1e-9 || continue
-            to_obj = PSY.get_to(PSY.get_arc(br))
-            adm = PSY.FixedAdmittance(;
-                name = "charging-$(from_bus)-$(to_bus)-$(ckt)",
-                available = PSY.get_available(br),
-                bus = to_obj,
-                Y = complex(0.0, b_total - have),
-            )
-            PSY.add_component!(sys, adm)
+            # A branch PowerSystems holds as a transformer has one shunt, its
+            # primary_shunt, which PowerNetworkMatrices adds to the `from`
+            # end's self admittance after the series part is divided by the
+            # squared ratio. The file's branch is a pi with half its charging
+            # at each end inside the ratio, as MATPOWER and PSS/E define it
+            # (the `from` self admittance is (y + j b/2) / tap^2). PowerSystems
+            # keeps half the charging of a PSS/E branch record it made a
+            # transformer of, and the whole of a MATPOWER transformer row's
+            # charging divided by the squared ratio ("Reflecting transformer
+            # shunts to primary"). The primary shunt is set to the `from` half,
+            # j b/2 / tap^2 (the ratio as corrected above), and the `to` half
+            # goes on the arc's `to` bus as a FixedAdmittance.
+            shunt = PSY.get_primary_shunt(br)
+            have = imag(shunt)
+            tap = _tap(br)
+            from_half = b_total / (2 * tap^2)
+            to_half = b_total / 2
+            abs(have - from_half) > 1e-9 || abs(to_half) > 1e-12 || continue
+            _set_primary_shunt!(sys, br, complex(real(shunt), from_half))
+            if abs(to_half) > 1e-12
+                to_obj = PSY.get_to(PSY.get_arc(br))
+                adm = PSY.FixedAdmittance(;
+                    name = "charging-$(from_bus)-$(to_bus)-$(ckt)",
+                    available = PSY.get_available(br),
+                    bus = to_obj,
+                    Y = complex(0.0, to_half),
+                )
+                PSY.add_component!(sys, adm)
+            end
             push!(applied, Dict{String, Any}("kind" => "charging", "branch" => PSY.get_name(br), "from" => have, "to" => b_total))
         end
     end
@@ -724,11 +829,16 @@ function topology_json(s::Session)::String
                 bb = PSY.get_b(br)
                 b_total = bb.from + bb.to
             else
-                # For a branch record PowerSystems made a transformer of, the
-                # half it kept plus the half the adapter put back; for a
-                # transformer record, its magnetising susceptance (0 in the
-                # test cases).
-                b_total = imag(PSY.get_primary_shunt(br)) + get(added, name, 0.0)
+                # For a branch whose charging the adapter put back, the two
+                # halves of the file's pi: the `from` half, which the primary
+                # shunt holds divided by the squared ratio, and the `to` half
+                # the adapter added. For any other transformer, its magnetising
+                # susceptance (0 in the test cases).
+                b_total = if haskey(added, name)
+                    imag(PSY.get_primary_shunt(br)) * _tap(br)^2 + added[name]
+                else
+                    imag(PSY.get_primary_shunt(br))
+                end
             end
             rating = PSY.get_rating(br)
             push!(branches, (
@@ -762,7 +872,7 @@ function topology_json(s::Session)::String
                     id = id,
                     kind = PSY.get_bustype(bus) == PSY.ACBusTypes.REF ? "Slack" : "PV",
                     sienna_type = string(nameof(typeof(c))),
-                    p_mw = PSY.get_active_power(c) * base_mva,
+                    p_mw = _active_power(c) * base_mva,
                     q_mvar = PSY.get_reactive_power(c) * base_mva,
                     v_set_pu = PSY.get_magnitude(bus),
                     q_min_mvar = q === nothing ? nothing : q.min * base_mva,
@@ -854,13 +964,136 @@ function _branch_flows(br, v_from::ComplexF64, v_to::ComplexF64, added_b::Float6
     return ComplexF64(s_from), ComplexF64(s_to)
 end
 
+# The units of a bus whose powers the power flow sets: the generators in
+# service that PowerFlows counts as sources (`_is_available_source`: no load,
+# no shunt, no FACTS device).
+_bus_units(sys, bus) = [
+    c for c in PSY.get_components(PSY.StaticInjection, sys) if
+    _is_generator(c) && PSY.get_available(c) && PSY.get_bus(c) === bus &&
+    !(c isa PSY.FACTSControlDevice)
+]
+
+# A unit's reactive limits as (min, max), or nothing when it has none or one
+# is not finite.
+function _q_range(c)
+    hasproperty(c, :reactive_power_limits) || return nothing
+    q = PSY.get_reactive_power_limits(c)
+    q === nothing && return nothing
+    (isfinite(q.min) && isfinite(q.max)) || return nothing
+    return (q.min, q.max)
+end
+
+"""
+    _share_q!(units, q_total)
+
+Share a bus's reactive power among its units as MATPOWER does (`pfsoln`):
+each unit takes its minimum plus a share of what the bus gives above their
+minimums, in proportion to its reactive range, so every unit is inside its
+limits whenever the bus is inside theirs, and each is past its limits by its
+share of the excess otherwise. Equal shares where a unit has no finite limits
+or the ranges add up to 0. Must be called with the unit system at SYSTEM_BASE.
+"""
+function _share_q!(units, q_total::Float64)
+    ranges = [_q_range(c) for c in units]
+    if any(r -> r === nothing, ranges) || sum(r[2] - r[1] for r in ranges) <= 0.0
+        for c in units
+            PSY.set_reactive_power!(c, q_total / length(units))
+        end
+        return nothing
+    end
+    q_min = sum(r[1] for r in ranges)
+    span = sum(r[2] - r[1] for r in ranges)
+    for (c, r) in zip(units, ranges)
+        PSY.set_reactive_power!(c, r[1] + (q_total - q_min) * (r[2] - r[1]) / span)
+    end
+    return nothing
+end
+
+"""
+    _share_p!(units, p_total)
+
+Share a reference bus's active power among its units: each keeps its
+scheduled power and takes a share of the difference in proportion to its
+maximum active power (`get_active_power_limits_for_power_flow`), or an equal
+share where none has one. A condenser takes none. Must be called with the unit
+system at SYSTEM_BASE.
+"""
+function _share_p!(units, p_total::Float64)
+    movers = [c for c in units if !(c isa PSY.SynchronousCondenser)]
+    isempty(movers) && return nothing
+    scheduled = sum(_active_power(c) for c in movers)
+    ratings = [max(PF.get_active_power_limits_for_power_flow(c).max, 0.0) for c in movers]
+    total = sum(ratings)
+    for (c, rating) in zip(movers, ratings)
+        share = total > 0.0 && isfinite(total) ? rating / total : 1.0 / length(movers)
+        PSY.set_active_power!(c, _active_power(c) + (p_total - scheduled) * share)
+    end
+    return nothing
+end
+
+"""
+    _store_unit_powers!(sys, pf, data, max_iterations, notes)
+
+Set the powers of the units of every PV and reference bus from the solved
+bus injections, which `write_power_flow_solution!` with `skip_redistribution`
+leaves to the caller. Each bus is shared first by PowerFlows' own rule
+(`_power_redistribution_ref`, `_reactive_power_redistribution_pv`): active
+power at a reference bus in proportion to the units' maximum active power,
+reactive power in proportion to their active power, each unit clamped to its
+limits. That rule fails when the bus needs more than its units' limits add up
+to (an `AssertionError` it notes as its issue #231), which a power flow does
+not constrain: the reference bus of `pglib_opf_case24_ieee_rts.m` must give
+more than the 591 MW of its three units, and bus 15 more reactive power than
+its six. Such a bus is shared by `_share_p!` and `_share_q!` instead, and a
+note says so. The bus voltages and each bus's total are the solved ones
+either way. Must be called with the unit system at SYSTEM_BASE.
+"""
+function _store_unit_powers!(sys, pf, data, max_iterations::Int, notes)
+    nrd = PNM.get_network_reduction_data(PF.get_power_network_matrix(data))
+    bus_lookup = PF.get_bus_lookup(data)
+    by_number = Dict(PSY.get_number(b) => b for b in PSY.get_components(PSY.ACBus, sys))
+    for (number, reduced) in PNM.get_bus_reduction_map(nrd)
+        isempty(reduced) || continue
+        ix = bus_lookup[number]
+        bustype = data.bus_type[ix, 1]
+        (bustype == PSY.ACBusTypes.REF || bustype == PSY.ACBusTypes.PV) || continue
+        bus = by_number[number]
+        p_total = Float64(data.bus_active_power_injections[ix, 1])
+        q_total = Float64(data.bus_reactive_power_injections[ix, 1])
+        units = _bus_units(sys, bus)
+        isempty(units) && continue
+        failure = try
+            if bustype == PSY.ACBusTypes.REF
+                PF._power_redistribution_ref(sys, p_total, q_total, bus, max_iterations, nothing)
+            else
+                PF._reactive_power_redistribution_pv(sys, q_total, bus, max_iterations)
+            end
+            nothing
+        catch err
+            err isa InterruptException && rethrow()
+            _first_line(sprint(showerror, err))
+        end
+        failure === nothing && continue
+        bustype == PSY.ACBusTypes.REF && _share_p!(units, p_total)
+        _share_q!(units, q_total)
+        what = bustype == PSY.ACBusTypes.REF ? "active and reactive power" : "reactive power"
+        _note!(
+            notes,
+            "PowerFlows could not share the $(what) of bus $(number) among its $(length(units)) units ($(failure)); they are shared in proportion to their ratings and reactive ranges instead, past their limits where the bus needs more",
+        )
+    end
+    return nothing
+end
+
 """
     pflow_json(s::Session; tolerance = nothing, max_iterations = nothing) -> String
 
-Solve the AC power flow with PowerFlows' `solve_and_store_power_flow!` (with
-`tol` and `maxIterations` passed only when given; the values in effect are
+Solve the AC power flow as PowerFlows' `solve_and_store_power_flow!` does
+(`PowerFlowData`, `solve_power_flow!` with `tol` and `maxIterations` passed
+only when given, `write_power_flow_solution!`; the values in effect are
 reported, PowerFlows' defaults being `DEFAULT_NR_TOL` and
-`DEFAULT_NR_MAX_ITER`) and read the solution back from the System with the
+`DEFAULT_NR_MAX_ITER`), with the units' powers set by `_store_unit_powers!`,
+and read the solution back from the System with the
 unit system at SYSTEM_BASE: bus magnitudes and angles (rad), generator
 powers, the power each load draws at its solved voltage, and both ends of
 every branch's flow (MW and MVAr leaving that end into the branch). What
@@ -877,14 +1110,28 @@ function pflow_json(s::Session; tolerance = nothing, max_iterations = nothing)::
     max_iterations === nothing || (kwargs[:maxIterations] = maxiter)
 
     logger = _NoteLogger()
+    shared = Dict{String, Any}[]
+    # What `solve_and_store_power_flow!` does, with the sharing of each bus's
+    # power among its units left to `_store_unit_powers!`.
+    pf = ACPowerFlow(; skip_redistribution = true)
     converged = Logging.with_logger(logger) do
-        solve_and_store_power_flow!(ACPowerFlow(), sys; kwargs...)
+        solved = false
+        PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+            data = PF.PowerFlowData(pf, sys)
+            solved = PF.solve_power_flow!(data; kwargs...)
+            if solved
+                PF.write_power_flow_solution!(sys, pf, data, maxiter)
+                _store_unit_powers!(sys, pf, data, maxiter, shared)
+            end
+        end
+        solved
     end
     s.pflow_solved = converged
     notes = [
         Dict{String, Any}("level" => _level_name(l), "text" => _scrub(t, (s.raw, s.dyr))) for
         (l, t) in logger.records
     ]
+    append!(notes, shared)
 
     buses = Any[]
     branches = Any[]
@@ -924,7 +1171,7 @@ function pflow_json(s::Session; tolerance = nothing, max_iterations = nothing)::
                         name = PSY.get_name(c),
                         bus = n,
                         id = _generator_id(PSY.get_name(c), n),
-                        p_mw = on ? PSY.get_active_power(c) * base_mva : 0.0,
+                        p_mw = on ? _active_power(c) * base_mva : 0.0,
                         q_mvar = on ? PSY.get_reactive_power(c) * base_mva : 0.0,
                     ))
                 elseif _is_load(c)
@@ -1219,21 +1466,25 @@ function apply_edits!(s::Session, edits_json::AbstractString)::String
     end
     # A PV bus whose generators are all out of service has no source to hold
     # its voltage, which the power flow refuses ("No available sources at
-    # bus ..."): it becomes a PQ bus while the edits stand. The log is applied
-    # to a System read afresh, so the bus is PV again once the generator is
-    # back. A reference bus is left as it is: without a source the case has no
+    # bus ..."): it becomes a PQ bus while the edits stand
+    # (`_retype_sourceless_pv!`). The log is applied to a System read afresh,
+    # so a bus an edit retyped is PV again once the generator is back; a bus
+    # the load retyped (the file's generators there are all out of service)
+    # is made PV again here when an edit puts one of them in service. A
+    # reference bus is left as it is: without a source the case has no
     # slack, and the power flow says so.
     retyped = Dict{String, Any}[]
-    for bus in PSY.get_components(PSY.ACBus, sys)
-        PSY.get_bustype(bus) == PSY.ACBusTypes.PV || continue
-        has_source = any(
-            c -> _is_generator(c) && PSY.get_available(c) && PSY.get_bus(c) === bus,
-            PSY.get_components(PSY.StaticInjection, sys),
-        )
-        if !has_source
-            PSY.set_bustype!(bus, PSY.ACBusTypes.PQ)
-            push!(retyped, Dict{String, Any}("bus" => PSY.get_number(bus), "type" => "PQ"))
-        end
+    by_number = Dict(PSY.get_number(b) => b for b in PSY.get_components(PSY.ACBus, sys))
+    for entry in s.applied
+        get(entry, "kind", "") == "bustype" || continue
+        bus = get(by_number, entry["bus"], nothing)
+        bus === nothing && continue
+        PSY.get_bustype(bus) == PSY.ACBusTypes.PQ && _has_source(sys, bus) || continue
+        PSY.set_bustype!(bus, PSY.ACBusTypes.PV)
+        push!(retyped, Dict{String, Any}("bus" => entry["bus"], "type" => "PV"))
+    end
+    for n in _retype_sourceless_pv!(sys)
+        push!(retyped, Dict{String, Any}("bus" => n, "type" => "PQ"))
     end
     s.pflow_solved = false
     return _to_json((applied = applied, refused = refused, retyped = retyped))

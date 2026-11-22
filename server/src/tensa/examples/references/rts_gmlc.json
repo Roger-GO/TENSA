@@ -539,5 +539,6 @@
       "generated_by": "scripts/crosscheck_pf.py report --enforce-q-limits",
       "pflow": {"enforce_q_limits": true}
     }
-  ]
+  ],
+  "cross_engine": {"sienna": "pass"}
 }

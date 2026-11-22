@@ -45,6 +45,9 @@ class TransformerFact:
     ``tap`` is the off-nominal ratio seen from ``from_bus`` in per unit, from
     the ``WINDV1``, ``WINDV2``, ``NOMV1`` and ``NOMV2`` fields as ``CW`` reads
     them; 1.0 when the file gives none. ``shift_rad`` is ``ANG1`` in radians.
+    ``b_total`` is the line charging of a MATPOWER transformer row (its ``b``,
+    per unit on the system base), half at each end inside the ratio; a PSS/E
+    transformer record has none, and 0.0 is given.
     """
 
     from_bus: int
@@ -52,6 +55,7 @@ class TransformerFact:
     ckt: str
     tap: float
     shift_rad: float
+    b_total: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -372,10 +376,11 @@ def read_matpower_facts(text: str) -> CaseFacts:
     ``v_setpoints`` comes from the ``Vg`` column (6) of the ``mpc.gen`` rows
     whose status (column 8) is greater than 0, keyed by the generator's bus
     (column 1). A ``mpc.branch`` row with a non-zero ratio (column 9) is a
-    transformer whose ``tap`` is that ratio and whose ``shift_rad`` is its angle
-    (column 10, degrees) in radians; any other row is a line whose ``b_total``
-    is its ``b`` (column 5). ``ckt`` is the ordinal among the rows of the same
-    unordered bus pair, from ``"1"``, as ``identity.py`` assigns it. Every row
+    transformer whose ``tap`` is that ratio, whose ``shift_rad`` is its angle
+    (column 10, degrees) in radians and whose ``b_total`` is its ``b`` (column
+    5); any other row is a line whose ``b_total`` is its ``b``. ``ckt`` is the
+    ordinal among the rows of the same unordered bus pair, from ``"1"``, as
+    ``identity.py`` assigns it. Every row
     gives a rating, its ``rateA`` (column 6); ``ratings`` holds the lines'
     first and then the transformers', as ``identity.py`` orders ``branches``.
     ``generator_ops`` reads the PMIN, PMAX and RAMP_10 columns of ``mpc.gen``
@@ -408,14 +413,14 @@ def read_matpower_facts(text: str) -> CaseFacts:
         if not math.isfinite(rate_a) or rate_a < 0.0:
             rate_a = 0.0
         rating = RatingFact(from_bus, to_bus, ckt, rate_a)
+        b_total = row[4] if len(row) > 4 else 0.0
         if ratio != 0.0:
             angle = row[9] if len(row) > 9 else 0.0
             transformer_facts.append(
-                TransformerFact(from_bus, to_bus, ckt, ratio, math.radians(angle))
+                TransformerFact(from_bus, to_bus, ckt, ratio, math.radians(angle), b_total)
             )
             transformer_ratings.append(rating)
         else:
-            b_total = row[4] if len(row) > 4 else 0.0
             line_facts.append(LineFact(from_bus, to_bus, ckt, b_total))
             line_ratings.append(rating)
 
@@ -520,8 +525,11 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
     ``v_setpoints`` is keyed by the bus number as a string; ``transformers``
     holds ``[from_bus, to_bus, ckt, tap, shift_rad]`` per two-winding
     transformer and ``line_charging`` holds ``[from_bus, to_bus, ckt, b_total]``
-    per non-transformer branch, both in file order; ``ratings`` holds
-    ``[from_bus, to_bus, ckt, rate_mva]`` per two-terminal branch, the rows of
+    per non-transformer branch, both in file order; ``transformer_charging``
+    holds ``[from_bus, to_bus, ckt, b_total]`` per transformer whose charging
+    is not 0 (a MATPOWER row with a ratio and a ``b``), in file order;
+    ``ratings`` holds ``[from_bus, to_bus, ckt, rate_mva]`` per two-terminal
+    branch, the rows of
     ``line_charging`` first and those of ``transformers`` after, in the same
     order and with the same ``[from_bus, to_bus, ckt]``; ``generator_ops``
     holds the operations data of each generator; ``notes`` is the
@@ -536,6 +544,11 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
         "line_charging": [
             [line.from_bus, line.to_bus, line.ckt, line.b_total]
             for line in facts.lines
+        ],
+        "transformer_charging": [
+            [t.from_bus, t.to_bus, t.ckt, t.b_total]
+            for t in facts.transformers
+            if t.b_total != 0.0
         ],
         "ratings": [
             [rating.from_bus, rating.to_bus, rating.ckt, rating.rate_mva]
