@@ -28,7 +28,7 @@ vi.mock('@/api/queries', async () => {
   return { ...actual, useCurrentTopology: () => mockTopology };
 });
 
-import { BusesGrid } from '@/components/data-grid/BusesGrid';
+import { BusesGrid, computeBusInjections } from '@/components/data-grid/BusesGrid';
 
 const TOPOLOGY: TopologySummary = {
   state: 'pre-setup',
@@ -384,5 +384,36 @@ describe('<BusesGrid /> units', () => {
     } finally {
       downloads.restore();
     }
+  });
+});
+
+describe('computeBusInjections', () => {
+  const base = {
+    run_id: parseRunId('run-dc'),
+    converged: true,
+    iterations: 0,
+    mismatch: 0,
+    bus_voltages: { '1': 1.0, '2': 1.0 },
+    bus_angles: { '1': 0, '2': -0.1 },
+    line_flows: {},
+  };
+
+  it('sums what the devices of a bus inject, loads counted negative', () => {
+    const map = computeBusInjections({
+      ...base,
+      generator_outputs: { G1: { p: 100, q: 20, v: 1.0, bus: 1 } },
+      load_consumption: { L1: { p: 30, q: 5, bus: 1 }, L2: { p: 70, q: 15, bus: 2 } },
+    });
+    expect(map.get('1')).toEqual({ p: 70, q: 15 });
+    expect(map.get('2')).toEqual({ p: -70, q: -15 });
+  });
+
+  it("leaves a bus's reactive injection null when a device on it has none (a DC power flow)", () => {
+    const map = computeBusInjections({
+      ...base,
+      generator_outputs: { G1: { p: 100, q: null, v: 1.0, bus: 1 } },
+      load_consumption: { L1: { p: 30, q: null, bus: 1 } },
+    });
+    expect(map.get('1')).toEqual({ p: 70, q: null });
   });
 });

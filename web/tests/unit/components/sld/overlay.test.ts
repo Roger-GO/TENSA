@@ -284,6 +284,22 @@ describe('getDeviceOverlayState', () => {
     expect(getDeviceOverlayState('load', '1', pflow).has_data).toBe(false);
   });
 
+  it('leaves the reactive label off for a DC power flow, which computes none', () => {
+    const dc = makeResult({
+      generator_outputs: { '1': { p: 40, q: null, v: 1.0, bus: 2 } },
+      load_consumption: { PQ_1: { p: 21.7, q: null, bus: 2 } },
+      line_flows: { L1: lineFlow(5, 0, { from: 1, to: 2 }, { q: null, q_to: null }) },
+    });
+    const gen = getDeviceOverlayState('generator', '1', dc);
+    expect(gen.has_data).toBe(true);
+    expect(gen.p_label).toBe('40.0 MW');
+    expect(gen.q_label).toBeNull();
+    expect(getDeviceOverlayState('load', 'PQ_1', dc).q_label).toBeNull();
+    const line = getLineOverlayState('L1', dc);
+    expect(line.p_label).toBe('5.00 MW');
+    expect(line.q_label).toBeNull();
+  });
+
   it('keeps the sign of an absorbing generator', () => {
     const slack = makeResult({
       generator_outputs: { '1': { p: 81.43, q: -21.62, v: 1.03, bus: 1 } },

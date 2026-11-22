@@ -167,7 +167,8 @@ export function getLineOverlayState(
   const loading_band = assessLoading(loading);
   return {
     p_label: hideLabels || !Number.isFinite(p) ? null : `${p.toFixed(2)} MW`,
-    q_label: hideLabels || !Number.isFinite(q) ? null : `${q.toFixed(2)} MVAr`,
+    // A DC power flow computes no reactive power (``q`` is null): no label.
+    q_label: hideLabels || q === null || !Number.isFinite(q) ? null : `${q.toFixed(2)} MVAr`,
     direction,
     has_data: true,
     loading_band,
@@ -245,7 +246,8 @@ export function getDeviceOverlayState(
   if (!row) return NEUTRAL_DEVICE;
   return {
     p_label: hideLabels || !Number.isFinite(row.p) ? null : formatPower(row.p, 'MW'),
-    q_label: hideLabels || !Number.isFinite(row.q) ? null : formatPower(row.q, 'MVAr'),
+    q_label:
+      hideLabels || row.q === null || !Number.isFinite(row.q) ? null : formatPower(row.q, 'MVAr'),
     has_data: true,
   };
 }

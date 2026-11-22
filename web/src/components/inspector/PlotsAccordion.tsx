@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatMvar } from '@/lib/reactivePower';
 import { ChartLineIcon, EmptyState } from '@/components/ui/EmptyState';
 import { useCaseStore } from '@/store/case';
 import type { SelectedElement } from '@/store/case';
@@ -234,7 +235,7 @@ function GeneratorContent({ idx, pflowKey }: { idx: string; pflowKey: string }) 
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-muted-foreground text-[10px] tracking-wide uppercase">Q</span>
-            <span className="text-foreground font-mono text-sm">{gen.q.toFixed(2)} MVAr</span>
+            <span className="text-foreground font-mono text-sm">{formatMvar(gen.q)}</span>
           </div>
           <span className="text-muted-foreground text-[10px]">From PF result</span>
         </div>
@@ -282,7 +283,7 @@ function LineContent({ idx }: { idx: string }) {
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-muted-foreground text-[10px] tracking-wide uppercase">Q</span>
-            <span className="text-foreground font-mono text-sm">{flow.q.toFixed(2)} MVAr</span>
+            <span className="text-foreground font-mono text-sm">{formatMvar(flow.q)}</span>
           </div>
           <span className="text-muted-foreground text-[10px]">From PF result</span>
         </div>
@@ -305,7 +306,7 @@ function LoadContent({ idx }: { idx: string }) {
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-muted-foreground text-[10px] tracking-wide uppercase">Q</span>
-            <span className="text-foreground font-mono text-sm">{ld.q.toFixed(2)} MVAr</span>
+            <span className="text-foreground font-mono text-sm">{formatMvar(ld.q)}</span>
           </div>
           <span className="text-muted-foreground text-[10px]">From PF result</span>
         </div>

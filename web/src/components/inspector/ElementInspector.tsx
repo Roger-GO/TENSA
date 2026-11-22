@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { formatMvar } from '@/lib/reactivePower';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChartLineIcon, CursorIcon, EmptyState, FolderIcon } from '@/components/ui/EmptyState';
 import { useRunModeStore } from '@/store/runMode';
@@ -60,7 +61,7 @@ interface ResultsTabProps {
 
 /** The verdict on a generator's Q against its limits, as a trailing phrase (empty when there is none). */
 function qLimitCheck(
-  q: number,
+  q: number | null,
   qMin: number | null | undefined,
   qMax: number | null | undefined,
 ): string {
@@ -80,11 +81,11 @@ function BranchFlowRows({ flow }: { flow: LineFlow }) {
       <dt className="text-muted-foreground font-mono text-xs">p_flow</dt>
       <dd className="text-foreground font-mono text-xs">{flow.p.toFixed(2)} MW</dd>
       <dt className="text-muted-foreground font-mono text-xs">q_flow</dt>
-      <dd className="text-foreground font-mono text-xs">{flow.q.toFixed(2)} MVAr</dd>
+      <dd className="text-foreground font-mono text-xs">{formatMvar(flow.q)}</dd>
       <dt className="text-muted-foreground font-mono text-xs">p_to</dt>
       <dd className="text-foreground font-mono text-xs">{flow.p_to.toFixed(2)} MW</dd>
       <dt className="text-muted-foreground font-mono text-xs">q_to</dt>
-      <dd className="text-foreground font-mono text-xs">{flow.q_to.toFixed(2)} MVAr</dd>
+      <dd className="text-foreground font-mono text-xs">{formatMvar(flow.q_to)}</dd>
       <dt className="text-muted-foreground font-mono text-xs">loss</dt>
       <dd className="text-foreground font-mono text-xs">{flow.loss.toFixed(3)} MW</dd>
       {flow.rate_a != null && flow.loading_pct != null ? (
@@ -184,7 +185,7 @@ function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
         <dt className="text-muted-foreground font-mono text-xs">P</dt>
         <dd className="text-foreground font-mono text-xs">{gen.p.toFixed(2)} MW</dd>
         <dt className="text-muted-foreground font-mono text-xs">Q</dt>
-        <dd className="text-foreground font-mono text-xs">{gen.q.toFixed(2)} MVAr</dd>
+        <dd className="text-foreground font-mono text-xs">{formatMvar(gen.q)}</dd>
         {gen.q_min != null || gen.q_max != null ? (
           <>
             <dt className="text-muted-foreground font-mono text-xs">Q limits</dt>
@@ -217,7 +218,7 @@ function ResultsTab({ selected, entry, pflowResult, bases }: ResultsTabProps) {
         <dt className="text-muted-foreground font-mono text-xs">P</dt>
         <dd className="text-foreground font-mono text-xs">{ld.p.toFixed(2)} MW</dd>
         <dt className="text-muted-foreground font-mono text-xs">Q</dt>
-        <dd className="text-foreground font-mono text-xs">{ld.q.toFixed(2)} MVAr</dd>
+        <dd className="text-foreground font-mono text-xs">{formatMvar(ld.q)}</dd>
         <dt className="text-muted-foreground font-mono text-xs">bus</dt>
         <dd className="text-foreground font-mono text-xs">{String(ld.bus)}</dd>
       </dl>
