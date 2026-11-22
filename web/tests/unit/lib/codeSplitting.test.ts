@@ -94,6 +94,13 @@ const LAZY_MODULES = [
   // Reading, fitting and capturing a layout, which only the diagram does:
   // what the first screen reads of one is in `sidecarCore.ts`.
   'components/sld/sidecar.ts',
+  // The per-element power-flow overlay helpers, which only the diagram uses;
+  // the App root's frame-overlay hook is in `frameOverlay.ts`.
+  'components/sld/overlay.ts',
+  // The Components tab of the left sidebar, fetched the first time its tab is
+  // shown; what a drop target reads of it is in `componentDnd.ts`.
+  'components/shell/ComponentLibrary.tsx',
+  'components/case/SaveAsCustomCaseDialog.tsx',
   'components/snapshot/SaveSnapshotDialog.tsx',
   'components/snapshot/LoadSnapshotDialog.tsx',
   'components/bundle/BundleExportDialog.tsx',

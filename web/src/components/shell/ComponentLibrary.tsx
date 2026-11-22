@@ -15,6 +15,7 @@ import { useAddComponent } from '@/lib/useAddComponent';
 import { useCaseStore } from '@/store/case';
 import { useLayoutStore } from '@/store/layout';
 import { useSldStore } from '@/store/sld';
+import { COMPONENT_DND_MIME } from './componentDnd';
 
 /**
  * ComponentLibrary: the palette of the left sidebar's Components tab.
@@ -56,8 +57,7 @@ import { useSldStore } from '@/store/sld';
  * call), which is a picture of the row.
  */
 
-/** Custom DnD MIME — avoids collision with browser-default drag types. */
-export const COMPONENT_DND_MIME = 'application/andes-component-type';
+export { COMPONENT_DND_MIME };
 
 /**
  * Shown under the search box while a row can add: to a case that is open, and

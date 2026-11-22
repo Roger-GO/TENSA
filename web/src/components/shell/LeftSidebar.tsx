@@ -11,9 +11,14 @@ import {
   useLayoutStore,
   type LeftSidebarTab,
 } from '@/store/layout';
+import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { SavedCasesList } from './SavedCasesList';
-import { ComponentLibrary } from './ComponentLibrary';
 import { cn } from '@/lib/cn';
+
+// The palette is not the tab shown by default, so it is fetched the first
+// time its tab is shown and kept mounted from then on, as both panels are.
+const ComponentLibrary = lazyNamed(() => import('./ComponentLibrary'), 'ComponentLibrary');
 
 /**
  * LeftSidebar (v3 Unit 3).
@@ -45,7 +50,9 @@ import { cn } from '@/lib/cn';
  * being restored and a blank system that is being started each finish in the
  * component that began them, and a tab switched meanwhile would otherwise
  * drop what they do when they land. The search of the palette is kept the
- * same way.
+ * same way. The palette's code is fetched the first time its tab is shown
+ * (``LazyMount``), which is the only difference: from then on it stays
+ * mounted like the other panel.
  *
  * A panel can send the user to the other tab (the empty case card links to
  * Components), and what was pressed is then hidden with its panel. The
@@ -176,7 +183,9 @@ export function LeftSidebar({ className }: LeftSidebarProps) {
         data-testid="left-sidebar-tab-content-components"
         className={cn('flex min-h-0 flex-1 flex-col', PANEL_FOCUS)}
       >
-        <ComponentLibrary />
+        <LazyMount when={tab === 'components'} fallback={<LoadingPanel />}>
+          <ComponentLibrary />
+        </LazyMount>
       </TabsPrimitive.Content>
     </TabsPrimitive.Root>
   );

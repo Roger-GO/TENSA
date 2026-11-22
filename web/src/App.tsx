@@ -32,7 +32,7 @@ import { useUnsavedWorkGuard } from '@/lib/useUnsavedWorkGuard';
 import { useSyncTopologyMirror } from '@/lib/useSyncTopologyMirror';
 import { useAddComponent } from '@/lib/useAddComponent';
 import { useJobEventsStream } from '@/streaming/useJobEventsStream';
-import { useSldFrameOverlay } from '@/components/sld/overlay';
+import { useSldFrameOverlay } from '@/components/sld/frameOverlay';
 import { RecoveryBadge } from '@/components/shell/RecoveryBadge';
 import { JobAnnouncer } from '@/components/shell/JobAnnouncer';
 import { WorkspaceDropTarget } from '@/components/shell/WorkspaceDropTarget';
