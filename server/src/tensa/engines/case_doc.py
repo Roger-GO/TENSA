@@ -29,9 +29,16 @@ class CaseSource(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    format: str
-    files: list[str]
-    sha256: list[str] | None = None
+    format: str = Field(
+        description="The format of the case file: psse-raw, matpower, xlsx or the like."
+    )
+    files: list[str] = Field(
+        description="The names of the files the case was read from, the case file first."
+    )
+    sha256: list[str] | None = Field(
+        default=None,
+        description="The SHA-256 of each file, in the order of files; null when one could not be read.",
+    )
 
 
 class ZipFractions(BaseModel):
@@ -39,8 +46,16 @@ class ZipFractions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    p: list[float] = Field(min_length=3, max_length=3)
-    q: list[float] = Field(min_length=3, max_length=3)
+    p: list[float] = Field(
+        min_length=3,
+        max_length=3,
+        description="The active power's constant impedance, current and power fractions, summing to 1.",
+    )
+    q: list[float] = Field(
+        min_length=3,
+        max_length=3,
+        description="The reactive power's constant impedance, current and power fractions, summing to 1.",
+    )
 
 
 class BusRecord(BaseModel):
@@ -48,17 +63,26 @@ class BusRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    number: int
-    name: str | None = None
-    vn_kv: float | None = None
-    type: Literal["pq", "pv", "ref", "isolated"]
-    v_pu: float | None = None
-    angle_deg: float | None = None
-    area: int | None = None
-    zone: int | None = None
-    area_slack: bool | None = None
-    in_service: bool = True
+    key: str = Field(description="The bus's TENSA key, as GET /sessions/{id}/keys lists it.")
+    number: int = Field(description="The bus number of the case.")
+    name: str | None = Field(default=None, description="The bus's name in the case.")
+    vn_kv: float | None = Field(default=None, description="The base voltage, in kV.")
+    type: Literal["pq", "pv", "ref", "isolated"] = Field(
+        description="The bus type: pq, pv, ref (the angle reference) or isolated."
+    )
+    v_pu: float | None = Field(
+        default=None, description="The voltage magnitude the case stores, per unit of vn_kv."
+    )
+    angle_deg: float | None = Field(
+        default=None, description="The voltage angle the case stores, in degrees."
+    )
+    area: int | None = Field(default=None, description="The area number, when the case has one.")
+    zone: int | None = Field(default=None, description="The zone number, when the case has one.")
+    area_slack: bool | None = Field(
+        default=None,
+        description="True for a bus the case names as its area's interchange slack; null when not known.",
+    )
+    in_service: bool = Field(default=True, description="Whether the bus is in service.")
 
 
 class LineRecord(BaseModel):
@@ -66,15 +90,24 @@ class LineRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    key: str
-    from_bus: int = Field(alias="from")
-    to_bus: int = Field(alias="to")
-    ckt: str
-    r_pu: float | None = None
-    x_pu: float | None = None
-    b_pu: float | None = None
-    rate_a_mva: float | None = None
-    in_service: bool = True
+    key: str = Field(description="The branch's TENSA key.")
+    from_bus: int = Field(alias="from", description="The number of the bus the branch leaves.")
+    to_bus: int = Field(alias="to", description="The number of the bus the branch reaches.")
+    ckt: str = Field(description="The circuit id that tells parallel branches apart.")
+    r_pu: float | None = Field(
+        default=None, description="The series resistance, per unit on base_mva and the bus voltage."
+    )
+    x_pu: float | None = Field(
+        default=None, description="The series reactance, per unit on base_mva and the bus voltage."
+    )
+    b_pu: float | None = Field(
+        default=None,
+        description="The total line charging susceptance, per unit on base_mva and the bus voltage.",
+    )
+    rate_a_mva: float | None = Field(
+        default=None, description="The long-term flow limit, in MVA; 0 where the case gives none."
+    )
+    in_service: bool = Field(default=True, description="Whether the branch is in service.")
 
 
 class TransformerRecord(BaseModel):
@@ -86,19 +119,31 @@ class TransformerRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    key: str
-    from_bus: int = Field(alias="from")
-    to_bus: int = Field(alias="to")
-    ckt: str
-    r_pu: float | None = None
-    x_pu: float | None = None
-    rate_mva: float | None = None
-    vn_from_kv: float | None = None
-    vn_to_kv: float | None = None
-    tap: float | None = None
-    shift_deg: float | None = None
-    rate_a_mva: float | None = None
-    in_service: bool = True
+    key: str = Field(description="The transformer's TENSA key.")
+    from_bus: int = Field(alias="from", description="The number of the bus of the first winding.")
+    to_bus: int = Field(alias="to", description="The number of the bus of the second winding.")
+    ckt: str = Field(description="The circuit id that tells parallel branches apart.")
+    r_pu: float | None = Field(
+        default=None, description="The series resistance, per unit on rate_mva and vn_from_kv."
+    )
+    x_pu: float | None = Field(
+        default=None, description="The series reactance, per unit on rate_mva and vn_from_kv."
+    )
+    rate_mva: float | None = Field(
+        default=None, description="The MVA base the impedances are given on."
+    )
+    vn_from_kv: float | None = Field(
+        default=None, description="The rated voltage of the first winding, in kV."
+    )
+    vn_to_kv: float | None = Field(
+        default=None, description="The rated voltage of the second winding, in kV."
+    )
+    tap: float | None = Field(default=None, description="The off-nominal turns ratio, per unit.")
+    shift_deg: float | None = Field(default=None, description="The phase shift, in degrees.")
+    rate_a_mva: float | None = Field(
+        default=None, description="The long-term flow limit, in MVA; 0 where the case gives none."
+    )
+    in_service: bool = Field(default=True, description="Whether the transformer is in service.")
 
 
 class GeneratorRecord(BaseModel):
@@ -106,16 +151,22 @@ class GeneratorRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    bus: int
-    id: str
-    p_mw: float | None = None
-    q_mvar: float | None = None
-    v_set_pu: float | None = None
-    q_min_mvar: float | None = None
-    q_max_mvar: float | None = None
-    mbase_mva: float | None = None
-    in_service: bool = True
+    key: str = Field(description="The generating unit's TENSA key.")
+    bus: int = Field(description="The number of the bus the generator is on.")
+    id: str = Field(description="The generator's id on its bus.")
+    p_mw: float | None = Field(default=None, description="The scheduled active power, in MW.")
+    q_mvar: float | None = Field(
+        default=None, description="The reactive power the case stores, in MVAr."
+    )
+    v_set_pu: float | None = Field(
+        default=None, description="The voltage setpoint, per unit of the bus's base voltage."
+    )
+    q_min_mvar: float | None = Field(default=None, description="The lower reactive limit, in MVAr.")
+    q_max_mvar: float | None = Field(default=None, description="The upper reactive limit, in MVAr.")
+    mbase_mva: float | None = Field(
+        default=None, description="The machine's MVA rating, the base of its dynamic parameters."
+    )
+    in_service: bool = Field(default=True, description="Whether the generator is in service.")
 
 
 class LoadRecord(BaseModel):
@@ -123,13 +174,18 @@ class LoadRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    bus: int
-    id: str
-    p_mw: float | None = None
-    q_mvar: float | None = None
-    zip: ZipFractions | None = None
-    in_service: bool = True
+    key: str = Field(description="The load's TENSA key.")
+    bus: int = Field(description="The number of the bus the load is on.")
+    id: str = Field(description="The load's id on its bus.")
+    p_mw: float | None = Field(default=None, description="The active power at 1.0 pu voltage, in MW.")
+    q_mvar: float | None = Field(
+        default=None, description="The reactive power at 1.0 pu voltage, in MVAr."
+    )
+    zip: ZipFractions | None = Field(
+        default=None,
+        description="How the power varies with the voltage; null when the engine does not hold it.",
+    )
+    in_service: bool = Field(default=True, description="Whether the load is in service.")
 
 
 class ShuntRecord(BaseModel):
@@ -137,12 +193,17 @@ class ShuntRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    bus: int
-    id: str
-    g_mw: float | None = None
-    b_mvar: float | None = None
-    in_service: bool = True
+    key: str = Field(description="The shunt's TENSA key.")
+    bus: int = Field(description="The number of the bus the shunt is on.")
+    id: str = Field(description="The shunt's id on its bus.")
+    g_mw: float | None = Field(
+        default=None, description="The active power it draws at 1.0 pu voltage, in MW."
+    )
+    b_mvar: float | None = Field(
+        default=None,
+        description="The reactive power it supplies at 1.0 pu voltage, in MVAr (positive for a capacitor).",
+    )
+    in_service: bool = Field(default=True, description="Whether the shunt is in service.")
 
 
 class DynamicRecord(BaseModel):
@@ -155,14 +216,25 @@ class DynamicRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    unit: str
-    role: str
-    model: str
-    values: list[float] | None = None
-    names: list[str] | None = None
-    vocabulary: Literal["psse", "andes", "sienna"] = "psse"
-    params: dict[str, float] | None = None
+    key: str = Field(description="The model's TENSA key, the unit's key and its role.")
+    unit: str = Field(description="The key of the generator the model belongs to.")
+    role: str = Field(description="What the model does in the unit: machine, exciter, governor, ...")
+    model: str = Field(description="The model's name, as its dynamic data file names it.")
+    values: list[float] | None = Field(
+        default=None,
+        description="The parameters in the order of the model's PSS/E record; null in this version.",
+    )
+    names: list[str] | None = Field(
+        default=None, description="The names of values, for people; never read back."
+    )
+    vocabulary: Literal["psse", "andes", "sienna"] = Field(
+        default="psse",
+        description="Whose parameter names the record uses: psse (values by position) or an engine's (params).",
+    )
+    params: dict[str, float] | None = Field(
+        default=None,
+        description="The parameters by the engine's own names, for a model with no PSS/E record.",
+    )
 
 
 class CaseDocument(BaseModel):
@@ -170,21 +242,33 @@ class CaseDocument(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tensa_case: Literal[1] = 1
-    name: str
-    base_mva: float | None = None
-    freq_hz: float | None = None
-    source: CaseSource | None = None
-    buses: list[BusRecord] = Field(default_factory=list)
-    lines: list[LineRecord] = Field(default_factory=list)
-    transformers: list[TransformerRecord] = Field(default_factory=list)
-    generators: list[GeneratorRecord] = Field(default_factory=list)
-    loads: list[LoadRecord] = Field(default_factory=list)
-    shunts: list[ShuntRecord] = Field(default_factory=list)
-    dynamics: list[DynamicRecord] = Field(default_factory=list)
-    events: list[dict[str, Any]] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-    ext: dict[str, Any] = Field(default_factory=dict)
+    tensa_case: Literal[1] = Field(default=1, description="The version of the document's form.")
+    name: str = Field(description="The case's name, its file's name without the extension.")
+    base_mva: float | None = Field(default=None, description="The system MVA base.")
+    freq_hz: float | None = Field(default=None, description="The system frequency, in Hz.")
+    source: CaseSource | None = Field(
+        default=None, description="Where the case came from; null for a case built in the session."
+    )
+    buses: list[BusRecord] = Field(default_factory=list, description="The buses, in the case's order.")
+    lines: list[LineRecord] = Field(default_factory=list, description="The branches that are not transformers.")
+    transformers: list[TransformerRecord] = Field(
+        default_factory=list, description="The two-winding transformers."
+    )
+    generators: list[GeneratorRecord] = Field(default_factory=list, description="The static generators.")
+    loads: list[LoadRecord] = Field(default_factory=list, description="The loads.")
+    shunts: list[ShuntRecord] = Field(default_factory=list, description="The fixed shunts.")
+    dynamics: list[DynamicRecord] = Field(
+        default_factory=list, description="The dynamic models of the generating units."
+    )
+    events: list[dict[str, Any]] = Field(
+        default_factory=list, description="What the case file says happens in time, as neutral events."
+    )
+    notes: list[str] = Field(
+        default_factory=list, description="What the document leaves out or holds only in part, and why."
+    )
+    ext: dict[str, Any] = Field(
+        default_factory=dict, description="What only one engine holds, under that engine's name."
+    )
 
 
 def _element_lists(document: CaseDocument) -> list[tuple[str, list[Any]]]:
