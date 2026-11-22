@@ -21,7 +21,7 @@ const PSI = PowerSimulations
 
 import Main.TensaSienna as TS
 
-export dispatch_json
+export dispatch_json, apply_series!
 
 # The message of a case with no cost data. The Python side
 # (tensa.engines.sienna.dispatch.NO_COST_DATA_MESSAGE) holds the same string
@@ -433,6 +433,50 @@ function dispatch_json(
         ))
     end
     return TS._to_json(answer)
+end
+
+"""
+    apply_series!(sys, payload_json) -> Nothing
+
+Apply a series block's load profiles to a system (always the deep copy the op
+made). `payload_json` is a JSON string with `start` (ISO 8601), `resolution_s`,
+`steps`, and `loads`, a list of `name` plus `factors`. Every listed load gets
+a SingleTimeSeries named "max_active_power" whose values are the factors, with
+`scaling_factor_multiplier = PSY.get_max_active_power`, and
+`transform_single_time_series!` shapes the horizon. Loads not listed keep no
+time series (factor 1.0).
+"""
+function apply_series!(sys, payload_json::AbstractString)
+    payload = JSON3.read(payload_json)
+    t0 = DateTime(payload[:start])
+    resolution = Second(round(Int, payload[:resolution_s]))
+    steps = Int(payload[:steps])
+    
+    for entry in payload[:loads]
+        name = String(entry[:name])
+        factors = Float64.(entry[:factors])
+        
+        # Try both PowerLoad and StandardLoad
+        load = PSY.get_component(PSY.PowerLoad, sys, name)
+        if load === nothing
+            load = PSY.get_component(PSY.StandardLoad, sys, name)
+        end
+        load === nothing && throw(ErrorException("series profile references $(name), which no load of the case has"))
+        
+        data = PSY.TimeSeries.TimeArray(t0 .+ resolution .* (0:steps-1), factors)
+        ts = PSY.SingleTimeSeries(;
+            name = "max_active_power",
+            data = data,
+            scaling_factor_multiplier = PSY.get_max_active_power,
+        )
+        PSY.add_time_series!(sys, load, ts)
+    end
+    
+    # One forecast window over the whole profile: a model that spans the
+    # profile's steps reads every period of it.
+    horizon = resolution * steps
+    PSY.transform_single_time_series!(sys, horizon, horizon)
+    return nothing
 end
 
 end # module

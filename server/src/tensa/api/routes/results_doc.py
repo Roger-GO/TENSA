@@ -34,7 +34,12 @@ from tensa.core.wrapper.results import (
 from tensa.engines.keys import KeyBook, KeyEntry
 from tensa.engines.results_doc import (
     EngineBlock,
+    OptimizationRow,
+    OptimizationTable,
+    OptimizationVariableTable,
     ResultsDocError,
+    ResultsDocument,
+    ResultsTables,
     eig_document,
     pflow_document,
     tds_document,
@@ -205,7 +210,45 @@ async def convert_result(body: ConvertResultRequest) -> ConvertResultResponse:
                 key_book=book,
             )
             return ConvertResultResponse(document=document, skipped=skipped, notes=notes)
-        document = eig_document(_eig_result(body.result), engine=engine, study=body.study)
-        return ConvertResultResponse(document=document, skipped=[], notes=[])
+        if body.kind == "eig":
+            document = eig_document(_eig_result(body.result), engine=engine, study=body.study)
+            return ConvertResultResponse(document=document, skipped=[], notes=[])
+        if body.kind == "dispatch":
+            # Build an optimization table from a dispatch answer
+            result = body.result
+            opt_table = OptimizationTable(
+                routine="dispatch",
+                template=result.get("template", {}),
+                status=result.get("status", "unknown"),
+                objective_usd=result.get("objective_per_h"),
+                variables=[
+                    OptimizationVariableTable(
+                        name="ActivePowerVariable__ThermalStandard",
+                        unit="MW",
+                        rows=[
+                            OptimizationRow(
+                                element=gen["name"],
+                                t=[0.0],
+                                y=[gen["p_mw"]],
+                            )
+                            for gen in result.get("generators", [])
+                        ],
+                    )
+                ],
+                duals=[],
+                parameters=[],
+                expressions=[],
+                slacks=[],
+            )
+            document = ResultsDocument(
+                tensa_results=1,
+                engine=engine,
+                study=body.study,
+                status="completed",
+                series=[],
+                tables=ResultsTables(optimization=opt_table),
+            )
+            return ConvertResultResponse(document=document, skipped=[], notes=[])
+        raise ResultsDocError(f"unknown kind {body.kind!r}")
     except (ValidationError, ResultsDocError) as exc:
         raise _unprocessable(exc) from exc

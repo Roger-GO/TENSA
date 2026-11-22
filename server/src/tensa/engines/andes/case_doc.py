@@ -474,6 +474,8 @@ def build_case_document(wrapper: Wrapper) -> CaseDocument:
         q0 = gen_q0.get(str(entry.idx))
         qmin = _number(entry.params.get("qmin"))
         qmax = _number(entry.params.get("qmax"))
+        # ANDES has no operations data (spec section 6.1: "ANDES has none of
+        # them"), so the op block stays None.
         generators.append(
             GeneratorRecord(
                 key=book.key_of(entry.kind, entry.idx) or generator_key(bus, device_id),
@@ -485,6 +487,7 @@ def build_case_document(wrapper: Wrapper) -> CaseDocument:
                 q_min_mvar=qmin * base_mva if qmin is not None and base_mva is not None else None,
                 q_max_mvar=qmax * base_mva if qmax is not None and base_mva is not None else None,
                 mbase_mva=_number(entry.params.get("Sn")),
+                op=None,
                 in_service=_number(entry.params.get("u")) != 0.0,
             )
         )

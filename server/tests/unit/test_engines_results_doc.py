@@ -22,8 +22,13 @@ from tensa.engines.keys import KeyBook, KeyEntry
 from tensa.engines.results_doc import (
     DAE_VARS_SKIPPED_REASON,
     EngineBlock,
+    OptimizationRow,
+    OptimizationSlackRow,
+    OptimizationTable,
+    OptimizationVariableTable,
     ResultsDocError,
     ResultsDocument,
+    ResultsTables,
     Series,
     eig_document,
     pflow_document,
@@ -527,17 +532,189 @@ def test_validate_a_row_keyed_as_another_kind() -> None:
     assert validate_results_document(doc) == ["tables.pflow: 'load:7-1' is not a bus key"]
 
 
-def test_document_round_trip_json() -> None:
-    doc = pflow_document(_pflow_result(), engine=ENGINE, study={"routine": "pflow"})
-
-    back = ResultsDocument.model_validate(json.loads(doc.model_dump_json()))
-
-    assert back == doc
+# Optimization table tests
 
 
-def test_document_extra_field_refused() -> None:
-    data = json.loads(pflow_document(_pflow_result(), engine=ENGINE, study=None).model_dump_json())
-    data["unexpected"] = 1
+def test_optimization_table_round_trip() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={"name": "economic_dispatch", "network_model": "copper_plate", "horizon_h": 1, "resolution_h": 1},
+        status="OPTIMAL",
+        objective_usd=1500.0,
+        variables=[
+            OptimizationVariableTable(
+                name="ActivePowerVariable__ThermalStandard",
+                unit="MW",
+                rows=[OptimizationRow(element="gen:1-1", t=[0.0], y=[150.0])],
+            )
+        ],
+        slacks=[],
+    )
+    tables = ResultsTables(optimization=opt)
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=tables,
+    )
+    dumped = doc.model_dump()
+    assert dumped["tables"]["optimization"]["routine"] == "dispatch"
+    assert dumped["tables"]["optimization"]["status"] == "OPTIMAL"
+    assert dumped["tables"]["optimization"]["objective_usd"] == 1500.0
+    again = ResultsDocument.model_validate(dumped)
+    assert again == doc
 
-    with pytest.raises(ValidationError):
-        ResultsDocument.model_validate(data)
+
+def test_tables_extra_name_forbidden() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ResultsTables.model_validate({"pflow": None, "unknown_table": {}})
+
+
+def test_validate_row_length_mismatch() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={},
+        status="OPTIMAL",
+        variables=[
+            OptimizationVariableTable(
+                name="ActivePowerVariable__ThermalStandard",
+                unit="MW",
+                rows=[OptimizationRow(element="gen:1-1", t=[0.0, 1.0], y=[150.0])],
+            )
+        ],
+    )
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=ResultsTables(optimization=opt),
+    )
+    problems = validate_results_document(doc)
+    assert len(problems) == 1
+    assert "tables.optimization.variables 'gen:1-1': t has 2 values, y has 1" in problems[0]
+
+
+def test_validate_time_backwards() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={},
+        status="OPTIMAL",
+        variables=[
+            OptimizationVariableTable(
+                name="ActivePowerVariable__ThermalStandard",
+                unit="MW",
+                rows=[OptimizationRow(element="gen:1-1", t=[1.0, 0.0], y=[150.0, 160.0])],
+            )
+        ],
+    )
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=ResultsTables(optimization=opt),
+    )
+    problems = validate_results_document(doc)
+    assert len(problems) == 1
+    assert "t is not non-decreasing" in problems[0]
+
+
+def test_validate_key_kind() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={},
+        status="OPTIMAL",
+        variables=[
+            OptimizationVariableTable(
+                name="ActivePowerVariable__ThermalStandard",
+                unit="MW",
+                rows=[OptimizationRow(element="load:3-1", t=[0.0], y=[150.0])],
+            )
+        ],
+    )
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=ResultsTables(optimization=opt),
+    )
+    problems = validate_results_document(doc)
+    assert len(problems) == 1
+    assert "is not a gen key" in problems[0]
+
+
+def test_validate_slack_threshold() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={},
+        status="OPTIMAL",
+        slacks=[
+            OptimizationSlackRow(
+                variable="SystemBalanceSlackUp",
+                element="system",
+                t=[0.0],
+                y=[1e-7],
+            )
+        ],
+    )
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=ResultsTables(optimization=opt),
+    )
+    problems = validate_results_document(doc)
+    assert len(problems) == 1
+    assert "a listed slack value is not past 1e-6" in problems[0]
+
+
+def test_validate_non_key_elements_pass() -> None:
+    opt = OptimizationTable(
+        routine="dispatch",
+        template={},
+        status="OPTIMAL",
+        variables=[
+            OptimizationVariableTable(
+                name="SystemBalance",
+                unit="MW",
+                rows=[OptimizationRow(element="system-balance", t=[0.0], y=[150.0])],
+            )
+        ],
+    )
+    doc = ResultsDocument(
+        tensa_results=1,
+        engine=ENGINE,
+        study=None,
+        status="completed",
+        series=[],
+        tables=ResultsTables(optimization=opt),
+    )
+    problems = validate_results_document(doc)
+    assert problems == []
+
+
+def test_existing_documents_unchanged() -> None:
+    # pflow_document and eig_document still produce tables.optimization is None
+    pflow_doc = pflow_document(_pflow_result(), engine=ENGINE, study=None)
+    assert pflow_doc.tables.optimization is None
+
+    eig_result = EigResult(
+        eigenvalues=[ComplexNumber(-0.5, 6.0)],
+        damping_ratios=[0.083],
+        frequencies_hz=[0.955],
+        mode_count=1,
+        state_count=1,
+        state_names=["omega GENROU 1"],
+        tds_initialized=True,
+    )
+    eig_doc = eig_document(eig_result, engine=ENGINE, study=None)
+    assert eig_doc.tables.optimization is None

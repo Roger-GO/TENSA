@@ -13,6 +13,8 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from tensa.engines.op_series import CaseSeries, CostCurveRecord, GeneratorOp, SeriesProfile
+
 TENSA_CASE_VERSION: Final = 1
 
 # The note every served document carries while the dynamics records hold no
@@ -166,6 +168,13 @@ class GeneratorRecord(BaseModel):
     mbase_mva: float | None = Field(
         default=None, description="The machine's MVA rating, the base of its dynamic parameters."
     )
+    op: GeneratorOp | None = Field(
+        default=None,
+        description=(
+            "The operations data (limits, ramps, cost, initial state); null "
+            "for a case that has none, which is every PSS/E .raw case."
+        ),
+    )
     in_service: bool = Field(default=True, description="Whether the generator is in service.")
 
 
@@ -259,6 +268,10 @@ class CaseDocument(BaseModel):
     shunts: list[ShuntRecord] = Field(default_factory=list, description="The fixed shunts.")
     dynamics: list[DynamicRecord] = Field(
         default_factory=list, description="The dynamic models of the generating units."
+    )
+    series: CaseSeries | None = Field(
+        default=None,
+        description="The time series the case carries; null when it carries none.",
     )
     events: list[dict[str, Any]] = Field(
         default_factory=list, description="What the case file says happens in time, as neutral events."
@@ -370,6 +383,73 @@ def validate_case_document(data: Mapping[str, Any]) -> CaseDocument:
                     f"load {load.key!r} zip {part} fractions sum to "
                     f"{sum(fractions)}, not 1.0"
                 )
+
+    # Validate op blocks
+    for record in document.generators:
+        if record.op is None:
+            continue
+        op = record.op
+        if op.p_min_mw is not None and op.p_max_mw is not None and op.p_min_mw > op.p_max_mw:
+            raise CaseDocumentError(
+                f"generator {record.key!r} has p_min_mw {op.p_min_mw} above p_max_mw {op.p_max_mw}"
+            )
+        if op.cost is not None:
+            cost = op.cost
+            if cost.kind == "polynomial":
+                if cost.coefficients is None or len(cost.coefficients) == 0:
+                    raise CaseDocumentError(
+                        f"generator {record.key!r} has a polynomial cost without coefficients"
+                    )
+                if cost.points is not None:
+                    raise CaseDocumentError(
+                        f"generator {record.key!r} has a polynomial cost without coefficients"
+                    )
+            elif cost.kind == "piecewise":
+                if cost.points is None or len(cost.points) < 2:
+                    raise CaseDocumentError(
+                        f"generator {record.key!r} has a piecewise cost with malformed points"
+                    )
+                if cost.coefficients is not None:
+                    raise CaseDocumentError(
+                        f"generator {record.key!r} has a piecewise cost with malformed points"
+                    )
+                # Check that points are strictly increasing in MW
+                for i in range(1, len(cost.points)):
+                    if len(cost.points[i]) != 2 or len(cost.points[i-1]) != 2:
+                        raise CaseDocumentError(
+                            f"generator {record.key!r} has a piecewise cost with malformed points"
+                        )
+                    if cost.points[i][0] <= cost.points[i-1][0]:
+                        raise CaseDocumentError(
+                            f"generator {record.key!r} has a piecewise cost with malformed points"
+                        )
+
+    # Validate series block
+    if document.series is not None:
+        series = document.series
+        star_count = sum(1 for p in series.load if p.applies_to == "*")
+        if star_count > 1:
+            raise CaseDocumentError("series has more than one load profile for \"*\"")
+
+        load_keys = {load.key for load in document.loads}
+        seen_keys: set[str] = set()
+        for profile in series.load:
+            if profile.applies_to != "*":
+                if profile.applies_to not in load_keys:
+                    raise CaseDocumentError(
+                        f"series profile references {profile.applies_to!r}, which no load of the document has"
+                    )
+                if profile.applies_to in seen_keys:
+                    raise CaseDocumentError(
+                        f"series has two load profiles for {profile.applies_to!r}"
+                    )
+                seen_keys.add(profile.applies_to)
+            for factor in profile.factors:
+                if factor < 0:
+                    raise CaseDocumentError(
+                        f"series profile for {profile.applies_to!r} has a negative factor"
+                    )
+
     return document
 
 
@@ -386,12 +466,16 @@ __all__ = [
     "BusRecord",
     "CaseDocument",
     "CaseDocumentError",
+    "CaseSeries",
     "CaseSource",
+    "CostCurveRecord",
     "DYNAMICS_NOTE",
     "DynamicRecord",
+    "GeneratorOp",
     "GeneratorRecord",
     "LineRecord",
     "LoadRecord",
+    "SeriesProfile",
     "ShuntRecord",
     "TENSA_CASE_VERSION",
     "TransformerRecord",

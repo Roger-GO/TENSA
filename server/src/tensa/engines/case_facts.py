@@ -88,6 +88,31 @@ class RatingFact:
 
 
 @dataclass(frozen=True)
+class GeneratorOpFact:
+    """The operations data of one generator of a MATPOWER case.
+
+    ``p_min_mw`` and ``p_max_mw`` are the PMIN and PMAX columns (10 and 9).
+    ``ramp_up_mw_per_min`` and ``ramp_down_mw_per_min`` are the RAMP_10 column
+    (18) divided by 10, or None where the column is 0. ``cost`` is the gencost
+    row: ``kind`` is "polynomial" for model 2, "piecewise" for model 1;
+    ``coefficients`` or ``points`` hold the row's numbers; ``startup_usd`` and
+    ``shutdown_usd`` are the row's second and third columns.
+    """
+
+    bus: int
+    gen_id: str
+    p_min_mw: float | None
+    p_max_mw: float | None
+    ramp_up_mw_per_min: float | None
+    ramp_down_mw_per_min: float | None
+    cost_kind: str | None
+    cost_coefficients: tuple[float, ...] | None
+    cost_points: tuple[tuple[float, float], ...] | None
+    startup_usd: float | None
+    shutdown_usd: float | None
+
+
+@dataclass(frozen=True)
 class CaseFacts:
     """The facts of a case file an engine's reader can get wrong, in file order.
 
@@ -101,6 +126,7 @@ class CaseFacts:
     transformers: tuple[TransformerFact, ...]
     lines: tuple[LineFact, ...]
     ratings: tuple[RatingFact, ...] = ()
+    generator_ops: tuple[GeneratorOpFact, ...] = ()
     notes: tuple[str, ...] = ()
 
 
@@ -352,9 +378,12 @@ def read_matpower_facts(text: str) -> CaseFacts:
     unordered bus pair, from ``"1"``, as ``identity.py`` assigns it. Every row
     gives a rating, its ``rateA`` (column 6); ``ratings`` holds the lines'
     first and then the transformers', as ``identity.py`` orders ``branches``.
+    ``generator_ops`` reads the PMIN, PMAX and RAMP_10 columns of ``mpc.gen``
+    and the ``mpc.gencost`` rows.
     """
     gen_rows = _matpower_rows(text, "gen")
     branch_rows = _matpower_rows(text, "branch")
+    gencost_rows = _matpower_rows(text, "gencost")
 
     v_setpoints: dict[int, float] = {}
     for row in gen_rows:
@@ -390,6 +419,65 @@ def read_matpower_facts(text: str) -> CaseFacts:
             line_facts.append(LineFact(from_bus, to_bus, ckt, b_total))
             line_ratings.append(rating)
 
+    # Read generator operations data
+    generator_ops: list[GeneratorOpFact] = []
+    gen_ordinals: dict[int, int] = {}
+    for i, row in enumerate(gen_rows):
+        bus = int(row[0])
+        gen_ordinals[bus] = gen_ordinals.get(bus, 0) + 1
+        gen_id = str(gen_ordinals[bus])
+
+        # PMIN is column 10 (index 9), PMAX is column 9 (index 8)
+        p_min_mw = row[9] if len(row) > 9 else None
+        p_max_mw = row[8] if len(row) > 8 else None
+
+        # RAMP_10 is column 18 (index 17), in MW per 10 minutes
+        ramp_10 = row[17] if len(row) > 17 else 0.0
+        ramp_up_mw_per_min = ramp_10 / 10.0 if ramp_10 != 0.0 else None
+        ramp_down_mw_per_min = ramp_10 / 10.0 if ramp_10 != 0.0 else None
+
+        # Read gencost if available
+        cost_kind = None
+        cost_coefficients = None
+        cost_points = None
+        startup_usd = None
+        shutdown_usd = None
+
+        if i < len(gencost_rows):
+            gencost = gencost_rows[i]
+            if len(gencost) >= 4:
+                model = int(gencost[0])
+                startup_usd = gencost[1] if len(gencost) > 1 else None
+                shutdown_usd = gencost[2] if len(gencost) > 2 else None
+                ncost = int(gencost[3]) if len(gencost) > 3 else 0
+
+                if model == 2:  # polynomial
+                    cost_kind = "polynomial"
+                    # Coefficients start at index 4, highest order first
+                    cost_coefficients = tuple(gencost[4:4+ncost])
+                elif model == 1:  # piecewise
+                    cost_kind = "piecewise"
+                    # Points are (MW, $/h) pairs starting at index 4
+                    points = []
+                    for j in range(ncost):
+                        if 4 + 2*j + 1 < len(gencost):
+                            points.append((gencost[4 + 2*j], gencost[4 + 2*j + 1]))
+                    cost_points = tuple(points)
+
+        generator_ops.append(GeneratorOpFact(
+            bus=bus,
+            gen_id=gen_id,
+            p_min_mw=p_min_mw,
+            p_max_mw=p_max_mw,
+            ramp_up_mw_per_min=ramp_up_mw_per_min,
+            ramp_down_mw_per_min=ramp_down_mw_per_min,
+            cost_kind=cost_kind,
+            cost_coefficients=cost_coefficients,
+            cost_points=cost_points,
+            startup_usd=startup_usd,
+            shutdown_usd=shutdown_usd,
+        ))
+
     # The lines' ratings, then the transformers', each in row order: the order
     # of ``lines`` followed by ``transformers`` and of the identity's
     # ``branches``, which is not the row order where the rows interleave them.
@@ -398,6 +486,7 @@ def read_matpower_facts(text: str) -> CaseFacts:
         transformers=tuple(transformer_facts),
         lines=tuple(line_facts),
         ratings=tuple(line_ratings + transformer_ratings),
+        generator_ops=tuple(generator_ops),
     )
 
 
@@ -434,7 +523,8 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
     per non-transformer branch, both in file order; ``ratings`` holds
     ``[from_bus, to_bus, ckt, rate_mva]`` per two-terminal branch, the rows of
     ``line_charging`` first and those of ``transformers`` after, in the same
-    order and with the same ``[from_bus, to_bus, ckt]``; ``notes`` is the
+    order and with the same ``[from_bus, to_bus, ckt]``; ``generator_ops``
+    holds the operations data of each generator; ``notes`` is the
     list of ``facts.notes``.
     """
     return {
@@ -450,6 +540,22 @@ def corrections_document(facts: CaseFacts) -> dict[str, object]:
         "ratings": [
             [rating.from_bus, rating.to_bus, rating.ckt, rating.rate_mva]
             for rating in facts.ratings
+        ],
+        "generator_ops": [
+            {
+                "bus": op.bus,
+                "gen_id": op.gen_id,
+                "p_min_mw": op.p_min_mw,
+                "p_max_mw": op.p_max_mw,
+                "ramp_up_mw_per_min": op.ramp_up_mw_per_min,
+                "ramp_down_mw_per_min": op.ramp_down_mw_per_min,
+                "cost_kind": op.cost_kind,
+                "cost_coefficients": list(op.cost_coefficients) if op.cost_coefficients else None,
+                "cost_points": [list(p) for p in op.cost_points] if op.cost_points else None,
+                "startup_usd": op.startup_usd,
+                "shutdown_usd": op.shutdown_usd,
+            }
+            for op in facts.generator_ops
         ],
         "notes": list(facts.notes),
     }

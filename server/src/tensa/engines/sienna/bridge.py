@@ -466,6 +466,25 @@ class JuliaBridge:
             )
         )
 
+    def apply_series(
+        self,
+        session: Any,
+        payload_json: str,
+    ) -> None:
+        """Apply a series block's load profiles to the session's system.
+
+        The payload is a JSON string with ``start``, ``resolution_s``, ``steps``,
+        and ``loads`` (a list of ``name`` plus ``factors``). The Julia side
+        resolves names to components and applies the time series.
+        """
+        self.start_ops()
+        self._call(
+            "apply_series!",
+            session,
+            payload_json,
+            _module=self._ts_ops,
+        )
+
     def dyn_plan(self, session: Any, load_model: str = "impedance") -> dict[str, Any]:
         """What a dynamic run of this session would be made of.
 

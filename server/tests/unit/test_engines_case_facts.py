@@ -521,6 +521,8 @@ def test_corrections_document_shape() -> None:
         # line ends before RATA1.
         "ratings": [[2, 3, "1", 1.0], [1, 2, "1", 0.0]],
         "notes": [],
+        # A PSS/E file has no operations data (no cost, no ramps).
+        "generator_ops": [],
     }
 
 
@@ -939,9 +941,9 @@ def test_corrections_document_keeps_the_committed_keys(name: str) -> None:
     case_path = Path(cases_dir) / SAMPLE_CASE_FILES[name]
     assert case_path.is_file(), f"ANDES case file missing: {case_path}"
     document = corrections_document(read_case_facts(case_path))
-    # The committed documents predate "ratings"; every key they have is
-    # what it was, value and serialised text.
-    assert set(document) == set(committed) | {"ratings"}, name
+    # The committed documents predate "ratings" and "generator_ops"; every
+    # key they have is what it was, value and serialised text.
+    assert set(document) == set(committed) | {"ratings", "generator_ops"}, name
     for key, value in committed.items():
         assert document[key] == value, f"{name}: {key}"
         assert json.dumps(document[key]) == json.dumps(value), f"{name}: {key}"

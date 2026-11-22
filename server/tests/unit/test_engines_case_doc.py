@@ -165,3 +165,10 @@ def test_upgrade_returns_other_versions_unchanged() -> None:
     record = DynamicRecord(key="gen:1-1/machine", unit="gen:1-1", role="machine", model="GENROU")
     assert record.values is None
     assert record.vocabulary == "psse"
+
+
+def test_series_field_is_null_by_default() -> None:
+    document = CaseDocument(name="x")
+    assert document.series is None
+    dumped = document.model_dump()
+    assert dumped["series"] is None

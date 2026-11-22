@@ -25,6 +25,13 @@ __all__ = [
     "EngineBlock",
     "EigenvalueRow",
     "EigenvalueTable",
+    "OptimizationDualTable",
+    "OptimizationExpressionTable",
+    "OptimizationParameterTable",
+    "OptimizationRow",
+    "OptimizationSlackRow",
+    "OptimizationTable",
+    "OptimizationVariableTable",
     "PflowBranchRow",
     "PflowBusRow",
     "PflowGeneratorRow",
@@ -172,6 +179,114 @@ class EigenvalueTable(BaseModel):
     )
 
 
+class OptimizationRow(BaseModel):
+    """One row of an optimization table: an element's value at one time step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    element: str = Field(
+        description=(
+            "What the row is for: a key (gen:1-1, load:7-1) where the row is "
+            "an element of the case, or the PowerSimulations name where it is "
+            "not (a system-wide slack or balance)."
+        )
+    )
+    t: list[float] = Field(description="The time steps of the horizon, in hours from its start.")
+    y: list[float | None] = Field(description="The value at each step; null is a gap.")
+
+
+class OptimizationVariableTable(BaseModel):
+    """One decision variable of the model, one row per element."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description="The variable's name as PowerSimulations names it (ActivePowerVariable__ThermalStandard)."
+    )
+    unit: str = Field(description="The unit the values are in: MW, MVA, $/h or 1 (a commitment state).")
+    rows: list[OptimizationRow] = Field(default_factory=list, description="One row per element.")
+
+
+class OptimizationDualTable(BaseModel):
+    """One dual variable of the model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="The dual's name as PowerSimulations names it.")
+    unit: str = Field(description="The unit the values are in, $/MWh for a balance dual.")
+    rows: list[OptimizationRow] = Field(default_factory=list, description="One row per element.")
+
+
+class OptimizationParameterTable(BaseModel):
+    """One parameter of the model (a time series the model read)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="The parameter's name as PowerSimulations names it.")
+    unit: str = Field(description="The unit the values are in.")
+    rows: list[OptimizationRow] = Field(default_factory=list, description="One row per element.")
+
+
+class OptimizationExpressionTable(BaseModel):
+    """One expression of the model (a derived quantity, such as production cost)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="The expression's name as PowerSimulations names it.")
+    unit: str = Field(description="The unit the values are in.")
+    rows: list[OptimizationRow] = Field(default_factory=list, description="One row per element.")
+
+
+class OptimizationSlackRow(BaseModel):
+    """One slack variable whose value is past 1e-6 at some step (spec section
+    13: slack variables always read back and reported when non-zero)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    variable: str = Field(description="The slack variable's name as PowerSimulations names it.")
+    element: str = Field(description="The element the slack is on, as PowerSimulations names it.")
+    t: list[float] = Field(description="The time steps where the slack is non-zero, in hours.")
+    y: list[float] = Field(description="The slack's value at each of those steps, in MW.")
+
+
+class OptimizationTable(BaseModel):
+    """The optimization table of a results document: what the model held and
+    what it decided. The template is recorded verbatim (spec section 13)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    routine: Literal["dispatch", "uc", "sim"] = Field(description="The operations routine that ran.")
+    template: dict[str, Any] = Field(
+        description=(
+            "The template as run: its name (economic_dispatch, "
+            "unit_commitment) or the explicit device formulations, the "
+            "network model, horizon and resolution, stored verbatim."
+        )
+    )
+    status: str = Field(
+        description="The solver's termination status as PowerSimulations reports it."
+    )
+    objective_usd: float | None = Field(
+        default=None, description="The objective value, in $ for the whole horizon."
+    )
+    variables: list[OptimizationVariableTable] = Field(
+        default_factory=list, description="The decision variables read back."
+    )
+    duals: list[OptimizationDualTable] = Field(
+        default_factory=list, description="The duals read back; empty when none were asked for."
+    )
+    parameters: list[OptimizationParameterTable] = Field(
+        default_factory=list, description="The parameters (time series) the model read."
+    )
+    expressions: list[OptimizationExpressionTable] = Field(
+        default_factory=list, description="The expressions read back."
+    )
+    slacks: list[OptimizationSlackRow] = Field(
+        default_factory=list,
+        description="Every slack variable past 1e-6 at some step; empty when all are zero.",
+    )
+
+
 class ResultsTables(BaseModel):
     """The tables of a results document: a power flow under ``pflow``, the
     eigenvalues under ``eig``; either, both or neither. Each name holds its own
@@ -181,6 +296,9 @@ class ResultsTables(BaseModel):
 
     pflow: PflowTable | None = Field(default=None, description="The power flow table.")
     eig: EigenvalueTable | None = Field(default=None, description="The eigenvalue table.")
+    optimization: OptimizationTable | None = Field(
+        default=None, description="The operations table of a dispatch, uc or sim run."
+    )
 
 
 class ResultsDocument(BaseModel):
@@ -481,4 +599,64 @@ def validate_results_document(doc: ResultsDocument) -> list[str]:
             for row in kind_rows:
                 if is_key(row.key) and _key_prefix(row.key) != kind:
                     problems.append(f"tables.pflow: {row.key!r} is not a {kind} key")
+
+    # Validate optimization table
+    opt_table = doc.tables.optimization
+    if opt_table is not None:
+        # Check variables, duals, parameters, expressions
+        for table_name, opt_tables in (
+            ("variables", opt_table.variables),
+            ("duals", opt_table.duals),
+            ("parameters", opt_table.parameters),
+            ("expressions", opt_table.expressions),
+        ):
+            for opt_tbl in opt_tables:
+                for opt_row in opt_tbl.rows:
+                    if len(opt_row.t) != len(opt_row.y):
+                        problems.append(
+                            f"tables.optimization.{table_name} {opt_row.element!r}: "
+                            f"t has {len(opt_row.t)} values, y has {len(opt_row.y)}"
+                        )
+                    for j in range(1, len(opt_row.t)):
+                        if opt_row.t[j] < opt_row.t[j - 1]:
+                            problems.append(
+                                f"tables.optimization.{table_name} {opt_row.element!r}: "
+                                "t is not non-decreasing"
+                            )
+                            break
+                    # Check key kind if element is a key and table name has a suffix
+                    if is_key(opt_row.element):
+                        if opt_tbl.name.endswith("__ThermalStandard"):
+                            if _key_prefix(opt_row.element) != "gen":
+                                problems.append(
+                                    f"tables.optimization.{table_name}: "
+                                    f"{opt_row.element!r} is not a gen key"
+                                )
+                        elif opt_tbl.name.endswith(("__PowerLoad", "__StandardLoad")):
+                            if _key_prefix(opt_row.element) != "load":
+                                problems.append(
+                                    f"tables.optimization.{table_name}: "
+                                    f"{opt_row.element!r} is not a load key"
+                                )
+                        elif opt_tbl.name.endswith("__Line") and _key_prefix(opt_row.element) != "branch":
+                            problems.append(
+                                f"tables.optimization.{table_name}: "
+                                f"{opt_row.element!r} is not a branch key"
+                            )
+
+        # Check slacks
+        for slack_row in opt_table.slacks:
+            if len(slack_row.t) != len(slack_row.y):
+                problems.append(
+                    f"tables.optimization.slacks {slack_row.element!r}: "
+                    f"t has {len(slack_row.t)} values, y has {len(slack_row.y)}"
+                )
+            for value in slack_row.y:
+                if abs(value) <= 1e-6:
+                    problems.append(
+                        f"tables.optimization.slacks {slack_row.element!r}: "
+                        "a listed slack value is not past 1e-6"
+                    )
+                    break
+
     return problems

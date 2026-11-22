@@ -414,6 +414,36 @@ end
         @test startswith(message, "economic dispatch did not meet the load:") ||
               occursin("economic dispatch did not", message)
     end
+
+    @testset "a four-period profile becomes the load's series and one four-period forecast" begin
+        # A four-period profile on the two-generator case's load (PowerSystems
+        # names a MATPOWER load after its bus: bus3): factors 1.0, 1.1, 0.9,
+        # 1.2 an hour apart. The series holds the factors, scaled by the
+        # load's max_active_power (150 MW), and the forecast made of it spans
+        # the four hours in one window.
+        path = two_gen_case(dir, "2  0  0  3  0.0  10.0  0.0", "2  0  0  3  0.0  20.0  0.0")
+        s = load_session(path)
+        sys = deepcopy(s.sys)
+        payload = JSON3.write(Dict(
+            "start" => "2026-01-01T00:00:00",
+            "resolution_s" => 3600,
+            "steps" => 4,
+            "loads" => [Dict("name" => "bus3", "factors" => [1.0, 1.1, 0.9, 1.2])],
+        ))
+        TensaSiennaOps.apply_series!(sys, payload)
+        load = PSY.get_component(PSY.PowerLoad, sys, "bus3")
+        @test load !== nothing
+        ts = PSY.get_time_series(PSY.SingleTimeSeries, load, "max_active_power")
+        @test collect(values(PSY.get_data(ts))) == [1.0, 1.1, 0.9, 1.2]
+        @test PSY.IS.get_scaling_factor_multiplier(ts) === PSY.get_max_active_power
+        @test PSY.get_max_active_power(load) * PSY.get_base_power(sys) == 150.0
+        forecast = PSY.get_time_series(PSY.DeterministicSingleTimeSeries, load, "max_active_power")
+        @test PSY.get_horizon(forecast) == Hour(4)
+        # One window over the whole profile: PowerSystems records its interval as 0.
+        @test PSY.IS.get_interval(forecast) == Second(0)
+        # The session's own system is untouched.
+        @test !PSY.has_time_series(PSY.get_component(PSY.PowerLoad, s.sys, "bus3"))
+    end
 end
 
 println("TENSA SIENNA OPS TESTS OK")

@@ -19,7 +19,9 @@ from tensa.engines.case_doc import (
     BusRecord,
     CaseDocument,
     CaseSource,
+    CostCurveRecord,
     DynamicRecord,
+    GeneratorOp,
     GeneratorRecord,
     LineRecord,
     LoadRecord,
@@ -228,6 +230,16 @@ def build_case_document(
             )
 
     generators: list[GeneratorRecord] = []
+    # Build a map of generator operations data by (bus, gen_id)
+    gen_ops_map: dict[tuple[int, str], Mapping[str, Any]] = {}
+    if document is not None:
+        for op_data in document.get("generator_ops", []):
+            if isinstance(op_data, Mapping):
+                op_bus = op_data.get("bus")
+                op_gen_id = op_data.get("gen_id")
+                if op_bus is not None and op_gen_id is not None:
+                    gen_ops_map[(int(op_bus), str(op_gen_id))] = op_data
+
     for row in _rows(topology, "generators"):
         name = _text(row.get("name"))
         bus = _int(row.get("bus"))
@@ -235,6 +247,42 @@ def build_case_document(
             continue
         kind = _text(row.get("kind")) or "PV"
         device_id = _text(row.get("id")) or name.rsplit("-", 1)[-1] or "1"
+
+        # Build the op block if we have operations data for this generator
+        op_block = None
+        op_data = gen_ops_map.get((bus, device_id))
+        if op_data is not None:
+            cost = None
+            cost_kind = op_data.get("cost_kind")
+            if cost_kind == "polynomial":
+                coefficients = op_data.get("cost_coefficients")
+                if coefficients:
+                    cost = CostCurveRecord(
+                        kind="polynomial",
+                        coefficients=[float(c) for c in coefficients],
+                        startup_usd=_float(op_data.get("startup_usd")),
+                        shutdown_usd=_float(op_data.get("shutdown_usd")),
+                    )
+            elif cost_kind == "piecewise":
+                points = op_data.get("cost_points")
+                if points:
+                    cost = CostCurveRecord(
+                        kind="piecewise",
+                        points=[[float(p[0]), float(p[1])] for p in points],
+                        startup_usd=_float(op_data.get("startup_usd")),
+                        shutdown_usd=_float(op_data.get("shutdown_usd")),
+                    )
+
+            op_block = GeneratorOp(
+                p_min_mw=_float(op_data.get("p_min_mw")),
+                p_max_mw=_float(op_data.get("p_max_mw")),
+                ramp_up_mw_per_min=_float(op_data.get("ramp_up_mw_per_min")),
+                ramp_down_mw_per_min=_float(op_data.get("ramp_down_mw_per_min")),
+                cost=cost,
+                initial_p_mw=_float(row.get("p_mw")),
+                initial_status="on" if row.get("available", True) else "off",
+            )
+
         generators.append(
             GeneratorRecord(
                 key=book.key_of(kind, name) or generator_key(bus, device_id),
@@ -246,6 +294,7 @@ def build_case_document(
                 q_min_mvar=_float(row.get("q_min_mvar")),
                 q_max_mvar=_float(row.get("q_max_mvar")),
                 mbase_mva=_float(row.get("mbase_mva")),
+                op=op_block,
                 in_service=bool(row.get("available", True)),
             )
         )

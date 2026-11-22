@@ -16,6 +16,13 @@ from tensa.engines.results_doc import (
     EigenvalueRow,
     EigenvalueTable,
     EngineBlock,
+    OptimizationDualTable,
+    OptimizationExpressionTable,
+    OptimizationParameterTable,
+    OptimizationRow,
+    OptimizationSlackRow,
+    OptimizationTable,
+    OptimizationVariableTable,
     PflowBranchRow,
     PflowBusRow,
     PflowGeneratorRow,
@@ -32,6 +39,13 @@ __all__ = [
     "EngineBlock",
     "EigenvalueRow",
     "EigenvalueTable",
+    "OptimizationDualTable",
+    "OptimizationExpressionTable",
+    "OptimizationParameterTable",
+    "OptimizationRow",
+    "OptimizationSlackRow",
+    "OptimizationTable",
+    "OptimizationVariableTable",
     "PflowBranchRow",
     "PflowBusRow",
     "PflowGeneratorRow",
@@ -54,7 +68,7 @@ class ConvertResultRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["pflow", "tds", "eig"] = Field(
+    kind: Literal["pflow", "tds", "eig", "dispatch"] = Field(
         ..., description="Which builder the result goes through."
     )
     engine: str = Field(..., description="The engine that produced the result (``andes``, ``sienna``).")
