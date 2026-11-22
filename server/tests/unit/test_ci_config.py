@@ -1046,3 +1046,35 @@ def test_the_julia_test_step_writes_a_failure_as_an_error_annotation(tmp_path: P
             "SKIP case.raw%0A...%0ASKIP case.raw%0Aok"
         ],
     )
+
+
+def _matches_actions_path(pattern: str, path: str) -> bool:
+    """A path filter of a workflow as GitHub reads it: ``**`` crosses folders
+    and ``*`` does not."""
+    parts = re.split(r"(\*\*|\*)", pattern)
+    regex = "".join(
+        ".*" if part == "**" else "[^/]*" if part == "*" else re.escape(part) for part in parts
+    )
+    return re.fullmatch(regex, path) is not None
+
+
+def test_every_file_outside_server_that_a_server_test_reads_triggers_the_server_workflow() -> None:
+    """The tests of this folder hold the README, the docs, the community files,
+    the examples and the workflows to what the server says, so a change to one
+    of them has to run them. A README change that left the server workflow out
+    once broke main with nothing to say so until the next server change."""
+    read = re.compile(r'(?:ROOT[A-Za-z_]*|repo_root) / "([^"]+)"|_read(?:_required)?\("([^"]+)"\)')
+    tests = REPO_ROOT / "server" / "tests"
+    named: set[str] = set()
+    for source in tests.rglob("*.py"):
+        for match in read.finditer(source.read_text(encoding="utf-8")):
+            name = match.group(1) or match.group(2)
+            if (REPO_ROOT / name).exists():
+                named.add(name)
+    assert {"README.md", "docs", "llms.txt", ".github"} <= named, sorted(named)
+    triggers = _triggers(_workflow())
+    for event in ("push", "pull_request"):
+        patterns = triggers[event]["paths"]
+        for name in sorted(named):
+            probe = f"{name}/x" if (REPO_ROOT / name).is_dir() else name
+            assert any(_matches_actions_path(p, probe) for p in patterns), (event, name)

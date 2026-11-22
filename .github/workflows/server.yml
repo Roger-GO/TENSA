@@ -3,17 +3,25 @@ name: server
 on:
   push:
     branches: [main, "improve/**"]
-    paths:
+    paths: &server-paths
       - "server/**"
       - "web/**"
-      - ".github/workflows/server.yml"
       - "scripts/**"
+      # The server's tests also read these: the README, the docs and the
+      # community files, the examples, and every workflow (test_ci_config.py).
+      - "*.md"
+      - "*.cff"
+      - "*.txt"
+      - "*.yml"
+      - "LICENSE"
+      - ".mailmap"
+      - ".gitattributes"
+      - ".gitignore"
+      - "docs/**"
+      - "examples/**"
+      - ".github/**"
   pull_request:
-    paths:
-      - "server/**"
-      - "web/**"
-      - ".github/workflows/server.yml"
-      - "scripts/**"
+    paths: *server-paths
   workflow_dispatch:
   # publish.yml runs this whole workflow before it uploads a release.
   workflow_call:
