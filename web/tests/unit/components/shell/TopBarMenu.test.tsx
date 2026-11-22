@@ -429,6 +429,41 @@ describe('<TopBarMenu /> an item with a note', () => {
   });
 });
 
+describe('<TopBarMenu /> an item with a detail line', () => {
+  it('shows the detail as a second muted line under the note, and not while unavailable', async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarMenu label="Sample" testId="topbar-menu-sample">
+        <TopBarMenuItem testId="item-engine" note="pflow, tds" detail="andes 1.9.3">
+          ANDES
+        </TopBarMenuItem>
+        <TopBarMenuItem testId="item-note-only" note="pflow, tds">
+          Sienna
+        </TopBarMenuItem>
+        <TopBarMenuItem
+          testId="item-off"
+          note="pflow, tds"
+          detail="andes 1.9.3"
+          unavailableReason="Not available on this server."
+        >
+          Other
+        </TopBarMenuItem>
+      </TopBarMenu>,
+    );
+    await user.click(screen.getByTestId('topbar-menu-sample-trigger'));
+    const item = await screen.findByTestId('item-engine');
+    expect(within(item).getByTestId('item-engine-note')).toHaveTextContent('pflow, tds');
+    expect(within(item).getByTestId('item-engine-detail')).toHaveTextContent('andes 1.9.3');
+    expect(item).toHaveTextContent('ANDESpflow, tdsandes 1.9.3');
+    // No detail without the prop, and none while the reason takes the lines.
+    expect(screen.queryByTestId('item-note-only-detail')).toBeNull();
+    expect(screen.queryByTestId('item-off-detail')).toBeNull();
+    expect(screen.getByTestId('item-off-reason')).toHaveTextContent(
+      'Not available on this server.',
+    );
+  });
+});
+
 describe('<TopBarMenu /> unavailable items', () => {
   function renderUnavailable(onClickLocked = vi.fn()) {
     render(

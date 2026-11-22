@@ -11,6 +11,8 @@ import type { ReactElement } from 'react';
 
 import { HelpMenu } from '@/components/shell/HelpMenu';
 import { HELP_LINKS, REPO_URL } from '@/lib/helpLinks';
+import type { EngineList } from '@/api/types';
+import { useSessionStore } from '@/store/session';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 
 let fetchSpy: MockInstance<typeof fetch>;
@@ -34,18 +36,52 @@ function requestedPaths(): string[] {
   });
 }
 
+const ANDES_ENTRY = {
+  name: 'andes',
+  available: true,
+  unavailable_reason: null,
+  versions: { andes: '2.0.0' },
+  formats: { read: [], write: [] },
+  routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+  ops: [],
+  editing: true,
+};
+
+const SIENNA_VERSIONED = {
+  name: 'sienna',
+  available: true,
+  unavailable_reason: null,
+  versions: {
+    julia: '1.11.3',
+    PowerSystems: '5.12.5',
+    PowerFlows: '0.16.4',
+    PowerNetworkMatrices: '0.15.2',
+    PowerSimulationsDynamics: '0.18.1',
+  },
+  formats: { read: [], write: [] },
+  routines: ['pflow', 'tds'],
+  ops: [],
+  editing: false,
+};
+
+function engineList(...entries: unknown[]): EngineList {
+  return { engines: entries } as EngineList;
+}
+
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   fetchSpy.mockImplementation(() =>
     Promise.resolve(jsonResponse({ tensa: '0.5.0', andes: '2.0.0' })),
   );
   useShortcutCheatsheetStore.setState({ open: false, section: null });
+  useSessionStore.setState({ engines: null });
 });
 
 afterEach(() => {
   cleanup();
   fetchSpy.mockRestore();
   useShortcutCheatsheetStore.setState({ open: false, section: null });
+  useSessionStore.setState({ engines: null });
 });
 
 async function openMenu() {
@@ -138,6 +174,42 @@ describe('<HelpMenu />', () => {
     await screen.findByTestId('topbar-menu-help-content');
     expect(screen.getByTestId('help-about-tensa')).toHaveTextContent('0.5.0');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows one row per engine with a non-empty versions map, ANDES excepted', async () => {
+    // The ANDES row above already shows the ANDES version, so the ANDES
+    // engine gets no row of its own. The expected line is written out by
+    // hand: julia first, then the packages alphabetically.
+    useSessionStore.setState({ engines: engineList(ANDES_ENTRY, SIENNA_VERSIONED) });
+    await openMenu();
+    const about = screen.getByTestId('help-about');
+    expect(within(about).getByText('Sienna packages')).toBeInTheDocument();
+    expect(screen.getByTestId('help-about-engine-sienna')).toHaveTextContent(
+      'julia 1.11.3, PowerFlows 0.16.4, PowerNetworkMatrices 0.15.2, ' +
+        'PowerSimulationsDynamics 0.18.1, PowerSystems 5.12.5',
+    );
+    expect(screen.queryByTestId('help-about-engine-andes')).toBeNull();
+    expect(about).not.toHaveTextContent('ANDES packages');
+  });
+
+  it('shows no engine row for an engine with an empty versions map', async () => {
+    useSessionStore.setState({
+      engines: engineList(ANDES_ENTRY, { ...SIENNA_VERSIONED, versions: {} }),
+    });
+    await openMenu();
+    expect(screen.queryByTestId('help-about-engine-sienna')).toBeNull();
+    expect(screen.queryByTestId('help-about-engine-andes')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('help-about-tensa')).toHaveTextContent('0.5.0'));
+    expect(screen.getByTestId('help-about-andes')).toHaveTextContent('2.0.0');
+  });
+
+  it('shows no engine rows while the list is not loaded, and the TENSA and ANDES rows as today', async () => {
+    useSessionStore.setState({ engines: null });
+    await openMenu();
+    expect(screen.queryByTestId('help-about-engine-sienna')).toBeNull();
+    expect(screen.queryByTestId('help-about-engine-andes')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('help-about-tensa')).toHaveTextContent('0.5.0'));
+    expect(screen.getByTestId('help-about-andes')).toHaveTextContent('2.0.0');
   });
 
   it('has an entry of its own for moving a line by hand and for connecting, which open that part of the list', async () => {

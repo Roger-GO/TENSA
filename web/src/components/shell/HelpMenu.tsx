@@ -21,8 +21,10 @@ import {
 } from './TopBarMenu';
 import { useVersionInfo } from '@/api/queries';
 import { HELP_LINKS } from '@/lib/helpLinks';
+import { engineLabel, engineVersionsLine } from '@/lib/engines';
 import { SHORTCUTS } from '@/lib/shortcuts';
 import { shortcutLabel } from '@/lib/shortcutFormatter';
+import { useSessionStore } from '@/store/session';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 
 /** Question mark in a circle, in the same hand-inlined style as the other top bar glyphs. */
@@ -53,6 +55,10 @@ function HelpGlyph({ className }: { className?: string }) {
  */
 function AboutBlock() {
   const { data, isPending, isError } = useVersionInfo();
+  // The same mirrored engine list the picker reads (no query of its own):
+  // one row per engine with a non-empty versions map. The ANDES engine gets
+  // none, since the ANDES row above already shows its version.
+  const engines = useSessionStore((s) => s.engines);
   const value = (version: string | undefined): string => {
     if (isPending) return '…';
     if (isError || version === undefined) return 'unavailable';
@@ -70,6 +76,22 @@ function AboutBlock() {
         <dd data-testid="help-about-andes" className="text-foreground font-mono">
           {value(data?.andes)}
         </dd>
+        {engines?.engines.map((entry) => {
+          if (entry.name === 'andes') return null;
+          const line = engineVersionsLine(entry.versions);
+          if (line === null) return null;
+          return (
+            <div key={entry.name} className="col-span-2 grid grid-cols-subgrid">
+              <dt>{engineLabel(entry.name)} packages</dt>
+              <dd
+                data-testid={`help-about-engine-${entry.name}`}
+                className="text-foreground font-mono"
+              >
+                {line}
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </div>
   );

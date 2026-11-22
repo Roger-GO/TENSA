@@ -41,6 +41,27 @@ export function engineRoutines(
   return entry === undefined ? null : entry.routines;
 }
 
+/**
+ * The versions of the engine's packages as one compact line
+ * (`PowerSystems 5.12.5, PowerFlows 0.16.4`), or null when the engine
+ * reports none (absent or empty map): nothing is shown for such an engine.
+ * `julia` comes first, then the packages alphabetically; for ANDES the map
+ * is just `andes`. The generated type carries `versions` as a required map;
+ * the parameter also takes `undefined` so a reader of an older server
+ * without the field reads it as none.
+ */
+export function engineVersionsLine(versions: Record<string, string> | undefined): string | null {
+  if (versions === undefined) return null;
+  const names = Object.keys(versions);
+  if (names.length === 0) return null;
+  names.sort((a, b) => {
+    if (a === 'julia') return b === 'julia' ? 0 : -1;
+    if (b === 'julia') return 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  return names.map((pkg) => `${pkg} ${versions[pkg] ?? ''}`).join(', ');
+}
+
 /** A format `POST /sessions/{id}/save` can write a case file in. */
 export type SaveFormat = 'xlsx' | 'json' | 'raw' | 'm';
 

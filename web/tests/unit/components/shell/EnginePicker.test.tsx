@@ -229,6 +229,59 @@ describe('<EnginePicker /> the list', () => {
   });
 });
 
+describe('<EnginePicker /> engine versions', () => {
+  const ANDES_VERSIONED = { ...ANDES, versions: { andes: '1.9.3' } };
+  const SIENNA_VERSIONED = {
+    ...SIENNA,
+    versions: {
+      julia: '1.11.3',
+      PowerSystems: '5.12.5',
+      PowerFlows: '0.16.4',
+      PowerNetworkMatrices: '0.15.2',
+      PowerSimulationsDynamics: '0.18.1',
+    },
+  };
+  // Written out by hand: julia first, then the packages alphabetically.
+  const SIENNA_LINE =
+    'julia 1.11.3, PowerFlows 0.16.4, PowerNetworkMatrices 0.15.2, ' +
+    'PowerSimulationsDynamics 0.18.1, PowerSystems 5.12.5';
+
+  it('shows the versions line under the routines of each engine in the opened list', async () => {
+    const user = userEvent.setup();
+    live(list(ANDES_VERSIONED, SIENNA_VERSIONED));
+    renderPicker();
+    await openMenu(user);
+    expect(option('andes')).toHaveTextContent('pflow, tds, eig, cpf, se');
+    expect(option('andes')).toHaveTextContent('andes 1.9.3');
+    expect(screen.getByTestId('engine-picker-option-andes-detail')).toHaveTextContent(
+      'andes 1.9.3',
+    );
+    expect(option('sienna')).toHaveTextContent('pflow, tds');
+    expect(screen.getByTestId('engine-picker-option-sienna-detail')).toHaveTextContent(SIENNA_LINE);
+  });
+
+  it('an engine with an empty versions map shows no versions line', async () => {
+    const user = userEvent.setup();
+    live(list(ANDES, SIENNA_VERSIONED));
+    renderPicker();
+    await openMenu(user);
+    expect(option('andes')).toHaveTextContent('pflow, tds, eig, cpf, se');
+    expect(screen.queryByTestId('engine-picker-option-andes-detail')).toBeNull();
+    expect(option('andes').textContent).not.toMatch(/\d+\.\d+/);
+  });
+
+  it('the trigger is unchanged: no versions leak into the top bar', async () => {
+    const user = userEvent.setup();
+    live(list(ANDES_VERSIONED, SIENNA_VERSIONED));
+    renderPicker();
+    expect(trigger()).toHaveTextContent('ANDES');
+    expect(trigger().textContent).toBe('ANDES');
+    expect(trigger()).toHaveAccessibleName('Engine: ANDES');
+    await openMenu(user);
+    expect(trigger().textContent).toBe('ANDES');
+  });
+});
+
 describe('<EnginePicker /> switching with no case open', () => {
   it('switches with no confirm: DELETE, then the new engine with no session', async () => {
     const user = userEvent.setup();

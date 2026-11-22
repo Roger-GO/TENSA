@@ -9,6 +9,7 @@ import {
   engineLabel,
   engineRoutines,
   engineSaveFormats,
+  engineVersionsLine,
 } from '@/lib/engines';
 import type { EngineCapabilities, EngineList } from '@/api/types';
 
@@ -69,6 +70,33 @@ describe('engineRoutines', () => {
 
   it('answers null for a null engine', () => {
     expect(engineRoutines(ENGINES, null)).toBeNull();
+  });
+});
+
+describe('engineVersionsLine', () => {
+  it('answers null for an absent or empty map', () => {
+    expect(engineVersionsLine(undefined)).toBeNull();
+    expect(engineVersionsLine({})).toBeNull();
+  });
+
+  it("answers ANDES's one package", () => {
+    expect(engineVersionsLine({ andes: '1.9.3' })).toBe('andes 1.9.3');
+  });
+
+  it('puts julia first, then the packages alphabetically, joined with a comma', () => {
+    // The expected string is written out by hand: julia, then PowerFlows,
+    // PowerNetworkMatrices, PowerSimulations, PowerSystems alphabetically.
+    const versions = {
+      PowerSystems: '5.12.5',
+      julia: '1.11.3',
+      PowerSimulationsDynamics: '0.18.1',
+      PowerFlows: '0.16.4',
+      PowerNetworkMatrices: '0.15.2',
+    };
+    expect(engineVersionsLine(versions)).toBe(
+      'julia 1.11.3, PowerFlows 0.16.4, PowerNetworkMatrices 0.15.2, ' +
+        'PowerSimulationsDynamics 0.18.1, PowerSystems 5.12.5',
+    );
   });
 });
 

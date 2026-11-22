@@ -33,7 +33,7 @@ import { usePflowStore } from '@/store/pflow';
 import { useRunsStore } from '@/store/runs';
 import { useSweepStore } from '@/store/sweep';
 import { hasUnsavedEdits, useEditJournalStore } from '@/store/editJournal';
-import { DEFAULT_ENGINE, engineLabel } from '@/lib/engines';
+import { DEFAULT_ENGINE, engineLabel, engineVersionsLine } from '@/lib/engines';
 import { toast } from '@/lib/toast';
 
 // The confirm is its own chunk, fetched the first time a switch asks for it:
@@ -155,6 +155,10 @@ export function EnginePicker() {
               : isCurrent
                 ? undefined
                 : (blocked ?? undefined);
+            // The versions go on a second line under the routines, inside the
+            // opened list only: the trigger and the top bar width do not
+            // change. An engine that reports none renders exactly as before.
+            const versionsLine = engineVersionsLine(entry.versions);
             return (
               <TopBarMenuItem
                 key={entry.name}
@@ -163,6 +167,7 @@ export function EnginePicker() {
                 aria-current={isCurrent ? 'true' : undefined}
                 unavailableReason={reason}
                 note={entry.routines.length > 0 ? entry.routines.join(', ') : 'No routines'}
+                detail={versionsLine ?? undefined}
                 onClick={() => choose(entry.name)}
               >
                 {engineLabel(entry.name)}

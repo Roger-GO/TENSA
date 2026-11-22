@@ -307,6 +307,12 @@ export interface TopBarMenuItemProps extends Omit<
    * unavailable, where the line under the label is the reason.
    */
   note?: string;
+  /**
+   * A second muted line under the note, in the same styling (the engine
+   * picker's package versions under the routines). Shown only with a note;
+   * left out, like the note, while the entry is unavailable.
+   */
+  detail?: string;
   /** Stable testid. */
   testId?: string;
   /**
@@ -327,6 +333,7 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
       preventCloseOnSelect = false,
       unavailableReason,
       note,
+      detail,
       onClick,
       testId,
       className,
@@ -407,12 +414,22 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
               {unavailableReason}
             </span>
           ) : note !== undefined ? (
-            <span
-              data-testid={testId ? `${testId}-note` : undefined}
-              className="text-muted-foreground text-[10px] leading-snug"
-            >
-              {note}
-            </span>
+            <>
+              <span
+                data-testid={testId ? `${testId}-note` : undefined}
+                className="text-muted-foreground text-[10px] leading-snug"
+              >
+                {note}
+              </span>
+              {detail !== undefined ? (
+                <span
+                  data-testid={testId ? `${testId}-detail` : undefined}
+                  className="text-muted-foreground text-[10px] leading-snug"
+                >
+                  {detail}
+                </span>
+              ) : null}
+            </>
           ) : null}
         </span>
         {shortcut ? (
