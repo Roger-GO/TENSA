@@ -8,7 +8,7 @@
  * changes; the gate in `useRunReadiness` is what a second engine is held
  * to.
  */
-import type { EngineList } from '@/api/types';
+import type { DisturbanceSpec, EngineList } from '@/api/types';
 
 /** The engine a session is created for when the user has not chosen one. */
 export const DEFAULT_ENGINE = 'andes';
@@ -39,6 +39,103 @@ export function engineRoutines(
   if (engines === undefined || name === null) return null;
   const entry = engines.engines.find((e) => e.name === name);
   return entry === undefined ? null : entry.routines;
+}
+
+/** The load models a dynamic run can apply, in the order the server lists them. */
+export type TdsLoadModel = 'impedance' | 'power' | 'as-case';
+
+/**
+ * Per-routine options of one engine, as `routine_options` carries them. The
+ * generated entry type carries the block as an open record; this is the shape
+ * the readers below read of it.
+ */
+export interface RoutineOptions {
+  streaming?: boolean;
+  abort?: boolean;
+  disturbances?: readonly string[];
+  options?: { load_model?: readonly TdsLoadModel[] };
+}
+
+/** The `routine_options` block of one engine entry, or null when it has none. */
+function routineOptionsOf(
+  engines: EngineList | null | undefined,
+  name: string | null,
+): Record<string, RoutineOptions> | null {
+  if (engines === null || engines === undefined || name === null) return null;
+  const entry = engines.engines.find((e) => e.name === name);
+  if (entry === undefined) return null;
+  const block = (entry as { routine_options?: Record<string, RoutineOptions> }).routine_options;
+  return block === undefined || block === null ? null : block;
+}
+
+/**
+ * The options of routine `routine` of the engine `name`, or null when the
+ * engines list is not loaded, does not name the engine, or the engine lists
+ * no `routine_options` for the routine. ANDES has no `tds` block: null means
+ * the ANDES behaviour, and every consumer shows what it shows today.
+ */
+export function engineRoutineOptions(
+  engines: EngineList | null | undefined,
+  name: string | null,
+  routine: 'tds' | 'eig',
+): RoutineOptions | null {
+  return routineOptionsOf(engines, name)?.[routine] ?? null;
+}
+
+/**
+ * The disturbance kinds the engine accepts for `tds`, or null when unknown.
+ * ANDES answers null, which means the client offers Fault, Toggle and Alter
+ * as today.
+ */
+export function engineDisturbanceKinds(
+  engines: EngineList | null | undefined,
+  name: string | null,
+): readonly string[] | null {
+  return routineOptionsOf(engines, name)?.tds?.disturbances ?? null;
+}
+
+/**
+ * The load models the engine takes for a dynamic run, or null when it takes
+ * none (ANDES) or the list is not loaded. Null means: show no load model
+ * control and send no load_model field.
+ */
+export function engineLoadModels(
+  engines: EngineList | null | undefined,
+  name: string | null,
+): readonly TdsLoadModel[] | null {
+  return routineOptionsOf(engines, name)?.tds?.options?.load_model ?? null;
+}
+
+/**
+ * The spec kinds an engine's accepted disturbance list allows. Null (ANDES,
+ * or a list not loaded) allows all three, as the disturbance form has always
+ * offered. No engine capability names an alter, so a restricted list never
+ * adds it.
+ */
+export function allowedSpecKinds(
+  kinds: readonly string[] | null,
+): ReadonlySet<DisturbanceSpec['kind']> {
+  if (kinds === null) return new Set(['fault', 'toggle', 'alter']);
+  const out = new Set<DisturbanceSpec['kind']>();
+  if (kinds.includes('bus_fault')) out.add('fault');
+  if (kinds.includes('branch_trip') || kinds.includes('gen_trip')) out.add('toggle');
+  return out;
+}
+
+/**
+ * The toggle target device kinds an engine's accepted disturbance list
+ * allows: branches (a line trip) and generators (a generator trip). Null
+ * (ANDES, or a list not loaded) answers null, which offers every model, as
+ * the toggle form has always done.
+ */
+export function allowedToggleTargets(
+  kinds: readonly string[] | null,
+): ReadonlySet<'branch' | 'generator'> | null {
+  if (kinds === null) return null;
+  const out = new Set<'branch' | 'generator'>();
+  if (kinds.includes('branch_trip')) out.add('branch');
+  if (kinds.includes('gen_trip')) out.add('generator');
+  return out;
 }
 
 /**

@@ -1,7 +1,14 @@
 import { useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useRunsStore } from '@/store/runs';
-import { usePlotStore, parseColumnName, groupLabel } from '@/store/plot';
+import { useCaseStore } from '@/store/case';
+import {
+  usePlotStore,
+  parseColumnName,
+  groupLabel,
+  neutralElementLabel,
+  neutralQuantityUnit,
+} from '@/store/plot';
 import type { ParsedSeries, VarGroup } from '@/store/plot';
 import { RunLegendChip } from './RunLegendChip';
 import { resolveOverlayRuns, usePlotRunId } from './overlayRuns';
@@ -53,6 +60,37 @@ interface GroupBucket {
   elements: ElementBucket[];
   /** Total leaf series count across elements (used for the header counter). */
   totalSeries: number;
+}
+
+/**
+ * The name the topology gives a neutral series' element key (``bus:7``,
+ * ``gen:2-1``), or null when it has none for it; the label then falls back to
+ * the bare key.
+ */
+function neutralElementName(
+  topology: ReturnType<typeof useCaseStore.getState>['topology'],
+  key: string,
+): string | null {
+  if (topology === null || topology === undefined) return null;
+  const colon = key.indexOf(':');
+  if (colon <= 0) return null;
+  const bucket = key.slice(0, colon);
+  const id = key.slice(colon + 1);
+  const entries =
+    bucket === 'bus'
+      ? topology.buses
+      : bucket === 'gen'
+        ? topology.generators
+        : bucket === 'line'
+          ? [...topology.lines, ...topology.transformers]
+          : bucket === 'load'
+            ? topology.loads
+            : [];
+  // A generator key carries the unit id after a dash (``gen:2-1``); the
+  // topology names the unit by its idx, so the id is tried as a suffix.
+  const base = bucket === 'gen' ? id.split('-')[0]! : id;
+  const found = entries.find((e) => String(e.idx) === id || String(e.idx) === base);
+  return found === undefined ? null : found.name;
 }
 
 /**
@@ -211,6 +249,7 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
   const setSelection = usePlotStore((s) => s.setSelection);
   const setFilter = usePlotStore((s) => s.setFilter);
   const toggleExpanded = usePlotStore((s) => s.toggleExpanded);
+  const topology = useCaseStore((s) => s.topology);
 
   const { tree, availability } = useMemo(() => {
     if (pickerRunIds.length === 0) {
@@ -232,10 +271,16 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
     let named = 0;
     for (const name of columnNames) {
       const p = parseColumnName(name);
+      // Voltage AND frequency (gen_state omega; a neutral run's rotor_speed)
+      // are always plottable.
       if (p && p.group === 'bus_v' && p.field === 'v' && buses < MAX_DEFAULT_SERIES) {
         defaults.push(name);
         buses += 1;
-      } else if (p && p.group === 'dae' && named < MAX_DEFAULT_SERIES) {
+      } else if (
+        p &&
+        (p.group === 'dae' || (p.group === 'gen_state' && p.neutral?.quantity === 'rotor_speed')) &&
+        named < MAX_DEFAULT_SERIES
+      ) {
         defaults.push(name);
         named += 1;
       }
@@ -412,7 +457,12 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                               testId={`variable-tree-picker-element-${elKey}`}
                             />
                             <span className="text-foreground font-mono text-xs">
-                              {el.elementIdx}
+                              {el.series[0]?.neutral !== undefined
+                                ? neutralElementLabel(
+                                    el.series[0].neutral.key,
+                                    neutralElementName(topology, el.series[0].neutral.key),
+                                  )
+                                : el.elementIdx}
                             </span>
                             <span className="text-muted-foreground text-[10px]">
                               ({el.series.length})
@@ -452,8 +502,14 @@ export function VariableTreePicker({ runId, className }: VariableTreePickerProps
                                     )}
                                   />
                                   <span className="text-foreground font-mono text-xs">
-                                    {s.name}
+                                    {s.neutral !== undefined ? s.neutral.quantity : s.name}
                                   </span>
+                                  {s.neutral !== undefined &&
+                                  neutralQuantityUnit(s.neutral.quantity) !== null ? (
+                                    <span className="text-muted-foreground text-[10px]">
+                                      ({neutralQuantityUnit(s.neutral.quantity)})
+                                    </span>
+                                  ) : null}
                                   {isMultiRun && availSet !== undefined ? (
                                     <span
                                       data-testid={`variable-tree-picker-leaf-availability-${s.name}`}

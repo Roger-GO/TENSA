@@ -24,6 +24,7 @@ import { EIGParticipationTable } from './EIGParticipationTable';
 import { EIGDampingChart } from './EIGDampingChart';
 import { SEResidualChart } from './SEResidualChart';
 import { useAnalyzeStore } from '@/store/analyze';
+import { useUiStore } from '@/store/ui';
 import {
   useCpfRun,
   useCurrentTopology,
@@ -32,7 +33,7 @@ import {
   useSeRun,
 } from '@/api/queries';
 import type { SeRunVars } from '@/api/queries';
-import type { SeResult } from '@/api/types';
+import type { EigResult, SeResult } from '@/api/types';
 import { formatSignificant } from '@/lib/series';
 import { directionRows } from '@/lib/cpfOptions';
 import { useSessionStore } from '@/store/session';
@@ -388,7 +389,10 @@ export function AnalyzeEigSubMode() {
 
   const onRun = () => {
     if (!sessionId) return;
-    eigRun.mutate(sessionId);
+    // The session's load-model choice goes with the run for an engine that
+    // takes one; null sends no field, as the TDS frame does.
+    const loadModel = useUiStore.getState().tdsLoadModel;
+    eigRun.mutate(loadModel === null ? sessionId : { sessionId, loadModel });
   };
   // "Run eigenvalue analysis (EIG)" in the Run menu and the palette.
   useRequestedRun(['eig'], () => {
@@ -396,6 +400,13 @@ export function AnalyzeEigSubMode() {
   });
 
   const eigError = eigRun.error;
+  // The dynamic-run fields of an EIG result (`notes`, `load_model`) ride the
+  // same payload; the brand predates them, so they are read through this
+  // widening, which an ANDES result (both absent) answers as empty.
+  const eigDynamics =
+    eigResult === null
+      ? null
+      : (eigResult as EigResult & { notes?: string[]; load_model?: string | null });
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -427,6 +438,29 @@ export function AnalyzeEigSubMode() {
       <RunReadinessNote routine="eig" testId="analyze-run-eig" />
 
       <AnalyzeRoutineError routine="eig" error={eigError} />
+
+      {eigDynamics !== null &&
+      ((eigDynamics.notes ?? []).length > 0 || (eigDynamics.load_model ?? null) !== null) ? (
+        <div data-testid="eig-result-notes" className="flex flex-col gap-1">
+          {(eigDynamics.load_model ?? null) !== null ? (
+            <span
+              data-testid="eig-result-load-model"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              Load model: {eigDynamics.load_model}
+            </span>
+          ) : null}
+          {(eigDynamics.notes ?? []).map((note, i) => (
+            <span
+              key={i}
+              data-testid={`eig-result-note-${i}`}
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              {note}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <EIGScatter className="min-h-[260px] flex-shrink-0" />
       <EIGParticipationTable className="min-h-[140px] flex-shrink-0" />

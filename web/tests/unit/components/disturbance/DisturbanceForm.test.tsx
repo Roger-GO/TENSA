@@ -8,8 +8,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 import { DisturbanceForm } from '@/components/disturbance/DisturbanceForm';
-import { blankFaultSpec, blankToggleSpec } from '@/store/disturbance';
-import type { DisturbanceSpec, TopologySummary } from '@/api/types';
+import { allowedSpecKinds } from '@/lib/engines';
+import { blankAlterSpec, blankFaultSpec, blankToggleSpec } from '@/store/disturbance';
+import { useSessionStore } from '@/store/session';
+import type { DisturbanceSpec, EngineCapabilities, EngineList, TopologySummary } from '@/api/types';
 
 let MOCK_TOPOLOGY: TopologySummary | null = null;
 
@@ -29,6 +31,29 @@ function withQueryClient(ui: ReactNode) {
   return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
 }
 
+/** The capabilities block of a Sienna engine, as `GET /engines` carries it. */
+function siennaEngines(): EngineList {
+  const sienna = {
+    name: 'sienna',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: [], write: [] },
+    routines: ['matrices', 'pflow', 'eig', 'tds'],
+    ops: [],
+    editing: false,
+    routine_options: {
+      tds: {
+        streaming: true,
+        abort: true,
+        disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+        options: { load_model: ['impedance', 'power', 'as-case'] },
+      },
+    },
+  } as unknown as EngineCapabilities;
+  return { engines: [sienna] };
+}
+
 beforeEach(() => {
   MOCK_TOPOLOGY = {
     state: 'pre-setup',
@@ -39,6 +64,7 @@ beforeEach(() => {
     loads: [],
     shunts: [],
   };
+  useSessionStore.setState({ engine: null, engines: null });
 });
 
 describe('<DisturbanceForm />', () => {
@@ -87,5 +113,56 @@ describe('<DisturbanceForm />', () => {
     );
     expect(screen.queryByTestId('disturbance-kind')).toBeNull();
     expect(screen.getByTestId('fault-spec-form')).toBeInTheDocument();
+  });
+
+  it('an ANDES session offers Fault, Toggle and Alter', () => {
+    render(
+      withQueryClient(
+        <DisturbanceForm spec={{ ...blankFaultSpec(), bus_idx: '1' }} onChange={() => {}} />,
+      ),
+    );
+    const select = screen.getByTestId('disturbance-kind') as HTMLSelectElement;
+    const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(values).toEqual(['fault', 'toggle', 'alter']);
+  });
+
+  it('a Sienna session offers Fault and Toggle only', () => {
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(
+      withQueryClient(
+        <DisturbanceForm spec={{ ...blankFaultSpec(), bus_idx: '1' }} onChange={() => {}} />,
+      ),
+    );
+    const select = screen.getByTestId('disturbance-kind') as HTMLSelectElement;
+    const values = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(values).toEqual(['fault', 'toggle']);
+  });
+
+  it('a Sienna session with an alter draft says the kind is not available and renders no sub-form', () => {
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(withQueryClient(<DisturbanceForm spec={blankAlterSpec()} onChange={() => {}} />));
+    expect(screen.getByTestId('disturbance-kind-not-available')).toHaveTextContent(
+      'not available with the Sienna engine',
+    );
+    expect(screen.queryByTestId('alter-spec-form')).toBeNull();
+    expect(screen.queryByTestId('fault-spec-form')).toBeNull();
+    expect(screen.queryByTestId('toggle-spec-form')).toBeNull();
+  });
+});
+
+describe('allowedSpecKinds', () => {
+  it('null allows all three kinds', () => {
+    expect([...allowedSpecKinds(null)].sort()).toEqual(['alter', 'fault', 'toggle']);
+  });
+
+  it('the Sienna list allows fault and toggle', () => {
+    expect([...allowedSpecKinds(['branch_trip', 'bus_fault', 'gen_trip'])].sort()).toEqual([
+      'fault',
+      'toggle',
+    ]);
+  });
+
+  it('a bus-fault-only list allows only fault', () => {
+    expect([...allowedSpecKinds(['bus_fault'])]).toEqual(['fault']);
   });
 });

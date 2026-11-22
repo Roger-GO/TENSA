@@ -217,6 +217,9 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // Unit 14: free-form ``tds_config_overrides`` dict from the TDS
   // Advanced key-value editor. Empty by default → no overrides forwarded.
   const tdsConfigOverridesCustom = useUiStore((s) => s.tdsConfigOverrides);
+  // The load model an engine that takes one (Sienna) is asked for. Null sends
+  // no field, leaving the choice to the server.
+  const tdsLoadModel = useUiStore((s) => s.tdsLoadModel);
 
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -484,6 +487,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       ...(h === undefined ? {} : { h }),
       integrator: wireIntegrator,
       ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),
+      ...(tdsLoadModel === null ? {} : { loadModel: tdsLoadModel }),
     };
 
     const scenario = describeScenario(disturbances.map((d) => d.spec));

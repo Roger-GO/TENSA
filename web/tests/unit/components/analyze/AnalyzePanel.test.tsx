@@ -1516,3 +1516,28 @@ describe('<AnalyzePanel /> run-readiness notes', () => {
     }
   });
 });
+
+describe('<AnalyzePanel /> eigenvalue notes and load model', () => {
+  it("shows a result's notes and its load model, one muted line each", () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult({
+      ...RESULT_WITH_TDS_INIT,
+      notes: ['PSID calls the validation of its small-signal results work in progress.'],
+      load_model: 'power',
+    } as EigResult);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('eig-result-load-model')).toHaveTextContent('Load model: power');
+    expect(screen.getByTestId('eig-result-note-0')).toHaveTextContent(
+      'PSID calls the validation of its small-signal results work in progress.',
+    );
+  });
+
+  it('shows neither for a result that has none (an ANDES result)', () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult(RESULT_WITH_TDS_INIT);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.queryByTestId('eig-result-notes')).toBeNull();
+  });
+});

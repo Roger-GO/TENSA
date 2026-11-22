@@ -17,6 +17,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { TdsControllerResult } from '@/api/types';
+import type { TdsLoadModel } from '@/lib/engines';
 import type { TdsControllerEntry } from '@/lib/tdsControllers';
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
@@ -144,6 +145,13 @@ export type TdsConfigOverrides = Record<string, number>;
 export const DEFAULT_TDS_CONFIG_OVERRIDES: TdsConfigOverrides = {};
 
 /**
+ * The load model of a dynamic run (`load_model` on the wire), for an engine
+ * that takes one. `null` sends no field and leaves the choice to the server
+ * (whose default is `impedance`), matching how `h: null` omits `h`.
+ */
+export const DEFAULT_TDS_LOAD_MODEL: TdsLoadModel | null = null;
+
+/**
  * Known ANDES ``ss.TDS.config`` keys offered as autocomplete in the
  * Unit 14 key-value editor. Not exhaustive and not a whitelist — the
  * editor accepts any key the user types; these just seed the datalist so
@@ -210,6 +218,14 @@ export interface UiState {
   tdsConfigOverrides: TdsConfigOverrides;
   setTdsConfigOverrides: (next: TdsConfigOverrides) => void;
   resetTdsConfigOverrides: () => void;
+
+  /**
+   * The load model the next dynamic run asks for, for an engine that takes
+   * one (Sienna). `null` sends no `load_model` and leaves the choice to the
+   * server. Session-scoped like the rest of `tdsConfig`: not persisted.
+   */
+  tdsLoadModel: TdsLoadModel | null;
+  setTdsLoadModel: (model: TdsLoadModel | null) => void;
 }
 
 /**
@@ -234,7 +250,11 @@ export const useUiStore = create<UiState>()(
             : { tdsControllerResults: null }),
         })),
       resetTdsConfig: () =>
-        set({ tdsConfig: { ...DEFAULT_TDS_CONFIG }, tdsControllerResults: null }),
+        set({
+          tdsConfig: { ...DEFAULT_TDS_CONFIG },
+          tdsControllerResults: null,
+          tdsLoadModel: DEFAULT_TDS_LOAD_MODEL,
+        }),
 
       tdsControllerResults: null,
       setTdsControllerResults: (results) => set({ tdsControllerResults: results }),
@@ -254,6 +274,9 @@ export const useUiStore = create<UiState>()(
       setTdsConfigOverrides: (next) => set({ tdsConfigOverrides: { ...next } }),
       resetTdsConfigOverrides: () =>
         set({ tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES } }),
+
+      tdsLoadModel: DEFAULT_TDS_LOAD_MODEL,
+      setTdsLoadModel: (model) => set({ tdsLoadModel: model }),
     }),
     {
       name: 'andes-ui-tds-integrator',

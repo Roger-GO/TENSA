@@ -41,19 +41,35 @@ import { failJob, reconcileJobSuccess, registerJob } from './jobGlue';
  * - 422 ``EigComputationError`` — ANDES routine raised (singular
  *   Jacobian after regularization, etc.); surfaced as a banner.
  */
-export function useEigRun(): UseMutationResult<EigResult, Error, SessionId> {
+/**
+ * What an eigenvalue run is started with: the session, and for an engine that
+ * takes one (Sienna) the load model (`load_model` in the body; left out, the
+ * server's default, `impedance`). A bare session id is the run with no
+ * choice, which is how most callers start it.
+ */
+export interface EigRunVars {
+  sessionId: SessionId;
+  loadModel?: string;
+}
+
+function eigRunVars(vars: SessionId | EigRunVars): EigRunVars {
+  return typeof vars === 'string' ? { sessionId: vars } : vars;
+}
+
+export function useEigRun(): UseMutationResult<EigResult, Error, SessionId | EigRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sessionId: SessionId) => {
+    mutationFn: async (vars: SessionId | EigRunVars) => {
+      const { sessionId, loadModel } = eigRunVars(vars);
       return await andesClient.post<EigResult>(`/sessions/${encodeURIComponent(sessionId)}/eig`, {
-        body: {},
+        body: loadModel === undefined ? {} : { load_model: loadModel },
         timeoutMs: TIMEOUTS.pflowRun,
       });
     },
     onMutate: () => ({ jobId: registerJob('eig') }),
-    onSuccess: (data, sessionId, ctx) => {
+    onSuccess: (data, vars, ctx) => {
       useAnalyzeStore.getState().setEigResult(data);
-      queryClient.setQueryData(queryKeys.eig(sessionId), data);
+      queryClient.setQueryData(queryKeys.eig(eigRunVars(vars).sessionId), data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {

@@ -425,3 +425,23 @@ describe('useSldFrameOverlay', () => {
     expect(useAnimationStore.getState().busOverlayByRun['run-1']).toBeUndefined();
   });
 });
+
+describe('getFrameBusOverlay on a neutral (Sienna) run', () => {
+  it('colours a bus by its voltage series, keyed by the bus number as for ANDES', () => {
+    const run = makeRun({
+      seqCount: 2,
+      t: [0, 1],
+      busColumns: {},
+      extraColumns: {
+        'voltage|bus:7': [1.0, 0.92],
+        'angle|bus:7': [0.1, 0.2],
+        'rotor_speed|gen:1-1': [1.0, 1.001],
+      },
+    });
+    const f1 = getFrameBusOverlay(run, 1);
+    // The angle and the machine's speed drive nothing; only the voltage does.
+    expect([...f1.keys()]).toEqual(['7']);
+    expect(f1.get('7')?.voltage).toBe(0.92);
+    expect(f1.get('7')?.band).toBe('danger');
+  });
+});

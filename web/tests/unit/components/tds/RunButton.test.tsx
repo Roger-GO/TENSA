@@ -2479,6 +2479,40 @@ describe('<RunButton /> — integrator wire mapping (Unit 17)', () => {
       min_step: 1e-5,
     });
   });
+
+  it('a load model left at its default sends no load_model key', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel(null);
+    const start = await captureStartTds();
+    expect(start).not.toHaveProperty('load_model');
+  });
+
+  it('a load model the user picked is sent as load_model', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel('power');
+    try {
+      const start = await captureStartTds();
+      expect(start.load_model).toBe('power');
+    } finally {
+      useUiStore.getState().setTdsLoadModel(null);
+    }
+  });
+
+  it('a Sienna session with a default store sends the default integrator and nothing it refuses', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel(null);
+    useSessionStore.setState({ engine: 'sienna' });
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('trapezoidal');
+      expect(start).not.toHaveProperty('load_model');
+      expect(start).not.toHaveProperty('dae_vars');
+      expect(start).not.toHaveProperty('controllers');
+      expect(start).not.toHaveProperty('tds_config_overrides');
+    } finally {
+      useSessionStore.setState({ engine: null });
+    }
+  });
 });
 
 describe('<RunButton /> v0.2 — abort + reset', () => {

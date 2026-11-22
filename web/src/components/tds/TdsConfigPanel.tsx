@@ -22,6 +22,9 @@ import { ControllersEditor } from './ControllersEditor';
 import { DaeVariablePicker } from './DaeVariablePicker';
 import { Button } from '@/components/ui/button';
 import { useRunsStore, MAX_RETENTION_LIMIT } from '@/store/runs';
+import { useSessionStore } from '@/store/session';
+import { engineLoadModels, engineRoutineOptions } from '@/lib/engines';
+import type { TdsLoadModel } from '@/lib/engines';
 
 /**
  * TdsConfigPanel — compact form for the TDS run parameters.
@@ -85,6 +88,22 @@ const VAR_GROUP_HINTS: Record<TdsVarGroup, string> = {
   load_pq: 'Real + reactive consumption (MW / MVAr) per PQ load.',
 };
 
+/** The wording of one load model choice, by value. */
+const LOAD_MODEL_WORDING: Record<TdsLoadModel, { label: string; hint: string }> = {
+  impedance: {
+    label: 'Constant impedance',
+    hint: "Loads draw power as fixed impedances. The server's default.",
+  },
+  power: {
+    label: 'Constant power',
+    hint: 'Loads draw fixed real and reactive power.',
+  },
+  'as-case': {
+    label: 'As the case defines',
+    hint: 'Each load keeps the model the case gives it.',
+  },
+};
+
 const INTEGRATOR_OPTIONS: ReadonlyArray<{
   value: TdsIntegrator;
   step: 'fixed' | 'variable';
@@ -144,6 +163,20 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
   const resetTdsConfigOverrides = useUiStore((s) => s.resetTdsConfigOverrides);
   const retentionLimit = useRunsStore((s) => s.retentionLimit);
   const setRetentionLimit = useRunsStore((s) => s.setRetentionLimit);
+  // The load model an engine that takes one (Sienna) is asked for.
+  const tdsLoadModel = useUiStore((s) => s.tdsLoadModel);
+  const setTdsLoadModel = useUiStore((s) => s.setTdsLoadModel);
+  const engine = useSessionStore((s) => s.engine);
+  const engines = useSessionStore((s) => s.engines);
+
+  // What the session's engine takes. An engine with a `routine_options.tds`
+  // block (Sienna) refuses the ANDES-only run options, so the integrator, the
+  // var groups, the ANDES variables, the controllers and the overrides are
+  // hidden; its `load_model` choices are offered instead. An engine without
+  // the block (ANDES, or a list not loaded yet) renders as it always did.
+  const loadModels = engineLoadModels(engines, engine);
+  const takesLoadModel = loadModels !== null && loadModels.length > 0;
+  const andesOnlyOptions = engineRoutineOptions(engines, engine, 'tds') !== null;
 
   // Raw text inputs so users can clear + re-type without clobbering.
   // We intentionally do NOT re-sync from the store on every render — if
@@ -279,6 +312,7 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
     resetTdsConfig();
     resetTdsToleranceOverrides();
     resetTdsConfigOverrides();
+    setTdsLoadModel(null);
     setTdsIntegrator('trapezoidal');
     setTfText(String(DEFAULT_TDS_CONFIG.tf));
     setHText(DEFAULT_TDS_CONFIG.h === null ? '' : String(DEFAULT_TDS_CONFIG.h));
@@ -322,71 +356,144 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         hint="The simulated time the run stops at, in seconds. A disturbance set for a later time is never reached."
       />
 
-      {!isVariableStep ? (
+      {!isVariableStep || andesOnlyOptions ? (
         <NumberField
           id="tds-config-h"
           label="h — fixed step (s, optional)"
           value={hText}
           onChange={setHValue}
           error={errors.h}
-          hint="Leave blank for the ANDES default (1/30 s). The variable-step integrators ignore h; use max_step."
+          hint={
+            andesOnlyOptions
+              ? "Largest step (s); leave blank for the engine's default."
+              : 'Leave blank for the ANDES default (1/30 s). The variable-step integrators ignore h; use max_step.'
+          }
           placeholder="1/30 (default)"
         />
       ) : null}
 
-      <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-integrator">
-        <legend className="text-muted-foreground text-xs font-medium">Integrator</legend>
-        {INTEGRATOR_OPTIONS.map((opt, i) => {
-          const id = `tds-config-integrator-${opt.value}`;
-          const checked = tdsIntegrator === opt.value;
-          const radio = (
-            <label
-              key={opt.value}
-              htmlFor={id}
+      {takesLoadModel ? (
+        <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-load-model">
+          <legend className="text-muted-foreground text-xs font-medium">Load model</legend>
+          <label
+            htmlFor="tds-config-load-model-default"
+            className={cn(
+              'flex items-start gap-2',
+              'cursor-pointer rounded px-1 py-1',
+              'hover:bg-muted/40 transition-colors',
+            )}
+          >
+            <input
+              id="tds-config-load-model-default"
+              data-testid="tds-config-load-model-default"
+              type="radio"
+              name="tds-config-load-model"
+              checked={tdsLoadModel === null}
+              onChange={() => setTdsLoadModel(null)}
               className={cn(
-                'flex items-start gap-2',
-                'cursor-pointer rounded px-1 py-1',
-                'hover:bg-muted/40 transition-colors',
+                'border-border mt-0.5 h-3.5 w-3.5 border',
+                'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
               )}
-            >
-              <input
-                id={id}
-                data-testid={id}
-                type="radio"
-                name="tds-config-integrator"
-                checked={checked}
-                onChange={() => setTdsIntegrator(opt.value)}
+            />
+            <span className="flex flex-col">
+              <span className="text-foreground text-xs">Server default</span>
+              <span className="text-muted-foreground text-[10px] leading-snug">
+                Send no load model; the run uses the server's choice (constant impedance).
+              </span>
+            </span>
+          </label>
+          {loadModels.map((value) => {
+            const id = `tds-config-load-model-${value}`;
+            const wording = LOAD_MODEL_WORDING[value];
+            return (
+              <label
+                key={value}
+                htmlFor={id}
                 className={cn(
-                  'border-border mt-0.5 h-3.5 w-3.5 border',
-                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  'flex items-start gap-2',
+                  'cursor-pointer rounded px-1 py-1',
+                  'hover:bg-muted/40 transition-colors',
                 )}
-              />
-              <span className="flex flex-col">
-                <span className="text-foreground text-xs">{opt.label}</span>
-                <span className="text-muted-foreground text-[10px] leading-snug">{opt.hint}</span>
-              </span>
-            </label>
-          );
-          // The six choices stay one radio group (one ``name``, so the
-          // arrow keys move through all of them); a short heading marks
-          // where the fixed-step ones end and the variable-step ones begin.
-          const startsGroup = i === 0 || INTEGRATOR_OPTIONS[i - 1]?.step !== opt.step;
-          if (!startsGroup) return radio;
-          return (
-            <Fragment key={opt.value}>
-              <span
-                data-testid={`tds-config-integrator-group-${opt.step}`}
-                className="text-muted-foreground text-[10px] leading-snug font-medium"
               >
-                {opt.step === 'fixed' ? 'Fixed step (uses h)' : 'Variable step (ignores h)'}
-              </span>
-              {radio}
-            </Fragment>
-          );
-        })}
-      </fieldset>
+                <input
+                  id={id}
+                  data-testid={id}
+                  type="radio"
+                  name="tds-config-load-model"
+                  checked={tdsLoadModel === value}
+                  onChange={() => setTdsLoadModel(value)}
+                  className={cn(
+                    'border-border mt-0.5 h-3.5 w-3.5 border',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  )}
+                />
+                <span className="flex flex-col">
+                  <span className="text-foreground text-xs">{wording.label}</span>
+                  <span className="text-muted-foreground text-[10px] leading-snug">
+                    {wording.hint}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </fieldset>
+      ) : null}
 
-      {isManual ? (
+      {!andesOnlyOptions ? (
+        <fieldset className="flex flex-col gap-1.5" data-testid="tds-config-integrator">
+          <legend className="text-muted-foreground text-xs font-medium">Integrator</legend>
+          {INTEGRATOR_OPTIONS.map((opt, i) => {
+            const id = `tds-config-integrator-${opt.value}`;
+            const checked = tdsIntegrator === opt.value;
+            const radio = (
+              <label
+                key={opt.value}
+                htmlFor={id}
+                className={cn(
+                  'flex items-start gap-2',
+                  'cursor-pointer rounded px-1 py-1',
+                  'hover:bg-muted/40 transition-colors',
+                )}
+              >
+                <input
+                  id={id}
+                  data-testid={id}
+                  type="radio"
+                  name="tds-config-integrator"
+                  checked={checked}
+                  onChange={() => setTdsIntegrator(opt.value)}
+                  className={cn(
+                    'border-border mt-0.5 h-3.5 w-3.5 border',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  )}
+                />
+                <span className="flex flex-col">
+                  <span className="text-foreground text-xs">{opt.label}</span>
+                  <span className="text-muted-foreground text-[10px] leading-snug">{opt.hint}</span>
+                </span>
+              </label>
+            );
+            // The six choices stay one radio group (one ``name``, so the
+            // arrow keys move through all of them); a short heading marks
+            // where the fixed-step ones end and the variable-step ones begin.
+            const startsGroup = i === 0 || INTEGRATOR_OPTIONS[i - 1]?.step !== opt.step;
+            if (!startsGroup) return radio;
+            return (
+              <Fragment key={opt.value}>
+                <span
+                  data-testid={`tds-config-integrator-group-${opt.step}`}
+                  className="text-muted-foreground text-[10px] leading-snug font-medium"
+                >
+                  {opt.step === 'fixed' ? 'Fixed step (uses h)' : 'Variable step (ignores h)'}
+                </span>
+                {radio}
+              </Fragment>
+            );
+          })}
+        </fieldset>
+      ) : null}
+
+      {!andesOnlyOptions && isManual ? (
         <div
           data-testid="tds-config-tolerance-overrides"
           className="border-border/60 bg-muted/30 flex flex-col gap-2 rounded border p-2"
@@ -430,69 +537,71 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         </div>
       ) : null}
 
-      <fieldset
-        className="flex flex-col gap-1.5"
-        data-testid="tds-config-vars"
-        aria-describedby="tds-config-vars-error"
-      >
-        <legend className="text-muted-foreground text-xs font-medium">
-          Variable groups to stream
-        </legend>
-        <p
-          data-testid="tds-config-vars-fixed-hint"
-          className="text-muted-foreground text-[10px] leading-snug"
+      {!andesOnlyOptions ? (
+        <fieldset
+          className="flex flex-col gap-1.5"
+          data-testid="tds-config-vars"
+          aria-describedby="tds-config-vars-error"
         >
-          Fixed at run-start — pick the groups you want plotted BEFORE clicking Run TDS. Voltage +
-          frequency stream by default.
-        </p>
-        {TDS_VAR_GROUPS.map((group) => {
-          const id = `tds-config-var-${group}`;
-          const checked = tdsConfig.vars.includes(group);
-          return (
-            <label
-              key={group}
-              htmlFor={id}
-              className={cn(
-                'flex items-start gap-2',
-                'cursor-pointer rounded px-1 py-1',
-                'hover:bg-muted/40 transition-colors',
-              )}
-            >
-              <input
-                id={id}
-                data-testid={`tds-config-var-${group}`}
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggleVar(group)}
-                className={cn(
-                  'border-border mt-0.5 h-3.5 w-3.5 rounded border',
-                  'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-                )}
-              />
-              <span className="flex flex-col">
-                <span className="text-foreground text-xs">{VAR_GROUP_LABELS[group]}</span>
-                <span className="text-muted-foreground text-[10px] leading-snug">
-                  {VAR_GROUP_HINTS[group]}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-        {errors.vars ? (
-          <span
-            id="tds-config-vars-error"
-            role="alert"
-            data-testid="error-tds-config-vars"
-            className="text-danger text-[10px]"
+          <legend className="text-muted-foreground text-xs font-medium">
+            Variable groups to stream
+          </legend>
+          <p
+            data-testid="tds-config-vars-fixed-hint"
+            className="text-muted-foreground text-[10px] leading-snug"
           >
-            {errors.vars}
-          </span>
-        ) : null}
-      </fieldset>
+            Fixed at run-start — pick the groups you want plotted BEFORE clicking Run TDS. Voltage +
+            frequency stream by default.
+          </p>
+          {TDS_VAR_GROUPS.map((group) => {
+            const id = `tds-config-var-${group}`;
+            const checked = tdsConfig.vars.includes(group);
+            return (
+              <label
+                key={group}
+                htmlFor={id}
+                className={cn(
+                  'flex items-start gap-2',
+                  'cursor-pointer rounded px-1 py-1',
+                  'hover:bg-muted/40 transition-colors',
+                )}
+              >
+                <input
+                  id={id}
+                  data-testid={`tds-config-var-${group}`}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleVar(group)}
+                  className={cn(
+                    'border-border mt-0.5 h-3.5 w-3.5 rounded border',
+                    'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+                  )}
+                />
+                <span className="flex flex-col">
+                  <span className="text-foreground text-xs">{VAR_GROUP_LABELS[group]}</span>
+                  <span className="text-muted-foreground text-[10px] leading-snug">
+                    {VAR_GROUP_HINTS[group]}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+          {errors.vars ? (
+            <span
+              id="tds-config-vars-error"
+              role="alert"
+              data-testid="error-tds-config-vars"
+              className="text-danger text-[10px]"
+            >
+              {errors.vars}
+            </span>
+          ) : null}
+        </fieldset>
+      ) : null}
 
-      <DaeVariablePicker />
+      {!andesOnlyOptions ? <DaeVariablePicker /> : null}
 
-      <ControllersEditor />
+      {!andesOnlyOptions ? <ControllersEditor /> : null}
 
       <NumberField
         id="tds-config-max-rate"
@@ -503,106 +612,108 @@ export function TdsConfigPanel({ className }: TdsConfigPanelProps) {
         hint="Power-user override. Higher values raise memory + redraw cost."
       />
 
-      <details className="group" data-testid="tds-config-advanced">
-        <summary
-          className={cn(
-            'text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium',
-            'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
-          )}
-        >
-          Advanced — ANDES TDS config overrides
-        </summary>
-        <div
-          data-testid="tds-config-overrides-editor"
-          className="border-border/60 bg-muted/30 mt-2 flex flex-col gap-2 rounded border p-2"
-        >
-          <p className="text-muted-foreground text-[10px] leading-snug">
-            Forward additional <code className="font-mono">ss.TDS.config</code> keys to the
-            substrate (e.g. <code className="font-mono">tol</code>,{' '}
-            <code className="font-mono">max_iter</code>). Leave empty to send no overrides. Unknown
-            keys are rejected by the substrate.
-          </p>
-
-          {/* Shared autocomplete list for every key input. */}
-          <datalist id="tds-config-override-keys">
-            {KNOWN_TDS_CONFIG_KEYS.map((k) => (
-              <option key={k} value={k} />
-            ))}
-          </datalist>
-
-          {overrideRows.length === 0 ? (
-            <p
-              data-testid="tds-config-overrides-empty"
-              className="text-muted-foreground text-[10px] italic"
-            >
-              No overrides.
-            </p>
-          ) : (
-            overrideRows.map((row, idx) => (
-              <div
-                key={idx}
-                className="flex flex-col gap-1"
-                data-testid={`tds-config-override-${idx}`}
-              >
-                <div className="flex items-center gap-2">
-                  <Input
-                    list="tds-config-override-keys"
-                    aria-label={`Override key ${idx + 1}`}
-                    data-testid={`tds-config-override-key-${idx}`}
-                    value={row.key}
-                    onChange={(t) => updateOverrideRow(idx, { key: t })}
-                    placeholder="key"
-                    className="h-7 flex-1 font-mono text-xs"
-                  />
-                  <Input
-                    inputMode="decimal"
-                    aria-label={`Override value ${idx + 1}`}
-                    data-testid={`tds-config-override-value-${idx}`}
-                    value={row.value}
-                    onChange={(t) => updateOverrideRow(idx, { value: t })}
-                    placeholder="value"
-                    aria-invalid={overrideRowErrors[idx] ? true : undefined}
-                    className={cn(
-                      'h-7 w-24 font-mono text-xs',
-                      overrideRowErrors[idx] ? 'border-danger' : '',
-                    )}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeOverrideRow(idx)}
-                    aria-label={`Remove override ${idx + 1}`}
-                    data-testid={`tds-config-override-remove-${idx}`}
-                  >
-                    Remove
-                  </Button>
-                </div>
-                {overrideRowErrors[idx] ? (
-                  <span
-                    role="alert"
-                    data-testid={`error-tds-config-override-${idx}`}
-                    className="text-danger text-[10px]"
-                  >
-                    {overrideRowErrors[idx]}
-                  </span>
-                ) : null}
-              </div>
-            ))
-          )}
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addOverrideRow}
-            data-testid="tds-config-override-add"
-            className="self-start"
+      {!andesOnlyOptions ? (
+        <details className="group" data-testid="tds-config-advanced">
+          <summary
+            className={cn(
+              'text-muted-foreground hover:text-foreground cursor-pointer text-xs font-medium',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+            )}
           >
-            Add override
-          </Button>
-        </div>
-      </details>
+            Advanced — ANDES TDS config overrides
+          </summary>
+          <div
+            data-testid="tds-config-overrides-editor"
+            className="border-border/60 bg-muted/30 mt-2 flex flex-col gap-2 rounded border p-2"
+          >
+            <p className="text-muted-foreground text-[10px] leading-snug">
+              Forward additional <code className="font-mono">ss.TDS.config</code> keys to the
+              substrate (e.g. <code className="font-mono">tol</code>,{' '}
+              <code className="font-mono">max_iter</code>). Leave empty to send no overrides.
+              Unknown keys are rejected by the substrate.
+            </p>
+
+            {/* Shared autocomplete list for every key input. */}
+            <datalist id="tds-config-override-keys">
+              {KNOWN_TDS_CONFIG_KEYS.map((k) => (
+                <option key={k} value={k} />
+              ))}
+            </datalist>
+
+            {overrideRows.length === 0 ? (
+              <p
+                data-testid="tds-config-overrides-empty"
+                className="text-muted-foreground text-[10px] italic"
+              >
+                No overrides.
+              </p>
+            ) : (
+              overrideRows.map((row, idx) => (
+                <div
+                  key={idx}
+                  className="flex flex-col gap-1"
+                  data-testid={`tds-config-override-${idx}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      list="tds-config-override-keys"
+                      aria-label={`Override key ${idx + 1}`}
+                      data-testid={`tds-config-override-key-${idx}`}
+                      value={row.key}
+                      onChange={(t) => updateOverrideRow(idx, { key: t })}
+                      placeholder="key"
+                      className="h-7 flex-1 font-mono text-xs"
+                    />
+                    <Input
+                      inputMode="decimal"
+                      aria-label={`Override value ${idx + 1}`}
+                      data-testid={`tds-config-override-value-${idx}`}
+                      value={row.value}
+                      onChange={(t) => updateOverrideRow(idx, { value: t })}
+                      placeholder="value"
+                      aria-invalid={overrideRowErrors[idx] ? true : undefined}
+                      className={cn(
+                        'h-7 w-24 font-mono text-xs',
+                        overrideRowErrors[idx] ? 'border-danger' : '',
+                      )}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeOverrideRow(idx)}
+                      aria-label={`Remove override ${idx + 1}`}
+                      data-testid={`tds-config-override-remove-${idx}`}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  {overrideRowErrors[idx] ? (
+                    <span
+                      role="alert"
+                      data-testid={`error-tds-config-override-${idx}`}
+                      className="text-danger text-[10px]"
+                    >
+                      {overrideRowErrors[idx]}
+                    </span>
+                  ) : null}
+                </div>
+              ))
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addOverrideRow}
+              data-testid="tds-config-override-add"
+              className="self-start"
+            >
+              Add override
+            </Button>
+          </div>
+        </details>
+      ) : null}
 
       <FieldRow
         id="tds-config-retention"

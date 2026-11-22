@@ -135,6 +135,12 @@ export interface TdsArgs {
    * config namespace (unknown keys are rejected substrate-side).
    */
   tdsConfigOverrides?: Record<string, number>;
+  /**
+   * The load model a dynamic run applies (`load_model` on the wire), for an
+   * engine that takes one. Left out when unset, which leaves the choice to
+   * the server.
+   */
+  loadModel?: string;
 }
 
 /** Connection-status events surfaced to the UI status badge. */
@@ -555,7 +561,7 @@ export class RunStream {
       }
       this.send({ type: 'resume', run_id: this.runId, last_seq: this.rowCount });
     } else {
-      const { tf, h, vars, daeVars, controllers, integrator, tdsConfigOverrides } =
+      const { tf, h, vars, daeVars, controllers, integrator, tdsConfigOverrides, loadModel } =
         this.opts.tdsArgs;
       const payload: Record<string, unknown> = {
         type: 'start_tds',
@@ -574,6 +580,7 @@ export class RunStream {
       if (tdsConfigOverrides !== undefined) {
         payload.tds_config_overrides = tdsConfigOverrides;
       }
+      if (loadModel !== undefined) payload.load_model = loadModel;
       this.send(payload);
     }
     this.phase = 'awaiting-stream-start';

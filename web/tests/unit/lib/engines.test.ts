@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_ENGINE,
   SAVE_FORMATS,
+  engineDisturbanceKinds,
   engineLabel,
+  engineLoadModels,
+  engineRoutineOptions,
   engineRoutines,
   engineSaveFormats,
   engineVersionsLine,
@@ -97,6 +100,102 @@ describe('engineVersionsLine', () => {
       'julia 1.11.3, PowerFlows 0.16.4, PowerNetworkMatrices 0.15.2, ' +
         'PowerSimulationsDynamics 0.18.1, PowerSystems 5.12.5',
     );
+  });
+});
+
+describe('engineRoutineOptions', () => {
+  function siennaWithRoutineOptions(): EngineList {
+    const sienna = {
+      ...makeEngine('sienna', ['matrices', 'pflow', 'eig', 'tds']),
+      routine_options: {
+        pflow: { methods: ['ac', 'dc', 'ptdf-dc'] },
+        tds: {
+          streaming: true,
+          abort: true,
+          disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+          options: { load_model: ['impedance', 'power', 'as-case'] },
+        },
+      },
+    } as unknown as EngineCapabilities;
+    return { engines: [makeEngine('andes', ['pflow', 'tds', 'eig', 'cpf', 'se']), sienna] };
+  }
+
+  it('returns the tds block of an engine that carries one', () => {
+    expect(engineRoutineOptions(siennaWithRoutineOptions(), 'sienna', 'tds')).toEqual({
+      streaming: true,
+      abort: true,
+      disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+      options: { load_model: ['impedance', 'power', 'as-case'] },
+    });
+  });
+
+  it('returns null for a routine the block does not name, and for an engine with no block', () => {
+    expect(engineRoutineOptions(siennaWithRoutineOptions(), 'sienna', 'eig')).toBeNull();
+    expect(engineRoutineOptions(siennaWithRoutineOptions(), 'andes', 'tds')).toBeNull();
+  });
+
+  it('returns null when the list is not loaded or the engine is null', () => {
+    expect(engineRoutineOptions(undefined, 'sienna', 'tds')).toBeNull();
+    expect(engineRoutineOptions(null, 'sienna', 'tds')).toBeNull();
+    expect(engineRoutineOptions(siennaWithRoutineOptions(), null, 'tds')).toBeNull();
+  });
+});
+
+describe('engineLoadModels', () => {
+  const engines: EngineList = {
+    engines: [
+      makeEngine('andes', ['pflow', 'tds', 'eig']),
+      {
+        ...makeEngine('sienna', ['pflow', 'eig', 'tds']),
+        routine_options: {
+          tds: {
+            streaming: true,
+            abort: true,
+            disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+            options: { load_model: ['impedance', 'power', 'as-case'] },
+          },
+        },
+      } as unknown as EngineCapabilities,
+    ],
+  };
+
+  it("returns the server's list, in its order, for an engine that takes one", () => {
+    expect(engineLoadModels(engines, 'sienna')).toEqual(['impedance', 'power', 'as-case']);
+  });
+
+  it('returns null for ANDES and for an unloaded list', () => {
+    expect(engineLoadModels(engines, 'andes')).toBeNull();
+    expect(engineLoadModels(undefined, 'sienna')).toBeNull();
+    expect(engineLoadModels(engines, null)).toBeNull();
+  });
+});
+
+describe('engineDisturbanceKinds', () => {
+  const engines: EngineList = {
+    engines: [
+      makeEngine('andes', ['pflow', 'tds', 'eig']),
+      {
+        ...makeEngine('sienna', ['pflow', 'eig', 'tds']),
+        routine_options: {
+          tds: {
+            streaming: true,
+            abort: true,
+            disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+            options: { load_model: ['impedance', 'power', 'as-case'] },
+          },
+        },
+      } as unknown as EngineCapabilities,
+    ],
+  };
+
+  it('returns the accepted kinds for Sienna, null for ANDES and an unloaded list', () => {
+    expect(engineDisturbanceKinds(engines, 'sienna')).toEqual([
+      'branch_trip',
+      'bus_fault',
+      'gen_trip',
+    ]);
+    expect(engineDisturbanceKinds(engines, 'andes')).toBeNull();
+    expect(engineDisturbanceKinds(undefined, 'sienna')).toBeNull();
   });
 });
 

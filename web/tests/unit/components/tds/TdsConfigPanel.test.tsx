@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
+import { useSessionStore } from '@/store/session';
+import type { EngineCapabilities, EngineList } from '@/api/types';
 import {
   DEFAULT_TDS_CONFIG,
   DEFAULT_TDS_CONFIG_OVERRIDES,
@@ -27,7 +29,47 @@ function resetUi() {
     tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
     tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },
     tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES },
+    tdsLoadModel: null,
   });
+  useSessionStore.setState({ engine: null, engines: null });
+}
+
+/** The capabilities block of a Sienna engine, as `GET /engines` carries it. */
+function siennaEngines(): EngineList {
+  const andes: EngineCapabilities = {
+    name: 'andes',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: [], write: [] },
+    routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+    ops: [],
+    editing: true,
+  };
+  const sienna = {
+    name: 'sienna',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: ['psse-raw'], write: [] },
+    routines: ['matrices', 'pflow', 'eig', 'tds'],
+    ops: [],
+    editing: false,
+    routine_options: {
+      pflow: { methods: ['ac', 'dc', 'ptdf-dc'] },
+      tds: {
+        streaming: true,
+        abort: true,
+        disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+        options: { load_model: ['impedance', 'power', 'as-case'] },
+      },
+    },
+  } as unknown as EngineCapabilities;
+  return { engines: [andes, sienna] };
+}
+
+function seedSienna() {
+  useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
 }
 
 describe('<TdsConfigPanel />', () => {
@@ -558,5 +600,56 @@ describe('<TdsConfigPanel />', () => {
     await user.click(screen.getByTestId('tds-config-reset'));
     expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
     expect(screen.getByTestId('tds-config-overrides-empty')).toBeInTheDocument();
+  });
+
+  // ---- Sienna session: the engine refuses the ANDES-only options ----
+
+  it('an ANDES session shows the integrator, the var groups and the overrides, and no load model', () => {
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-integrator')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-config-vars')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-config-advanced')).toBeInTheDocument();
+    expect(screen.queryByTestId('tds-config-load-model')).toBeNull();
+  });
+
+  it('a Sienna session hides the ANDES-only options and offers the load model', () => {
+    seedSienna();
+    render(<TdsConfigPanel />);
+    expect(screen.queryByTestId('tds-config-integrator')).toBeNull();
+    expect(screen.queryByTestId('tds-config-vars')).toBeNull();
+    expect(screen.queryByTestId('tds-config-advanced')).toBeNull();
+    expect(screen.queryByTestId('tds-config-dae-vars')).toBeNull();
+    expect(screen.queryByTestId('tds-config-controllers')).toBeNull();
+    // tf and h keep their places.
+    expect(screen.getByTestId('field-tds-config-tf')).toBeInTheDocument();
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+    const group = screen.getByTestId('tds-config-load-model');
+    expect(within(group).getByTestId('tds-config-load-model-default')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-impedance')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-power')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-as-case')).toBeInTheDocument();
+  });
+
+  it('the load model defaults to the server default and follows the radios', async () => {
+    const user = userEvent.setup();
+    seedSienna();
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-load-model-default')).toBeChecked();
+    await user.click(screen.getByTestId('tds-config-load-model-power'));
+    expect(useUiStore.getState().tdsLoadModel).toBe('power');
+    expect(screen.getByTestId('tds-config-load-model-power')).toBeChecked();
+    await user.click(screen.getByTestId('tds-config-load-model-default'));
+    expect(useUiStore.getState().tdsLoadModel).toBeNull();
+  });
+
+  it('Reset returns the load model to the server default', async () => {
+    const user = userEvent.setup();
+    seedSienna();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-load-model-power'));
+    expect(useUiStore.getState().tdsLoadModel).toBe('power');
+    await user.click(screen.getByTestId('tds-config-reset'));
+    expect(useUiStore.getState().tdsLoadModel).toBeNull();
+    expect(screen.getByTestId('tds-config-load-model-default')).toBeChecked();
   });
 });
