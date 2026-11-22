@@ -2,7 +2,7 @@ name: server
 
 on:
   push:
-    branches: [main, "improve/**", multiengine]
+    branches: [main, "improve/**"]
     paths:
       - "server/**"
       - "web/**"

@@ -9,7 +9,7 @@ name: sienna
 
 on:
   push:
-    branches: [main, "improve/**", multiengine]
+    branches: [main, "improve/**"]
     paths:
       # Every test marked sienna is an integration test, and the API, the
       # session manager and the worker all sit between it and the engine, so

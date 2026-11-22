@@ -2,7 +2,7 @@ name: web
 
 on:
   push:
-    branches: [main, "feat/**", "improve/**", multiengine]
+    branches: [main, "feat/**", "improve/**"]
     paths:
       - "web/**"
       # The e2e job drives the real server, so a server change can break it.
