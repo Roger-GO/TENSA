@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 4 |
+| `none` | 5 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **78** |
+| **total** | **79** |
 
 ## OpenAPI routes
 
@@ -45,6 +45,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/external-results` | `analysis-panel` |  |
 | `GET` | `/api/health` | `none` | Operations probe for scripts, process supervisors and container health checks. The UI reads GET /version for its About dialog and GET /sessions/{id} for session liveness. |
 | `POST` | `/api/response-metrics` | `analysis-panel` |  |
+| `POST` | `/api/results/convert` | `none` | No web surface yet; the comparison overlay of the Phase 6 comparison unit adds it. |
 | `GET` | `/api/sessions` | `auto` |  |
 | `POST` | `/api/sessions` | `auto` |  |
 | `GET` | `/api/sessions/{session_id}` | `auto` |  |

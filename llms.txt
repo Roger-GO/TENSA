@@ -116,6 +116,12 @@ TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrat
                  422 on a case with no dynamic models, a power flow that does not converge, or a System already
                  initialised by this route, a run or an eigenvalue analysis: POST /sessions/{id}/reload first)
                  POST /sessions/{id}/abort  (cooperative abort of a running TDS)
+Results:         POST /results/convert  (no session; body {"kind": "pflow"|"tds"|"eig", "engine", "result", optional
+                 "versions", "study", "keys", "status"} -> {"document", "skipped", "notes"}: the engine's own result
+                 as a neutral results document {"tensa_results": 1, "engine", "study", "status", "series", "tables"},
+                 "keys" the session's keys lookup for an ANDES tds result; "skipped" names each column left out and why
+                 (a dae_vars raw state is not part of the document yet), "notes" reports a truncated result; 413 over
+                 128 MiB, 422 for a result that does not fit its kind or a power flow that did not converge)
 Response metrics:POST /response-metrics  (no session; body {"series":[{"name","t":[...],"y":[...]}], optional t_start, t_end,
                  settling_band, rocof_window} -> per series: initial, final, peak, nadir, max_deviation, rocof, settling_time,
                  overshoot_pct, damping {ratio, frequency_hz}; not the "traces" object itself, which is 422: build "series" from a batch

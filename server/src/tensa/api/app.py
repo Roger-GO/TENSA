@@ -61,6 +61,7 @@ from tensa.api.routes.pflow import router as pflow_router
 from tensa.api.routes.pmu import router as pmu_router
 from tensa.api.routes.profiles import router as profiles_router
 from tensa.api.routes.reports import router as reports_router
+from tensa.api.routes.results_doc import router as results_doc_router
 from tensa.api.routes.se import router as se_router
 from tensa.api.routes.sessions import router as sessions_router
 from tensa.api.routes.snapshot import router as snapshot_router
@@ -372,6 +373,7 @@ def make_app(
     app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
+    app.include_router(results_doc_router, prefix="/api", tags=["results"])
     app.include_router(external_results_router, prefix="/api", tags=["external-results"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
