@@ -205,6 +205,27 @@ def test_angle_rel_against_the_reference_bus() -> None:
     assert by_name["angle_rel|bus:7"] == [0.0, 0.0, 0.0]
 
 
+def test_angle_rel_does_not_jump_when_a_bus_angle_wraps() -> None:
+    """The Julia side reports a bus angle as atan(Vi, Vr), wrapped into one
+    turn: bus 2 passes pi between the second and third rows and is reported
+    as 3.16 - 2 pi there. Its relative angle moves by 0.03 rad a row, not by
+    2 pi, and the absolute angle is reported as the engine gave it."""
+    wrapped = 3.16 - 2 * math.pi
+    answer = dict(RUN_OK)
+    answer["columns"] = [
+        {"quantity": "angle", "kind": "bus", "bus": 2, "unit": "rad"},
+        {"quantity": "angle", "kind": "bus", "bus": 7, "unit": "rad"},
+    ]
+    answer["rows"] = [[3.10, 3.00], [3.13, 3.00], [wrapped, 3.00]]
+    answer["post"] = None
+    state = loaded_state(FakeBridge(answer))
+    by_name = {
+        v["name"]: v["values"] for v in state.run_tds(tf=5.0)["traces"]["variables"]
+    }
+    assert by_name["angle|bus:2"] == [3.10, 3.13, wrapped]
+    assert by_name["angle_rel|bus:2"] == pytest.approx([0.10, 0.13, 0.16])
+
+
 def test_post_series_on_their_own_time_base() -> None:
     state = loaded_state()
     payload = state.run_tds(tf=5.0)

@@ -1692,7 +1692,7 @@ class SiennaState:
         if angle_series:
             import numpy as np
 
-            from tensa.engines.frames import angle_rel
+            from tensa.engines.frames import angle_rel, unwrap_angle
 
             reference = self._reference_bus()
             bus_numbers = [bus for bus, _ in angle_series]
@@ -1706,7 +1706,11 @@ class SiennaState:
                 ],
                 dtype=float,
             ).T
-            relative = angle_rel(matrix, reference_index)
+            # The Julia side reports a bus angle as atan(Vi, Vr), wrapped into
+            # one turn, so a bus passing pi jumps by 2 pi; each series is made
+            # continuous in time before the difference, or angle_rel would
+            # jump with it.
+            relative = angle_rel(unwrap_angle(matrix), reference_index)
             for column_index, (bus, _) in enumerate(angle_series):
                 key = self._key_book.key_of("Bus", bus)
                 if key is None:

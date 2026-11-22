@@ -43,6 +43,7 @@ not available.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -100,26 +101,78 @@ class Audit:
     note: str
 
 
-# The bounds of test_engines_agree.py, the GENROU baseline every change from
-# is argued against: 2e-5 pu and 2.5e-3 of the swing on rotor speed, 7e-4 pu
-# max and 1e-4 pu RMS on post-clearing voltage, 1e-3 Hz and 1e-3 on the modes.
-_GENROU_BOUNDS: Final = (2e-5, 2.5e-3, 7e-4, 1e-4, 1e-3, 1e-3)
-# A controller added to the GENROU case moves the agreement by its own action;
-# the spike's GENROU+TGOV1 run (a model with a real difference) moved rotor
-# speed to 2.1e-4 pu, so an exact controller must sit well under that. Rotor
-# speed is held at five times the GENROU bound, voltage at the level the
-# exciter acts on, and damping at twice the baseline because a controller's
-# whole effect on the modes is damping.
-_CONTROLLER_BOUNDS: Final = (1e-4, 5e-3, 1e-3, 2e-4, 1e-3, 2e-3)
-# GENCLS has no damper winding and no subtransient, so the one difference from
-# the GENROU case is the model itself; the rotor-speed bound is 2.5 times the
-# GENROU one to cover the different initialisation path, and a wrong GENCLS in
-# either engine moves the swing frequency by far more.
-_GENCLS_BOUNDS: Final = (5e-5, 2.5e-3, 7e-4, 1e-4, 1e-3, 1e-3)
+# The bounds of an audit that agrees are worked out from what the audit
+# measured (_MEASURED): _MARGIN times each figure, rounded up to one
+# significant digit, so that a real difference in the model fails, and never
+# tighter than what the runs and the power flow can resolve:
+# - rotor speed: both runs are converged to under 1e-6 pu at their steps
+#   (_ANDES_STEP, _SIENNA_STEP), so no bound in pu is under _STEP_ERROR_PU,
+#   and no share of the swing under _STEP_ERROR_PU over that swing;
+# - modes: both engines linearise at a power flow solved to 1e-6 (ANDES's
+#   default tolerance), so no frequency or damping bound is under _MODE_FLOOR.
+_MARGIN: Final = 10.0
+_STEP_ERROR_PU: Final = 1e-6
+_MODE_FLOOR: Final = 1e-6
+
+
+@dataclass(frozen=True)
+class Measured:
+    """What an audit that agrees measured, with the steps above: the largest
+    rotor speed difference over its machines (pu), the largest share of a
+    machine's swing and that machine's swing (pu), the largest post-clearing
+    voltage difference and RMS difference (pu), and the largest frequency
+    (Hz) and damping difference of a matched electromechanical mode (``None``
+    where the case has none)."""
+
+    rotor_speed: float
+    share: float
+    swing: float
+    voltage_max: float
+    voltage_rms: float
+    freq_hz: float | None
+    damping: float | None
+
+
+_MEASURED: Final = {
+    "genrou": Measured(1.988e-7, 1.46e-4, 1.363e-3, 1.865e-6, 1.440e-7, 1.30e-8, 7.20e-9),
+    "gencls": Measured(9.262e-7, 7.16e-4, 1.294e-3, 3.696e-6, 1.799e-6, 8.64e-9, 1.32e-12),
+    "esst1a": Measured(6.001e-6, 7.83e-4, 7.663e-3, 3.941e-5, 7.555e-6, 1.10e-7, 5.63e-8),
+    "sexs": Measured(1.926e-7, 2.62e-4, 7.343e-4, 2.168e-6, 1.694e-7, 1.28e-8, 7.17e-9),
+    "ieeest": Measured(1.752e-7, 2.52e-4, 6.941e-4, 7.469e-7, 2.070e-7, 1.28e-8, 7.17e-9),
+    # The converter chain's one machine stands for the infinite bus and swings
+    # by 8.8e-6 pu, so its share of the swing is held at the step error over
+    # that swing; the case has no electromechanical mode.
+    "renewable": Measured(3.721e-8, 4.22e-3, 8.812e-6, 8.840e-6, 5.396e-7, None, None),
+}
+
+
+def _round_up(value: float) -> float:
+    """``value`` rounded up to one significant digit."""
+    exponent = math.floor(math.log10(value))
+    return float(f"{math.ceil(round(value / 10.0**exponent, 9))}e{exponent}")
+
+
+def agree_bounds(measured: Measured) -> tuple[float, float, float, float, float, float]:
+    """An agreeing audit's bounds from what it measured (see _MARGIN)."""
+
+    def mode(value: float | None) -> float:
+        return _MODE_FLOOR if value is None else max(_round_up(_MARGIN * value), _MODE_FLOOR)
+
+    return (
+        max(_round_up(_MARGIN * measured.rotor_speed), _STEP_ERROR_PU),
+        _round_up(max(_MARGIN * measured.share, _STEP_ERROR_PU / measured.swing)),
+        _round_up(_MARGIN * measured.voltage_max),
+        _round_up(_MARGIN * measured.voltage_rms),
+        mode(measured.freq_hz),
+        mode(measured.damping),
+    )
+
+
 # TGOV1, GAST and HYGOV: the known differences tgov1-torque, gast-torque and
 # hygov-torque (Sienna's governors hand the machine P_m / omega) raise Sienna's
 # damping by the equivalent of D += P_m0 per machine and barely move the
-# frequencies. The audit holds the frequencies to the baseline, leaves the
+# frequencies. The audit holds the frequencies to test_engines_agree.py's
+# 1e-3 Hz (measured: at most 1.0e-4 Hz, HYGOV's 1.39 Hz mode), leaves the
 # damping bound None (the difference is asserted against the entry instead),
 # and holds the run to a sanity floor, so the difference must be the known one,
 # not chaos: 3e-4 pu on rotor speed (above the spike's measured 2.1e-4 on
@@ -137,12 +190,13 @@ _GOVERNOR_TORQUE_BOUNDS: Final = (3e-4, 5e-2, 1e-3, 2e-4, 1e-3, None)
 # post-clearing voltage 2.1e-2 pu max and 6.1e-3 pu RMS.
 _ESAC1A_BOUNDS: Final = (1e-3, 0.5, 3e-2, 1e-2, None, None)
 # EXST1: the known difference exst1-output-limiter is not small-signal, so the
-# modes are held as an agreement is (they agree to five digits), and the run
-# to a sanity floor above what was measured: after the trip Sienna's field
-# voltage reaches VT * VRMAX and ANDES's never does, and rotor speed differs by
-# 4.5e-4 pu (5.3% of the swing of 8.4e-3) on the GENROU machine; with VRMAX
-# out of reach in both engines the same run differs by 3.3e-6 pu.
-_EXST1_BOUNDS: Final = (1e-3, 0.1, 1e-2, 2e-3, 1e-3, 2e-3)
+# modes are held as an agreement is (measured: 1.3e-7 Hz and 8.8e-8 in
+# damping, held as agree_bounds would hold them), and the run to a sanity
+# floor above what was measured: after the trip Sienna's field voltage
+# reaches VT * VRMAX and ANDES's never does, and rotor speed differs by 4.5e-4
+# pu (5.3% of the swing of 8.4e-3) on the GENROU machine; with VRMAX out of
+# reach in both engines the same run differs by 3.3e-6 pu.
+_EXST1_BOUNDS: Final = (1e-3, 0.1, 1e-2, 2e-3, 2e-6, _MODE_FLOOR)
 # EXAC1: the known difference exac1-transducer moves the modes (by up to
 # 0.025 Hz on the benchmark), so no mode bound applies, and the run is held to
 # a sanity floor above what was measured: rotor speed 1.0e-4 pu (1.4% of the
@@ -170,9 +224,9 @@ AUDITS: Final = (
         models=("GENROU",),
         disturbance=_TRIP_101_102,
         t_end=20.0,  # test_case15_genrou.jl: tspan = (0.0, 20.0)
-        bounds=_GENROU_BOUNDS,
+        bounds=agree_bounds(_MEASURED["genrou"]),
         expect="agree",
-        note="The control audit: the bounds are the given test's own.",
+        note="The control audit: GENROU alone on the benchmark's network.",
     ),
     Audit(
         audit_id="gencls",
@@ -182,9 +236,9 @@ AUDITS: Final = (
         models=("GENCLS",),
         disturbance=_TRIP_101_102,
         t_end=20.0,  # the GENCLS benchmark shares the GENROU test's shape
-        bounds=_GENCLS_BOUNDS,
+        bounds=agree_bounds(_MEASURED["gencls"]),
         expect="agree",
-        note="Classical machine on the same network; rotor bound 2.5 times the baseline.",
+        note="Classical machine on the same network.",
     ),
     Audit(
         audit_id="esac1a",
@@ -206,7 +260,7 @@ AUDITS: Final = (
         models=("ESST1A",),
         disturbance=_TRIP_1_4,
         t_end=20.0,  # test_case55_esst1a.jl: (0.0, 20.0)
-        bounds=_CONTROLLER_BOUNDS,
+        bounds=agree_bounds(_MEASURED["esst1a"]),
         expect="agree",
         # The shipped TVC_System.dyr names EXST1; test_case55_esst1a.jl
         # replaces it with an ESST1A built in code. The audit's .dyr is the
@@ -246,7 +300,7 @@ AUDITS: Final = (
         models=("SEXS",),
         disturbance=_TRIP_101_102,
         t_end=20.0,  # test_case26_SEXS.jl: tspan = (0.0, 20.0)
-        bounds=_CONTROLLER_BOUNDS,
+        bounds=agree_bounds(_MEASURED["sexs"]),
         expect="agree",
         note="The benchmark's GENROU machine carries the SEXS.",
     ),
@@ -258,9 +312,7 @@ AUDITS: Final = (
         models=("IEEEST",),
         disturbance=_TRIP_101_102,
         t_end=20.0,  # test_case30_ieeest.jl: tspan = (0.0, 20.0)
-        # A stabiliser's whole effect is damping, so the damping bound is the
-        # loosest of the exact audits; the rest are the controller bounds.
-        bounds=(1e-4, 5e-3, 1e-3, 2e-4, 1e-3, 3e-3),
+        bounds=agree_bounds(_MEASURED["ieeest"]),
         expect="agree",
         note="The benchmark's GENROU machine carries a SEXS and the IEEEST.",
     ),
@@ -308,9 +360,7 @@ AUDITS: Final = (
         models=("REGCA1", "REECB1", "REPCA1"),
         disturbance=_TRIP_101_103,
         t_end=5.0,  # test_case29_renewablemodels.jl: tspan = (0.0, 5.0)
-        # The converter's current injection is fast beside the electromechanical
-        # modes; an exact chain leaves the agreement at the controller level.
-        bounds=_CONTROLLER_BOUNDS,
+        bounds=agree_bounds(_MEASURED["renewable"]),
         expect="agree",
         # The chain's three models are one audit: neither engine can run
         # REECB1 or REPCA1 without REGCA1 (the converter is the injector).
@@ -910,6 +960,12 @@ def test_audit_modes(audit_run: dict[str, Any]) -> None:
         return
     pairs = _electromechanical_pairs(compared_eig)
     assert pairs, f"no electromechanical modes compared for {audit.audit_id}"
+    for row in pairs:
+        print(
+            f"mode {row['frequency_hz_ref']:.5f} Hz: frequency diff "
+            f"{abs(row['frequency_hz_new'] - row['frequency_hz_ref']):.3e} Hz, damping diff "
+            f"{abs(row['damping_ratio_new'] - row['damping_ratio_ref']):.3e}"
+        )
     unmatched = _unmatched_in_band(compared_eig, audit_run["eig_documents"])
     freq_hz, damping = audit.bounds[4], audit.bounds[5]
     if kind == "differ" and _entry_of(audit).small_signal:

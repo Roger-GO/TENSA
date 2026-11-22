@@ -14,16 +14,23 @@ writes, each on a machine of Kundur.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from tensa.core.clone_writers import DyrLocator
 from tensa.core.clone_writers.dyr_writer import apply_edit
-from tensa.core.dyr_columns import PSSE_COLUMNS, andes_columns, read_dyr_records
+from tensa.core.dyr_columns import (
+    PSSE_COLUMNS,
+    andes_columns,
+    put_back_dyr_columns,
+    read_dyr_records,
+)
 from tensa.core.wrapper import Wrapper
 
 pytestmark = pytest.mark.integration  # reads cases into a real ANDES System
@@ -144,6 +151,97 @@ def test_the_values_are_the_ones_a_setup_runs_with(case: tuple[Path, Path]) -> N
     assert float(ss.ESAC1A.KE.v[0]) == 1.0
     assert float(ss.ESST1A.TC.v[0]) == pytest.approx(14.142135623731)
     assert float(ss.ESST1A.ILR.v[0]) == 2.8
+
+
+def _load(raw: Path, dyr: Path) -> Any:
+    """The System ANDES reads from ``raw`` and ``dyr``, before the columns
+    are put back."""
+    import andes
+
+    return andes.load(
+        str(raw), addfile=str(dyr), setup=False, no_output=True, default_config=True
+    )
+
+
+def test_a_file_with_a_byte_order_mark_is_read_as_andes_reads_it(
+    case: tuple[Path, Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    """ANDES detects a file's encoding, so a .dyr saved as UTF-8 with a BOM
+    loads its first record; read as plain UTF-8 the BOM would be part of the
+    first record's bus, which then named no machine and was left as ANDES
+    misread it (KA 7)."""
+    raw, dyr = case
+    genrou = _genrou_records((_cases() / "kundur" / "kundur_full.dyr").read_text())
+    dyr.write_text(_ESAC1A + genrou, encoding="utf-8-sig")
+    assert dyr.read_bytes().startswith(b"\xef\xbb\xbf")
+    ss = _load(raw, dyr)
+    assert float(ss.ESAC1A.KA.v[0]) == 7.0  # ANDES's own reading
+    with caplog.at_level(logging.WARNING, logger="tensa.notice"):
+        notes = put_back_dyr_columns(ss, [dyr])
+    assert _held(ss, "ESAC1A") == pytest.approx(_FILE_VALUES["ESAC1A"])
+    assert len(notes) == 1 and "KA 200 (ANDES held 7)" in notes[0]
+
+
+def test_two_records_on_one_machine_correct_two_devices(case: tuple[Path, Path]) -> None:
+    """ANDES adds a device per record, in the order of the records; the
+    second record naming a machine is the second device on it, not the first
+    corrected again."""
+    raw, dyr = case
+    genrou = _genrou_records((_cases() / "kundur" / "kundur_full.dyr").read_text())
+    second = _ESAC1A.replace("200.0", "150.0")
+    dyr.write_text(genrou + _ESAC1A + second, encoding="utf-8")
+    ss = _load(raw, dyr)
+    assert list(ss.ESAC1A.syn.v) == [ss.ESAC1A.syn.v[0]] * 2
+    notes = put_back_dyr_columns(ss, [dyr], notify=False)
+    assert [float(v) for v in ss.ESAC1A.KA.v] == [200.0, 150.0]
+    assert [float(v) for v in ss.ESAC1A.KE.v] == [1.0, 1.0]
+    assert len(notes) == 2
+
+
+def test_a_value_that_is_not_a_number_is_not_written(
+    case: tuple[Path, Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A token that is not a number is never written into a parameter: the
+    parameter keeps what ANDES holds, and the notice names it."""
+    raw, dyr = case
+    genrou = _genrou_records((_cases() / "kundur" / "kundur_full.dyr").read_text())
+    dyr.write_text(genrou + _ESAC1A.replace("200.0", "True"), encoding="utf-8")
+    ss = _load(raw, dyr)
+    held_ka = float(ss.ESAC1A.KA.v[0])
+    with caplog.at_level(logging.WARNING, logger="tensa.notice"):
+        notes = put_back_dyr_columns(ss, [dyr])
+    assert float(ss.ESAC1A.KA.v[0]) == held_ka
+    for name in PSSE_COLUMNS["ESAC1A"]:
+        assert math.isfinite(float(getattr(ss.ESAC1A, name).v[0])), name
+    assert float(ss.ESAC1A.KE.v[0]) == 1.0  # the other columns were put back
+    said = [r.getMessage() for r in caplog.records if r.name == "tensa.notice"]
+    assert any("not a finite number" in n and "KA ('True'" in n for n in said), said
+    assert said == notes
+
+
+class _Param:
+    def __init__(self, values: list[Any]) -> None:
+        self.v = values
+
+
+def test_a_record_that_finds_no_device_is_said(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A record of a listed model whose machine the System does not hold is
+    not corrected, and the notice says its values were not checked."""
+    dyr = tmp_path / "exciter.dyr"
+    dyr.write_text(_ESAC1A, encoding="utf-8")
+    esac1a = SimpleNamespace(
+        syn=_Param(["GENROU_2"]), **{name: _Param([0.0]) for name in PSSE_COLUMNS["ESAC1A"]}
+    )
+    syngen = SimpleNamespace(find_idx=lambda *args, **kwargs: [None])
+    ss = SimpleNamespace(ESAC1A=esac1a, SynGen=syngen)
+    with caplog.at_level(logging.WARNING, logger="tensa.notice"):
+        notes = put_back_dyr_columns(ss, [dyr])
+    assert all(getattr(esac1a, name).v == [0.0] for name in PSSE_COLUMNS["ESAC1A"])
+    assert len(notes) == 1
+    assert notes[0].startswith("ESAC1A on the machine at bus 1, id 1 in exciter.dyr: no device")
+    assert [r.getMessage() for r in caplog.records if r.name == "tensa.notice"] == notes
 
 
 def test_a_clone_edit_writes_the_column_pss_e_reads(tmp_path: Path) -> None:

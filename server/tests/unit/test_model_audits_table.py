@@ -173,9 +173,29 @@ def test_small_signal_differences_leave_the_damping_unbounded(audits: Any) -> No
     assert tgov1.bounds[4] == 1e-3
 
 
-def test_genrou_bounds_are_the_given_tests(audits: Any) -> None:
-    genrou = next(a for a in audits.AUDITS if a.audit_id == "genrou")
-    assert genrou.bounds == (2e-5, 2.5e-3, 7e-4, 1e-4, 1e-3, 1e-3)
+def test_agreement_bounds_are_tight(audits: Any) -> None:
+    """An audit that agrees is held to a stated margin over what it measured,
+    so that a real model difference fails it: its bounds are the ones
+    ``agree_bounds`` works out from its row of ``_MEASURED``, the margin is
+    five to ten, no mode is allowed more than 1e-5 Hz or 1e-5 in damping (the
+    exact audits measure at most 1.1e-7 Hz), and no bound is under what the
+    runs and the power flow resolve."""
+    assert 5.0 <= audits._MARGIN <= 10.0
+    step, mode_floor = audits._STEP_ERROR_PU, audits._MODE_FLOOR
+    agreeing = [a for a in audits.AUDITS if a.expect == "agree"]
+    assert {a.audit_id for a in agreeing} == set(audits._MEASURED)
+    for audit in agreeing:
+        measured = audits._MEASURED[audit.audit_id]
+        bounds = audit.bounds
+        assert bounds == audits.agree_bounds(measured), audit.audit_id
+        assert bounds[4] <= 1e-5 and bounds[5] <= 1e-5, audit.audit_id
+        assert bounds[0] >= step and bounds[1] * measured.swing >= step, audit.audit_id
+        assert bounds[4] >= mode_floor and bounds[5] >= mode_floor, audit.audit_id
+        figures = (
+            measured.rotor_speed, measured.share, measured.voltage_max, measured.voltage_rms,
+        )
+        for bound, figure in zip(bounds, figures, strict=False):
+            assert bound >= 5.0 * figure, (audit.audit_id, bound, figure)
 
 
 def test_audit_register_points_at_existing_audits(audits: Any) -> None:

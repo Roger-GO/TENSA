@@ -24,7 +24,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["WRAP_PERIOD", "angle_rel", "rotor_angle_rel", "wrap_angle"]
+__all__ = ["WRAP_PERIOD", "angle_rel", "rotor_angle_rel", "unwrap_angle", "wrap_angle"]
 
 WRAP_PERIOD: float = 2.0 * np.pi
 
@@ -43,6 +43,35 @@ def wrap_angle(angle: NDArray[np.float64]) -> NDArray[np.float64]:
     difference between engines.
     """
     return (np.asarray(angle, dtype=np.float64) + np.pi) % WRAP_PERIOD - np.pi
+
+
+def unwrap_angle(angles: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Each column of ``angles`` made continuous in time: a step between two
+    successive finite values of more than pi is taken as a wrap and has a
+    multiple of 2 pi added to it (``np.unwrap`` along axis 0).
+
+    For an engine that reports an angle wrapped into one turn (Sienna's bus
+    angle is ``atan(Vi, Vr)``): two buses that are a few degrees apart either
+    side of pi are reported nearly 2 pi apart, and a difference of them jumps
+    by 2 pi as one of them crosses. ``angles`` has shape ``(n_steps,
+    n_columns)`` (or ``(n_steps,)``), radians. A NaN is a gap: it stays NaN,
+    and the values after it are unwrapped against the last finite value before
+    it, so one gap does not turn the rest of the column into NaN, which
+    ``np.unwrap`` alone would. The first finite value of a column is kept as it
+    is. The result is a new array; the input is not modified.
+
+    Raises:
+        ValueError: ``angles`` is neither 1-D nor 2-D.
+    """
+    out = np.array(angles, dtype=np.float64)
+    if out.ndim not in (1, 2):
+        raise ValueError(f"angles must be 1-D or 2-D; got shape {out.shape}")
+    columns = out[:, None] if out.ndim == 1 else out  # a view: writes reach ``out``
+    for j in range(columns.shape[1]):
+        finite = np.isfinite(columns[:, j])
+        if finite.sum() > 1:
+            columns[finite, j] = np.unwrap(columns[finite, j])
+    return out
 
 
 def angle_rel(
@@ -110,9 +139,12 @@ def rotor_angle_rel(
     wrapped (see the module docstring). A row with no machine in service, or
     whose in-service machines all weigh zero, yields NaN across the row (the
     mean is a 0/0, computed under ``np.errstate(invalid="ignore",
-    divide="ignore")``; no warning escapes). A machine with weight ``0.0``
-    contributes nothing to the mean's numerator or denominator. Negative
-    weights are not validated. Inputs are never modified.
+    divide="ignore")``; no warning escapes). A machine with weight ``0.0``, or
+    out of service, contributes nothing to the mean's numerator or
+    denominator, whatever its angle: a NaN angle of such a machine leaves the
+    mean alone and makes only its own column NaN, while a NaN angle of a
+    machine that is counted makes the row's mean NaN. Negative weights are not
+    validated. Inputs are never modified.
 
     Raises:
         ValueError: ``angles`` is not 2-D, ``weights`` does not have one entry
@@ -139,10 +171,15 @@ def rotor_angle_rel(
     if in_service.dtype != np.bool_:
         raise ValueError(f"in_service must be a bool array; got dtype {in_service.dtype}")
 
-    active_weights: NDArray[np.float64] = np.where(in_service, weights[None, :], 0.0)
+    # A machine counts in the mean where it is in service and weighs something.
+    # Its term is selected, not multiplied by a zero weight: an out-of-service
+    # machine's angle is often NaN, and NaN times 0 is NaN.
+    counted = in_service & (weights[None, :] != 0.0)
+    active_weights: NDArray[np.float64] = np.where(counted, weights[None, :], 0.0)
     with np.errstate(invalid="ignore", divide="ignore"):
         denominator: NDArray[np.float64] = active_weights.sum(axis=1)
-        numerator: NDArray[np.float64] = (angles * active_weights).sum(axis=1)
+        terms: NDArray[np.float64] = np.where(counted, angles * weights[None, :], 0.0)
+        numerator: NDArray[np.float64] = terms.sum(axis=1)
         mean: NDArray[np.float64] = numerator / denominator
     result: NDArray[np.float64] = angles - mean[:, None]
     return result

@@ -6,7 +6,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tensa.engines.frames import WRAP_PERIOD, angle_rel, rotor_angle_rel, wrap_angle
+from tensa.engines.frames import (
+    WRAP_PERIOD,
+    angle_rel,
+    rotor_angle_rel,
+    unwrap_angle,
+    wrap_angle,
+)
 
 
 @pytest.mark.unit
@@ -241,3 +247,76 @@ def test_inputs_not_modified() -> None:
     wrapped_input_copy = wrapped_input.copy()
     wrap_angle(wrapped_input)
     np.testing.assert_array_equal(wrapped_input, wrapped_input_copy)
+
+
+@pytest.mark.unit
+def test_rotor_angle_rel_nan_angle_out_of_service() -> None:
+    # Machine 2 is out of service and has no angle (NaN): the mean is that
+    # of machines 0 and 1 alone, (2 * 0.1 + 2 * 0.3) / 4 = 0.2, and only
+    # machine 2's own column is NaN.
+    with np.errstate(all="raise"):
+        result = rotor_angle_rel(
+            np.array([[0.1, 0.3, np.nan]]),
+            np.array([2.0, 2.0, 5.0]),
+            np.array([[True, True, False]]),
+        )
+    assert result[0, 0] == pytest.approx(-0.1, abs=1e-15)
+    assert result[0, 1] == pytest.approx(0.1, abs=1e-15)
+    assert np.isnan(result[0, 2])
+
+
+@pytest.mark.unit
+def test_rotor_angle_rel_nan_angle_of_zero_weight() -> None:
+    # A machine in service that weighs nothing leaves the mean alone, NaN or not.
+    result = rotor_angle_rel(
+        np.array([[0.4, np.nan]]),
+        np.array([2.0, 0.0]),
+        np.array([[True, True]]),
+    )
+    assert result[0, 0] == pytest.approx(0.0, abs=1e-15)
+    assert np.isnan(result[0, 1])
+
+
+@pytest.mark.unit
+def test_rotor_angle_rel_nan_angle_in_service_poisons_the_row() -> None:
+    result = rotor_angle_rel(
+        np.array([[0.4, np.nan]]),
+        np.array([2.0, 1.0]),
+        np.array([[True, True]]),
+    )
+    assert np.isnan(result).all()
+
+
+@pytest.mark.unit
+def test_unwrap_angle_across_pi() -> None:
+    # A bus whose angle passes pi, reported wrapped into (-pi, pi] as
+    # atan(Vi, Vr) gives it, against a reference that stays just below pi:
+    # the relative angle of the wrapped series jumps by 2 pi; of the
+    # unwrapped one it moves smoothly.
+    true_bus = np.array([3.10, 3.13, 3.16, 3.19, 3.22])
+    reference = np.full(5, 3.12)
+    wrapped = np.column_stack([np.arctan2(np.sin(true_bus), np.cos(true_bus)), reference])
+    jumpy = angle_rel(wrapped, 1)[:, 0]
+    assert np.max(np.abs(np.diff(jumpy))) > 6.0
+    smooth = angle_rel(unwrap_angle(wrapped), 1)[:, 0]
+    np.testing.assert_allclose(smooth, true_bus - reference, atol=1e-12)
+
+
+@pytest.mark.unit
+def test_unwrap_angle_keeps_gaps() -> None:
+    # A NaN is a gap: it stays, and the values after it are unwrapped against
+    # the last finite one before it, not turned into NaN.
+    series = np.array([3.1, np.nan, 3.2 - 2 * np.pi, 3.25 - 2 * np.pi])
+    out = unwrap_angle(series)
+    assert np.isnan(out[1])
+    np.testing.assert_allclose(out[[0, 2, 3]], [3.1, 3.2, 3.25], atol=1e-12)
+    np.testing.assert_array_equal(np.isnan(series), np.isnan(out))  # input kept
+    assert series[2] < 0
+
+
+@pytest.mark.unit
+def test_unwrap_angle_leaves_a_continuous_series() -> None:
+    series = np.array([[0.0, -0.5], [0.4, -0.7], [0.9, -1.1]])
+    np.testing.assert_array_equal(unwrap_angle(series), series)
+    with pytest.raises(ValueError, match="1-D or 2-D"):
+        unwrap_angle(np.zeros((2, 2, 2)))

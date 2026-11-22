@@ -134,7 +134,7 @@ The models both engines have were audited like for like on PowerSimulationsDynam
 
 The converter chain stays `unverified`: its runs agree, but its case has no electromechanical mode, and the converter's own eigenvalues differ between the engines (ANDES -50.0 ± 4.40j, Sienna -45.2 ± 8.70j) for a reason not yet found. The runs were made at a step of 1/480 s in ANDES and 1/240 s in Sienna: at Sienna's default largest step of 1/30 s the step error alone is 3.0e-5 pu of rotor speed on the GENROU case.
 
-The known differences live in `server/src/tensa/engines/known_differences.json`, one entry each, and `server/tests/integration/test_known_differences.py` reproduces each one's evidence. Four are in the models of ANDES 2.0.0 (the ESAC1A rate feedback is computed and never subtracted, the EXAC1 voltage transducer is bypassed, the EXST1 limiter tests the wrong signal) and three are the torque a turbine model hands the machine (Sienna P_m / ω, ANDES P_m). The first entry, as the register holds it:
+The known differences live in `server/src/tensa/engines/known_differences.json`, one entry each, and `server/tests/integration/test_known_differences.py` reproduces each one's evidence. Three are in the models of ANDES 2.0.0 (the ESAC1A rate feedback is computed and never subtracted and its regulator output is never limited, the EXAC1 voltage transducer is bypassed, the EXST1 limiter tests the wrong signal) and three are the torque a turbine model hands the machine (Sienna P_m / ω, ANDES P_m; ANDES's HYGOV also integrates with a gain that does not depend on its Tr). The first entry, as the register holds it:
 
 ```json
 {"id": "tgov1-torque", "model": "TGOV1", "engines": ["andes", "sienna"],
