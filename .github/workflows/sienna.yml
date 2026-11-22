@@ -101,9 +101,12 @@ jobs:
       # Three files, one per module: runtests.jl (TensaSienna), runtests_dyn.jl
       # (TensaSiennaDyn) and runtests_net.jl (TensaSiennaNet, on a case built in
       # code, which takes no folder). Every one runs; the status is the first
-      # failure's.
+      # failure's. runtests_dyn.jl checks that a hook written in Python stops a
+      # run, which needs PythonCall to load: it is given this job's Python, and
+      # no conda environment of its own (it would skip the check otherwise).
       - name: Julia module tests
         run: |
+          export JULIA_PYTHONCALL_EXE="$(command -v python)" JULIA_CONDAPKG_BACKEND=Null
           cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
           status=0
           : > "$RUNNER_TEMP/julia-tests.log"
