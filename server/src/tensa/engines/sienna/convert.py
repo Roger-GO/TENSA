@@ -47,6 +47,17 @@ def _float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _float_or_none(value: Any) -> float | None:
+    """``value`` as a float, ``None`` when the JSON carries null.
+
+    A DC power flow computes no reactive power, so its reactive fields are
+    JSON null; an AC power flow always carries a number.
+    """
+    if value is None:
+        return None
+    return _float(value)
+
+
 def _int(value: Any) -> int:
     """``value`` as an int (a float or numeric text is truncated)."""
     if isinstance(value, bool):
@@ -531,13 +542,23 @@ def pflow_result(
     for row in _rows(pflow, "branches"):
         name = _text(row.get("name"))
         p_from = _float(row.get("p_from_mw"))
-        q_from = _float(row.get("q_from_mvar"))
+        q_from = _float_or_none(row.get("q_from_mvar"))
         p_to = _float(row.get("p_to_mw"))
-        q_to = _float(row.get("q_to_mvar"))
+        q_to = _float_or_none(row.get("q_to_mvar"))
         rate_a = rate_of.get(name)
         loading = None
         if rate_a is not None:
-            loading = 100.0 * max(math.hypot(p_from, q_from), math.hypot(p_to, q_to)) / rate_a
+            # A null q (a DC power flow) counts as 0 in the apparent power:
+            # the loading is then the active power over the rating, which is
+            # the honest DC loading.
+            loading = (
+                100.0
+                * max(
+                    math.hypot(p_from, q_from or 0.0),
+                    math.hypot(p_to, q_to or 0.0),
+                )
+                / rate_a
+            )
         line_flows[name] = LineFlow(
             p=p_from,
             q=q_from,
@@ -565,7 +586,7 @@ def pflow_result(
         available = bool(topo_row.get("available", True))
         generator_outputs[name] = GeneratorOutput(
             p=_float(row.get("p_mw")),
-            q=_float(row.get("q_mvar")),
+            q=_float_or_none(row.get("q_mvar")),
             v=bus_voltages.get(bus, 0.0),
             bus=bus,
             q_min=_float(topo_row.get("q_min_mvar")) if available else None,
@@ -583,7 +604,7 @@ def pflow_result(
         bus = _int(row["bus"])
         load_consumption[name] = LoadConsumption(
             p=_float(row.get("p_mw")),
-            q=_float(row.get("q_mvar")),
+            q=_float_or_none(row.get("q_mvar")),
             bus=bus,
         )
         key = book.key_of("PQ", name)
@@ -591,11 +612,13 @@ def pflow_result(
             load_keys[name] = key
 
     generation_p = sum(output.p for output in generator_outputs.values())
-    generation_q = sum(output.q for output in generator_outputs.values())
     load_p = sum(load.p for load in load_consumption.values())
-    load_q = sum(load.q for load in load_consumption.values())
+    # A DC power flow names its method in the answer; it computes no reactive
+    # power, so its reactive totals are null, never zero. The active totals
+    # are computed as for an AC result.
+    is_dc = pflow.get("method") in ("dc", "ptdf-dc")
     shunt_p = 0.0
-    shunt_q = 0.0
+    shunt_q_value = 0.0
     for row in _rows(topology, "shunts"):
         if not row.get("available", True):
             continue
@@ -603,19 +626,41 @@ def pflow_result(
         if v is None:
             continue
         shunt_p += _float(row.get("g_mw")) * v * v
-        shunt_q -= _float(row.get("b_mvar")) * v * v
+        shunt_q_value -= _float(row.get("b_mvar")) * v * v
     loss_p = sum(flow.p + flow.p_to for flow in line_flows.values())
-    loss_q = sum(flow.q + flow.q_to for flow in line_flows.values())
     slack_names = [
         name
         for name, row in topo_generators.items()
         if _text(row.get("kind")) == "Slack"
     ]
     slack_p: float | None = None
-    slack_q: float | None = None
     if slack_names:
         slack_p = sum(generator_outputs[name].p for name in slack_names if name in generator_outputs)
-        slack_q = sum(generator_outputs[name].q for name in slack_names if name in generator_outputs)
+    if is_dc:
+        generation_q: float | None = None
+        load_q: float | None = None
+        shunt_q: float | None = None
+        loss_q: float | None = None
+        slack_q: float | None = None
+    else:
+        generation_q = sum(
+            output.q for output in generator_outputs.values() if output.q is not None
+        )
+        load_q = sum(
+            load.q for load in load_consumption.values() if load.q is not None
+        )
+        shunt_q = shunt_q_value
+        loss_q = sum(
+            flow.q + flow.q_to
+            for flow in line_flows.values()
+            if flow.q is not None and flow.q_to is not None
+        )
+        slack_q = None
+        if slack_names:
+            slack_qs = [
+                generator_outputs[name].q for name in slack_names if name in generator_outputs
+            ]
+            slack_q = sum(q for q in slack_qs if q is not None)
 
     summary = PflowSummary(
         generation_p=generation_p,

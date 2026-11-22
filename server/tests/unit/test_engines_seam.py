@@ -196,9 +196,12 @@ def test_engine_capabilities_andes() -> None:
         "versions",
         "formats",
         "routines",
+        "routine_options",
         "ops",
         "editing",
     }
+    # The power flow methods of core/pflow_options.py, by name.
+    assert caps["routine_options"] == {"pflow": {"methods": ["NR", "dishonest", "NK"]}}
     assert caps["available"] is True
     assert caps["unavailable_reason"] is None
     assert isinstance(caps["versions"]["andes"], str)
@@ -253,6 +256,7 @@ def test_engine_capabilities_sienna_available(
     }
     assert caps["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert caps["routine_options"] == {
+        "pflow": {"methods": ["ac", "dc", "ptdf-dc"]},
         "tds": {
             "streaming": True,
             "abort": True,

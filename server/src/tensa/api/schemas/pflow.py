@@ -35,10 +35,11 @@ class LineFlow(BaseModel):
             "computed in pu and multiplied by the system base MVA)."
         ),
     )
-    q: float = Field(
+    q: float | None = Field(
         ...,
         description=(
-            "Reactive power leaving ``bus1`` into the line, in MVAr."
+            "Reactive power leaving ``bus1`` into the line, in MVAr. "
+            "``null`` for a DC power flow, which computes no reactive power."
         ),
     )
     from_idx: int | str = Field(
@@ -56,9 +57,12 @@ class LineFlow(BaseModel):
             "when the line delivers power to ``bus2``."
         ),
     )
-    q_to: float = Field(
+    q_to: float | None = Field(
         ...,
-        description="Reactive power leaving ``bus2`` into the line, in MVAr.",
+        description=(
+            "Reactive power leaving ``bus2`` into the line, in MVAr. "
+            "``null`` for a DC power flow, which computes no reactive power."
+        ),
     )
     loss: float = Field(
         ...,
@@ -94,8 +98,12 @@ class GeneratorOutput(BaseModel):
     p: float = Field(
         ..., description="Active power generated at the terminal bus, in MW."
     )
-    q: float = Field(
-        ..., description="Reactive power generated at the terminal bus, in MVAr."
+    q: float | None = Field(
+        ...,
+        description=(
+            "Reactive power generated at the terminal bus, in MVAr. "
+            "``null`` for a DC power flow, which computes no reactive power."
+        ),
     )
     v: float = Field(
         ..., description="Terminal bus voltage magnitude (pu)."
@@ -126,7 +134,13 @@ class LoadConsumption(BaseModel):
     switched off draws nothing: ``p`` and ``q`` are 0."""
 
     p: float = Field(..., description="Active power drawn, in MW.")
-    q: float = Field(..., description="Reactive power drawn, in MVAr.")
+    q: float | None = Field(
+        ...,
+        description=(
+            "Reactive power drawn, in MVAr. ``null`` for a DC power flow, "
+            "which computes no reactive power."
+        ),
+    )
     bus: int | str = Field(..., description="Terminal bus idx.")
 
 
@@ -166,11 +180,13 @@ class PflowSettings(BaseModel):
     method: str | None = Field(
         default=None,
         description=(
-            "The solver the run used: ``NR`` (Newton-Raphson), ``dishonest`` "
-            "(Newton-Raphson that reuses the Jacobian after the first "
-            "``n_factorize`` iterations) or ``NK`` (Newton-Krylov from SciPy, "
-            "which stops by SciPy's own rule: it reads neither ``tolerance`` nor "
-            "``max_iterations`` and keeps no iteration count)."
+            "The solver the run used. For an ANDES session: ``NR`` "
+            "(Newton-Raphson), ``dishonest`` (Newton-Raphson that reuses the "
+            "Jacobian after the first ``n_factorize`` iterations) or ``NK`` "
+            "(Newton-Krylov from SciPy, which stops by SciPy's own rule: it "
+            "reads neither ``tolerance`` nor ``max_iterations`` and keeps no "
+            "iteration count). For a Sienna session: ``NR`` for the AC power "
+            "flow, ``dc`` or ``ptdf-dc`` for a DC power flow."
         ),
     )
     n_factorize: int | None = Field(
@@ -200,29 +216,41 @@ class PflowSummary(BaseModel):
     generation_p: float = Field(
         ..., description="Active power the in-service generators produce, in MW."
     )
-    generation_q: float = Field(
-        ..., description="Reactive power the in-service generators produce, in MVAr."
+    generation_q: float | None = Field(
+        ...,
+        description=(
+            "Reactive power the in-service generators produce, in MVAr. "
+            "``null`` for a DC power flow, which computes no reactive power."
+        ),
     )
     load_p: float = Field(..., description="Active power the loads draw, in MW.")
-    load_q: float = Field(..., description="Reactive power the loads draw, in MVAr.")
+    load_q: float | None = Field(
+        ...,
+        description=(
+            "Reactive power the loads draw, in MVAr. ``null`` for a DC power "
+            "flow, which computes no reactive power."
+        ),
+    )
     shunt_p: float = Field(
         ..., description="Active power the bus shunts absorb, in MW (0 for a pure susceptance)."
     )
-    shunt_q: float = Field(
+    shunt_q: float | None = Field(
         ...,
         description=(
             "Reactive power the bus shunts absorb, in MVAr: negative for a capacitor, "
-            "which supplies it."
+            "which supplies it. ``null`` for a DC power flow, which computes no "
+            "reactive power."
         ),
     )
     loss_p: float = Field(
         ..., description="Active power the lines and transformers dissipate, in MW."
     )
-    loss_q: float = Field(
+    loss_q: float | None = Field(
         ...,
         description=(
             "Reactive power the lines and transformers absorb, in MVAr: their series "
-            "losses less their charging, so negative when charging dominates."
+            "losses less their charging, so negative when charging dominates. "
+            "``null`` for a DC power flow, which computes no reactive power."
         ),
     )
     slack_p: float | None = Field(
@@ -407,13 +435,16 @@ class PflowRunRequest(BaseModel):
     method: str | None = Field(
         default=None,
         description=(
-            "The solver ANDES runs: ``\"NR\"`` Newton-Raphson (the default), "
-            "``\"dishonest\"`` the same but reusing the Jacobian after the "
-            "first ``n_factorize`` iterations, ``\"NK\"`` Newton-Krylov from "
-            "SciPy; one of those three, case-sensitively. ``NK`` stops by "
-            "SciPy's own rule, so ``tolerance``, ``max_iterations`` and "
-            "``linesearch`` do not apply to it, and its result reports "
-            "``iterations`` as 0. Left out, the case's own setting stands."
+            "The solver the session's engine runs. An ANDES session takes "
+            "``\"NR\"`` Newton-Raphson (the default), ``\"dishonest\"`` the "
+            "same but reusing the Jacobian after the first ``n_factorize`` "
+            "iterations, ``\"NK\"`` Newton-Krylov from SciPy; one of those "
+            "three, case-sensitively. ``NK`` stops by SciPy's own rule, so "
+            "``tolerance``, ``max_iterations`` and ``linesearch`` do not apply "
+            "to it, and its result reports ``iterations`` as 0. A Sienna "
+            "session takes ``\"ac\"`` (the default), ``\"dc\"`` or "
+            "``\"ptdf-dc\"``; a DC method takes neither ``tolerance`` nor "
+            "``max_iterations``. Left out, the case's own setting stands."
         ),
     )
     n_factorize: int | None = Field(

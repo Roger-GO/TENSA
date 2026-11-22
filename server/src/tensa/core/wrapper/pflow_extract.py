@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from tensa.core.wrapper.results import GeneratorOutput, LineFlow, LoadConsumption, PflowSummary
@@ -492,13 +492,26 @@ def _summarize_pflow(
     ]
     return PflowSummary(
         generation_p=sum(g.p for g in generator_outputs.values()),
-        generation_q=sum(g.q for g in generator_outputs.values()),
+        generation_q=_total(g.q for g in generator_outputs.values()),
         load_p=sum(load.p for load in load_consumption.values()),
-        load_q=sum(load.q for load in load_consumption.values()),
+        load_q=_total(load.q for load in load_consumption.values()),
         shunt_p=shunt_p,
         shunt_q=shunt_q,
         loss_p=sum(f.loss for f in line_flows.values()),
-        loss_q=sum(f.q + f.q_to for f in line_flows.values()),
+        loss_q=_total(
+            q for f in line_flows.values() for q in (f.q, f.q_to)
+        ),
         slack_p=sum(g.p for g in slack_rows) if slack_rows else None,
-        slack_q=sum(g.q for g in slack_rows) if slack_rows else None,
+        slack_q=_total(g.q for g in slack_rows) if slack_rows else None,
     )
+
+
+def _total(values: Iterable[float | None]) -> float | None:
+    """The sum of reactive powers, or ``None`` when one is ``None`` (a DC
+    power flow has none); an ANDES power flow fills every one."""
+    total = 0.0
+    for value in values:
+        if value is None:
+            return None
+        total += value
+    return total

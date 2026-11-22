@@ -20,12 +20,15 @@ GET /api/version and tensa --version say which version is running.
                                              Julia is not set up; the worker's first request waits a minute or two
                                              while Julia starts). A Sienna session reads .raw (+ one .dyr) and .m,
                                              and answers POST /case, POST /reload, GET /topology, GET /keys,
-                                             POST /pflow (tolerance and max_iterations only; any other setting is
-                                             422) and GET /operating-point; every other session route answers 409
+                                             POST /pflow (method ac, the default, with tolerance and max_iterations;
+                                             method dc or ptdf-dc, a DC power flow whose reactive fields are null;
+                                             any other setting is 422) and GET /operating-point; every other session route answers 409
                                              naming the engines that have it. A Sienna session also answers
-                                             POST /tds (batch only; tf, optional h and load_model impedance|power|as-case;
+                                             POST /tds (batch; tf, optional h and load_model impedance|power|as-case;
                                              integrator, tds_config_overrides, dae_vars and controllers are 422; traces are
-                                             named quantity|key, rotor_angle_rel is not reported), POST /tds/init (test_init
+                                             named quantity|key, rotor_angle_rel is not reported), a streamed run over the
+                                             WebSocket (start_tds with tf, h or step, load_model, decimation; columns named
+                                             quantity|key; the same refusals), POST /tds/init (test_init
                                              false is 422) and POST/GET /sessions/{id}/disturbances (a Fault on a bus, a
                                              Toggle on a Line or on a generator; anything else is 422). A .dyr with records PowerSystems does
                                              not support is refused (422 naming each) unless /case is sent

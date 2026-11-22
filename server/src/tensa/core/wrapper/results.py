@@ -130,12 +130,15 @@ class LineFlow:
     rating (a ``rate_a`` of zero).
     """
 
+    # ``q`` and ``q_to`` are ``None`` for a DC power flow (a Sienna session's
+    # ``method`` dc or ptdf-dc), which computes no reactive power; an AC power
+    # flow, and every ANDES one, fills them.
     p: float
-    q: float
+    q: float | None
     from_idx: int | str
     to_idx: int | str
     p_to: float
-    q_to: float
+    q_to: float | None
     loss: float
     rate_a: float | None
     loading_pct: float | None
@@ -158,7 +161,7 @@ class GeneratorOutput:
     """
 
     p: float  # MW (scaled by ss.config.mva)
-    q: float  # MVAr
+    q: float | None  # MVAr; None for a DC power flow (see LineFlow)
     v: float  # terminal voltage (pu)
     bus: int | str
     q_min: float | None = None  # MVAr
@@ -170,7 +173,7 @@ class LoadConsumption:
     """Per-load PF consumption: P + Q draw at the load's terminal bus."""
 
     p: float  # MW
-    q: float  # MVAr
+    q: float | None  # MVAr; None for a DC power flow (see LineFlow)
     bus: int | str
 
 
@@ -186,14 +189,16 @@ class PflowSummary:
     in-service slack generators, ``None`` when there is none.
     """
 
+    # The reactive totals are ``None`` for a DC power flow, which computes no
+    # reactive power (see LineFlow).
     generation_p: float
-    generation_q: float
+    generation_q: float | None
     load_p: float
-    load_q: float
+    load_q: float | None
     shunt_p: float
-    shunt_q: float
+    shunt_q: float | None
     loss_p: float
-    loss_q: float
+    loss_q: float | None
     slack_p: float | None
     slack_q: float | None
 

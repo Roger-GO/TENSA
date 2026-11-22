@@ -111,7 +111,17 @@ class NetworkMatrixTooLargeError(AndesAppError):
         )
 
 # The ops the Sienna engine does not take, named for the error message.
-_ANDES_ONLY_PFLOW_OPTIONS = ("method", "n_factorize", "linesearch")
+_ANDES_ONLY_PFLOW_OPTIONS = ("n_factorize", "linesearch")
+
+# The power flow methods the Sienna engine takes (``None`` and ``"ac"`` are
+# the AC power flow; ``"dc"`` and ``"ptdf-dc"`` the DC solvers).
+_PFLOW_METHODS = ("ac", "dc", "ptdf-dc")
+
+# Why a dynamic analysis refuses to start after a DC power flow.
+_DC_NOT_AN_OPERATING_POINT = (
+    "the last power flow was a DC one, which gives no operating point a dynamic "
+    "analysis can start from; solve the AC power flow (method ac) first"
+)
 
 # The load models a dynamic analysis takes (spec section 6.3).
 _LOAD_MODELS = ("impedance", "power", "as-case")
@@ -518,13 +528,18 @@ class SiennaState:
         max_iterations: int | None = None,
         flat_start: bool | None = None,
         enforce_q_limits: bool | None = None,
+        method: str | None = None,
         **other: Any,
     ) -> PflowResult:
-        """Solve the AC power flow.
+        """Solve the power flow.
 
-        ``flat_start`` or ``enforce_q_limits`` that is not ``None``, or any
-        ANDES-only option (``method``, ``n_factorize``, ``linesearch``) that
-        is not ``None``, raises :class:`PflowRequestError` naming the option.
+        ``method`` may be ``"ac"`` (the default), ``"dc"`` or ``"ptdf-dc"``;
+        ``"dc"`` and ``"ptdf-dc"`` take neither ``tolerance`` nor
+        ``max_iterations``, and a DC method given with ``flat_start`` or
+        ``enforce_q_limits`` is refused naming the option, since a DC power
+        flow has none of them. Any ANDES-only option (``n_factorize``,
+        ``linesearch``) that is not ``None`` raises :class:`PflowRequestError`
+        naming the option, as does a ``method`` the engine does not have.
         ``tolerance`` must be a finite number above 0 and ``max_iterations``
         an integer of at least 1 (not a bool).
         """
@@ -534,6 +549,21 @@ class SiennaState:
             if value is not None:
                 raise PflowRequestError(
                     f"the Sienna engine does not take {name}"
+                )
+        if method is not None and method not in _PFLOW_METHODS:
+            raise PflowRequestError(
+                f"the Sienna engine does not have method {short_repr(method)}; "
+                f"it has ac, dc and ptdf-dc"
+            )
+        is_dc = method in ("dc", "ptdf-dc")
+        if is_dc:
+            if tolerance is not None:
+                raise PflowRequestError(
+                    f"method {method} takes neither tolerance nor max_iterations"
+                )
+            if max_iterations is not None:
+                raise PflowRequestError(
+                    f"method {method} takes neither tolerance nor max_iterations"
                 )
         for name in _ANDES_ONLY_PFLOW_OPTIONS:
             value = other.pop(name, None)
@@ -567,11 +597,15 @@ class SiennaState:
             )
 
         bridge = self._require_bridge()
-        pflow = bridge.pflow(
-            self._session,
-            tolerance=None if tolerance is None else float(tolerance),
-            max_iterations=max_iterations,
-        )
+        if is_dc:
+            assert method is not None  # noqa: S101 - is_dc implies a method
+            pflow = bridge.dc_pflow(self._session, method)
+        else:
+            pflow = bridge.pflow(
+                self._session,
+                tolerance=None if tolerance is None else float(tolerance),
+                max_iterations=max_iterations,
+            )
         self._pflow_json = pflow
         # A new operating point is not the one the last analysis linearised at.
         self._eig_result = None
@@ -594,13 +628,19 @@ class SiennaState:
             pflow, self._topology_json, self._key_book, ratings=ratings
         )
         # The settings the JSON reports, with the fields the Sienna engine
-        # has no value for set to the value that states "not used".
+        # has no value for set to the value that states "not used". A DC power
+        # flow has no tolerance or iteration limit, so both are 0 there, and
+        # the method says which solver ran.
         result.settings = PflowSettings(
-            tolerance=float(pflow.get("tolerance", 1e-8)),
-            max_iterations=int(pflow.get("max_iterations", 30)),
+            tolerance=float(pflow["tolerance"])
+            if pflow.get("tolerance") is not None
+            else 0.0,
+            max_iterations=int(pflow["max_iterations"])
+            if pflow.get("max_iterations") is not None
+            else 0,
             flat_start=False,
             enforce_q_limits=False,
-            method="NR",
+            method=str(method) if is_dc else "NR",
             n_factorize=1,
             linesearch=False,
         )
@@ -673,6 +713,8 @@ class SiennaState:
             raise EigPrerequisiteError(
                 "Run PFlow first; EIG requires a converged operating point."
             )
+        if self._dc_pflow_last():
+            raise EigPrerequisiteError(_DC_NOT_AN_OPERATING_POINT)
         if load_model not in _LOAD_MODELS:
             raise EigComputationError(
                 f'load_model must be "impedance", "power" or "as-case", got '
@@ -967,10 +1009,20 @@ class SiennaState:
 
     # ---- run_tds ------------------------------------------------------------
 
+    def _dc_pflow_last(self) -> bool:
+        """Whether the last power flow was a DC one, which solves a copy of the
+        System and leaves no operating point a dynamic analysis can start from."""
+        return self._pflow_json is not None and self._pflow_json.get("method") in (
+            "dc",
+            "ptdf-dc",
+        )
+
     def _require_converged_pflow(self) -> None:
-        """The gate every dynamic analysis shares: a solved power flow."""
+        """The gate every dynamic analysis shares: a solved AC power flow."""
         if self._pflow_json is None or not self._pflow_json.get("converged"):
             raise TdsRequestError("solve the power flow first")
+        if self._dc_pflow_last():
+            raise TdsRequestError(_DC_NOT_AN_OPERATING_POINT)
 
     def _reference_bus(self) -> int:
         """The bus the relative angles are taken against: the case's reference

@@ -427,11 +427,17 @@ async def test_failure_paths(world: World) -> None:
     # A failed load leaves the case held before, as under ANDES.
     assert len((await _ok(c.get(f"/api/sessions/{sid}/topology")))["buses"]) == 10
 
-    for option, value in (("flat_start", True), ("flat_start", False), ("enforce_q_limits", True), ("method", "NR")):
+    for option, value in (("flat_start", True), ("flat_start", False), ("enforce_q_limits", True)):
         resp = await c.post(f"/api/sessions/{sid}/pflow", json={option: value})
         assert resp.status_code == 422, (option, resp.text)
         assert option in resp.json()["detail"]
         assert "Sienna engine does not take" in resp.json()["detail"]
+    # The engine takes a method, its own: an ANDES one is refused with the list.
+    resp = await c.post(f"/api/sessions/{sid}/pflow", json={"method": "NR"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"] == (
+        "the Sienna engine does not have method 'NR'; it has ac, dc and ptdf-dc"
+    )
 
     await _ok(_load(c, sid, "ieee39.raw"))
     stalled = await _ok(c.post(f"/api/sessions/{sid}/pflow", json={"max_iterations": 1}))

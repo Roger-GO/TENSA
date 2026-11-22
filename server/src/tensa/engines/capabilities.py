@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.metadata
 from typing import Any
 
+from tensa.core.pflow_options import METHODS
 from tensa.engines.ops import ENGINE_NAMES, ENGINE_OPS
 from tensa.engines.registry import engine_unavailable_reason
 
@@ -45,12 +46,15 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
             "routines": ["matrices", "pflow", "eig", "tds"],
             "routine_options": {
+                "pflow": {
+                    "methods": ["ac", "dc", "ptdf-dc"],
+                },
                 "tds": {
                     "streaming": True,
                     "abort": True,
                     "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
                     "options": {"load_model": ["impedance", "power", "as-case"]},
-                }
+                },
             },
             "ops": sorted(ENGINE_OPS[name]),
             "editing": False,
@@ -65,6 +69,11 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "write": ["xlsx", "json", "psse-raw", "matpower"],
         },
         "routines": ["pflow", "tds", "eig", "cpf", "se"],
+        "routine_options": {
+            "pflow": {
+                "methods": list(METHODS),
+            },
+        },
         "ops": sorted(ENGINE_OPS[name]),
         "editing": True,
     }
