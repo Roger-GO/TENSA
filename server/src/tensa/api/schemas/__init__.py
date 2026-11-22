@@ -192,6 +192,18 @@ from tensa.api.schemas.ybus import (
     YbusResponse,
 )
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
+from tensa.engines.case_doc import (
+    BusRecord,
+    CaseDocument,
+    CaseSource,
+    DynamicRecord,
+    GeneratorRecord,
+    LineRecord,
+    LoadRecord,
+    ShuntRecord,
+    TransformerRecord,
+    ZipFractions,
+)
 
 # Every name the single-file module defined, kept importable from here (the three
 # disturbance specs were re-exported by it, for the request bodies built on them).
@@ -206,7 +218,10 @@ __all__ = [
     "AlterableParamsResponse",
     "BlankSystemResponse",
     "BusCoord",
+    "BusRecord",
+    "CaseDocument",
     "CaseEvent",
+    "CaseSource",
     "CloneDiffPair",
     "CloneDiffResponse",
     "CloneEditRequest",
@@ -229,6 +244,7 @@ __all__ = [
     "DeleteElementResponse",
     "DeletedDisturbance",
     "DisturbanceAck",
+    "DynamicRecord",
     "EditElementRequest",
     "EditStep",
     "EigenvaluePairOut",
@@ -245,14 +261,17 @@ __all__ = [
     "ExternalSeries",
     "FaultSpec",
     "GeneratorOutput",
+    "GeneratorRecord",
     "JobKindSchema",
     "JobRecordSchema",
     "JobStatusSchema",
     "KeyEntrySchema",
     "KeyList",
     "LineFlow",
+    "LineRecord",
     "LoadCaseRequest",
     "LoadConsumption",
+    "LoadRecord",
     "MAX_COMPARE_SAMPLES",
     "MAX_COMPARE_SAMPLES_TOTAL",
     "MAX_COMPARE_SERIES",
@@ -293,6 +312,7 @@ __all__ = [
     "SeriesDifferenceOut",
     "SeriesMetrics",
     "SessionDescriptor",
+    "ShuntRecord",
     "SessionList",
     "SessionMessageSchema",
     "SessionMessages",
@@ -319,6 +339,7 @@ __all__ = [
     "TopologyParamMeta",
     "TopologySchema",
     "TopologySummary",
+    "TransformerRecord",
     "UnmatchedKeysOut",
     "UploadedWorkspaceFile",
     "VersionInfo",
@@ -326,4 +347,5 @@ __all__ = [
     "WorkspaceFileList",
     "YbusEntrySchema",
     "YbusResponse",
+    "ZipFractions",
 ]

@@ -90,6 +90,11 @@ Keys:            GET /sessions/{id}/keys  (every element's key, each with bucket
                  topology carries "has_dynamics", and a pflow result carries "keys": per kind (bus, line,
                  generator, load) the stringified idx of each result entry mapped to its key. A key names an
                  element the same way in every engine: bus:7, branch:7-8-1, gen:1-1, gen:1-1/exciter)
+Case document:   GET /sessions/{id}/case/neutral  (the loaded case in the engine-neutral form of spec section 5:
+                 tensa_case 1, base_mva, freq_hz, source, buses, lines, transformers, generators, loads, shunts,
+                 dynamics (key, unit, role, model; values and names null in this version, which "notes" says),
+                 events, ext; what the case does not give is null, never an engine default; both engines answer
+                 it; 409 when no case has been loaded)
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |

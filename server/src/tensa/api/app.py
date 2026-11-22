@@ -41,6 +41,7 @@ from tensa import __version__
 from tensa.api.error_mapping import recovery_for
 from tensa.api.request_log import make_request_log_middleware
 from tensa.api.routes.bundle import router as bundle_import_router
+from tensa.api.routes.case_document import router as case_document_router
 from tensa.api.routes.cases import router as cases_router
 from tensa.api.routes.clone import router as clone_router
 from tensa.api.routes.compare import router as compare_router
@@ -370,6 +371,7 @@ def make_app(
     app.include_router(ybus_router, prefix="/api", tags=["ybus"])
     app.include_router(network_matrix_router, prefix="/api", tags=["network-matrix"])
     app.include_router(keys_router, prefix="/api", tags=["keys"])
+    app.include_router(case_document_router, prefix="/api", tags=["case-document"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])

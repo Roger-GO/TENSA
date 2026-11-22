@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 7 |
+| `none` | 8 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **81** |
+| **total** | **82** |
 
 ## OpenAPI routes
 
@@ -63,6 +63,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/case/clone/reset` | `command-palette` |  |
 | `POST` | `/api/sessions/{session_id}/case/clone/save-as` | `command-palette` |  |
 | `POST` | `/api/sessions/{session_id}/case/clone/undo` | `inspector` |  |
+| `GET` | `/api/sessions/{session_id}/case/neutral` | `none` | no web surface reads the case document yet; the Phase 8 editing unit that builds a session from one adds it |
 | `GET` | `/api/sessions/{session_id}/connectivity` | `workspace` |  |
 | `POST` | `/api/sessions/{session_id}/cpf` | `analysis-panel` |  |
 | `POST` | `/api/sessions/{session_id}/cpf/qv` | `analysis-panel` |  |

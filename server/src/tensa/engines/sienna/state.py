@@ -899,6 +899,34 @@ class SiennaState:
                     log.debug("the matrix file %s could not be removed", path.name)
         return answer
 
+    def case_document_parts(
+        self,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        CaseIdentity | None,
+        KeyBook,
+        Path | None,
+        list[Path] | None,
+    ]:
+        """What the case document builder reads, as one tuple.
+
+        The topology JSON, the report JSON, the corrections document, the
+        identity, the key book, the case path and the addfiles. With no case
+        loaded raises :class:`NoCaseLoadedError`, as ``topology`` does.
+        """
+        self._require_session()
+        return (
+            self._topology_json or {},
+            self._report_json,
+            self._document,
+            self._identity,
+            self._key_book,
+            self._case_path,
+            self._addfiles,
+        )
+
     # ---- disturbances ---------------------------------------------------------
 
     def add_disturbance(self, spec: DisturbanceSpec) -> str:

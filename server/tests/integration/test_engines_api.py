@@ -25,6 +25,7 @@ pytestmark = pytest.mark.integration
 _SIENNA_REASON = sienna_unavailable_reason()
 _SIENNA_OPS = [
     "add_disturbance",
+    "case_document",
     "clear_disturbances",
     "eig_participation",
     "init_tds",

@@ -58,6 +58,7 @@ _SWEEP_REQUEST_SECONDS = 120.0
 
 _SIENNA_OPS = [
     "add_disturbance",
+    "case_document",
     "clear_disturbances",
     "eig_participation",
     "init_tds",
@@ -503,6 +504,7 @@ _SPEC_ROUTES = _session_routes(_SPEC)
 _WORKS = {
     ("GET", "/api/sessions/{session_id}"),
     ("POST", "/api/sessions/{session_id}/case"),
+    ("GET", "/api/sessions/{session_id}/case/neutral"),
     ("GET", "/api/sessions/{session_id}/topology"),
     ("POST", "/api/sessions/{session_id}/reload"),
     ("GET", "/api/sessions/{session_id}/keys"),

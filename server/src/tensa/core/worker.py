@@ -610,6 +610,15 @@ def _handle_operating_point(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.operating_point())
 
 
+def _handle_case_document(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The neutral case document of the loaded case (spec section 5). With no
+    case loaded the wrapper's :class:`NoCaseLoadedError` propagates, as the
+    ``topology`` op's does."""
+    from tensa.engines.andes.case_doc import build_case_document
+
+    return build_case_document(wrapper).model_dump(mode="json", by_alias=True)
+
+
 def _handle_add_disturbance(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     spec = _disturbance_from_dict(args["spec"])
     return wrapper.add_disturbance(spec)
@@ -1922,6 +1931,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "topology": _handle_topology,
     "list_keys": _handle_list_keys,
     "operating_point": _handle_operating_point,
+    "case_document": _handle_case_document,
     "add_disturbance": _handle_add_disturbance,
     "list_disturbances": _handle_list_disturbances,
     "replay_disturbances": _handle_replay_disturbances,

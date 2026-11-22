@@ -62,7 +62,7 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
-def test_sienna_ops_are_the_literal_fourteen() -> None:
+def test_sienna_ops_are_the_literal_fifteen() -> None:
     """The Sienna set is held to the literal ops the engine has."""
     assert ENGINE_OPS["sienna"] == frozenset(
         {
@@ -79,9 +79,16 @@ def test_sienna_ops_are_the_literal_fourteen() -> None:
             "list_disturbances",
             "clear_disturbances",
             "init_tds",
+            "case_document",
             "run_tds",
         }
     )
+
+
+def test_case_document_is_an_op_of_both_engines() -> None:
+    assert "case_document" in ENGINE_OPS["andes"]
+    assert "case_document" in ENGINE_OPS["sienna"]
+    assert engines_with_op("case_document") == ["andes", "sienna"]
 
 
 def test_engines_with_op_lists_engines_in_engine_names_order(
@@ -274,6 +281,11 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
 
         def list_disturbances(self) -> list[Any]:
             return []
+
+        def case_document_parts(self) -> tuple[Any, ...]:
+            from tensa.engines.keys import KeyBook
+
+            return ({}, None, None, None, KeyBook(), None, None)
 
         def __getattr__(self, name: str) -> Any:
             if name.startswith("__"):

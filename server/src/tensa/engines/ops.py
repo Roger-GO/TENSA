@@ -73,6 +73,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "delete_snapshot",
             "sweep_plan",
             "adopt_sweep_source",
+            "case_document",
             # Special-cased by the dispatch (they need the abort event and the data pipe).
             "run_tds",
             "run_sweep",
@@ -94,6 +95,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "list_disturbances",
             "clear_disturbances",
             "init_tds",
+            "case_document",
             # Special-cased by the dispatch (it needs the abort event).
             "run_tds",
         }

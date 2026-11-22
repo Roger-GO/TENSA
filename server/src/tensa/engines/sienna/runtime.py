@@ -3,7 +3,7 @@
 Shaped like the worker's own table (``tensa.core.worker.HANDLERS``): each
 handler takes the state and the op's args and answers the payload the worker
 sends back, serialised with the worker's ``_serialize_dataclass``. The ops
-are exactly the fourteen the engine has; an op outside the table is refused
+are exactly the fifteen the engine has; an op outside the table is refused
 by the worker before dispatch. ``run_tds`` is dispatched directly, as the
 ANDES table special-cases it: it needs the abort event.
 """
@@ -129,6 +129,19 @@ def _handle_network_matrix(state: SiennaState, args: dict[str, Any]) -> Any:
     return state.network_matrix(args["kind"])
 
 
+def _handle_case_document(state: SiennaState, args: dict[str, Any]) -> Any:
+    """The neutral case document of the loaded case. With no case loaded the
+    state's :class:`NoCaseLoadedError` propagates, as ``topology``'s does."""
+    from tensa.engines.sienna.case_doc import build_case_document
+
+    topology, report, document, identity, book, case_path, addfiles = (
+        state.case_document_parts()
+    )
+    return build_case_document(
+        topology, report, document, identity, book, case_path, addfiles
+    ).model_dump(mode="json", by_alias=True)
+
+
 def _handle_list_keys(state: SiennaState, args: dict[str, Any]) -> Any:
     """The keys of the loaded case's elements, in assignment order, with the
     problems the assignment noted. A listing is a read: with no case loaded
@@ -166,6 +179,7 @@ _HANDLERS: dict[str, Any] = {
     "list_disturbances": _handle_list_disturbances,
     "clear_disturbances": _handle_clear_disturbances,
     "init_tds": _handle_init_tds,
+    "case_document": _handle_case_document,
 }
 
 
@@ -234,7 +248,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the fourteen ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the fifteen ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(
