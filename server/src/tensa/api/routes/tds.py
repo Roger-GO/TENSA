@@ -123,7 +123,7 @@ async def run_tds(
         engine = getattr(record, "engine", "andes") if record is not None else "andes"
         if engine != "sienna":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="ext_sienna is a Sienna option; an ANDES session does not take it",
             )
         args["ext_sienna"] = body.ext_sienna.model_dump()

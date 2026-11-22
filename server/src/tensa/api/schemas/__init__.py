@@ -167,6 +167,13 @@ from tensa.api.schemas.sessions import (
     SessionDescriptor,
     SessionList,
 )
+from tensa.api.schemas.sim import (
+    SimGeneratorSeriesSchema,
+    SimRequest,
+    SimResponse,
+    SimSlackSchema,
+    SimStageSchema,
+)
 from tensa.api.schemas.studies import (
     EngineStudyOutcome,
     StudyCaseRef,
@@ -357,6 +364,11 @@ __all__ = [
     "SessionMessageSchema",
     "SessionMessages",
     "SidecarLayout",
+    "SimGeneratorSeriesSchema",
+    "SimRequest",
+    "SimResponse",
+    "SimSlackSchema",
+    "SimStageSchema",
     "SkippedSeries",
     "StudyCaseRef",
     "StudyRequest",

@@ -131,6 +131,18 @@ Unit commitment: POST /sessions/{id}/uc  (Sienna only; body {"network_model": "c
                  total_load_mw per period, slacks (every slack variable past 1e-6 MW, with its period); 422 for
                  a bad request or a case with no generator cost data (a PSS/E .raw case carries none), 409 on
                  an ANDES session)
+Simulation:      POST /sessions/{id}/sim  (Sienna only; body {"load_profile": 96 fractions of each load's max
+                 active power, one per 15-minute step of the day (1.0 is the case's load), optional
+                 "network_model": "copper_plate"|"dc"|"ptdf"} -> a day-ahead unit commitment at hourly
+                 resolution over the day (every generator starting off, so one on in the first hour pays its
+                 start-up), then a real-time economic dispatch at 15 minutes held to that commitment, one
+                 simulation step over the day: "stages" DA (uc) and RT (dispatch), each with per-generator
+                 "dispatch" (MW per step) and "objective" (the stage's cost over the day in $, recomputed from
+                 its dispatch and the file's gencost), DA also with "commitment" (0 or 1 per hour), the
+                 generators keyed by neutral key gen:<bus>-<id>; step i of DA is hour i of the day from
+                 2026-01-01T00:00:00, step j of RT is 15 minutes times j; "slacks" lists every slack variable
+                 of either stage past 1e-6 MW with its step; 422 for a bad profile or a case with no generator
+                 cost data (a PSS/E .raw case carries none), 409 on an ANDES session)
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |
                  qndf (variable step, error control from tds_config_overrides rtol/atol, bounds max_step/min_step; h

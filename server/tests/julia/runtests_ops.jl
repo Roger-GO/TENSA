@@ -703,6 +703,152 @@ end
         # The session's own system is untouched.
         @test !PSY.has_time_series(PSY.get_component(PSY.PowerLoad, s.sys, "bus3"))
     end
+
+    # ---- sim_json ---------------------------------------------------------------
+
+    # The hand-worked simulation case is the uc case above: generator A
+    # (bus 1), 10 $/MWh, PMIN 50 MW, PMAX 200 MW, start-up 500 $; generator B
+    # (bus 2), 30 $/MWh, PMIN 0, PMAX 200 MW, no start-up cost; a load of
+    # 100 MW at bus 3 whose profile is 40, 120, 150, 40 MW over the first
+    # four hours and 40 MW for the rest of the day (the 96-step profile holds
+    # each hour's factor for its four quarter-hours). The day-ahead
+    # enumeration of the first four hours is beside uc_case: A on in hours 2
+    # and 3 with one start-up, A at 120 and 150 MW, B at 40 MW in hours 1 and
+    # 4. Hours 5 to 24 are 40 MW each, which A's 50 MW minimum cannot serve,
+    # so B serves them at 30 $/MWh. The day-ahead cost is energy
+    # 10 * (120 + 150) + 30 * 40 * 22 = 2700 + 26400 = 29100 $ plus one
+    # start-up of 500 $: 29600 $. The real-time stage, held to that
+    # commitment, dispatches each 15-minute period of an hour at that hour's
+    # day-ahead MW (A 0, 120, 150, 0; B 40, 0, 0, 40, then B at 40 MW), and
+    # its cost is the energy alone: 29100 $.
+    function sim_profile()
+        return vcat(fill(0.4, 4), fill(1.2, 4), fill(1.5, 4), fill(0.4, 84))
+    end
+
+    function sim_of(answer, stage_name, field)
+        stage = only([st for st in answer[:stages] if String(st[:name]) == stage_name])
+        return Dict(String(row[:name]) => Float64.(row[field]) for row in stage[field == :on ? :commitment : :dispatch])
+    end
+
+    @testset "sim: the hand-worked two-stage day" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        scratch_before = Set(readdir(s.scratch))
+        answer = JSON3.read(TensaSiennaOps.sim_json(
+            s;
+            load_profile = sim_profile(),
+            network_model = "copper_plate",
+            ops_json = uc_ops(500.0),
+        ))
+        @test answer[:status] == "completed"
+        @test answer[:interval_minutes] == 60
+        @test length(answer[:stages]) == 2
+        da = only([st for st in answer[:stages] if String(st[:name]) == "DA"])
+        rt = only([st for st in answer[:stages] if String(st[:name]) == "RT"])
+        @test da[:kind] == "uc"
+        @test da[:resolution_minutes] == 60
+        @test da[:steps] == 24
+        @test rt[:kind] == "dispatch"
+        @test rt[:resolution_minutes] == 15
+        @test rt[:steps] == 96
+        on = sim_of(answer, "DA", :on)
+        p_da = sim_of(answer, "DA", :p_mw)
+        p_rt = sim_of(answer, "RT", :p_mw)
+        # The day-ahead commitment: A on in hours 2 and 3 only.
+        @test on["gen-1"] == vcat([0.0, 1.0, 1.0], fill(0.0, 21))
+        # The day-ahead dispatch: A 0, 120, 150, 0; B 40, 0, 0, 40, then B at
+        # 40 MW for the rest of the day.
+        @test all(abs.(p_da["gen-1"][1:4] .- [0.0, 120.0, 150.0, 0.0]) .<= 1e-4)
+        @test all(abs.(p_da["gen-1"][5:24]) .<= 1e-6)
+        @test all(abs.(p_da["gen-2"][1:4] .- [40.0, 0.0, 0.0, 40.0]) .<= 1e-4)
+        @test all(abs.(p_da["gen-2"][5:24] .- 40.0) .<= 1e-4)
+        # The feed-forward: every 15-minute period of hours 1 and 4 to 24 has
+        # A at 0 MW (without it the real-time stage is free to run A whenever
+        # it is locally cheaper), and each period of hours 2 and 3 is at the
+        # hour's day-ahead MW.
+        for t in vcat(1:4, 13:96)
+            @test abs(p_rt["gen-1"][t]) <= 1e-6
+        end
+        @test all(abs.(p_rt["gen-1"][5:8] .- 120.0) .<= 1e-4)
+        @test all(abs.(p_rt["gen-1"][9:12] .- 150.0) .<= 1e-4)
+        @test all(abs.(p_rt["gen-2"][1:4] .- 40.0) .<= 1e-4)
+        @test all(abs.(p_rt["gen-2"][13:96] .- 40.0) .<= 1e-4)
+        # The costs, recomputed from each stage's dispatch: DA 29600 $ (energy
+        # 29100, one start-up 500, fixed 0), RT the energy alone, 29100 $.
+        @test abs(Float64(da[:objective]) - 29600.0) <= 1e-6 * 29600.0
+        @test abs(Float64(rt[:objective]) - 29100.0) <= 1e-6 * 29100.0
+        @test isempty(answer[:slacks])
+        # The store went under the session's scratch and is removed.
+        @test startswith(String(answer[:store_dir]), "sim-")
+        @test Set(readdir(s.scratch)) == scratch_before
+    end
+
+    @testset "sim: a bad profile is refused" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.sim_json(s; load_profile = fill(1.0, 95))
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin(
+            "load_profile must hold 96 numbers, one per 15-minute step of the day",
+            sprint(showerror, err),
+        )
+        err = try
+            TensaSiennaOps.sim_json(s; load_profile = vcat(fill(1.0, 95), [-0.5]))
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("load_profile entries must be finite numbers >= 0", sprint(showerror, err))
+    end
+
+    @testset "sim: an unknown network model is refused" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.sim_json(s; load_profile = sim_profile(), network_model = "sdp")
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("network_model must be copper_plate, dc, ptdf or ac, got sdp", sprint(showerror, err))
+    end
+
+    @testset "sim: a case with no cost data is refused" begin
+        path = no_cost_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.sim_json(s; load_profile = sim_profile())
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin(
+            "the case has no generator cost data; economic dispatch needs gencost records",
+            sprint(showerror, err),
+        )
+    end
+
+    @testset "sim: the session's system is unchanged" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        before = TensaSienna.topology_json(s)
+        TensaSiennaOps.sim_json(
+            s;
+            load_profile = sim_profile(),
+            network_model = "copper_plate",
+            ops_json = uc_ops(500.0),
+        )
+        @test TensaSienna.topology_json(s) == before
+        @test !PSY.has_time_series(first(collect(PSY.get_components(PSY.PowerLoad, s.sys))))
+    end
 end
 
 println("TENSA SIENNA OPS TESTS OK")

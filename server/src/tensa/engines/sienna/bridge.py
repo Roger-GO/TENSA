@@ -501,6 +501,26 @@ class JuliaBridge:
             )
         )
 
+    def sim(
+        self,
+        session: Any,
+        load_profile: Sequence[float],
+        network_model: str,
+        ops: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Run the two-stage simulation; loads the ops module on first call."""
+        self.start_ops()
+        return self._json(
+            self._call(
+                "sim_json",
+                session,
+                _module=self._ts_ops,
+                load_profile=[float(v) for v in load_profile],
+                network_model=network_model,
+                ops_json=json.dumps(list(ops) if ops is not None else None),
+            )
+        )
+
     def apply_series(
         self,
         session: Any,

@@ -94,6 +94,7 @@ from tensa.engines.sienna.edit_log import (
 from tensa.engines.sienna.ext import SiennaExtSpec, ext_to_json, validate_ext
 from tensa.engines.sienna.keys import assign_sienna_keys
 from tensa.engines.sienna.matrix_io import read_matrix
+from tensa.engines.sienna.sim import SimResult, check_load_profile, sim_result
 from tensa.engines.sienna.uc import (
     UcResult,
     check_uc_overrides,
@@ -1159,6 +1160,56 @@ class SiennaState:
                 else:
                     log.info("%s", text)
         return uc_result(payload, self._key_book)
+
+    # ---- run_sim ----------------------------------------------------------------
+
+    def run_sim(
+        self,
+        load_profile: Any,
+        network_model: Any = "copper_plate",
+    ) -> SimResult:
+        """Run the two-stage simulation of the loaded case.
+
+        ``load_profile`` is 96 fractions of each load's max active power, one
+        per 15-minute step of the day; ``network_model`` is
+        ``"copper_plate"``, ``"dc"`` or ``"ptdf"``. All request validation is
+        ``check_load_profile`` and ``check_network_model``, before any Julia
+        call, mirroring the ``run_dispatch`` validation. With no case loaded
+        raises :class:`NoCaseLoadedError`, and for a case that is not a
+        MATPOWER file (no gencost) :class:`DispatchRequestError` before any
+        Julia call: a PSS/E .raw case has no cost data and PowerSystems gives
+        its generators a placeholder curve of 1 $/MWh. A :class:`SiennaError`
+        from the bridge propagates unchanged; the route maps it. The notes
+        the Julia side captured are logged on ``tensa.notice`` exactly as
+        ``run_dispatch`` does.
+        """
+        self._require_session()
+        profile = check_load_profile(load_profile)
+        check_network_model(network_model)
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        ops = (self._document or {}).get("generator_ops")
+        bridge = self._require_bridge()
+        payload = bridge.sim(
+            self._session,
+            profile,
+            str(network_model),
+            ops if isinstance(ops, list) else None,
+        )
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return sim_result(payload, self._key_book)
 
     # ---- network_matrix -------------------------------------------------------
 

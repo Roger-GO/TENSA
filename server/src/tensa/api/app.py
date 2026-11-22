@@ -69,6 +69,7 @@ from tensa.api.routes.reports import router as reports_router
 from tensa.api.routes.results_doc import router as results_doc_router
 from tensa.api.routes.se import router as se_router
 from tensa.api.routes.sessions import router as sessions_router
+from tensa.api.routes.sim import router as sim_router
 from tensa.api.routes.snapshot import router as snapshot_router
 from tensa.api.routes.studies import router as studies_router
 from tensa.api.routes.sweep import router as sweep_router
@@ -380,6 +381,7 @@ def make_app(
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(dispatch_router, prefix="/api", tags=["dispatch"])
     app.include_router(uc_router, prefix="/api", tags=["uc"])
+    app.include_router(sim_router, prefix="/api", tags=["sim"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(clone_router, prefix="/api", tags=["clone"])

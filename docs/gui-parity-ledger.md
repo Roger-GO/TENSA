@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 12 |
+| `none` | 13 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **86** |
+| **total** | **87** |
 
 ## OpenAPI routes
 
@@ -104,6 +104,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/save` | `command-palette` |  |
 | `POST` | `/api/sessions/{session_id}/se` | `analysis-panel` |  |
 | `POST` | `/api/sessions/{session_id}/se/measurements/generate` | `analysis-panel` |  |
+| `POST` | `/api/sessions/{session_id}/sim` | `none` | No web surface runs a multi-stage simulation yet; the route is for scripts and agents. A later operations unit adds it to the run drawer. |
 | `POST` | `/api/sessions/{session_id}/snapshot` | `snapshot-dialog` |  |
 | `POST` | `/api/sessions/{session_id}/snapshot/restore` | `snapshot-dialog` |  |
 | `DELETE` | `/api/sessions/{session_id}/snapshot/{name}` | `snapshot-dialog` |  |

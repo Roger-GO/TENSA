@@ -43,6 +43,7 @@ _SIENNA_OPS = [
     "run_dispatch",
     "run_eig",
     "run_pflow",
+    "run_sim",
     "run_tds",
     "run_uc",
     "topology",
@@ -111,6 +112,7 @@ async def test_list_engines(client: httpx.AsyncClient) -> None:
             "tds",
             "dispatch",
             "uc",
+            "sim",
         ]
         assert sienna["ops"] == _SIENNA_OPS
         assert sienna["editing"] is True

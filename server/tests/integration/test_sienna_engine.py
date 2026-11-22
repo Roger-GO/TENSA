@@ -76,6 +76,7 @@ _SIENNA_OPS = [
     "run_dispatch",
     "run_eig",
     "run_pflow",
+    "run_sim",
     "run_tds",
     "run_uc",
     "topology",
@@ -295,7 +296,7 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["unavailable_reason"] is None
     assert sienna["ops"] == _SIENNA_OPS
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
-    assert sienna["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch", "uc"]
+    assert sienna["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch", "uc", "sim"]
     assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
     assert sienna["routine_options"]["tds"]["streaming"] is True
     assert sienna["editing"] is True
@@ -523,6 +524,7 @@ _SPEC_ROUTES = _session_routes(_SPEC)
 _REFUSED_BY_THE_ENGINE = {
     ("POST", "/api/sessions/{session_id}/dispatch"),
     ("POST", "/api/sessions/{session_id}/uc"),
+    ("POST", "/api/sessions/{session_id}/sim"),
     ("POST", "/api/sessions/{session_id}/elements"),
     ("PUT", "/api/sessions/{session_id}/elements/{model}/{idx}"),
     ("DELETE", "/api/sessions/{session_id}/elements/{model}/{idx}"),

@@ -25,7 +25,7 @@ No body or `{}` still means ANDES. `GET /api/sessions/{id}` reports the session'
   "unavailable_reason": null,
   "versions": {"julia": "1.13.4", "PowerSystems": "5.12.5", "PowerFlows": "0.16.4", "PowerSimulationsDynamics": "0.16.2", "PowerSimulations": "0.34.2"},
   "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
-  "routines": ["matrices", "pflow", "eig", "tds", "dispatch", "uc"],
+  "routines": ["matrices", "pflow", "eig", "tds", "dispatch", "uc", "sim"],
   "ops": ["..."],
   "models": {"GENROU": "exact", "TGOV1": "known-difference:tgov1-torque"},
   "editing": true
@@ -44,7 +44,7 @@ From `capabilities.py` and `ops.py`:
 |---|---|---|
 | Formats read | `xlsx`, `json`, `psse-raw`, `psse-dyr`, `matpower` | `psse-raw`, `psse-dyr`, `matpower` |
 | Formats written | `xlsx`, `json`, `psse-raw`, `matpower` | none |
-| Routines | `pflow`, `tds`, `eig`, `cpf`, `se` | `matrices`, `pflow`, `eig`, `tds`, `dispatch`, `uc` |
+| Routines | `pflow`, `tds`, `eig`, `cpf`, `se` | `matrices`, `pflow`, `eig`, `tds`, `dispatch`, `uc`, `sim` |
 | Editing | yes | yes, a subset |
 
 The Sienna editing subset, from `routine_options.edit`: a load (`PQ`: `p0`, `q0`, `u`), a generator (`PV` or `Slack`: `p0`, `v0`, `u`), a line or transformer (`Line`: `u`) and a shunt (`Shunt`: `g`, `b`, `u`), one param per edit; a `PQ` or a `Shunt` can be added on a bus and a load or a shunt deleted. Each edit, undo and redo rebuilds the System from the case file with the edit log applied.
@@ -55,6 +55,7 @@ The Sienna-only routes:
 - **DC power flow.** `POST /api/sessions/{id}/pflow` on a Sienna session takes `method`: `ac` (the default), or `dc` and `ptdf-dc`, PowerFlows' `DCPowerFlow` and `PTDFDCPowerFlow`. A DC result has the AC result's shape with every reactive power null and says its method in `settings`.
 - **Economic dispatch.** `POST /api/sessions/{id}/dispatch` solves the one-period economic dispatch of a MATPOWER case with PowerSimulations and HiGHS. The body is `{"network_model": "copper_plate"|"dc"|"ptdf"|"ac", optional "duals": false}`. With `network_model` `ac` the model holds the full AC power flow equations, solved with Ipopt, and the answer also carries the bus voltages and angles, the generator reactive powers, the branch flows at both ends and the losses. The answer carries `objective_per_h` (the solver's objective) and `objective_check_per_h` (recomputed from the dispatch and the file's gencost), generators keyed by neutral key, and every slack variable past 1e-6 MW.
 - **Unit commitment.** `POST /api/sessions/{id}/uc` commits and dispatches a MATPOWER case over a horizon at a resolution with PowerSimulations and HiGHS. The body is `{"network_model": "copper_plate"|"dc"|"ptdf", "horizon_h": 1..168, "resolution_min": 15|30|60, "series": one positive load factor per period, optional "overrides": {gen:<bus>-<id>: {"startup_cost", "min_up_h", "min_down_h", "must_run"}}}`. Every generator starts off, so one on in the first period pays its start-up. The answer gives each period's on/off and MW per generator, the cost split into energy, start-up and fixed, the solver's objective beside the recomputed cost, and slacks.
+- **A day in two stages.** `POST /api/sessions/{id}/sim` runs a PowerSimulations simulation of one day: a day-ahead unit commitment at hourly resolution, then a real-time economic dispatch every 15 minutes held to that commitment (a generator the day-ahead stage left off runs at 0 MW in real time). The body is `{"load_profile": 96 factors of each load, one per 15 minutes, "network_model": "copper_plate"|"dc"|"ptdf"}`; the day-ahead stage sees each hour as the mean of its four quarter-hours. The answer gives, per stage, each generator's MW per step, the day-ahead on/off per hour, the cost of each stage recomputed from its dispatch and the file's gencost, and slacks.
 - **Dynamic lines and inverters.** A TDS request of a Sienna session may carry `ext_sienna`: `dynamic_branches` turns branches into PSID `DynamicBranch` and the run reports each one's current at both ends (`i_from|<key>`, `i_to|<key>`); `inverters` gives a generator with no dynamic model one of two PSID inverters, `gfl-omib` (grid following) and `gfm-omib` (grid forming), each a parameter set PSID 0.16.2 itself tests. An ANDES session refuses the block with 422.
 
 ```json
@@ -152,7 +153,7 @@ Dynamic lines and inverters, on Kundur with circuit 7-8-2 tripped at 0.1 s and 7
 ## Limits a user meets
 
 - **First-use delay.** Julia is loaded on first use of a Sienna session, never in the server process and never for an ANDES session. On a Windows laptop with Julia 1.13.4: create a session to its first reply, 2 to 5 s; first case load, Julia's start included, 56 to 84 s; first power flow, 40 to 47 s; later loads and power flows under 1 s. The first use of each Julia function compiles it. `tensa warm-cache --engine sienna` instantiates the environment, and `tensa serve` starts it in the background; a Sienna session waits for it with a progress message.
-- **Dispatch and unit commitment need a MATPOWER case.** A PSS/E `.raw` case carries no generator cost data and is refused with 422 before Julia runs.
+- **Dispatch, unit commitment and the two-stage day need a MATPOWER case.** A PSS/E `.raw` case carries no generator cost data and is refused with 422 before Julia runs.
 - **A generator with no dynamic model is a voltage source in a Sienna run.** PowerSystems' PSS/E reader turns a generator with no `.dyr` record into a voltage `Source` (a stiff voltage behind an impedance), and PSID simulates it as that: the run completes, with that unit holding its bus voltage rather than swinging. A case meant to compare dynamics gives every generator a model. The `ext_sienna` inverter block gives such a generator a PSID inverter instead.
 - **The AC OPF of case14 is 0.08 percent above MATPOWER**, 8088.22 $/h against 8081.53, with 0.17 MW more losses. The test holds the measured value and says so.
 - **`flat_start: false` is refused** under Sienna, as every power flow option it does not have; the UI sends it only when the user sets it.

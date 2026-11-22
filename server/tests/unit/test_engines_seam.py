@@ -62,7 +62,7 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
-def test_sienna_ops_are_the_literal_twenty_two() -> None:
+def test_sienna_ops_are_the_literal_twenty_three() -> None:
     """The Sienna set is held to the literal ops the engine has."""
     assert ENGINE_OPS["sienna"] == frozenset(
         {
@@ -88,6 +88,7 @@ def test_sienna_ops_are_the_literal_twenty_two() -> None:
             "redo_edit",
             "run_dispatch",
             "run_uc",
+            "run_sim",
             "run_tds",
         }
     )
@@ -271,7 +272,7 @@ def test_engine_capabilities_sienna_available(
         "read": ["psse-raw", "psse-dyr", "matpower"],
         "write": [],
     }
-    assert caps["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch", "uc"]
+    assert caps["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch", "uc", "sim"]
     assert caps["routine_options"] == {
         "pflow": {"methods": ["ac", "dc", "ptdf-dc"]},
         "dispatch": {"network_models": ["copper_plate", "dc", "ptdf", "ac"]},
@@ -280,6 +281,11 @@ def test_engine_capabilities_sienna_available(
             "resolutions_min": [15, 30, 60],
             "horizon_h": {"min": 1, "max": 168},
             "overrides": ["startup_cost", "min_up_h", "min_down_h", "must_run"],
+        },
+        "sim": {
+            "network_models": ["copper_plate", "dc", "ptdf"],
+            "profile_steps": 96,
+            "profile_step_minutes": 15,
         },
         "tds": {
             "streaming": True,

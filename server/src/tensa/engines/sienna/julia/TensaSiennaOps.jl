@@ -21,7 +21,7 @@ const PSI = PowerSimulations
 
 import Main.TensaSienna as TS
 
-export dispatch_json, uc_json, apply_series!
+export dispatch_json, uc_json, apply_series!, sim_json
 
 # The message of a case with no cost data. The Python side
 # (tensa.engines.sienna.dispatch.NO_COST_DATA_MESSAGE) holds the same string
@@ -194,6 +194,14 @@ function _ac_quantities(res, sys, generators)
     return buses, branches, q_of, total_losses_mw
 end
 
+
+# A fresh folder for one PowerSimulations build, inside the session's scratch
+# folder (spec section 12: an engine writes only there), never the system's
+# temporary directory. It goes with the session's scratch folder, and at the
+# latest when the worker's Julia exits.
+_run_dir(s::TS.Session, prefix::AbstractString) =
+    mktempdir(s.scratch; prefix = prefix * "-", cleanup = true)
+
 """
     dispatch_json(s::TS.Session; network_model, duals = false) -> String
 
@@ -287,7 +295,8 @@ function dispatch_json(
             name = "tensa_ed",
             store_variable_names = true,
         )
-        dir = mktempdir()
+        # Spec section 12: simulation files only under the session's scratch.
+        dir = _run_dir(s, "ed")
         built = PSI.build!(model; output_dir = dir)
         built == PSI.ModelBuildStatus.BUILT || throw(
             ErrorException("economic dispatch did not build: $(built)"),
@@ -660,7 +669,8 @@ function uc_json(
             name = "tensa_uc",
             store_variable_names = true,
         )
-        dir = mktempdir()
+        # Spec section 12: simulation files only under the session's scratch.
+        dir = _run_dir(s, "uc")
         built = PSI.build!(model; output_dir = dir)
         built == PSI.ModelBuildStatus.BUILT || throw(
             ErrorException("unit commitment did not build: $(built)"),
@@ -842,6 +852,393 @@ function apply_series!(sys, payload_json::AbstractString)
     horizon = resolution * steps
     PSY.transform_single_time_series!(sys, horizon, horizon)
     return nothing
+end
+
+# The message of a load profile whose length is not 96. The Python side
+# (tensa.engines.sienna.sim.BAD_PROFILE_MESSAGE) holds the same string; the
+# Python check fires first for requests over the wire.
+const BAD_PROFILE = "load_profile must hold 96 numbers, one per 15-minute step of the day"
+
+# The cost of one stage over the day, recomputed from its dispatch in MW and
+# the file's own coefficients, as uc_json's objective_check is: the quadratic
+# and linear terms at the dispatched MW, the constant term per committed
+# hour, and one start-up per period the generator comes on (the initial state
+# being off). `on` is the commitment per stage step (nothing for the
+# real-time stage, whose cost has no start-up or fixed part: the commitment
+# is the day-ahead stage's), `p_mw` the dispatch per step, `step_h` the step
+# length in hours.
+function _stage_cost(g, on, p_mw::Vector{Float64}, step_h::Float64)
+    coefficients = _cost_coefficients(g)
+    coefficients === nothing && return 0.0
+    a, b, c = coefficients
+    cost = sum(a * p^2 + b * p for p in p_mw) * 1.0
+    # The curve is in $/h of power in MW; a step of step_h hours at p MW
+    # costs the curve's value times step_h.
+    cost *= step_h
+    on === nothing && return cost
+    cost += c * step_h * count(==(1.0), on)
+    starts = count(t -> on[t] == 1.0 && (t == 1 || on[t - 1] == 0.0), 1:length(on))
+    cost += Float64(PSY.get_start_up(PSY.get_operation_cost(g))) * starts
+    return cost
+end
+
+"""
+    sim_json(s::TS.Session; load_profile, network_model = "copper_plate") -> String
+
+Run the two-stage simulation of the loaded case: a day-ahead unit commitment
+at hourly resolution over the day (the `uc_json` model:
+`template_unit_commitment` with `ThermalStandardUnitCommitment`, the start-up
+costs set on the copy, every unit starting off), then a real-time economic
+dispatch at 15 minutes (the `dispatch_json` model:
+`template_economic_dispatch`) held to that commitment through a
+`SemiContinuousFeedforward` on `OnVariable`, one simulation step over the
+day. `load_profile` is 96 fractions of each load's `max_active_power`, one
+per 15-minute step of the day (1.0 is the case's load); the day-ahead stage's
+hourly value at hour h is the mean of the four quarter-hours, which is what
+`transform_single_time_series!` makes of the 15-minute series at hourly
+resolution. The system is deep-copied first: the time series, the relabelled
+cost curves, the start-up costs and the initial state go to the copy, never
+to the session's system.
+
+The answer lists, per stage and per period, each generator's on/off
+(day-ahead) and MW, the cost of each stage recomputed from its dispatch and
+the file's own gencost coefficients, and every slack variable past 1e-6 MW
+with its step. Times are implicit: step i of DA is hour i - 1 of the day from
+2026-01-01T00:00:00, step j of RT is 15 minutes times j - 1; the Python side
+reconstructs timestamps from `resolution_minutes` and that fixed start date.
+The simulation's store goes in a fresh folder `sim-<stamp>` inside the
+session's scratch folder (spec section 12) and is removed once the results
+are read.
+
+Throws an `ArgumentError` for a bad profile or network model, an
+`ErrorException` with the no-cost-data message when no generator of the case
+has cost data, and an `ErrorException` whose message starts with the stage
+name for a build, solve or balance failure.
+"""
+function sim_json(
+    s::TS.Session;
+    load_profile::AbstractVector,
+    network_model::AbstractString = "copper_plate",
+    ops_json::AbstractString = "null",
+)::String
+    # From Python the profile arrives as a PyList; the numbers are copied out.
+    load_profile = Float64[Float64(v) for v in load_profile]
+    length(load_profile) == 96 || throw(ArgumentError(BAD_PROFILE))
+    bad = findfirst(v -> !isfinite(v) || v < 0.0, load_profile)
+    bad === nothing || throw(
+        ArgumentError("load_profile entries must be finite numbers >= 0, " *
+                    "got $(load_profile[bad]) at step $(bad)"),
+    )
+    network = _network_model(network_model)
+    sys = deepcopy(s.sys)
+    base_mva = PSY.get_base_power(sys)
+
+    has_cost = any(
+        g -> _cost_coefficients(g) !== nothing,
+        PSY.get_components(PSY.ThermalStandard, sys),
+    )
+    has_cost || throw(ErrorException(NO_COST_DATA))
+
+    _costs_in_natural_units!(sys)
+
+    # A ramp of 0 from the file (no data) becomes no limit; a real one is
+    # kept as PowerSystems read it. Never 0, which would pin the generator.
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        limit = _ramp_mw_per_min(g)
+        PSY.set_ramp_limits!(g, limit === nothing ? nothing : (up = limit, down = limit))
+    end
+
+    # Every generator starts off, so one committed in the first hour pays a
+    # start-up (MATPOWER carries no commitment state).
+    _initial_state_off!(sys)
+
+    # The start-up cost of the gencost rows, which PowerSystems does not
+    # carry into ThermalGenerationCost.start_up, set on the copy from the
+    # case facts the Python side sends.
+    ops = JSON3.read(ops_json)
+    for (name, startup) in _startup_costs(sys, ops)
+        g = PSY.get_component(PSY.ThermalStandard, sys, name)
+        cost = PSY.get_operation_cost(g)
+        cost isa PSY.ThermalGenerationCost && PSY.set_start_up!(cost, startup)
+    end
+
+    # The load profile as two time series of every load, one per stage, as
+    # PowerSimulations' own two-stage test sets them up: the day-ahead
+    # stage's hourly series, each hour the mean of its four quarter-hours,
+    # given for two days (the day repeated: a single forecast window is stored
+    # with an interval of zero, which no model can name, so the series holds
+    # two windows 24 hours apart; the one simulation step reads the first),
+    # and the real-time stage's 15-minute
+    # series (the 96 steps and three more, the last repeated, so the one-hour
+    # window that starts at 23:45 is whole). Both are scaled by the load's
+    # max_active_power, and each is turned into forecasts at its own
+    # resolution and interval; a model names the resolution it reads.
+    t0 = DateTime("2026-01-01T00:00:00")
+    day = [sum(load_profile[(4 * h - 3):(4 * h)]) / 4 for h in 1:24]
+    hourly = vcat(day, day)
+    quarter = vcat(load_profile, fill(load_profile[end], 3))
+    for T in (PSY.PowerLoad, PSY.StandardLoad)
+        for l in collect(PSY.get_components(T, sys))
+            for (step, values) in ((Hour(1), hourly), (Minute(15), quarter))
+                data = PSY.TimeSeries.TimeArray(t0 .+ step .* (0:(length(values) - 1)), values)
+                PSY.add_time_series!(sys, l, PSY.SingleTimeSeries(;
+                    name = "max_active_power",
+                    data = data,
+                    scaling_factor_multiplier = PSY.get_max_active_power,
+                ))
+            end
+        end
+    end
+    PSY.transform_single_time_series!(sys, Hour(24), Hour(24); resolution = Hour(1))
+    PSY.transform_single_time_series!(
+        sys, Hour(1), Minute(15); resolution = Minute(15), delete_existing = false,
+    )
+
+    logger = TS._NoteLogger()
+    out_dir = _run_dir(s, "sim")
+    store_name = basename(out_dir)
+    results = Logging.with_logger(logger) do
+        # The keyword is `network`: the template takes any keyword and keeps
+        # the copper plate for one it does not know, so the model is checked.
+        template_uc = PSI.template_unit_commitment(; network = PSI.NetworkModel(network))
+        PSI.set_device_model!(template_uc, PSY.ThermalStandard, PSI.ThermalStandardUnitCommitment)
+        PSI.get_network_model(template_uc) isa PSI.NetworkModel{network} || throw(
+            ErrorException("unit commitment was built without the $(network_model) network model"),
+        )
+        # The template models PowerLoad alone; a case read from PSS/E holds
+        # StandardLoad, which would otherwise be left out of the balance.
+        PSI.set_device_model!(template_uc, PSY.StandardLoad, PSI.StaticPowerLoad)
+
+        template_rt = PSI.template_economic_dispatch(; network = PSI.NetworkModel(network))
+        PSI.get_network_model(template_rt) isa PSI.NetworkModel{network} || throw(
+            ErrorException("economic dispatch was built without the $(network_model) network model"),
+        )
+        PSI.set_device_model!(template_rt, PSY.StandardLoad, PSI.StaticPowerLoad)
+
+        models = PSI.SimulationModels(;
+            decision_models = [
+                PSI.DecisionModel(
+                    template_uc,
+                    sys;
+                    name = "DA",
+                    optimizer = PSI.optimizer_with_attributes(
+                        HiGHS.Optimizer,
+                        "mip_rel_gap" => 1e-9,
+                    ),
+                    horizon = Hour(24),
+                    interval = Hour(24),
+                    resolution = Hour(1),
+                    store_variable_names = true,
+                ),
+                PSI.DecisionModel(
+                    template_rt,
+                    sys;
+                    name = "RT",
+                    optimizer = HiGHS.Optimizer,
+                    horizon = Hour(1),
+                    interval = Minute(15),
+                    resolution = Minute(15),
+                    store_variable_names = true,
+                ),
+            ],
+        )
+        # The real-time stage is held to the day-ahead commitment: a
+        # generator the day-ahead stage has off runs at 0 MW.
+        feedforwards = Dict(
+            "RT" => [PSI.SemiContinuousFeedforward(;
+                component_type = PSY.ThermalStandard,
+                source = PSI.OnVariable,
+                affected_values = [PSI.ActivePowerVariable],
+            )],
+        )
+        sequence = PSI.SimulationSequence(;
+            models = models,
+            feedforwards = feedforwards,
+            ini_cond_chronology = PSI.InterProblemChronology(),
+        )
+        sim = PSI.Simulation(;
+            name = "tensa_sim",
+            steps = 1,
+            models = models,
+            sequence = sequence,
+            initial_time = t0,
+            simulation_folder = out_dir,
+        )
+        built = PSI.build!(sim)
+        built == PSI.SimulationBuildStatus.BUILT || throw(
+            ErrorException("the simulation did not build: $(built)"),
+        )
+        executed = PSI.execute!(sim; enable_progress_bar = false)
+        executed == PSI.RunStatus.SUCCESSFULLY_FINALIZED || throw(
+            ErrorException("the simulation did not solve: $(executed)"),
+        )
+        PSI.SimulationResults(sim)
+    end
+    notes = [
+        Dict{String, Any}("level" => TS._level_name(l), "text" => TS._scrub(t, (s.raw, s.dyr))) for
+        (l, t) in logger.records
+    ]
+
+    base_load_mw = 0.0
+    PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+        for T in (PSY.PowerLoad, PSY.StandardLoad)
+            for l in PSY.get_components(T, sys)
+                base_load_mw += PSY.get_max_active_power(l) * base_mva
+            end
+        end
+    end
+
+    # The realized series of one variable of one stage, keyed by component
+    # name: a vector of one value per step of the day. `read_realized_variable`
+    # answers one long table over every step of the stage.
+    function realized(res, variable::AbstractString, steps::Int)
+        table = sort(PSI.read_realized_variable(res, variable), :DateTime)
+        out = Dict{String, Vector{Float64}}()
+        for row in eachrow(table)
+            name = String(row[:name])
+            series = get!(out, name, Float64[])
+            push!(series, Float64(row[:value]))
+        end
+        for (name, series) in out
+            length(series) == steps || throw(ErrorException(
+                "the $(variable) results of $(name) hold $(length(series)) " *
+                "steps, not $(steps)",
+            ))
+        end
+        return out
+    end
+
+    slacks = Any[]
+    function read_slacks(res, stage::AbstractString)
+        for variable_name in PSI.list_variable_names(res)
+            occursin("Slack", String(variable_name)) || continue
+            for row in eachrow(PSI.read_realized_variable(res, String(variable_name)))
+                value = Float64(row[:value])
+                abs(value) > 1e-6 || continue
+                push!(slacks, (
+                    variable = String(variable_name),
+                    element = string(row[:name]),
+                    time = string(row[:DateTime]),
+                    value = value,
+                ))
+            end
+        end
+        return nothing
+    end
+
+    try
+        results_da = PSI.get_decision_problem_results(results, "DA")
+        results_rt = PSI.get_decision_problem_results(results, "RT")
+
+        on_da = realized(results_da, "OnVariable__ThermalStandard", 24)
+        p_da = realized(results_da, "ActivePowerVariable__ThermalStandard", 24)
+        p_rt = realized(results_rt, "ActivePowerVariable__ThermalStandard", 96)
+        read_slacks(results_da, "DA")
+        read_slacks(results_rt, "RT")
+
+        # The commitment must be integral; a value not within 1e-3 of an
+        # integer means HiGHS solved the relaxation, which is an error.
+        for (name, series) in on_da
+            for (t, value) in enumerate(series)
+                rounded = round(value)
+                abs(value - rounded) <= 1e-3 || throw(ErrorException(
+                    "the commitment is not integral: $(name) in hour $(t) is $(value)",
+                ))
+                series[t] = rounded
+            end
+        end
+
+        # The dispatch must meet the load in every step of each stage, unless
+        # a slack variable made up the difference (reported in slacks). The
+        # day-ahead stage's hourly load is the mean of the four quarter-hours.
+        slack_by_time = Dict{String, Float64}()
+        for row in slacks
+            slack_by_time[row.time] = get(slack_by_time, row.time, 0.0) + abs(row.value)
+        end
+        names = sort(collect(keys(p_da)))
+        for t in 1:24
+            load = base_load_mw * sum(load_profile[(4 * t - 3):(4 * t)]) / 4
+            dispatched = sum(get(p_da, name, zeros(24))[t] for name in names)
+            stamp = string(t0 + Hour(t - 1))
+            if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
+               get(slack_by_time, stamp, 0.0) == 0.0
+                throw(ErrorException(
+                    "DA did not meet the load at $(stamp): $(dispatched) MW " *
+                    "dispatched for $(load) MW of load",
+                ))
+            end
+        end
+        for t in 1:96
+            load = base_load_mw * load_profile[t]
+            dispatched = sum(get(p_rt, name, zeros(96))[t] for name in keys(p_rt))
+            stamp = string(t0 + Minute(15) * (t - 1))
+            if abs(dispatched - load) > 1e-6 * max(1.0, load) &&
+               get(slack_by_time, stamp, 0.0) == 0.0
+                throw(ErrorException(
+                    "RT did not meet the load at $(stamp): $(dispatched) MW " *
+                    "dispatched for $(load) MW of load",
+                ))
+            end
+        end
+
+        commitment = Any[]
+        dispatch_da = Any[]
+        dispatch_rt = Any[]
+        cost_da = 0.0
+        cost_rt = 0.0
+        for g in PSY.get_components(PSY.ThermalStandard, sys)
+            name = PSY.get_name(g)
+            bus = PSY.get_number(PSY.get_bus(g))
+            id = TS._generator_id(name, bus)
+            on = get(on_da, name, zeros(24))
+            p_day = get(p_da, name, zeros(24))
+            p_quarter = get(p_rt, name, zeros(96))
+            cost_da += _stage_cost(g, on, p_day, 1.0)
+            cost_rt += _stage_cost(g, nothing, p_quarter, 0.25)
+            push!(commitment, (name = name, bus = bus, id = id, on = on))
+            push!(dispatch_da, (name = name, bus = bus, id = id, p_mw = p_day))
+            push!(dispatch_rt, (name = name, bus = bus, id = id, p_mw = p_quarter))
+        end
+        by_key = x -> (x.bus, x.id, x.name)
+        sort!(commitment; by = by_key)
+        sort!(dispatch_da; by = by_key)
+        sort!(dispatch_rt; by = by_key)
+
+        answer = (
+            status = "completed",
+            network_model = String(network_model),
+            base_mva = base_mva,
+            interval_minutes = 60,
+            stages = [
+                (
+                    name = "DA",
+                    kind = "uc",
+                    resolution_minutes = 60,
+                    steps = 24,
+                    horizon_hours = 24,
+                    commitment = commitment,
+                    dispatch = dispatch_da,
+                    objective = cost_da,
+                ),
+                (
+                    name = "RT",
+                    kind = "dispatch",
+                    resolution_minutes = 15,
+                    steps = 96,
+                    horizon_hours = 1,
+                    dispatch = dispatch_rt,
+                    objective = cost_rt,
+                ),
+            ],
+            slacks = slacks,
+            store_dir = store_name,
+            notes = notes,
+        )
+        return TS._to_json(answer)
+    finally
+        # The store is read; the scratch folder keeps nothing of it.
+        rm(out_dir; recursive = true, force = true)
+    end
 end
 
 end # module
