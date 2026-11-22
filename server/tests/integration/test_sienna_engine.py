@@ -58,8 +58,11 @@ _SWEEP_REQUEST_SECONDS = 120.0
 
 _SIENNA_OPS = [
     "add_disturbance",
+    "add_element",
     "case_document",
     "clear_disturbances",
+    "delete_element",
+    "edit_element",
     "eig_participation",
     "init_tds",
     "list_disturbances",
@@ -67,11 +70,13 @@ _SIENNA_OPS = [
     "load_case",
     "network_matrix",
     "operating_point",
+    "redo_edit",
     "reload_case",
     "run_eig",
     "run_pflow",
     "run_tds",
     "topology",
+    "undo_last_edit",
 ]
 
 # The case files the module loads, from ANDES's cases folder, by the name they
@@ -290,7 +295,8 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
     assert sienna["routine_options"]["tds"]["streaming"] is True
-    assert sienna["editing"] is False
+    assert sienna["editing"] is True
+    assert sienna["routine_options"]["edit"]["addable"] == ["load", "shunt"]
     # Read from the project's Manifest without starting Julia.
     assert sienna["versions"]["julia"].startswith("1.")
     assert sienna["versions"]["PowerSystems"]
@@ -505,6 +511,18 @@ def _session_routes(spec: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]
 
 _SPEC_ROUTES = _session_routes(_SPEC)
 
+# The edit routes reach the Sienna engine, which refuses what the sweep's
+# placeholder body asks for with a 422 of its own (no model ``x``, no field,
+# a bus to delete, nothing to undo or redo); ``test_sienna_edits.py`` holds
+# what they do with a real edit.
+_REFUSED_BY_THE_ENGINE = {
+    ("POST", "/api/sessions/{session_id}/elements"),
+    ("PUT", "/api/sessions/{session_id}/elements/{model}/{idx}"),
+    ("DELETE", "/api/sessions/{session_id}/elements/{model}/{idx}"),
+    ("POST", "/api/sessions/{session_id}/undo-last-edit"),
+    ("POST", "/api/sessions/{session_id}/redo-edit"),
+}
+
 # The routes that work on a Sienna session: its ops' and the ones no
 # worker op answers. Every other session route answers 409 naming the engines
 # that have its op.
@@ -707,6 +725,9 @@ async def test_every_session_route_works_or_is_refused(
     assert resp.status_code < 500, where
     if (method, path) in _EXEMPT:
         assert resp.status_code in (200, 204, 404), where
+    elif (method, path) in _REFUSED_BY_THE_ENGINE:
+        assert resp.status_code == 422, where
+        assert "is not available with the sienna engine" not in resp.json()["detail"], where
     elif (method, path) in _WORKS:
         assert resp.status_code in (200, 201, 202, 204), where
         if (method, path) == ("POST", "/api/sessions/{session_id}/abort"):

@@ -378,6 +378,12 @@ class JuliaBridge:
             keywords["max_iterations"] = max_iterations
         return self._json(self._call("pflow_json", session, **keywords))
 
+    def apply_edits(self, session: Any, edits_json: str) -> dict[str, Any]:
+        """Apply the session's whole edit log to the System and answer what
+        was done and what was refused (the ``applied`` and ``refused`` lists
+        of the Julia module's answer)."""
+        return self._json(self._call("apply_edits_json", session, edits_json))
+
     def dc_pflow(self, session: Any, method: str) -> dict[str, Any]:
         """Solve the DC power flow by ``method`` (``"dc"`` or ``"ptdf-dc"``)."""
         self.start_network()

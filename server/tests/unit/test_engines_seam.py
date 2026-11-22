@@ -62,7 +62,7 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
-def test_sienna_ops_are_the_literal_fifteen() -> None:
+def test_sienna_ops_are_the_literal_twenty() -> None:
     """The Sienna set is held to the literal ops the engine has."""
     assert ENGINE_OPS["sienna"] == frozenset(
         {
@@ -80,6 +80,11 @@ def test_sienna_ops_are_the_literal_fifteen() -> None:
             "clear_disturbances",
             "init_tds",
             "case_document",
+            "add_element",
+            "edit_element",
+            "delete_element",
+            "undo_last_edit",
+            "redo_edit",
             "run_tds",
         }
     )
@@ -262,12 +267,35 @@ def test_engine_capabilities_sienna_available(
             "abort": True,
             "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
             "options": {"load_model": ["impedance", "power", "as-case"]},
-        }
+        },
+        "edit": {
+            "fields": {
+                "load": ["p_mw", "q_mvar", "in_service"],
+                "generator": ["p_mw", "v_set_pu", "in_service"],
+                "branch": ["in_service"],
+                "shunt": ["g_mw", "b_mvar", "in_service"],
+            },
+            "addable": ["load", "shunt"],
+        },
     }
     assert "run_eig" in caps["ops"]
     assert "run_tds" in caps["ops"]
     assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
-    assert caps["editing"] is False
+    assert caps["editing"] is True
+
+
+def _loads_snapshot(loads: list[str]) -> Any:
+    """A topology of the named loads alone."""
+    from tensa.core.wrapper.results import TopologyEntry, TopologySnapshot
+
+    return TopologySnapshot(
+        state="pre-setup",
+        buses=[],
+        lines=[],
+        transformers=[],
+        generators=[],
+        loads=[TopologyEntry(idx=name, name=name, kind="PQ") for name in loads],
+    )
 
 
 def test_every_sienna_op_has_a_dispatch_path() -> None:
@@ -291,9 +319,14 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
             self._bridge = _StubBridge()
 
         def keys(self) -> Any:
-            from tensa.engines.keys import KeyBook
+            from tensa.engines.keys import KeyBook, KeyEntry
 
-            return KeyBook()
+            book = KeyBook()
+            book.assign(KeyEntry("load:7-1", "load", "PQ", "load71", "file"))
+            return book
+
+        def base_mva(self) -> float:
+            return 100.0
 
         def list_disturbances(self) -> list[Any]:
             return []
@@ -311,6 +344,19 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
 
         def run_tds(self, **kwargs: Any) -> Any:
             return {"converged": True, "final_t": 1.0, "callpert_count": 1}
+
+        # The element handlers read the topology before and after the edit.
+        def topology(self) -> Any:
+            return _loads_snapshot(["load71"])
+
+        def add_element(self, *args: Any) -> Any:
+            return _loads_snapshot(["load71", "load7-2"])
+
+        def delete_element(self, *args: Any) -> Any:
+            return _loads_snapshot([])
+
+        def edit_element(self, *args: Any) -> Any:
+            return _loads_snapshot(["load71"])
 
         def __getattr__(self, name: str) -> Any:
             if name.startswith("__"):
@@ -338,6 +384,9 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
                 "rf": 0.0,
             }
         },
+        "add_element": {"model": "PQ", "params": {"bus": 7, "p0": 0.5, "q0": 0.1}},
+        "edit_element": {"model": "PQ", "idx": "load71", "params": {"p0": 0.5}},
+        "delete_element": {"model": "PQ", "idx": "load71", "cascade": False},
     }
     import threading
 

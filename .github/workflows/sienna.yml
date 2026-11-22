@@ -111,7 +111,7 @@ jobs:
           cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
           status=0
           : > "$RUNNER_TEMP/julia-tests.log"
-          for file in runtests.jl runtests_dyn.jl runtests_net.jl runtests_dcpf.jl; do
+          for file in runtests.jl runtests_dyn.jl runtests_net.jl runtests_dcpf.jl runtests_edit.jl; do
             echo "== $file" | tee -a "$RUNNER_TEMP/julia-tests.log"
             one=0
             julia --project="$RUNNER_TEMP/sienna/dyn" "server/tests/julia/$file" "$cases" 2>&1 | tee -a "$RUNNER_TEMP/julia-tests.log" || one=$?

@@ -55,9 +55,19 @@ def engine_capabilities(name: str) -> dict[str, Any]:
                     "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
                     "options": {"load_model": ["impedance", "power", "as-case"]},
                 },
+                "edit": {
+                    "fields": {
+                        "load": ["p_mw", "q_mvar", "in_service"],
+                        "generator": ["p_mw", "v_set_pu", "in_service"],
+                        "branch": ["in_service"],
+                        "shunt": ["g_mw", "b_mvar", "in_service"],
+                    },
+                    "addable": ["load", "shunt"],
+                },
             },
             "ops": sorted(ENGINE_OPS[name]),
-            "editing": False,
+            # Edits the fields and adds the kinds ``routine_options.edit`` lists.
+            "editing": True,
         }
     return {
         "name": name,

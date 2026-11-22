@@ -46,6 +46,7 @@ from tensa.core.errors import (
     EigComputationError,
     EigPrerequisiteError,
     ElementNotFoundError,
+    ElementValidationError,
     NoCaseLoadedError,
     PflowRequestError,
     SiennaError,
@@ -59,7 +60,7 @@ from tensa.core.wrapper.results import PflowResult, TopologySnapshot
 from tensa.core.wrapper.ybus import MAX_YBUS_ENTRIES
 from tensa.engines.case_facts import corrections_document, read_case_facts
 from tensa.engines.identity import _matpower_rows, read_identity
-from tensa.engines.keys import KeyBook
+from tensa.engines.keys import KeyBook, KeyEntry
 from tensa.engines.series_names import build_name
 from tensa.engines.sienna.bridge import JuliaBridge
 from tensa.engines.sienna.convert import (
@@ -73,6 +74,15 @@ from tensa.engines.sienna.disturbances import (
     run_json_entries,
     to_pending,
     unit_key_of,
+)
+from tensa.engines.sienna.edit_log import (
+    AddElementOp,
+    NeutralOp,
+    RemoveElementOp,
+    make_add,
+    make_remove,
+    make_set_field,
+    ops_to_json,
 )
 from tensa.engines.sienna.keys import assign_sienna_keys
 from tensa.engines.sienna.matrix_io import read_matrix
@@ -154,6 +164,43 @@ SIENNA_EIG_NOTE = (
     "PSID's small-signal results are work in progress in validation, "
     "by PSID's own documentation."
 )
+
+
+def _topology_handles(topology: Mapping[str, Any]) -> set[tuple[str, str]]:
+    """Every ``(model, idx)`` handle the topology JSON holds, as
+    ``assign_sienna_keys`` builds them."""
+    handles: set[tuple[str, str]] = set()
+    for row in topology.get("buses", []):
+        handles.add(("Bus", str(int(row["number"]))))
+    for row in topology.get("branches", []):
+        handles.add(("Line", str(row.get("name"))))
+    for row in topology.get("generators", []):
+        handles.add((str(row.get("kind") or "PV"), str(row.get("name"))))
+    for row in topology.get("loads", []):
+        handles.add(("PQ", str(row.get("name"))))
+    for row in topology.get("shunts", []):
+        handles.add(("Shunt", str(row.get("name"))))
+    for row in topology.get("dynamics", []):
+        handles.add((str(row.get("model")), f"{row.get('generator')}/{row.get('model')}"))
+    return handles
+
+
+def _add_handle(op: AddElementOp) -> tuple[str, str]:
+    """The ``(model, idx)`` handle an add gives its element: the Julia side
+    names an added load ``load<bus>-<id>`` and an added shunt ``<bus>-<id>``,
+    with ``id`` the ordinal the key carries."""
+    kind, _, rest = op.key.partition(":")
+    bus, _, ordinal = rest.partition("-")
+    if kind == "load":
+        return ("PQ", f"load{bus}-{ordinal}")
+    return ("Shunt", f"{bus}-{ordinal}")
+
+
+def _remove_handle(op: RemoveElementOp) -> tuple[str, str]:
+    """The ``(model, idx)`` handle a remove takes out: the book entry's model
+    for the key's kind, and its idx, which the op carries as ``name``."""
+    kind = op.key.partition(":")[0]
+    return ("PQ" if kind == "load" else "Shunt", op.name)
 
 
 def _case_stamp(case_path: Path) -> tuple[Path, int, int]:
@@ -278,6 +325,8 @@ class SiennaState:
         self._eig_result: EigResult | None = None
         self._eig_participation: list[list[float]] | None = None
         self._pending_disturbances: list[PendingDisturbance] = []
+        self._edit_log: list[NeutralOp] = []
+        self._redo_log: list[NeutralOp] = []
 
     # ---- the bridge ---------------------------------------------------------
 
@@ -334,6 +383,8 @@ class SiennaState:
         self._eig_result = None
         self._eig_participation = None
         self._pending_disturbances = []
+        self._edit_log = []
+        self._redo_log = []
 
     # ---- load_case ----------------------------------------------------------
 
@@ -343,7 +394,31 @@ class SiennaState:
         addfiles: list[Path] | None = None,
         on_unsupported: str = "refuse",
     ) -> TopologySnapshot:
-        """Load a PSS/E ``.raw`` or MATPOWER ``.m`` case through Julia.
+        """Load a PSS/E ``.raw`` or MATPOWER ``.m`` case through Julia, with no
+        edits: a case that is loaded starts a new edit log and an empty redo
+        log, as the ANDES wrapper's ``load_case`` does. What else it does and
+        raises is :meth:`_load`'s."""
+        snapshot = self._load(path, addfiles, on_unsupported, [], keep_disturbances=False)
+        self._edit_log = []
+        self._redo_log = []
+        return snapshot
+
+    def _load(
+        self,
+        path: Path,
+        addfiles: list[Path] | None,
+        on_unsupported: str,
+        edit_log: list[NeutralOp],
+        *,
+        keep_disturbances: bool,
+    ) -> TopologySnapshot:
+        """Read the case's files through Julia and apply ``edit_log`` to the
+        System read, which is then the session's: the System is always the
+        case file with the log applied.
+
+        ``keep_disturbances`` keeps the pending disturbances (an edit, an undo
+        and a redo keep them, as the ANDES wrapper's do); a load and a reload
+        drop them. The caller adopts ``edit_log`` as the state's log.
 
         Every path that reaches the bridge (the case, the ``.dyr``, the
         scratch folder) is validated against the workspace in Python first, by
@@ -357,7 +432,9 @@ class SiennaState:
         ``on_unsupported`` is ``"refuse"``; that refusal leaves the state with no
         case. A file Julia cannot read raises :class:`SiennaError` with the Julia
         module's message, and the case held before (if any) stays, as a failed
-        load leaves the ANDES engine's.
+        load leaves the ANDES engine's. An edit of the log that the System
+        refuses raises :class:`ElementValidationError` naming it, and the case
+        held before stays as well.
         """
         suffix = path.suffix.lower()
         if suffix not in (".raw", ".m"):
@@ -420,6 +497,14 @@ class SiennaState:
         bridge = self._require_bridge()
         scratch = self._scratch_dir(workspace, path.name)
         session = bridge.load_case(path, dyr, scratch, v_setpoints, corrections)
+        if edit_log:
+            answer = bridge.apply_edits(session, ops_to_json(edit_log))
+            refused = answer.get("refused") or []
+            if refused:
+                reasons = "; ".join(
+                    f"{row.get('key')}: {row.get('reason')}" for row in refused
+                )
+                raise ElementValidationError(f"the System refused the edit: {reasons}")
         report = bridge.report(session)
         topology = bridge.topology(session)
 
@@ -459,10 +544,13 @@ class SiennaState:
         self._eig_result = None
         self._eig_participation = None
         # A fresh case holds no disturbances, as the ANDES wrapper's load_case
-        # wipes the disturbance log.
-        self._pending_disturbances = []
+        # wipes the disturbance log; an edit keeps them.
+        if not keep_disturbances:
+            self._pending_disturbances = []
 
         book = assign_sienna_keys(topology, identity, self._key_book)
+        added, removed = self._log_handle_delta(edit_log)
+        book.retain((_topology_handles(topology) | added) - removed)
 
         # What the load found and did goes to the session's message log.
         if document is None:
@@ -513,13 +601,16 @@ class SiennaState:
         )
 
     def reload_case(self) -> TopologySnapshot:
-        """Load the same files again with the same ``on_unsupported``."""
+        """Load the same files again with the same ``on_unsupported`` and the
+        edit log applied; the pending disturbances are dropped."""
         if self._case_path is None:
             raise NoCaseLoadedError("no case has been loaded")
-        return self.load_case(
+        return self._load(
             self._case_path,
-            addfiles=self._addfiles,
-            on_unsupported=self._on_unsupported,
+            self._addfiles,
+            self._on_unsupported,
+            self._edit_log,
+            keep_disturbances=False,
         )
 
     def run_pflow(
@@ -825,6 +916,133 @@ class SiennaState:
         """The keys of the loaded case's elements."""
         self._require_session()
         return self._key_book
+
+    def base_mva(self) -> float:
+        """The system base of the loaded case, for the runtime's per-unit
+        conversion of the ANDES-shaped route arguments."""
+        self._require_session()
+        return float((self._topology_json or {}).get("base_mva", 100.0))
+
+    # ---- editing --------------------------------------------------------------
+
+    def _edit_error(self, exc: ValueError) -> ElementNotFoundError | ElementValidationError:
+        """The error class a refusal of ``edit_log`` maps to: an unknown key is
+        a 404, every other refusal a 422."""
+        message = str(exc)
+        if message.startswith("no element with key"):
+            return ElementNotFoundError(message)
+        return ElementValidationError(message)
+
+    def _log_handle_delta(
+        self, edit_log: list[NeutralOp] | None = None
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        """The handles the edit log adds and removes, for the book's retain.
+
+        The re-read topology is authoritative, but a bridge answer can lag the
+        log (and a removed element's handle must leave the book even while a
+        topology still lists it): an add keeps its handle, a remove drops its
+        own, and a later add of the same handle cancels the remove.
+        """
+        added: set[tuple[str, str]] = set()
+        removed: set[tuple[str, str]] = set()
+        for op in self._edit_log if edit_log is None else edit_log:
+            if isinstance(op, AddElementOp):
+                handle = _add_handle(op)
+                added.add(handle)
+                removed.discard(handle)
+            elif isinstance(op, RemoveElementOp):
+                handle = _remove_handle(op)
+                if handle not in added:
+                    removed.add(handle)
+        return added, removed
+
+    def _record_edit(self, op: NeutralOp) -> TopologySnapshot:
+        """Rebuild the System from the case file with ``op`` added to the log;
+        only a rebuild that succeeds adopts the longer log and clears the redo
+        log, so the log always says what the System holds."""
+        log_ops = [*self._edit_log, op]
+        snapshot = self._reload_with(log_ops)
+        self._edit_log = log_ops
+        self._redo_log = []
+        if isinstance(op, AddElementOp):
+            # The key was decided before the apply; the book must hold it even
+            # when the re-read topology does not show the element yet.
+            model, idx = _add_handle(op)
+            if self._key_book.key_of(model, idx) is None:
+                bucket = "load" if model == "PQ" else "shunt"
+                self._key_book.assign(KeyEntry(op.key, bucket, model, idx, "ordinal"))
+        return snapshot
+
+    def add_element(self, kind: str, fields: dict[str, Any]) -> TopologySnapshot:
+        """Add a load or a shunt on an existing bus and answer the topology."""
+        self._require_session()
+        try:
+            op = make_add(self._key_book, kind, fields)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def edit_element(self, key: str, field: str, value: Any) -> TopologySnapshot:
+        """Set one field of one element, addressed by key, and answer the
+        topology."""
+        self._require_session()
+        try:
+            op = make_set_field(self._key_book, key, field, value)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def delete_element(self, key: str) -> TopologySnapshot:
+        """Remove one load or shunt, addressed by key, and answer the
+        topology."""
+        self._require_session()
+        try:
+            op = make_remove(self._key_book, key)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def _reload_with(self, log_ops: list[NeutralOp]) -> TopologySnapshot:
+        """Load the case's files again with ``log_ops`` applied, keeping the
+        pending disturbances and leaving the state's own log fields untouched
+        until the caller adopts them. A load clears the solved state, so the
+        next power flow solves the edited case."""
+        if self._case_path is None:
+            raise NoCaseLoadedError("no case has been loaded")
+        return self._load(
+            self._case_path,
+            self._addfiles,
+            self._on_unsupported,
+            log_ops,
+            keep_disturbances=True,
+        )
+
+    def undo_last_edit(self) -> TopologySnapshot:
+        """Take back the last edit: rebuild the case from the file with the log
+        minus its last entry, which goes to the redo log."""
+        self._require_session()
+        if not self._edit_log:
+            raise ElementValidationError("no edits to undo")
+        op = self._edit_log[-1]
+        kept = self._edit_log[:-1]
+        redo = [*self._redo_log, op]
+        snapshot = self._reload_with(kept)
+        self._edit_log = kept
+        self._redo_log = redo
+        return snapshot
+
+    def redo_edit(self) -> TopologySnapshot:
+        """Put back the edit ``undo_last_edit`` took back last."""
+        self._require_session()
+        if not self._redo_log:
+            raise ElementValidationError("no edits to redo")
+        op = self._redo_log[-1]
+        log_ops = [*self._edit_log, op]
+        redo = self._redo_log[:-1]
+        snapshot = self._reload_with(log_ops)
+        self._edit_log = log_ops
+        self._redo_log = redo
+        return snapshot
 
     # ---- network_matrix -------------------------------------------------------
 

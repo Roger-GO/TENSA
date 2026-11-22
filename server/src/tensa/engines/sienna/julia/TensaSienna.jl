@@ -17,6 +17,7 @@ const PF = PowerFlows
 const PNM = PowerNetworkMatrices
 
 export Session, load_case, report_json, topology_json, pflow_json, versions_json
+export apply_edits_json
 
 """
     mutable struct Session
@@ -955,6 +956,290 @@ function pflow_json(s::Session; tolerance = nothing, max_iterations = nothing)::
         loads = loads,
     ))
 end
+
+# ---------------------------------------------------------------------------
+# apply_edits_json
+# ---------------------------------------------------------------------------
+
+# The neutral edit fields and the PowerSystems setter of each, by component
+# group. Verified against PowerSystems 5.12: a load is a StandardLoad or
+# PowerLoad (set_active_power!, set_reactive_power! in per unit on the system
+# base, under with_units_base SYSTEM_BASE), a generator a StaticInjection
+# that is not a load or shunt (set_active_power!; the voltage setpoint is the
+# bus magnitude of a PV or REF bus, set_magnitude!), a branch an ACBranch
+# (set_available!), a shunt a FixedAdmittance or SwitchedAdmittance (set_Y!
+# with the new admittance). in_service is set_available! on the component.
+const _FIELD_SETTERS = Dict(
+    "load" => Dict(
+        "p_mw" => :load_p,
+        "q_mvar" => :load_q,
+        "in_service" => :available,
+    ),
+    "generator" => Dict(
+        "p_mw" => :gen_p,
+        "v_set_pu" => :gen_v,
+        "in_service" => :available,
+    ),
+    "branch" => Dict("in_service" => :available),
+    "shunt" => Dict(
+        "g_mw" => :shunt_g,
+        "b_mvar" => :shunt_b,
+        "in_service" => :available,
+    ),
+)
+
+# Parse "load:7-1" -> ("load", 7, "1"); "branch:7-8-1" -> ("branch", 7, 8, "1");
+# "bus:7" -> ("bus", 7); "gen:1-1" -> ("gen", 1, "1"); "shunt:7-1" -> ("shunt", 7, "1").
+function _parse_key(key::AbstractString)
+    kind, rest = split(key, ":"; limit = 2)
+    parts = split(rest, "-")
+    if kind == "bus"
+        return (kind, parse(Int, parts[1]))
+    end
+    if kind == "branch"
+        return (kind, parse(Int, parts[1]), parse(Int, parts[2]), String(parts[3]))
+    end
+    return (kind, parse(Int, parts[1]), String(join(parts[2:end], "-")))
+end
+
+# Find the component a set or remove entry names, by its topology name within
+# the group the key's kind names. PowerSystems names are unique per type.
+function _find_by_name(sys, kind::AbstractString, name::AbstractString)
+    if kind == "load"
+        for c in PSY.get_components(PSY.ElectricLoad, sys)
+            _is_load(c) && PSY.get_name(c) == name && return c
+        end
+    elseif kind == "gen"
+        for c in PSY.get_components(PSY.StaticInjection, sys)
+            _is_generator(c) && PSY.get_name(c) == name && return c
+        end
+    elseif kind == "branch"
+        for c in PSY.get_components(PSY.ACBranch, sys)
+            _is_reported_branch(c) && PSY.get_name(c) == name && return c
+        end
+    elseif kind == "shunt"
+        for c in PSY.get_components(PSY.StaticInjection, sys)
+            _is_shunt(c) && !_adapter_shunt(c) && PSY.get_name(c) == name && return c
+        end
+    end
+    return nothing
+end
+
+function _apply_set!(sys, entry, base_mva, applied, refused)
+    key = String(entry["key"])
+    name = String(entry["name"])
+    field = String(entry["field"])
+    value = entry["value"]
+    parsed = try
+        _parse_key(key)
+    catch
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "the key does not parse"))
+        return
+    end
+    kind = parsed[1]
+    group = kind == "gen" ? "generator" : kind
+    setters = get(_FIELD_SETTERS, group, nothing)
+    if setters === nothing || !haskey(setters, field)
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "a $(group) does not take $(field)"))
+        return
+    end
+    component = _find_by_name(sys, kind, name)
+    if component === nothing
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "no $(group) named $(name) in the System"))
+        return
+    end
+    setter = setters[field]
+    note = nothing
+    PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+        if setter == :available
+            value isa Bool ||
+                throw(ArgumentError("in_service of $(key) must be true or false"))
+            PSY.set_available!(component, value)
+        elseif setter == :load_p
+            number = Float64(value)
+            if component isa PSY.StandardLoad
+                PSY.set_constant_active_power!(component, number / base_mva)
+                if PSY.get_current_active_power(component) != 0.0 ||
+                   PSY.get_impedance_active_power(component) != 0.0
+                    note = "the load's current and impedance parts are unchanged"
+                end
+            else
+                PSY.set_active_power!(component, number / base_mva)
+            end
+        elseif setter == :load_q
+            number = Float64(value)
+            if component isa PSY.StandardLoad
+                PSY.set_constant_reactive_power!(component, number / base_mva)
+                if PSY.get_current_reactive_power(component) != 0.0 ||
+                   PSY.get_impedance_reactive_power(component) != 0.0
+                    note = "the load's current and impedance parts are unchanged"
+                end
+            else
+                PSY.set_reactive_power!(component, number / base_mva)
+            end
+        elseif setter == :gen_p
+            PSY.set_active_power!(component, Float64(value) / base_mva)
+        elseif setter == :gen_v
+            bus = PSY.get_bus(component)
+            bt = PSY.get_bustype(bus)
+            if bt != PSY.ACBusTypes.PV && bt != PSY.ACBusTypes.REF
+                push!(refused, Dict{String, Any}(
+                    "key" => key,
+                    "reason" => "the voltage setpoint of $(key) names a bus that is not PV or REF",
+                ))
+                return
+            end
+            PSY.set_magnitude!(bus, Float64(value))
+        elseif setter == :shunt_g || setter == :shunt_b
+            y = PSY.get_Y(component)
+            number = Float64(value) / base_mva
+            new_y = setter == :shunt_g ? complex(number, imag(y)) : complex(real(y), number)
+            PSY.set_Y!(component, new_y)
+        end
+    end
+    done = Dict{String, Any}("op" => "set", "key" => key, "field" => field, "value" => value)
+    note === nothing || (done["note"] = note)
+    push!(applied, done)
+    return
+end
+
+function _apply_add!(sys, entry, base_mva, applied, refused)
+    key = String(entry["key"])
+    fields = entry["fields"]
+    parsed = try
+        _parse_key(key)
+    catch
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "the key does not parse"))
+        return
+    end
+    kind, bus_number, id = parsed[1], parsed[2], parsed[3]
+    buses = [b for b in PSY.get_components(PSY.ACBus, sys) if PSY.get_number(b) == bus_number]
+    if isempty(buses)
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "no bus $(bus_number) in the System"))
+        return
+    end
+    bus = buses[1]
+    available = Bool(get(fields, "in_service", true))
+    PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+        if kind == "load"
+            component = PSY.PowerLoad(;
+                name = "load$(bus_number)-$(id)",
+                available = available,
+                bus = bus,
+                base_power = base_mva,
+                active_power = Float64(fields["p_mw"]) / base_mva,
+                reactive_power = Float64(fields["q_mvar"]) / base_mva,
+                max_active_power = Float64(fields["p_mw"]) / base_mva,
+                max_reactive_power = Float64(fields["q_mvar"]) / base_mva,
+            )
+            PSY.add_component!(sys, component)
+        elseif kind == "shunt"
+            component = PSY.FixedAdmittance(;
+                name = "$(bus_number)-$(id)",
+                available = available,
+                bus = bus,
+                Y = complex(Float64(fields["g_mw"]), Float64(fields["b_mvar"])) / base_mva,
+            )
+            PSY.add_component!(sys, component)
+        else
+            push!(refused, Dict{String, Any}("key" => key, "reason" => "only a load or a shunt can be added"))
+            return
+        end
+    end
+    push!(applied, Dict{String, Any}("op" => "add", "key" => key))
+    return
+end
+
+function _apply_remove!(sys, entry, applied, refused)
+    key = String(entry["key"])
+    name = String(entry["name"])
+    parsed = try
+        _parse_key(key)
+    catch
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "the key does not parse"))
+        return
+    end
+    kind = parsed[1]
+    if kind != "load" && kind != "shunt"
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "only a load or a shunt can be removed"))
+        return
+    end
+    component = _find_by_name(sys, kind, name)
+    if component === nothing
+        push!(refused, Dict{String, Any}("key" => key, "reason" => "no $(kind) named $(name) in the System"))
+        return
+    end
+    PSY.remove_component!(sys, component)
+    push!(applied, Dict{String, Any}("op" => "remove", "key" => key))
+    return
+end
+
+"""
+    apply_edits!(s::Session, edits_json::AbstractString) -> String
+
+Apply the session's whole neutral edit log to the System, in order. Each
+entry is `{"op": "set", "key", "name", "field", "value"}`,
+`{"op": "add", "key", "fields"}` or `{"op": "remove", "key", "name"}`. The
+component is found by its topology name within the group the key's kind
+names. MW and MVAr are converted with the system base under
+`with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE)`.
+
+Answers a JSON object `{"applied": [...], "refused": [...]}`: one `applied`
+entry per edit done, one `refused` entry per edit not done with `"reason"`.
+A refused edit does not stop the log: the Python side validates before it
+sends, so a refusal means the System and the log disagree, which the answer
+must say.
+"""
+function apply_edits!(s::Session, edits_json::AbstractString)::String
+    sys = s.sys
+    base_mva = PSY.get_base_power(sys)
+    entries = JSON3.read(edits_json)
+    applied = Dict{String, Any}[]
+    refused = Dict{String, Any}[]
+    for entry in entries
+        op = String(entry["op"])
+        try
+            if op == "set"
+                _apply_set!(sys, entry, base_mva, applied, refused)
+            elseif op == "add"
+                _apply_add!(sys, entry, base_mva, applied, refused)
+            elseif op == "remove"
+                _apply_remove!(sys, entry, applied, refused)
+            else
+                push!(refused, Dict{String, Any}("key" => get(entry, "key", ""), "reason" => "unknown op $(op)"))
+            end
+        catch err
+            key = try
+                String(entry["key"])
+            catch
+                ""
+            end
+            push!(refused, Dict{String, Any}("key" => key, "reason" => _first_line(sprint(showerror, err))))
+        end
+    end
+    # A PV bus whose generators are all out of service has no source to hold
+    # its voltage, which the power flow refuses ("No available sources at
+    # bus ..."): it becomes a PQ bus while the edits stand. The log is applied
+    # to a System read afresh, so the bus is PV again once the generator is
+    # back. A reference bus is left as it is: without a source the case has no
+    # slack, and the power flow says so.
+    retyped = Dict{String, Any}[]
+    for bus in PSY.get_components(PSY.ACBus, sys)
+        PSY.get_bustype(bus) == PSY.ACBusTypes.PV || continue
+        has_source = any(
+            c -> _is_generator(c) && PSY.get_available(c) && PSY.get_bus(c) === bus,
+            PSY.get_components(PSY.StaticInjection, sys),
+        )
+        if !has_source
+            PSY.set_bustype!(bus, PSY.ACBusTypes.PQ)
+            push!(retyped, Dict{String, Any}("bus" => PSY.get_number(bus), "type" => "PQ"))
+        end
+    end
+    s.pflow_solved = false
+    return _to_json((applied = applied, refused = refused, retyped = retyped))
+end
+
+apply_edits_json(s::Session, edits_json::AbstractString) = apply_edits!(s, edits_json)
 
 # ---------------------------------------------------------------------------
 # versions_json

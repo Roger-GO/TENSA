@@ -707,7 +707,13 @@ def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> N
     julia_files = sorted(
         path.name for path in (REPO_ROOT / "server" / "tests" / "julia").glob("runtests*.jl")
     )
-    assert julia_files == ["runtests.jl", "runtests_dcpf.jl", "runtests_dyn.jl", "runtests_net.jl"]
+    assert julia_files == [
+        "runtests.jl",
+        "runtests_dcpf.jl",
+        "runtests_dyn.jl",
+        "runtests_edit.jl",
+        "runtests_net.jl",
+    ]
     loop = re.search(r"for file in ([^;]+);", steps[julia_tests]["run"])
     assert loop is not None
     assert sorted(loop.group(1).split()) == julia_files

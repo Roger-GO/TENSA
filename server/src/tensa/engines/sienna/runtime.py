@@ -21,10 +21,18 @@ import numpy as np
 from pydantic import TypeAdapter
 
 from tensa.core.disturbance import DisturbanceSpec
-from tensa.core.errors import AndesAppError, NoCaseLoadedError, SetupFailedError, short_repr
+from tensa.core.errors import (
+    AndesAppError,
+    ElementNotFoundError,
+    ElementValidationError,
+    NoCaseLoadedError,
+    SetupFailedError,
+    short_repr,
+)
 from tensa.core.messages import NOTICE_LOGGER
 from tensa.core.stream import run_tds_stream
 from tensa.core.worker import _serialize_dataclass
+from tensa.core.wrapper.results import TopologyEntry, TopologySnapshot
 from tensa.engines.base import EngineRuntime, TdsStreamPlan
 from tensa.engines.series_names import build_name
 from tensa.engines.sienna.bridge import JuliaBridge
@@ -310,6 +318,142 @@ def _handle_network_matrix(state: SiennaState, args: dict[str, Any]) -> Any:
     return state.network_matrix(args["kind"])
 
 
+# ANDES param name -> (neutral field, per unit on the system base), by model.
+_ADD_PARAMS: dict[str, dict[str, tuple[str, bool]]] = {
+    "PQ": {"bus": ("bus", False), "p0": ("p_mw", True), "q0": ("q_mvar", True), "u": ("in_service", False)},
+    "Shunt": {"bus": ("bus", False), "g": ("g_mw", True), "b": ("b_mvar", True), "u": ("in_service", False)},
+}
+_EDIT_PARAMS: dict[str, dict[str, tuple[str, bool]]] = {
+    "PQ": {"p0": ("p_mw", True), "q0": ("q_mvar", True), "u": ("in_service", False)},
+    "PV": {"p0": ("p_mw", True), "v0": ("v_set_pu", False), "u": ("in_service", False)},
+    "Slack": {"p0": ("p_mw", True), "v0": ("v_set_pu", False), "u": ("in_service", False)},
+    "Line": {"u": ("in_service", False)},
+    "Shunt": {"g": ("g_mw", True), "b": ("b_mvar", True), "u": ("in_service", False)},
+}
+
+# The neutral kind each addable model maps to.
+_ADD_KINDS = {"PQ": "load", "Shunt": "shunt"}
+
+
+def _neutral_fields(
+    state: SiennaState,
+    model: str,
+    params: dict[str, Any],
+    table: dict[str, dict[str, tuple[str, bool]]],
+) -> dict[str, Any]:
+    """Map ANDES param names to neutral fields, converting per-unit values
+    with the system base. A param the model's table does not hold is refused
+    by name."""
+    mapping = table.get(model, {})
+    base = state.base_mva()
+    out: dict[str, Any] = {}
+    for name, value in params.items():
+        held = mapping.get(name)
+        if held is None:
+            allowed = ", ".join(sorted(mapping))
+            raise ElementValidationError(
+                f"the Sienna engine does not take {model} param {name!r}; it takes {allowed}"
+            )
+        field, per_unit = held
+        if field == "in_service":
+            if value not in (0, 1, True, False):
+                raise ElementValidationError(f"u must be 0 or 1; got {value!r}")
+            out[field] = bool(int(value))
+        elif field == "bus":
+            out[field] = value
+        elif per_unit:
+            out[field] = float(value) * base
+        else:
+            out[field] = float(value)
+    return out
+
+
+def _key_of(state: SiennaState, model: str, idx: Any) -> str:
+    """The key of the element the route names, or a 404."""
+    key = state.keys().key_of(model, idx)
+    if key is None:
+        raise ElementNotFoundError(f"no {model} with idx={idx!r}")
+    return key
+
+
+def _entries(snapshot: TopologySnapshot) -> list[TopologyEntry]:
+    """Every element entry of a topology, in its lists' order."""
+    return [
+        *snapshot.buses,
+        *snapshot.lines,
+        *snapshot.transformers,
+        *snapshot.generators,
+        *snapshot.loads,
+        *snapshot.shunts,
+        *snapshot.controllers,
+    ]
+
+
+def _entry_of(snapshot: TopologySnapshot, model: str, idx: Any) -> TopologyEntry:
+    """The entry the element routes name by ``model`` and ``idx``."""
+    for entry in _entries(snapshot):
+        if entry.kind == model and str(entry.idx) == str(idx):
+            return entry
+    raise ElementNotFoundError(f"no {model} with idx={idx!r}")
+
+
+def _handle_add_element(state: SiennaState, args: dict[str, Any]) -> Any:
+    """The added element's topology entry, as the route answers it (the
+    ANDES engine's ``add_element`` answers the same)."""
+    model = str(args["model"])
+    kind = _ADD_KINDS.get(model)
+    if kind is None:
+        raise ElementValidationError(
+            f"the Sienna engine adds a load or a shunt; got model {model!r}"
+        )
+    fields = _neutral_fields(state, model, dict(args["params"]), _ADD_PARAMS)
+    before = {(entry.kind, str(entry.idx)) for entry in _entries(state.topology())}
+    after = state.add_element(kind, fields)
+    added = [e for e in _entries(after) if (e.kind, str(e.idx)) not in before]
+    if len(added) != 1:
+        raise ElementValidationError(f"the add changed {len(added)} entries of the topology, not one")
+    return _serialize_dataclass(added[0])
+
+
+def _handle_edit_element(state: SiennaState, args: dict[str, Any]) -> Any:
+    model = str(args["model"])
+    params = dict(args["params"])
+    if len(params) != 1:
+        raise ElementValidationError(
+            f"the Sienna engine edits one field at a time; got {sorted(params)}"
+        )
+    key = _key_of(state, model, args["idx"])
+    fields = _neutral_fields(state, model, params, _EDIT_PARAMS)
+    field, value = next(iter(fields.items()))
+    # The edited element's entry, as the route answers it.
+    return _serialize_dataclass(_entry_of(state.edit_element(key, field, value), model, args["idx"]))
+
+
+def _handle_delete_element(state: SiennaState, args: dict[str, Any]) -> Any:
+    if args.get("cascade"):
+        raise ElementValidationError(
+            "the Sienna engine does not cascade a delete: "
+            "a load or a shunt has no dependents"
+        )
+    model = str(args["model"])
+    key = _key_of(state, model, args["idx"])
+    gone = _entry_of(state.topology(), model, args["idx"])
+    # The new topology with what went beside it, as the ANDES engine answers;
+    # a load or a shunt takes no disturbance with it.
+    payload: dict[str, Any] = _serialize_dataclass(state.delete_element(key))
+    payload["deleted"] = [_serialize_dataclass(gone)]
+    payload["disturbances"] = []
+    return payload
+
+
+def _handle_undo_last_edit(state: SiennaState, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(state.undo_last_edit())
+
+
+def _handle_redo_edit(state: SiennaState, args: dict[str, Any]) -> Any:
+    return _serialize_dataclass(state.redo_edit())
+
+
 def _handle_case_document(state: SiennaState, args: dict[str, Any]) -> Any:
     """The neutral case document of the loaded case. With no case loaded the
     state's :class:`NoCaseLoadedError` propagates, as ``topology``'s does."""
@@ -361,6 +505,11 @@ _HANDLERS: dict[str, Any] = {
     "clear_disturbances": _handle_clear_disturbances,
     "init_tds": _handle_init_tds,
     "case_document": _handle_case_document,
+    "add_element": _handle_add_element,
+    "edit_element": _handle_edit_element,
+    "delete_element": _handle_delete_element,
+    "undo_last_edit": _handle_undo_last_edit,
+    "redo_edit": _handle_redo_edit,
 }
 
 

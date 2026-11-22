@@ -175,6 +175,10 @@ Elements:        GET /topology/schema (every buildable model + typed params) · 
                  (delete any element, one the case file brought included; the file is not written. 422 with "dependents" and
                  "disturbances" when other elements name it or disturbances act on it: delete those first, or send cascade=true to
                  delete them with it. The 200 body is the topology plus "deleted" and "disturbances", what went)
+                 A Sienna session takes the same routes for a subset, one param per edit: a load (PQ: p0, q0, u), a generator
+                 (PV or Slack: p0, v0, u), a line or transformer (Line: u) and a shunt (Shunt: g, b, u); it adds a PQ or a Shunt
+                 on a bus and deletes a load or a shunt (cascade is 422). Each edit, undo and redo rebuilds the System from the
+                 case file with the edit log applied, keeps the pending disturbances, and leaves no solved power flow
                  POST /sessions/{id}/undo-last-edit · POST /sessions/{id}/redo-edit (take back / put back the last add, edit or delete;
                  the topology's "undo" and "redo" name the edit each would act on, null when there is none; a delete put back takes
                  what it took the first time, and is refused with 422 and the list if anything else has come to depend on the element)
