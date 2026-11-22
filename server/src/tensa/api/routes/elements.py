@@ -411,7 +411,7 @@ async def save_case(
         async with _run_as_job(
             mgr, session_id, "case-save", request_summary=body.model_dump()
         ) as job_id:
-            await mgr.invoke(
+            payload: Any = await mgr.invoke(
                 session_id,
                 "save_case",
                 {"format": body.format, "filename": str(canonical)},
@@ -424,8 +424,35 @@ async def save_case(
     except WorkerError as exc:
         raise _to_http_error(exc) from exc
     bytes_written = canonical.stat().st_size if canonical.exists() else 0
+    # The worker answers with the path of the file it wrote; the ``.dyr``
+    # beside it and what the writer left out come back in the reply's
+    # messages (the ``tensa.notice`` lines the wrapper logs).
+    dyr_filename: str | None = None
+    dyr_notes: list[str] = []
+    if body.format == "raw":
+        candidate = canonical.with_suffix(".dyr")
+        if candidate.is_file():
+            try:
+                dyr_filename = str(candidate.relative_to(workspace))
+            except ValueError:
+                dyr_filename = candidate.name
+        if isinstance(payload, dict):
+            messages = payload.get("messages")
+            if isinstance(messages, list):
+                prefix = f"{canonical.name}: "
+                dyr_notes = [
+                    str(message)[len(prefix):]
+                    for message in messages
+                    if isinstance(message, str)
+                    and message.startswith(prefix)
+                    and "were written beside it as" not in message
+                ]
     return SaveCaseResponse(
-        filename=body.filename, bytes_written=bytes_written, job_id=job_id
+        filename=body.filename,
+        bytes_written=bytes_written,
+        dyr_filename=dyr_filename,
+        dyr_notes=dyr_notes,
+        job_id=job_id,
     )
 
 

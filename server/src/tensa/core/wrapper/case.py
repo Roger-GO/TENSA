@@ -15,6 +15,7 @@ from tensa.core.case_events import CaseEvent, events_in_case
 from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.disturbance import DisturbanceSpec
 from tensa.core.dyr_columns import put_back_dyr_columns
+from tensa.core.dyr_writer import write_dyr
 from tensa.core.edit_log import Op, apply_op, step_of
 from tensa.core.errors import (
     CaseLoadError,
@@ -347,8 +348,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
           built-in PSS/E writer; the substrate ships one for the
           power-flow data (Bus, PQ, Shunt, PV/Slack, Line, 2W
           transformer). A ``.raw`` holds no dynamic data, so the dynamic
-          models of the case (a ZIP on its PQ, a machine on its PV or
-          Slack) are not in it.
+          models of the case are written beside it, same stem, as a
+          ``.dyr`` (``tensa.core.dyr_writer.write_dyr``) when the System
+          has a dynamic device the writer writes. The path of that file
+          and what the writer left out are logged on ``tensa.notice``,
+          which the reply's messages carry.
         - ``m``: MATPOWER v2, via the substrate's writer
           (``tensa.core.matpower_writer.write_matpower``) around ANDES's
           ``system2mpc``. It covers the power-flow data (Bus, PQ, Shunt,
@@ -372,9 +376,9 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         while the System holds disturbances a client committed or a restore
         replayed, because they would become part of the case file.
 
-        Returns the absolute path of the written file. Caller (the
-        route handler) is responsible for canonicalizing ``filename``
-        against the workspace and rejecting traversal.
+        Returns the absolute path of the written file. Caller (the route
+        handler) is responsible for canonicalizing ``filename`` against
+        the workspace and rejecting traversal.
         """
         ss = self._require_loaded()
         target = Path(filename)
@@ -413,6 +417,9 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         # What the written file does not hold of the System (the m writer's
         # notes), said once the file is in place.
         notes: list[str] = []
+        dyr_path: Path | None = None
+        dyr_notes: list[str] = []
+        dyr_skipped: list[str] = []
         try:
             # ANDES's writers call ``confirm_overwrite`` → ``input()`` when the
             # file exists; the temp always exists (mkstemp created it), so force
@@ -429,6 +436,27 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                 from tensa.core.psse_writer import write_raw
 
                 write_raw(ss, str(tmp_path))
+                # The dynamics beside the network, same stem, when the
+                # System has a dynamic device the writer writes. Written
+                # and validated the way the .raw is: a temporary file,
+                # then moved into place, nothing exposed on failure.
+                dyr_tmp = tmp_path.with_suffix(".dyr")
+                dyr_report = write_dyr(ss, str(dyr_tmp))
+                dyr_skipped = [
+                    f"{s.model} {s.idx} has no PSS/E reader entry and was not written"
+                    for s in dyr_report.skipped
+                ]
+                dyr_notes = list(dyr_report.notes)
+                if dyr_report.records:
+                    if not dyr_tmp.exists() or dyr_tmp.stat().st_size == 0:
+                        raise CaseSaveError(
+                            "the dyr writer produced an empty file for a "
+                            "system with dynamic models"
+                        )
+                    dyr_path = target.with_suffix(".dyr")
+                else:
+                    with contextlib.suppress(OSError):
+                        dyr_tmp.unlink()
             else:  # m
                 from tensa.core.matpower_writer import write_matpower
 
@@ -468,16 +496,30 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                     )
 
             os.replace(str(tmp_path), str(target))
+            if dyr_path is not None:
+                os.replace(str(tmp_path.with_suffix(".dyr")), str(dyr_path))
         except CaseSaveError:
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
+            with contextlib.suppress(OSError):
+                tmp_path.with_suffix(".dyr").unlink()
             raise
         except Exception as exc:  # noqa: BLE001 — wrap so no raw writer error leaks
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
+            with contextlib.suppress(OSError):
+                tmp_path.with_suffix(".dyr").unlink()
             raise CaseSaveError(_sanitize_message(str(exc))) from exc
         notice = logging.getLogger("tensa.notice")
         for note in notes:
+            notice.warning("%s: %s", target.name, note)
+        if dyr_path is not None:
+            notice.warning(
+                "%s: the dynamic models were written beside it as %s",
+                target.name,
+                dyr_path.name,
+            )
+        for note in (*dyr_skipped, *dyr_notes):
             notice.warning("%s: %s", target.name, note)
         if overwrites_open_case:
             self._edit_log = []

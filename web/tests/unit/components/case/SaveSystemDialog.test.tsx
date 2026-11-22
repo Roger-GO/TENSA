@@ -326,12 +326,12 @@ describe('<SaveSystemDialog />', () => {
     expect(screen.getByText(/my-system\.raw/)).toBeInTheDocument();
   });
 
-  it('says that a raw file holds the power-flow data and no dynamic models', async () => {
+  it('says that a raw file comes with a .dyr when the case has dynamics', async () => {
     const user = userEvent.setup();
     render(withQueryClient(<Owner />));
     await user.click(screen.getByTestId('save-system-button'));
     expect(
-      screen.getByRole('radio', { name: /raw.*power-flow data only \(no dynamic models\)/i }),
+      screen.getByRole('radio', { name: /raw.*with \.dyr when the case has dynamics/i }),
     ).toBeInTheDocument();
   });
 

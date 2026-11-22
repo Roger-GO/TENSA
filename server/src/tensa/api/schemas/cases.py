@@ -126,6 +126,24 @@ class SaveCaseResponse(BaseModel):
         description="Size in bytes of the file just written, as reported by ``os.stat``.",
         ge=0,
     )
+    dyr_filename: str | None = Field(
+        default=None,
+        description=(
+            "Workspace-relative path of the PSS/E ``.dyr`` written beside "
+            "the case file when ``format`` is ``raw`` and the system has "
+            "dynamic models; ``null`` otherwise. Load the pair by passing "
+            "it as the addfile of the ``.raw``."
+        ),
+    )
+    dyr_notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the ``.dyr`` writer could not write or wrote as another "
+            "model: the dynamic devices no PSS/E reader entry covers, and "
+            "a model written under another name (TGOV1N as TGOV1). Empty "
+            "when no ``.dyr`` was written or nothing was left out."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(

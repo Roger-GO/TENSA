@@ -77,7 +77,7 @@ const EXT_BY_FORMAT: Record<SaveFormat, string> = {
 /** What each format's radio says after its name. */
 const FORMAT_DESCRIPTION: Record<SaveFormat, string> = {
   xlsx: 'ANDES native, opens in Excel',
-  raw: 'PSS/E v33, the power-flow data only (no dynamic models)',
+  raw: 'PSS/E (.raw, with .dyr when the case has dynamics)',
   m: 'MATPOWER case, the power-flow data only (no dynamic models)',
   json: 'cleanest round-trip',
 };

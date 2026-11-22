@@ -184,8 +184,10 @@ def test_a_dynamic_model_is_not_written_as_a_device_of_its_own(tmp_path: Path) -
     loads, generators = _records(target, "LOAD"), _records(target, "GENERATOR")
     assert len(loads) == ss.PQ.n
     assert len(generators) == ss.PV.n + ss.Slack.n
-    # One of each on a bus: the second would carry the id ' 2'.
-    assert {record[1] for record in loads + generators} == {"' 1'"}
+    # One of each on a bus: the second would carry the id ' 2' ('2' for a
+    # generator, whose id is unpadded so PowerSystems matches the .dyr).
+    assert {record[1] for record in loads} == {"' 1'"}
+    assert {record[1] for record in generators} == {"'1'"}
     mva = float(ss.config.mva)
     assert _megawatts(loads, 5) == pytest.approx(mva * float(sum(ss.PQ.p0.v)), abs=_MW_TOLERANCE)
     # A bus with a machine is typed by the static generator under it, as before.
