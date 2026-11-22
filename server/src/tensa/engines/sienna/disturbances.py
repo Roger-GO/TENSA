@@ -7,6 +7,12 @@ a ``Toggle`` on a line is ``branch_trip``, on a generator ``gen_trip``) and
 refuses what it cannot map, naming what the engine takes. At the start of a
 run the pending list becomes the JSON list ``tds_run_json`` takes, with bus
 numbers and ids from the key book.
+
+It also holds the islanding check of spec section 4: a ``NetworkSwitch`` takes
+a whole admittance matrix and PSID refuses one that splits the network, so a
+branch trip that would island the system is refused here, before the run.
+``islanded_buses`` is a pure function of the topology JSON; it imports no
+Julia and no engine.
 """
 
 from __future__ import annotations
@@ -25,6 +31,9 @@ _TAKES = (
     "the Sienna engine takes a Fault on a bus, a Toggle on a Line "
     "(a branch trip) or on a generator (a generator trip)"
 )
+
+# How many bus numbers the islanding refusal lists before "and N more".
+_LISTED_BUSES = 10
 
 
 @dataclass(frozen=True)
@@ -156,6 +165,118 @@ def _parse_bus_key(key: str) -> int | None:
         return None
     text = key[len("bus:") :]
     return int(text) if text.isdigit() else None
+
+
+def _components(
+    buses: list[int], edges: list[tuple[int, int]]
+) -> list[list[int]]:
+    """The connected components of ``buses`` over ``edges``, each sorted, the
+    largest first (ties by the smallest bus number)."""
+    neighbours: dict[int, set[int]] = {bus: set() for bus in buses}
+    for from_bus, to_bus in edges:
+        if from_bus in neighbours and to_bus in neighbours:
+            neighbours[from_bus].add(to_bus)
+            neighbours[to_bus].add(from_bus)
+    components: list[list[int]] = []
+    unseen = set(buses)
+    while unseen:
+        start = min(unseen)
+        component: list[int] = []
+        stack = [start]
+        unseen.discard(start)
+        while stack:
+            bus = stack.pop()
+            component.append(bus)
+            for neighbour in neighbours[bus]:
+                if neighbour in unseen:
+                    unseen.discard(neighbour)
+                    stack.append(neighbour)
+        components.append(sorted(component))
+    components.sort(key=lambda part: (-len(part), part[0]))
+    return components
+
+
+def islanded_buses(
+    topology: dict[str, Any], tripped: set[str]
+) -> list[int]:
+    """The buses the branch trips of ``tripped`` cut off from the largest
+    component of the network, sorted, or the empty list.
+
+    ``topology`` is the topology JSON the state holds: ``buses`` (each with
+    its ``number``) and ``branches`` (each with ``from``, ``to``, ``ckt`` and
+    ``available``). Only ``available`` branches connect buses. ``tripped``
+    holds branch keys (``branch:<from>-<to>-<ckt>``); a key that parses and
+    names a branch of the topology removes that branch, any other is ignored
+    (the run's own checks refuse it). A branch already out of service
+    (``available`` false) connects nothing, so tripping it changes nothing.
+    """
+    buses = [int(row["number"]) for row in topology.get("buses", [])]
+    edges: list[tuple[int, int]] = []
+    for branch in topology.get("branches", []):
+        if not branch.get("available", True):
+            continue
+        from_bus = int(branch["from"])
+        to_bus = int(branch["to"])
+        ckt = str(branch.get("ckt", ""))
+        if f"branch:{from_bus}-{to_bus}-{ckt}" in tripped:
+            continue
+        edges.append((from_bus, to_bus))
+    components = _components(buses, edges)
+    if len(components) <= 1:
+        return []
+    return [bus for part in components[1:] for bus in part]
+
+
+def islanding_refusal(
+    topology: dict[str, Any], pending_trips: set[str], new_trip: str
+) -> str | None:
+    """The refusal message for tripping ``new_trip`` with ``pending_trips``
+    already held, or ``None`` when the trip splits nothing.
+
+    The comparison is against the network with the pending trips alone, so a
+    case whose file is already split is not refused for that, and two trips
+    that together split the network refuse the second. The message names the
+    branch key and the buses of the smallest new component (sorted, at most
+    ten listed, then "and N more").
+    """
+    before = _components(
+        [int(row["number"]) for row in topology.get("buses", [])],
+        _available_edges(topology, pending_trips),
+    )
+    after = _components(
+        [int(row["number"]) for row in topology.get("buses", [])],
+        _available_edges(topology, pending_trips | {new_trip}),
+    )
+    if len(after) <= len(before):
+        return None
+    # The smallest component the new trip made: the last of the sorted list.
+    cut_off = after[-1]
+    listed = ", ".join(str(bus) for bus in cut_off[:_LISTED_BUSES])
+    if len(cut_off) > _LISTED_BUSES:
+        listed += f" and {len(cut_off) - _LISTED_BUSES} more"
+    return (
+        f"tripping {new_trip} islands the network: buses {listed} lose their "
+        f"connection to the rest; PowerSimulationsDynamics cannot simulate a "
+        f"network that splits, so the Sienna engine refuses it before the run"
+    )
+
+
+def _available_edges(
+    topology: dict[str, Any], tripped: set[str]
+) -> list[tuple[int, int]]:
+    """The ends of the available branches with the trips of ``tripped``
+    removed, as ``islanded_buses`` reads them."""
+    edges: list[tuple[int, int]] = []
+    for branch in topology.get("branches", []):
+        if not branch.get("available", True):
+            continue
+        from_bus = int(branch["from"])
+        to_bus = int(branch["to"])
+        ckt = str(branch.get("ckt", ""))
+        if f"branch:{from_bus}-{to_bus}-{ckt}" in tripped:
+            continue
+        edges.append((from_bus, to_bus))
+    return edges
 
 
 def run_json_entries(

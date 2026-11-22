@@ -12,9 +12,11 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tensa.core.disturbance import ToggleSpec
 from tensa.core.eig_result import ComplexNumber
 from tensa.core.errors import (
     CaseLoadError,
+    DisturbanceValidationError,
     EigComputationError,
     EigPrerequisiteError,
     ElementNotFoundError,
@@ -656,6 +658,61 @@ def test_the_standing_note_is_logged(
     assert noted[0].getMessage() == SIENNA_EIG_NOTE
 
 
+def test_an_islanding_branch_trip_is_refused_before_it_is_held(
+    state: SiennaState, workspace: Path
+) -> None:
+    """Kundur's generator step-up transformers are the only branches on buses
+    1, 2, 3 and 4 (the recorded topology lists one branch per bus of 1..4:
+    1-101, 2-102, 12-112, 11-111). Tripping the transformer of bus 1 cuts bus
+    1 off, so the disturbance is refused and the pending list is unchanged."""
+    state.load_case(_kundur(workspace))
+    # The branch key of the transformer of bus 1, from the recorded topology.
+    topology_json = json.loads((_SAMPLES / "kundur.topology.json").read_text("utf-8"))
+    names = {
+        (row["from"], row["to"], row["ckt"]): row["name"]
+        for row in topology_json["branches"]
+    }
+    idx = names[(1, 5, "1")]
+    before = state.list_disturbances()
+    with pytest.raises(DisturbanceValidationError) as caught:
+        state.add_disturbance(ToggleSpec(model="Line", dev_idx=idx, t=1.0))
+    message = str(caught.value)
+    assert "branch:1-5-1" in message
+    assert "buses 1 lose their connection" in message
+    assert "before the run" in message
+    assert state.list_disturbances() == before
+
+
+def test_a_non_islanding_branch_trip_is_held(
+    state: SiennaState, workspace: Path
+) -> None:
+    """Kundur has three circuits between buses 7 and 8; tripping one leaves
+    two, so it is accepted. Tripping all three cuts off the far side (buses
+    8, 9, 10, 3 and 4, by the ring 7-8-9-10-... of the recorded topology), so
+    the third is refused and the first two stay held."""
+    state.load_case(_kundur(workspace))
+    topology_json = json.loads((_SAMPLES / "kundur.topology.json").read_text("utf-8"))
+    names = {
+        (row["from"], row["to"], row["ckt"]): row["name"]
+        for row in topology_json["branches"]
+    }
+    first = ToggleSpec(model="Line", dev_idx=names[(7, 8, "1")], t=1.0)
+    second = ToggleSpec(model="Line", dev_idx=names[(7, 8, "2")], t=1.0)
+    third = ToggleSpec(model="Line", dev_idx=names[(7, 8, "3")], t=1.0)
+    state.add_disturbance(first)
+    state.add_disturbance(second)
+    assert state.list_disturbances() == [first, second]
+    with pytest.raises(DisturbanceValidationError) as caught:
+        state.add_disturbance(third)
+    message = str(caught.value)
+    assert "branch:7-8-3" in message
+    # The area cut off, by hand from the recorded topology: with 7-8 open the
+    # only way to 8, 9, 10, 3 and 4 is through 7, so all five are cut off.
+    # The smallest new component is [3, 4, 8, 9, 10], sorted.
+    assert "buses 3, 4, 8, 9, 10 lose their connection" in message
+    assert state.list_disturbances() == [first, second]
+
+
 def test_no_case_raises(state: SiennaState) -> None:
     with pytest.raises(NoCaseLoadedError):
         state.topology()
@@ -889,3 +946,23 @@ def test_unmatched_ratings_are_one_warning(
     assert len(stray) == 1
     assert stray[0].levelno == logging.WARNING
     assert stray[0].getMessage().startswith("2 branch record(s)")
+
+
+def test_an_islanding_trip_on_a_matpower_case_is_refused(state: SiennaState, workspace: Path) -> None:
+    """On IEEE 14 bus 8 is fed by branch 7-8 alone. Its key is
+    ``branch:7-8-1``, but PowerSystems gives a MATPOWER branch the row number
+    of the file's branch matrix as its circuit, so the topology's row has
+    ``ckt`` "14": the check must find the row through the key book, not by
+    rebuilding the key from the row."""
+    case = workspace / "case14.m"
+    case.write_bytes((_andes_cases_dir() / "matpower" / "case14.m").read_bytes())
+    state.load_case(case)
+    topology_json = json.loads((_SAMPLES / "case14_m.topology.json").read_text("utf-8"))
+    (row,) = [b for b in topology_json["branches"] if {b["from"], b["to"]} == {7, 8}]
+    assert row["ckt"] != "1"
+    assert state.keys().key_of("Line", row["name"]) == "branch:7-8-1"
+    with pytest.raises(DisturbanceValidationError) as caught:
+        state.add_disturbance(ToggleSpec(model="Line", dev_idx=row["name"], t=1.0))
+    message = str(caught.value)
+    assert message.startswith("tripping branch:7-8-1 islands the network: buses 8 lose")
+    assert state.list_disturbances() == []

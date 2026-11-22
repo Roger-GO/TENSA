@@ -44,6 +44,7 @@ from tensa.core.eig_result import ComplexNumber, EigResult
 from tensa.core.errors import (
     AndesAppError,
     CaseLoadError,
+    DisturbanceValidationError,
     EigComputationError,
     EigPrerequisiteError,
     ElementNotFoundError,
@@ -79,6 +80,7 @@ from tensa.engines.sienna.dispatch import (
 )
 from tensa.engines.sienna.disturbances import (
     PendingDisturbance,
+    islanding_refusal,
     run_json_entries,
     to_pending,
     unit_key_of,
@@ -1405,6 +1407,30 @@ class SiennaState:
         """
         self._require_session()
         pending = to_pending(spec, self._key_book)
+        if pending.neutral["kind"] == "branch_trip":
+            # A NetworkSwitch takes a whole admittance matrix and PSID refuses
+            # one that splits the network (spec section 4), so a branch trip
+            # that would island the system is refused here, before the run.
+            # Trips accumulate: two trips that together split the network
+            # refuse the second. A Toggle that puts a branch that is out of
+            # service back in maps to branch_trip in to_pending today; it is
+            # treated as a removal here (the branch connects nothing either
+            # way, so the check below refuses nothing for it).
+            trips = {
+                self._topology_branch_id(str(item.neutral["target"]))
+                for item in self._pending_disturbances
+                if item.neutral["kind"] == "branch_trip"
+            }
+            target = str(pending.neutral["target"])
+            refusal = islanding_refusal(
+                self._topology_json or {}, trips, self._topology_branch_id(target)
+            )
+            if refusal is not None:
+                # The message names the branch by its key, not by the
+                # topology's own ends and circuit.
+                raise DisturbanceValidationError(
+                    refusal.replace(self._topology_branch_id(target), target, 1)
+                )
         self._pending_disturbances.append(pending)
         neutral = pending.neutral
         target = neutral.get("target") or neutral.get("bus")
@@ -1416,6 +1442,22 @@ class SiennaState:
             t,
         )
         return str(len(self._pending_disturbances) - 1)
+
+    def _topology_branch_id(self, key: str) -> str:
+        """The branch a key names, as ``islanded_buses`` reads the topology
+        JSON: ``branch:<from>-<to>-<ckt>`` with the ends and circuit of the
+        JSON row the key book gives the key to. These are not the key's own:
+        PowerSystems gives a MATPOWER branch the row number of the file's
+        branch matrix as its circuit (``branch:1-5-1`` is the row with
+        ``ckt`` "2" on IEEE 14), and may hold the ends the other way round.
+        A key the book or the JSON does not hold is answered as it is."""
+        entry = self._key_book.entry_of(key)
+        if entry is None:
+            return key
+        for row in (self._topology_json or {}).get("branches", []):
+            if str(row.get("name")) == str(entry.idx):
+                return f"branch:{int(row['from'])}-{int(row['to'])}-{row.get('ckt', '')}"
+        return key
 
     def list_disturbances(self) -> list[FaultSpec | ToggleSpec]:
         """The specs accepted since the last load or clear, in order, as the
