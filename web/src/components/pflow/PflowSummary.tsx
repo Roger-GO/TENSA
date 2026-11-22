@@ -9,6 +9,7 @@ import { usePflowHistoryStore } from '@/store/pflowHistory';
 import { openPflowComparePanel } from '@/lib/openPflowPanel';
 import { describeSettings, iterationsPhrase } from '@/lib/pflowOptions';
 import { lossShare, summaryRows } from '@/lib/pflowSummary';
+import { formatMvar } from '@/lib/reactivePower';
 
 /**
  * PflowSummary: how the last power flow came out, and what the whole system
@@ -18,7 +19,9 @@ import { lossShare, summaryRows } from '@/lib/pflowSummary';
  *
  * It reads the last converged run from the pflow slice. After a time-domain run
  * that slice holds the end-state operating point instead (bus voltages only), which
- * has no totals, and the panel says so rather than showing a stale table.
+ * has no totals, and the panel says so rather than showing a stale table. A DC
+ * power flow computes no reactive power: its Q cells show the dash `formatMvar`
+ * gives a null, the settings line names the DC method, and the footnote says why.
  *
  * Once a second power flow has converged, a button leads to the Compare tab,
  * where the result is set against an earlier one.
@@ -32,6 +35,17 @@ function mw(value: number | null): string {
   return value === null ? '-' : value.toFixed(2);
 }
 
+/**
+ * A reactive total: the number to two decimals, and for a null the dash
+ * `formatMvar` gives when the run computed no reactive power at all (a DC
+ * power flow, where every Q is null), else the plain dash of a row with
+ * nothing to show (no slack in service).
+ */
+function mvar(value: number | null, dc: boolean): string {
+  if (value !== null) return value.toFixed(2);
+  return dc ? formatMvar(null) : '-';
+}
+
 export function PflowSummary({ className }: PflowSummaryProps) {
   const lastRun = usePflowStore((s) => s.lastRun);
   const comparable = usePflowHistoryStore((s) => s.snapshots.length > 1);
@@ -39,12 +53,14 @@ export function PflowSummary({ className }: PflowSummaryProps) {
   const summary = lastRun?.summary ?? null;
   const settings = lastRun?.settings ?? null;
   const rows = useMemo(() => (summary === null ? [] : summaryRows(summary)), [summary]);
+  const reactiveMissing = rows.some((r) => r.q === null);
+  const dcRun = rows.length > 0 && rows.every((r) => r.q === null);
 
   const onExportCsv = () => {
     if (summary === null) return null;
     return recordsToCsv({
       columns: ['quantity', 'P (MW)', 'Q (MVAr)'],
-      rows: rows.map((r) => [r.label, r.p, r.q]),
+      rows: rows.map((r) => [r.label, r.p, r.q === null ? formatMvar(null) : r.q]),
       comments: settings === null ? undefined : [`Settings: ${describeSettings(settings)}`],
     });
   };
@@ -138,7 +154,7 @@ export function PflowSummary({ className }: PflowSummaryProps) {
                     {row.label}
                   </th>
                   <td className="py-1 text-right font-mono tabular-nums">{mw(row.p)}</td>
-                  <td className="py-1 text-right font-mono tabular-nums">{mw(row.q)}</td>
+                  <td className="py-1 text-right font-mono tabular-nums">{mvar(row.q, dcRun)}</td>
                 </tr>
               ))}
             </tbody>
@@ -147,6 +163,7 @@ export function PflowSummary({ className }: PflowSummaryProps) {
             Generation equals load plus bus shunts plus line losses
             {share === null ? '' : `; the lines lose ${share.toFixed(2)}% of the active generation`}
             . A negative Q is reactive power supplied, by a capacitor or by line charging.
+            {reactiveMissing ? ' Reactive power is not computed by a DC power flow.' : ''}
           </p>
         </>
       )}

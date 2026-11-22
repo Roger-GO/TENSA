@@ -139,6 +139,53 @@ export function allowedToggleTargets(
 }
 
 /**
+ * The power flow methods of the engine `name` in `engines`: the `methods` of
+ * its `routine_options.pflow` (`NR`, `dishonest`, `NK` for ANDES; `ac`, `dc`,
+ * `ptdf-dc` for Sienna), or null when the list is not loaded, does not name
+ * the engine, or the entry carries no such array (an older server).
+ */
+export function enginePflowMethods(
+  engines: EngineList | null | undefined,
+  name: string | null,
+): readonly string[] | null {
+  if (engines === null || engines === undefined || name === null) return null;
+  const entry = engines.engines.find((e) => e.name === name);
+  const options = entry?.routine_options as Record<string, unknown> | undefined;
+  const pflow = options?.['pflow'] as Record<string, unknown> | undefined;
+  const methods = pflow?.['methods'];
+  if (!Array.isArray(methods) || !methods.every((m) => typeof m === 'string')) return null;
+  return methods as readonly string[];
+}
+
+/**
+ * True when the engine `name` in `engines` lists `op` among its `ops`; false
+ * when anything is missing (the list not loaded, the engine absent, no `ops`
+ * array). A gate reads it so an unknown answer hides a feature rather than
+ * offering a route the server refuses.
+ */
+export function engineHasOp(
+  engines: EngineList | null | undefined,
+  name: string | null,
+  op: string,
+): boolean {
+  if (engines === null || engines === undefined || name === null) return false;
+  const entry = engines.engines.find((e) => e.name === name);
+  const ops = entry?.ops;
+  return Array.isArray(ops) && ops.includes(op);
+}
+
+/**
+ * True for an ANDES session, the one engine whose power flow reads the
+ * solver settings `n_factorize`, `linesearch`, `flat_start` and
+ * `enforce_q_limits`; a Sienna session refuses them, so its form hides them.
+ * An engine that is not known yet counts as ANDES: the form must not come up
+ * short because a list has not arrived.
+ */
+export function engineTakesAndesPflowOptions(engine: string | null): boolean {
+  return engine === null || engine === DEFAULT_ENGINE;
+}
+
+/**
  * The versions of the engine's packages as one compact line
  * (`PowerSystems 5.12.5, PowerFlows 0.16.4`), or null when the engine
  * reports none (absent or empty map): nothing is shown for such an engine.

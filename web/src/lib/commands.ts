@@ -58,6 +58,7 @@ import { useEditJournalStore } from '@/store/editJournal';
 import { redoTarget, undoTarget, useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useReportDialogStore } from '@/store/reportDialog';
 import { useYbusDialogStore } from '@/store/ybusDialog';
+import { useNetworkMatrixStore } from '@/store/networkMatrix';
 import {
   useAbortRun,
   useCloneRedo,
@@ -89,6 +90,7 @@ import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
+import { engineHasOp } from '@/lib/engines';
 import { hasDynamicModels, runReadinessNow, type RunRoutine } from '@/lib/useRunReadiness';
 import { EIG_THEN_RELOAD } from '@/lib/runLock';
 import { FIGURE_FOR_A_PAPER } from '@/lib/figureWording';
@@ -215,6 +217,8 @@ interface CommandSets {
 function useCommandSets(): CommandSets {
   // ---- subscriptions used by gates + actions -----------------------------
   const sessionId = useSessionStore((s) => s.sessionId);
+  const engine = useSessionStore((s) => s.engine);
+  const engines = useSessionStore((s) => s.engines);
   const caseSelection = useCaseStore((s) => s.selection);
   const topology = useCurrentTopology();
   const topologyRefetching = useTopologyRefetching();
@@ -345,6 +349,9 @@ function useCommandSets(): CommandSets {
   const diagramHeld = useSldStore((s) => s.diagramHeld);
   const diagramVisible =
     topology !== null && topology.buses.length > 0 && !resultsViewActive && !diagramHeld;
+  // The Sienna engine builds the network matrices of the loaded case; an ANDES
+  // session has the Ybus dialog instead.
+  const networkMatricesAvailable = engineHasOp(engines, engine, 'network_matrix');
 
   // ---- the arrangement of the diagram -----------------------------------
   // Moves, Tidy diagram and alignments have a history of their own, kept by
@@ -1077,6 +1084,37 @@ function useCommandSets(): CommandSets {
         action: openPflowComparePanel,
         when: () => hasPflowHistory,
       },
+      // The PTDF, LODF, Ybus or incidence matrix of the loaded case, built by
+      // the Sienna engine. Listed greyed out for an engine without the op:
+      // the matrices are a feature a user would look for, and the reason says
+      // where the ANDES equivalent is.
+      {
+        id: 'analysis.network-matrices',
+        label: 'Network matrices…',
+        description:
+          'The PTDF, LODF, Ybus or incidence matrix of the loaded case, built by the Sienna engine: a table labelled by element key, searchable, downloadable as CSV.',
+        group: 'view',
+        keywords: [
+          'matrix',
+          'matrices',
+          'ptdf',
+          'lodf',
+          'ybus',
+          'admittance',
+          'incidence',
+          'sienna',
+          'network',
+        ],
+        action: () => useNetworkMatrixStore.getState().openDialog(),
+        when: () => networkMatricesAvailable && topology !== null,
+        unavailableReason: () => {
+          if (sessionId === null) return null;
+          if (!networkMatricesAvailable) {
+            return 'Network matrices are built by the Sienna engine; an ANDES session has the Ybus dialog.';
+          }
+          return 'Open a case first: the matrix is of the loaded case.';
+        },
+      },
       // v3.1 — full-space results view. Toggles
       // ``useLayoutStore.resultsViewActive``, which makes the AppShell
       // short-circuit the diagram + inspector + drawer and render the
@@ -1563,6 +1601,7 @@ function useCommandSets(): CommandSets {
     abortableRun,
     abortMutation,
     diagramVisible,
+    networkMatricesAvailable,
     // Not only through `diagramVisible`: the figure says which of the three
     // reasons it has for not being there to draw.
     resultsViewActive,

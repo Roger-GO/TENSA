@@ -37,6 +37,24 @@ describe('summaryRows', () => {
     });
   });
 
+  it('passes a null reactive total of a DC power flow through as null', () => {
+    const dc: PflowSummary = {
+      generation_p: 226.43,
+      generation_q: null,
+      load_p: 223.7,
+      load_q: null,
+      shunt_p: 0,
+      shunt_q: null,
+      loss_p: 2.73,
+      loss_q: null,
+      slack_p: 81.43,
+      slack_q: null,
+    };
+    const rows = summaryRows(dc);
+    expect(rows.map((r) => r.q)).toEqual([null, null, null, null, null]);
+    expect(rows.map((r) => r.p)).toEqual([226.43, 223.7, 0, 2.73, 81.43]);
+  });
+
   it('leaves the slack row empty when the case has no slack in service', () => {
     const slack = summaryRows({ ...SUMMARY, slack_p: null, slack_q: null }).find(
       (r) => r.id === 'slack',

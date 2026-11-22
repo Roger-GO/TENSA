@@ -8,6 +8,7 @@ import {
   ANDES_PFLOW_DEFAULTS,
   DEFAULT_PFLOW_OPTIONS,
   caseSettingsFromRun,
+  dcIgnores,
   describeSettings,
   formatTolerance,
   isDefaultPflowOptions,
@@ -73,6 +74,41 @@ describe('pflowRequestBody', () => {
     expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, linesearch: false })).toEqual({
       linesearch: false,
     });
+  });
+
+  it('sends any method string the engine publishes', () => {
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'dc' })).toEqual({
+      method: 'dc',
+    });
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'ptdf-dc' })).toEqual({
+      method: 'ptdf-dc',
+    });
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'ac' })).toEqual({
+      method: 'ac',
+    });
+  });
+
+  it('leaves tolerance and iterations out under a DC method, which the server refuses them with', () => {
+    expect(
+      pflowRequestBody({
+        ...DEFAULT_PFLOW_OPTIONS,
+        method: 'dc',
+        tolerance: 1e-4,
+        maxIterations: 50,
+      }),
+    ).toEqual({ method: 'dc' });
+    expect(
+      pflowRequestBody({
+        ...DEFAULT_PFLOW_OPTIONS,
+        method: 'ptdf-dc',
+        tolerance: 1e-4,
+        maxIterations: 50,
+      }),
+    ).toEqual({ method: 'ptdf-dc' });
+    // The values stay in the options for when the user switches back; only the body drops them.
+    expect(
+      pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, tolerance: 1e-4, maxIterations: 50 }),
+    ).toEqual({ tolerance: 1e-4, max_iterations: 50 });
   });
 
   it('sends a checkbox only once it has been touched, and then whichever way it points', () => {
@@ -205,6 +241,17 @@ describe('nkIgnores', () => {
   });
 });
 
+describe('dcIgnores', () => {
+  it('is true for the two DC methods and nothing else', () => {
+    expect(dcIgnores('dc')).toBe(true);
+    expect(dcIgnores('ptdf-dc')).toBe(true);
+    expect(dcIgnores('NR')).toBe(false);
+    expect(dcIgnores('NK')).toBe(false);
+    expect(dcIgnores('ac')).toBe(false);
+    expect(dcIgnores(null)).toBe(false);
+  });
+});
+
 describe('formatTolerance', () => {
   it('writes a tolerance the way a person does', () => {
     expect(formatTolerance(1e-6)).toBe('1e-6');
@@ -265,6 +312,27 @@ describe('describeSettings', () => {
     ).toBe('tolerance 1e-6, up to 25 iterations');
     // PLAIN is what an older server sends: the three keys absent.
     expect(describeSettings(PLAIN)).not.toMatch(/undefined|null/);
+  });
+
+  it('names a DC method as a direct solve, and never a tolerance or a limit', () => {
+    // The server reports 0.0 and 0 for the two settings a DC solve does not read.
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(describeSettings(dc)).toBe('DC power flow (direct solve)');
+    expect(describeSettings({ ...dc, method: 'ptdf-dc' })).toBe(
+      'DC power flow from the PTDF matrix (direct solve)',
+    );
+    expect(describeSettings({ ...dc, flat_start: true, enforce_q_limits: true })).toBe(
+      'DC power flow (direct solve), flat start, Q limits enforced',
+    );
+    expect(describeSettings(dc)).not.toMatch(/tolerance|iteration/);
   });
 
   it('under Newton-Krylov never names a tolerance or a limit, whatever the server echoed', () => {
@@ -377,6 +445,34 @@ describe('nonDefaultSettings and pflowSuccessMessage', () => {
       nonDefaultSettings({ ...PLAIN, method: 'dishonest', n_factorize: 4, linesearch: true }),
     ).toEqual(['dishonest method']);
   });
+
+  it('name a DC method and never a tolerance or a limit, and the toast does not name it twice', () => {
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(nonDefaultSettings(dc)).toEqual(['DC power flow']);
+    expect(nonDefaultSettings({ ...dc, method: 'ptdf-dc' })).toEqual(['DC power flow (PTDF)']);
+    expect(nonDefaultSettings({ ...dc, enforce_q_limits: true })).toEqual([
+      'Q limits enforced',
+      'DC power flow',
+    ]);
+    expect(nonDefaultSettings({ ...dc, flat_start: true })).toEqual([
+      'flat start',
+      'DC power flow',
+    ]);
+    expect(pflowSuccessMessage({ iterations: 0, settings: dc })).toBe(
+      'PF converged by direct solve.',
+    );
+    expect(pflowSuccessMessage({ iterations: 0, settings: { ...dc, flat_start: true } })).toBe(
+      'PF converged by direct solve (flat start).',
+    );
+  });
 });
 
 describe('iterationsPhrase', () => {
@@ -389,6 +485,25 @@ describe('iterationsPhrase', () => {
     );
     expect(iterationsPhrase({ iterations: 7, settings: { ...PLAIN, method: 'dishonest' } })).toBe(
       'in 7 iterations',
+    );
+  });
+
+  it('names a direct solve for a DC method, whose 0 iterations would read as a failure', () => {
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(iterationsPhrase({ iterations: 0, settings: dc })).toBe('by direct solve');
+    expect(iterationsPhrase({ iterations: 0, settings: { ...dc, method: 'ptdf-dc' } })).toBe(
+      'by direct solve',
+    );
+    expect(iterationsPhrase({ iterations: 0, settings: { ...dc, method: 'ac' } })).toBe(
+      'in 0 iterations',
     );
   });
 });

@@ -16,11 +16,12 @@
  */
 import type { PflowRunRequest, PflowSettings } from '@/api/types';
 
-/** The solver a power flow can run with. */
-export type PflowMethod = 'NR' | 'dishonest' | 'NK';
-
-/** The solvers the server accepts, in the order the form lists them. */
-export const PFLOW_METHODS: readonly PflowMethod[] = ['NR', 'dishonest', 'NK'];
+/**
+ * The solver a power flow can run with: one of the engine's published `method`
+ * values (`NR`, `dishonest`, `NK` for ANDES; `ac`, `dc`, `ptdf-dc` for Sienna),
+ * as a string so a new engine's list needs no client change.
+ */
+export type PflowMethod = string;
 
 /** What the user can set for one power-flow run. */
 export interface PflowOptions {
@@ -32,7 +33,7 @@ export interface PflowOptions {
   flatStart: boolean | null;
   /** Hold a generator at `qmin` / `qmax` when its Q goes past one, or `null` for the case's own. */
   enforceQLimits: boolean | null;
-  /** The solver: "NR", "dishonest" or "NK", or `null` for the case's own. */
+  /** The solver: one of the engine's methods, or `null` for the case's own. */
   method: PflowMethod | null;
   /** Iterations of the dishonest method that refactorize the Jacobian, or `null` for the case's own. */
   nFactorize: number | null;
@@ -87,7 +88,11 @@ export function isDefaultPflowOptions(options: PflowOptions): boolean {
   );
 }
 
-/** The request body: only what has been set; the rest stays the case's own. */
+/**
+ * The request body: only what has been set; the rest stays the case's own. A DC
+ * method is solved directly and the server refuses a tolerance or an iteration
+ * limit with it, so the body leaves them out.
+ */
 export function pflowRequestBody(options: PflowOptions): PflowRunRequest {
   const body: PflowRunRequest = {};
   if (options.tolerance !== null) body.tolerance = options.tolerance;
@@ -97,6 +102,10 @@ export function pflowRequestBody(options: PflowOptions): PflowRunRequest {
   if (options.method !== null) body.method = options.method;
   if (options.nFactorize !== null) body.n_factorize = options.nFactorize;
   if (options.linesearch !== null) body.linesearch = options.linesearch;
+  if (dcIgnores(options.method)) {
+    delete body.tolerance;
+    delete body.max_iterations;
+  }
   return body;
 }
 
@@ -189,6 +198,11 @@ export function nkIgnores(method: PflowMethod | null): boolean {
   return method === 'NK';
 }
 
+/** The settings a DC power flow does not read: tolerance and max iterations (a direct solve). */
+export function dcIgnores(method: PflowMethod | null): boolean {
+  return method === 'dc' || method === 'ptdf-dc';
+}
+
 /** A tolerance the way a person writes it: `1e-6`, `2.5e-4`. */
 export function formatTolerance(value: number): string {
   return value.toExponential().replace('e+', 'e');
@@ -198,11 +212,23 @@ export function formatTolerance(value: number): string {
  * The settings a run used, in a line: `tolerance 1e-6, up to 25 iterations`, then
  * `flat start` and `Q limits enforced` when they were on, then the solver when it
  * was not NR. Under Newton-Krylov the tolerance, the iteration limit and the line
- * search were not read, so the line names the method and only what did apply.
+ * search were not read, so the line names the method and only what did apply. A
+ * DC method is a direct solve: the line names it and never a tolerance or a limit
+ * (the server reports the "not used" values 0.0 and 0 for them).
  */
 export function describeSettings(settings: PflowSettings): string {
   if (settings.method === 'NK') {
     const parts = ["Newton-Krylov (SciPy's own stopping rule)"];
+    if (settings.flat_start) parts.push('flat start');
+    if (settings.enforce_q_limits) parts.push('Q limits enforced');
+    return parts.join(', ');
+  }
+  if (dcIgnores(settings.method ?? null)) {
+    const parts = [
+      settings.method === 'ptdf-dc'
+        ? 'DC power flow from the PTDF matrix (direct solve)'
+        : 'DC power flow (direct solve)',
+    ];
     if (settings.flat_start) parts.push('flat start');
     if (settings.enforce_q_limits) parts.push('Q limits enforced');
     return parts.join(', ');
@@ -232,6 +258,7 @@ export function describeSettings(settings: PflowSettings): string {
  * `flat start`, `tolerance 1e-4`, `up to 50 iterations`, `dishonest method`,
  * `line search off`. Empty for a plain run. Under Newton-Krylov only the method
  * is named: the tolerance, the iteration limit and the line search were not read.
+ * A DC method is named as such, and never a tolerance or a limit.
  */
 export function nonDefaultSettings(settings: PflowSettings | null | undefined): string[] {
   if (settings === null || settings === undefined) return [];
@@ -240,6 +267,13 @@ export function nonDefaultSettings(settings: PflowSettings | null | undefined): 
     if (settings.enforce_q_limits) parts.push('Q limits enforced');
     if (settings.flat_start) parts.push('flat start');
     parts.push('Newton-Krylov');
+    return parts;
+  }
+  if (dcIgnores(settings.method ?? null)) {
+    const parts: string[] = [];
+    if (settings.enforce_q_limits) parts.push('Q limits enforced');
+    if (settings.flat_start) parts.push('flat start');
+    parts.push(settings.method === 'ptdf-dc' ? 'DC power flow (PTDF)' : 'DC power flow');
     return parts;
   }
   const parts: string[] = [];
@@ -268,14 +302,22 @@ export function nonDefaultSettings(settings: PflowSettings | null | undefined): 
 
 /**
  * How a run got where it did, to follow "converged" or "did not converge":
- * `in 5 iterations`, or `by Newton-Krylov` for a run of that method, which keeps
- * no iteration count (the server reports 0).
+ * `in 5 iterations`, `by Newton-Krylov` for a run of that method, which keeps
+ * no iteration count (the server reports 0), or `by direct solve` for a DC
+ * method, whose 0 iterations would read as a failure.
  */
 export function iterationsPhrase(result: {
   iterations: number;
   settings?: PflowSettings | null;
 }): string {
   if (result.settings?.method === 'NK') return 'by Newton-Krylov';
+  if (
+    result.settings !== null &&
+    result.settings !== undefined &&
+    dcIgnores(result.settings.method ?? null)
+  ) {
+    return 'by direct solve';
+  }
   return `in ${result.iterations} iterations`;
 }
 
@@ -284,11 +326,16 @@ export function pflowSuccessMessage(result: {
   iterations: number;
   settings?: PflowSettings | null;
 }): string {
-  const nk = result.settings?.method === 'NK';
-  // Under Newton-Krylov the sentence names the method already.
-  const extra = nonDefaultSettings(result.settings).filter(
-    (part) => !nk || part !== 'Newton-Krylov',
-  );
+  const method = result.settings?.method ?? null;
+  // Under Newton-Krylov and under a DC method the sentence names the method already.
+  const methodPart = nkIgnores(method)
+    ? 'Newton-Krylov'
+    : dcIgnores(method)
+      ? method === 'ptdf-dc'
+        ? 'DC power flow (PTDF)'
+        : 'DC power flow'
+      : null;
+  const extra = nonDefaultSettings(result.settings).filter((part) => part !== methodPart);
   const base = `PF converged ${iterationsPhrase(result)}`;
   return extra.length === 0 ? `${base}.` : `${base} (${extra.join(', ')}).`;
 }

@@ -20,6 +20,22 @@ import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useSessionStore } from '@/store/session';
+import type { EngineCapabilities, EngineList } from '@/api/types';
+
+function siennaEngines(): EngineList {
+  const sienna: EngineCapabilities = {
+    name: 'sienna',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: ['psse-raw'], write: [] },
+    routines: ['matrices', 'pflow', 'eig', 'tds'],
+    routine_options: { pflow: { methods: ['ac', 'dc', 'ptdf-dc'] } },
+    ops: ['network_matrix'],
+    editing: false,
+  };
+  return { engines: [sienna] };
+}
 
 function Wrapper({ children }: { children: ReactNode }) {
   const [client] = useState(() => makeQueryClient());
@@ -46,7 +62,7 @@ beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
   usePflowOptionsStore.getState().resetForNewCase();
   usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
-  useSessionStore.setState({ sessionId: null });
+  useSessionStore.setState({ sessionId: null, engine: null, engines: null });
   useCaseStore.setState({ selection: null, loadingPath: null });
 });
 
@@ -258,6 +274,102 @@ describe('<PflowOptionsForm /> fields', () => {
     expect(screen.getByTestId('pflow-linesearch').parentElement).not.toHaveTextContent(
       /Newton-Krylov/i,
     );
+  });
+
+  it('lists the methods the session’s engine publishes, with their labels', () => {
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    expect(screen.getByTestId('pflow-method-ac')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'AC power flow' })).toHaveAttribute('value', 'ac');
+    expect(screen.getByRole('radio', { name: 'DC power flow' })).toHaveAttribute('value', 'dc');
+    expect(
+      screen.getByRole('radio', { name: 'DC power flow from the PTDF matrix' }),
+    ).toHaveAttribute('value', 'ptdf-dc');
+    expect(screen.queryByTestId('pflow-method-nr')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pflow-method-dishonest')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pflow-method-nk')).not.toBeInTheDocument();
+    // The default radio stays, so the case's own setting can be kept.
+    expect(screen.getByTestId('pflow-method-default')).toBeChecked();
+  });
+
+  it('falls back to the ANDES list while the engines list has not arrived', () => {
+    useSessionStore.setState({ engine: 'sienna', engines: null });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    expect(screen.getByTestId('pflow-method-nr')).toBeInTheDocument();
+    expect(screen.getByTestId('pflow-method-dishonest')).toBeInTheDocument();
+    expect(screen.getByTestId('pflow-method-nk')).toBeInTheDocument();
+  });
+
+  it('commits a DC method to the store', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-dc'));
+    expect(usePflowOptionsStore.getState().options.method).toBe('dc');
+  });
+
+  it('under a DC method disables tolerance and iterations with the note, and keeps their values', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.type(field('pflow-tolerance'), '1e-4');
+    await user.click(screen.getByTestId('pflow-method-dc'));
+
+    expect(screen.getByTestId('pflow-dc-note')).toHaveTextContent(
+      'A DC power flow is solved directly; it has no tolerance or iteration limit.',
+    );
+    expect(screen.queryByTestId('pflow-nk-note')).not.toBeInTheDocument();
+    expect(document.getElementById('pflow-tolerance-hint')).toHaveTextContent(
+      /does not apply under a DC method/i,
+    );
+    expect(document.getElementById('pflow-max-iterations-hint')).toHaveTextContent(
+      /does not apply under a DC method/i,
+    );
+    expect(field('pflow-tolerance')).toBeDisabled();
+    expect(field('pflow-max-iterations')).toBeDisabled();
+    // Set for when the user switches back.
+    expect(field('pflow-tolerance')).toHaveValue('1e-4');
+    expect(usePflowOptionsStore.getState().options.tolerance).toBe(1e-4);
+    expect(screen.getByRole('group', { name: 'Solver method' })).toHaveAttribute(
+      'aria-describedby',
+      'pflow-method-hint pflow-dc-note',
+    );
+
+    await user.click(screen.getByTestId('pflow-method-ac'));
+    expect(screen.queryByTestId('pflow-dc-note')).not.toBeInTheDocument();
+    expect(field('pflow-tolerance')).toBeEnabled();
+  });
+
+  it('hides the ANDES-only options on a Sienna session', () => {
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    expect(screen.queryByTestId('field-pflow-n-factorize')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pflow-flat-start')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pflow-enforce-q-limits')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pflow-linesearch')).not.toBeInTheDocument();
+  });
+
+  it('shows the ANDES-only options on an ANDES session', () => {
+    useSessionStore.setState({ engine: 'andes' });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    expect(screen.getByTestId('field-pflow-n-factorize')).toBeInTheDocument();
+    expect(screen.getByTestId('pflow-flat-start')).toBeInTheDocument();
+    expect(screen.getByTestId('pflow-enforce-q-limits')).toBeInTheDocument();
+    expect(screen.getByTestId('pflow-linesearch')).toBeInTheDocument();
+  });
+
+  it('Reset clears a DC method back to the case’s own', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-dc'));
+    expect(screen.getByTestId('pflow-options-reset')).toBeEnabled();
+
+    await user.click(screen.getByTestId('pflow-options-reset'));
+
+    expect(usePflowOptionsStore.getState().options.method).toBeNull();
+    expect(screen.getByTestId('pflow-method-default')).toBeChecked();
+    expect(screen.queryByTestId('pflow-dc-note')).not.toBeInTheDocument();
   });
 
   it('keeps what was typed while focus is in the field, and tidies it on leaving', async () => {
@@ -537,6 +649,35 @@ describe('<PflowOptionsForm /> Run PF', () => {
       n_factorize: 10,
       linesearch: false,
     });
+  });
+
+  it('under a DC method sends the method and leaves the tolerance and the limit out', async () => {
+    const user = userEvent.setup();
+    useSessionStore.setState({
+      sessionId: parseSessionId('sess-1'),
+      engine: 'sienna',
+      engines: siennaEngines(),
+    });
+    useCaseStore.getState().setCase({
+      primaryPath: parseWorkspacePath('ieee14.raw'),
+      addfiles: [],
+    });
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(CONVERGED), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    render(<PflowOptionsForm />, { wrapper: Wrapper });
+    await user.click(screen.getByTestId('pflow-method-dc'));
+
+    await user.click(screen.getByTestId('pflow-options-run'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ method: 'dc' });
   });
 
   it('under Newton-Krylov still sends a typed tolerance and limit; the server ignores them', async () => {

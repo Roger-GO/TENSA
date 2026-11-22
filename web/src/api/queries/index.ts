@@ -54,3 +54,4 @@ export * from './sweeps';
 export * from './clone';
 export * from './externalResults';
 export * from './ybus';
+export * from './networkMatrix';

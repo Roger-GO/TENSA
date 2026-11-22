@@ -174,6 +174,7 @@ const PUBLIC_VALUES = [
   'useListWorkspaceFiles',
   'useLoadCase',
   'useModelDoc',
+  'useNetworkMatrix',
   'usePutSidecar',
   'useRedoEdit',
   'useRefreshTopology',

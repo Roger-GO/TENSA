@@ -130,6 +130,7 @@ const LAZY_MODULES = [
   'components/examples/ExampleCasesDialog.tsx',
   'components/examples/ExampleCard.tsx',
   'components/ybus/YbusDialog.tsx',
+  'components/networkMatrix/NetworkMatrixDialog.tsx',
   'components/models/ModelDocDialog.tsx',
   'components/shell/SwitchEngineConfirmDialog.tsx',
   'components/tds/TdsInitResultDialog.tsx',

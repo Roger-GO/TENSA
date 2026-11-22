@@ -12,7 +12,7 @@ export interface SummaryRow {
   title: string;
   /** Active power, MW. `null` where there is nothing to show (no slack). */
   p: number | null;
-  /** Reactive power, MVAr. */
+  /** Reactive power, MVAr. `null` for a DC power flow, which computes none. */
   q: number | null;
 }
 
@@ -24,14 +24,14 @@ export function summaryRows(summary: PflowSummary): SummaryRow[] {
       label: 'Generation',
       title: 'What the in-service generators produce.',
       p: summary.generation_p,
-      q: summary.generation_q,
+      q: summary.generation_q ?? null,
     },
     {
       id: 'load',
       label: 'Load',
       title: 'What the loads draw at the solved voltages.',
       p: summary.load_p,
-      q: summary.load_q,
+      q: summary.load_q ?? null,
     },
     {
       id: 'shunt',
@@ -39,7 +39,7 @@ export function summaryRows(summary: PflowSummary): SummaryRow[] {
       title:
         'What the shunts absorb. A capacitor supplies reactive power, so its Q reads negative.',
       p: summary.shunt_p,
-      q: summary.shunt_q,
+      q: summary.shunt_q ?? null,
     },
     {
       id: 'loss',
@@ -47,7 +47,7 @@ export function summaryRows(summary: PflowSummary): SummaryRow[] {
       title:
         'What the lines and transformers absorb: active power as heat, reactive power net of their charging (negative when charging dominates).',
       p: summary.loss_p,
-      q: summary.loss_q,
+      q: summary.loss_q ?? null,
     },
     {
       id: 'slack',

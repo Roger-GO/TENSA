@@ -7,11 +7,14 @@ import {
   DEFAULT_ENGINE,
   SAVE_FORMATS,
   engineDisturbanceKinds,
+  engineHasOp,
   engineLabel,
   engineLoadModels,
+  enginePflowMethods,
   engineRoutineOptions,
   engineRoutines,
   engineSaveFormats,
+  engineTakesAndesPflowOptions,
   engineVersionsLine,
 } from '@/lib/engines';
 import type { EngineCapabilities, EngineList } from '@/api/types';
@@ -73,6 +76,75 @@ describe('engineRoutines', () => {
 
   it('answers null for a null engine', () => {
     expect(engineRoutines(ENGINES, null)).toBeNull();
+  });
+});
+
+describe('enginePflowMethods', () => {
+  const withMethods = (name: string, methods: string[]): EngineCapabilities => ({
+    ...makeEngine(name, ['pflow']),
+    routine_options: { pflow: { methods } },
+  });
+
+  it('answers the methods of the engine’s pflow routine options', () => {
+    const engines: EngineList = {
+      engines: [
+        withMethods('andes', ['NR', 'dishonest', 'NK']),
+        withMethods('sienna', ['ac', 'dc', 'ptdf-dc']),
+      ],
+    };
+    expect(enginePflowMethods(engines, 'sienna')).toEqual(['ac', 'dc', 'ptdf-dc']);
+    expect(enginePflowMethods(engines, 'andes')).toEqual(['NR', 'dishonest', 'NK']);
+  });
+
+  it('answers null when the list is not loaded, the engine is not named, or the entry has no methods', () => {
+    const engines: EngineList = { engines: [withMethods('andes', ['NR'])] };
+    expect(enginePflowMethods(undefined, 'andes')).toBeNull();
+    expect(enginePflowMethods(null, 'andes')).toBeNull();
+    expect(enginePflowMethods(engines, null)).toBeNull();
+    expect(enginePflowMethods(engines, 'sienna')).toBeNull();
+    expect(enginePflowMethods({ engines: [makeEngine('andes', ['pflow'])] }, 'andes')).toBeNull();
+  });
+
+  it('answers null for an entry whose methods are not an array of strings', () => {
+    const bad = {
+      ...makeEngine('andes', ['pflow']),
+      routine_options: { pflow: { methods: 'NR' } },
+    } as unknown as EngineCapabilities;
+    expect(enginePflowMethods({ engines: [bad] }, 'andes')).toBeNull();
+  });
+});
+
+describe('engineHasOp', () => {
+  const withOps = (name: string, ops: string[]): EngineCapabilities => ({
+    ...makeEngine(name, []),
+    ops,
+  });
+
+  it('is true when the engine lists the op', () => {
+    const engines: EngineList = {
+      engines: [withOps('sienna', ['network_matrix', 'pflow']), withOps('andes', ['ybus'])],
+    };
+    expect(engineHasOp(engines, 'sienna', 'network_matrix')).toBe(true);
+    expect(engineHasOp(engines, 'andes', 'network_matrix')).toBe(false);
+  });
+
+  it('is false when anything is missing', () => {
+    const engines: EngineList = { engines: [withOps('sienna', ['network_matrix'])] };
+    expect(engineHasOp(undefined, 'sienna', 'network_matrix')).toBe(false);
+    expect(engineHasOp(null, 'sienna', 'network_matrix')).toBe(false);
+    expect(engineHasOp(engines, null, 'network_matrix')).toBe(false);
+    expect(engineHasOp(engines, 'andes', 'network_matrix')).toBe(false);
+    expect(engineHasOp({ engines: [makeEngine('sienna', [])] }, 'sienna', 'network_matrix')).toBe(
+      false,
+    );
+  });
+});
+
+describe('engineTakesAndesPflowOptions', () => {
+  it('is true for ANDES and for an engine not known yet, false for Sienna', () => {
+    expect(engineTakesAndesPflowOptions('andes')).toBe(true);
+    expect(engineTakesAndesPflowOptions(null)).toBe(true);
+    expect(engineTakesAndesPflowOptions('sienna')).toBe(false);
   });
 });
 

@@ -45,6 +45,7 @@ import { startResultsPersistence } from '@/store/resultsPersistence';
 import { useSnapshotStore } from '@/store/snapshot';
 import { useExampleCasesStore } from '@/store/exampleCases';
 import { useYbusDialogStore } from '@/store/ybusDialog';
+import { useNetworkMatrixStore } from '@/store/networkMatrix';
 import { useModelDocStore } from '@/store/modelDoc';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
@@ -83,6 +84,11 @@ const ExampleCasesDialog = lazyNamed(
 const YbusDialogLazy = lazyNamed(
   () => import('@/components/ybus/YbusDialog'),
   'YbusDialog',
+  'overlay',
+);
+const NetworkMatrixDialog = lazyNamed(
+  () => import('@/components/networkMatrix/NetworkMatrixDialog'),
+  'NetworkMatrixDialog',
   'overlay',
 );
 const ModelDocDialog = lazyNamed(
@@ -345,6 +351,20 @@ function YbusDialogHost() {
 }
 
 /**
+ * The Network matrices dialog, opened from the command palette through its
+ * store flag. Fetched and mounted the first time it is opened.
+ */
+function NetworkMatrixHost() {
+  const open = useNetworkMatrixStore((s) => s.dialogOpen);
+  const closeDialog = useNetworkMatrixStore((s) => s.closeDialog);
+  return (
+    <LazyMount when={open} onLoadFailed={closeDialog}>
+      <NetworkMatrixDialog />
+    </LazyMount>
+  );
+}
+
+/**
  * The Model documentation dialog, opened from a form's button or the command
  * palette through its store flag. Fetched and mounted the first time it is
  * opened.
@@ -441,6 +461,7 @@ export function App() {
               <SnapshotDialogs />
               <ExampleCasesHost />
               <YbusDialogHost />
+              <NetworkMatrixHost />
               <ModelDocHost />
             </>
           }
