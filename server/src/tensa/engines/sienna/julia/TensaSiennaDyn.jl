@@ -161,12 +161,24 @@ function _psid_error(s::TS.Session, sim_dir)
 end
 
 # The folder every simulation of this session writes into, emptied of the log
-# of the call before.
+# of the call before. The removal is best effort: on Windows a handle another
+# process holds on the file (a virus scanner reading what PSID just wrote)
+# makes `rm` fail with EBUSY even with `force`, and a run must not fail for
+# it. The log is then emptied instead where that is allowed; either way PSID's
+# build opens it again with mode "w".
 function _sim_dir(s::TS.Session)
     d = joinpath(s.scratch, "sim")
     mkpath(d)
     log = joinpath(d, _PSID_LOG)
-    isfile(log) && rm(log; force = true)
+    try
+        isfile(log) && rm(log; force = true)
+    catch err
+        err isa InterruptException && rethrow()
+        try
+            write(log, "")
+        catch
+        end
+    end
     return d
 end
 
@@ -270,7 +282,7 @@ _sorted_buses(sys) = sort(collect(PSY.get_components(PSY.ACBus, sys)); by = PSY.
 # The column plan of a time-domain run: the voltage magnitude and angle of
 # every bus by ascending number, then the rotor speed and the rotor angle of
 # every machine that has them, in the order of the plan's machines.
-function _column_plan(sys)
+function _column_plan(sys, ext_state = nothing)
     cols = Any[]
     buses = _sorted_buses(sys)
     for b in buses
@@ -283,6 +295,14 @@ function _column_plan(sys)
     for (quantity, unit) in (("rotor_speed", "pu"), ("rotor_angle", "rad"))
         for (g, _) in rotor
             push!(cols, (quantity = quantity, kind = "generator", bus = _bus_number(g), id = _gen_id(g), unit = unit))
+        end
+    end
+    if ext_state !== nothing
+        for branch in ext_state.branches
+            for quantity in ("i_from", "i_to")
+                push!(cols, (quantity = quantity, kind = "branch", from = branch.from,
+                             to = branch.to, ckt = branch.ckt, unit = "pu"))
+            end
         end
     end
     return cols
@@ -299,10 +319,18 @@ end
 
 # What must hold before anything is built: a solved power flow, at least one
 # dynamic injector, and no generator in service that PSID cannot simulate.
-function _readiness(s::TS.Session)
+# `covered` is the set of (bus, id) addresses an ext.sienna document's
+# inverters name: those generators get a dynamic model when the ext is
+# applied, so they are neither the one dynamic model the run needs nor a
+# generator without one. With no ext, `covered` is empty and the check is
+# exactly what it was.
+function _readiness(s::TS.Session, covered = Set{Tuple{Int, String}}())
     s.pflow_solved || return "solve the power flow first"
-    isempty(_machines(s.sys)) && return "the case has no dynamic models"
-    static = _unsimulated_static(s.sys)
+    machines = [(g, d) for (g, d) in _machines(s.sys)]
+    if isempty(machines) && isempty(covered)
+        return "the case has no dynamic models"
+    end
+    static = [g for g in _unsimulated_static(s.sys) if !((_bus_number(g), _gen_id(g)) in covered)]
     if !isempty(static)
         names = join(["bus $(_bus_number(g)) id $(_gen_id(g))" for g in first(static, 10)], ", ")
         more = length(static) > 10 ? " and $(length(static) - 10) more" : ""
@@ -408,6 +436,161 @@ function _prepared_copy(s::TS.Session, load_model)
     sys = deepcopy(s.sys)
     loads = _apply_load_model!(sys, load_model)
     return sys, loads
+end
+
+# ---------------------------------------------------------------------------
+# ext.sienna: Sienna-native dynamic components
+# ---------------------------------------------------------------------------
+
+# The inverter parameter sets, the same ids as the Python table
+# INVERTER_PARAMETER_SETS of tensa/engines/sienna/ext.py (a unit test holds
+# the two to the same ids). The values are PSID 0.16.2's own test data, in
+# test/data_tests of the installed package. "gfl-omib" is inv_gfoll of
+# test24.jl (lines 13-24): converter_low_power (dynamic_test_data.jl line
+# 287), outer_control_gfoll (354-362), current_mode_inner (388-392),
+# dc_source_lv (292), reduced_pll (315-319) and filt_gfoll (297).
+# "gfm-omib" is inv_case78 of dynamic_test_data.jl (660-671):
+# converter_high_power (289), outer_control (324-332), inner_control
+# (375-386), dc_source_lv (292), pll (309-313) and filt (296).
+const INVERTER_SETS = Dict{String, Function}(
+    # inv_gfoll of PSID 0.16.2's test/data_tests/test24.jl.
+    "gfl-omib" => (base_power) -> PSY.DynamicInverter(;
+        name = "",
+        ω_ref = 1.0,
+        converter = PSY.AverageConverter(; rated_voltage = 690.0, rated_current = 2.75),
+        outer_control = PSY.OuterControl(
+            PSY.ActivePowerPI(; Kp_p = 2.0, Ki_p = 30.0, ωz = 0.132 * 2.0 * pi * 50.0),
+            PSY.ReactivePowerPI(; Kp_q = 2.0, Ki_q = 30.0, ωf = 0.132 * 2.0 * pi * 50.0),
+        ),
+        inner_control = PSY.CurrentModeControl(; kpc = 0.37, kic = 0.7, kffv = 1.0),
+        dc_source = PSY.FixedDCSource(; voltage = 600.0),
+        freq_estimator = PSY.ReducedOrderPLL(; ω_lp = 1.32 * 2.0 * pi * 50.0, kp_pll = 2.0, ki_pll = 20.0),
+        filter = PSY.LCLFilter(; lf = 0.009, rf = 0.016, cf = 2.5, lg = 0.002, rg = 0.003),
+        base_power = base_power,
+    ),
+    # inv_case78 of PSID 0.16.2's test/data_tests/dynamic_test_data.jl.
+    "gfm-omib" => (base_power) -> PSY.DynamicInverter(;
+        name = "",
+        ω_ref = 1.0,
+        converter = PSY.AverageConverter(; rated_voltage = 138.0, rated_current = 100.0),
+        outer_control = PSY.OuterControl(
+            PSY.VirtualInertia(; Ta = 2.0, kd = 400.0, kω = 20.0),
+            PSY.ReactivePowerDroop(; kq = 0.2, ωf = 1000.0),
+        ),
+        inner_control = PSY.VoltageModeControl(;
+            kpv = 0.59, kiv = 736.0, kffv = 0.0, rv = 0.0, lv = 0.2,
+            kpc = 1.27, kic = 14.3, kffi = 0.0, ωad = 50.0, kad = 0.2,
+        ),
+        dc_source = PSY.FixedDCSource(; voltage = 600.0),
+        freq_estimator = PSY.KauraPLL(; ω_lp = 500.0, kp_pll = 0.084, ki_pll = 4.69),
+        filter = PSY.LCLFilter(; lf = 0.08, rf = 0.003, cf = 0.074, lg = 0.2, rg = 0.01),
+        base_power = base_power,
+    ),
+)
+
+# What the ext applied to one run: the dynamic branches with their addresses
+# (for the column plan) and their series admittance (for the per-step
+# currents).
+struct _ExtState
+    branches::Vector{NamedTuple{(:from, :to, :ckt, :y), Tuple{Int, Int, String, ComplexF64}}}
+end
+
+# PowerSystems' PSS/E reader replaces a generator that has no .dyr record by
+# a PSY.Source, a voltage source behind the record's ZSORCE, named as the
+# generator was (_add_dyn_injectors! in its parsers/psse_dynamic_data.jl), and
+# such a generator is exactly the one an inverter is given to. PSID 0.16.2
+# cannot simulate an inverter on a Source: its DynamicWrapper for a Source
+# asserts that the dynamic device has the Source's X_th and R_th, which only a
+# PeriodicVariableSource has, and the build fails with a MethodError of
+# get_X_th (src/base/device_wrapper.jl). So in the run's copy the Source is
+# replaced by a ThermalStandard of the same name on the same bus, with the
+# Source's dispatch and power base, rated at the apparent power of that
+# dispatch, which PSID's generic DynamicWrapper takes as the static device of
+# an inverter. The session's System keeps its Source. Answers the new
+# ThermalStandard.
+function _generator_for_inverter!(sys, src::PSY.Source)
+    base = PSY.get_base_power(src)
+    p_mw, q_mvar = PSY.with_units_base(sys, PSY.UnitSystem.NATURAL_UNITS) do
+        PSY.get_active_power(src), PSY.get_reactive_power(src)
+    end
+    p, q = p_mw / base, q_mvar / base
+    rating = abs(complex(p, q))
+    rating > 0 || (rating = 1.0)
+    thermal = PSY.ThermalStandard(;
+        name = PSY.get_name(src),
+        available = true,
+        status = true,
+        bus = PSY.get_bus(src),
+        active_power = p,
+        reactive_power = q,
+        rating = rating,
+        active_power_limits = (min = min(p, 0.0), max = max(p, rating)),
+        reactive_power_limits = (min = -rating, max = rating),
+        ramp_limits = nothing,
+        operation_cost = PSY.ThermalGenerationCost(nothing),
+        base_power = base,
+    )
+    PSY.remove_component!(sys, src)
+    PSY.add_component!(sys, thermal)
+    return thermal
+end
+
+# Apply the validated ext.sienna document to `sys` (the run's own copy).
+# `ext` is the parsed JSON object. Answers (ext_state, notes, error or
+# nothing). Never throws for a target the System does not hold: the Python
+# side has validated the document against the same topology, so a miss here
+# means the two disagree, which is answered as an error naming the target.
+function _apply_ext!(sys, ext)
+    notes = Any[]
+    state = _ExtState(NamedTuple{(:from, :to, :ckt, :y), Tuple{Int, Int, String, ComplexF64}}[])
+    for raw in get(ext, "dynamic_branches", Any[])
+        f, t, ckt = Int(raw["from"]), Int(raw["to"]), String(raw["ckt"])
+        br = TS._find_branch(sys, f, t, ckt)
+        br === nothing && return nothing, notes, "ext.sienna: there is no branch $(f)-$(t) circuit $(ckt)"
+        r, x = PSY.get_r(br), PSY.get_x(br)
+        y = 1.0 / complex(r, x)
+        # PowerSystems' add_component! of a DynamicBranch takes the static
+        # branch it wraps out of the System and puts the dynamic one in its
+        # place (PSID's own tests, data_tests/test11.jl and test25.jl). The
+        # wrapped branch must stay available: it is the same object, and
+        # switching it off takes the line out of the network.
+        dyn = PSY.DynamicBranch(br)
+        PSY.add_component!(sys, dyn)
+        push!(state.branches, (from = f, to = t, ckt = ckt, y = y))
+        _note!(notes, "info", "branch $(f)-$(t) circuit $(ckt) is a DynamicBranch")
+    end
+    for raw in get(ext, "inverters", Any[])
+        bus, id = Int(raw["bus"]), String(raw["id"])
+        set_id = String(raw["parameter_set"])
+        found = nothing
+        for (g, d) in _generators(sys)
+            _bus_number(g) == bus && _gen_id(g) == id && (found = (g, d); break)
+        end
+        found === nothing && return nothing, notes, "ext.sienna: there is no generator at bus $(bus) with id $(id)"
+        g, d = found
+        d === nothing || return nothing, notes, "ext.sienna: the generator at bus $(bus) id $(id) already has a dynamic model"
+        build = get(INVERTER_SETS, set_id, nothing)
+        build === nothing && return nothing, notes, "ext.sienna: unknown inverter parameter set $(set_id)"
+        g isa PSY.Source && (g = _generator_for_inverter!(sys, g))
+        inverter = build(PSY.get_base_power(g))
+        PSY.set_name!(inverter, PSY.get_name(g))
+        # A dynamic injector is attached to the static one it stands on, whose
+        # bus and setpoints it takes (PowerSystems' add_component! with the
+        # static injector, as PSID's tests attach their inverters).
+        PSY.add_component!(sys, inverter, g)
+        _note!(notes, "info", "generator at bus $(bus) id $(id) runs as an inverter ($(set_id))")
+    end
+    return state, notes, nothing
+end
+
+# The (bus, id) addresses an ext document's inverters name, for _readiness.
+function _ext_coverage(ext)
+    covered = Set{Tuple{Int, String}}()
+    ext === nothing && return covered
+    for raw in get(ext, "inverters", Any[])
+        push!(covered, (Int(raw["bus"]), String(raw["id"])))
+    end
+    return covered
 end
 
 # ---------------------------------------------------------------------------
@@ -899,7 +1082,7 @@ end
 # bus i's voltage is (u[i], u[i + n]) for i = lookup[bus number] (PSID keeps
 # the real parts of every bus first, then the imaginary parts), and a
 # machine's ω and δ are at its global index.
-function _plan_values!(vals, u, bus_ix, n_buses, machine_ix)
+function _plan_values!(vals, u, bus_ix, n_buses, machine_ix, ext_state = nothing, ext_bus_ix = nothing)
     k = 0
     for i in bus_ix
         k += 1
@@ -917,12 +1100,28 @@ function _plan_values!(vals, u, bus_ix, n_buses, machine_ix)
         k += 1
         vals[k] = u[d]
     end
+    if ext_state !== nothing
+        # The current magnitude at each end of a dynamic branch, from the bus
+        # voltages and the branch's own series admittance (the pi model's
+        # charging is shunt and stays with the buses): the same arithmetic
+        # PSID's get_branch_current_series performs in post-processing.
+        for branch in ext_state.branches
+            i_f = ext_bus_ix[branch.from]
+            i_t = ext_bus_ix[branch.to]
+            v_f = complex(u[i_f], u[i_f + n_buses])
+            v_t = complex(u[i_t], u[i_t + n_buses])
+            k += 1
+            vals[k] = abs(branch.y * (v_f - v_t))
+            k += 1
+            vals[k] = abs(branch.y * (v_t - v_f))
+        end
+    end
     return vals
 end
 
 """
     tds_run_json(s; tf, step = nothing, disturbances = nothing,
-                 load_model = "impedance", on_step = nothing) -> String
+                 load_model = "impedance", ext = nothing, on_step = nothing) -> String
 
 A time-domain run from 0 to `tf` seconds with IDA on PSID's ResidualModel,
 with `step` as the largest step (default 1/30 s). The rows are the solver's
@@ -944,6 +1143,7 @@ function tds_run_json(
     step = nothing,
     disturbances = nothing,
     load_model = "impedance",
+    ext = nothing,
     on_step = nothing,
     results_hook = nothing,
 )::String
@@ -954,14 +1154,30 @@ function tds_run_json(
         _is_number(tf) && tf > 0 || return _fail(s, "arguments", "tf must be a positive number of seconds", notes)
         step === nothing || (_is_number(step) && step > 0) ||
             return _fail(s, "arguments", "step must be a positive number of seconds", notes)
+        ext === nothing || ext isa AbstractString ||
+            return _fail(s, "arguments", "ext must be a JSON string", notes)
+        ext_doc = nothing
+        if ext !== nothing
+            ext_doc = try
+                JSON3.read(ext)
+            catch e
+                return _fail(s, "arguments", "ext is not valid JSON: $(TS._first_line(_message(e)))", notes)
+            end
+        end
         tf = Float64(tf)
         dtmax = step === nothing ? min(DEFAULT_STEP, tf) : Float64(step)
-        reason = _readiness(s)
+        reason = _readiness(s, _ext_coverage(ext_doc))
         reason === nothing || return _fail(s, "not_ready", reason, notes)
 
         logger = TS._NoteLogger()
         _quietly(logger) do
             sys, loads = _prepared_copy(s, String(load_model))
+            ext_state = nothing
+            if ext_doc !== nothing
+                ext_state, ext_notes, ext_err = _apply_ext!(sys, ext_doc)
+                append!(notes, ext_notes)
+                ext_err === nothing || return _fail(s, "arguments", ext_err, notes)
+            end
             checked = Any[]
             if disturbances !== nothing
                 checked, derr = _check_disturbances(disturbances, tf, sys)
@@ -1012,13 +1228,18 @@ function tds_run_json(
                 ) for cb in sim.callbacks
             ]
 
-            width = 2 * length(bus_ix) + 2 * length(machine_ix)
+            ext_bus_ix = nothing
+            if ext_state !== nothing && !isempty(ext_state.branches)
+                ext_bus_ix = Dict{Int, Int}(PSY.get_number(b) => lookup[PSY.get_number(b)] for b in _sorted_buses(sys))
+            end
+            width = 2 * length(bus_ix) + 2 * length(machine_ix) +
+                    (ext_state === nothing ? 0 : 2 * length(ext_state.branches))
             ts = Float64[]
             rows = Vector{Vector{Float64}}()
             stop = Ref(false)
             hook_error = Ref{Any}(nothing)
             function record(t, u)
-                vals = _plan_values!(Vector{Float64}(undef, width), u, bus_ix, n_buses, machine_ix)
+                vals = _plan_values!(Vector{Float64}(undef, width), u, bus_ix, n_buses, machine_ix, ext_state, ext_bus_ix)
                 push!(ts, Float64(t))
                 push!(rows, vals)
                 on_step === nothing && return false
@@ -1115,7 +1336,7 @@ function tds_run_json(
                 status = status,
                 error = error_text,
                 t = ts,
-                columns = _column_plan(sys),
+                columns = _column_plan(sys, ext_state),
                 rows = rows,
                 post = post,
                 steps = max(length(ts) - 1, 0),

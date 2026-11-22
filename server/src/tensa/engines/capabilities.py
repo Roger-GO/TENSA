@@ -38,6 +38,8 @@ def engine_capabilities(name: str) -> dict[str, Any]:
     if name == "sienna":
         # Imported lazily, as ``registry.engine_unavailable_reason`` imports the
         # environment check, so this module keeps importing nothing of an engine.
+        # ``ext`` imports pydantic and the key helpers only, no Julia.
+        from tensa.engines.sienna.ext import INVERTER_PARAMETER_SETS
         from tensa.engines.sienna.manifest import sienna_versions
 
         return {
@@ -59,6 +61,12 @@ def engine_capabilities(name: str) -> dict[str, Any]:
                     "abort": True,
                     "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
                     "options": {"load_model": ["impedance", "power", "as-case"]},
+                    "ext": {
+                        "dynamic_branches": True,
+                        "inverters": {
+                            "parameter_sets": sorted(INVERTER_PARAMETER_SETS),
+                        },
+                    },
                 },
                 "edit": {
                     "fields": {

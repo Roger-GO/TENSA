@@ -279,6 +279,12 @@ def test_engine_capabilities_sienna_available(
             "abort": True,
             "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
             "options": {"load_model": ["impedance", "power", "as-case"]},
+            # The ext.sienna block of a run: dynamic branches and the PSID
+            # inverter parameter sets a generator can be given.
+            "ext": {
+                "dynamic_branches": True,
+                "inverters": {"parameter_sets": ["gfl-omib", "gfm-omib"]},
+            },
         },
         "edit": {
             "fields": {

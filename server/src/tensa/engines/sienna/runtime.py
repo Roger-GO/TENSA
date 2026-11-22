@@ -36,6 +36,7 @@ from tensa.core.wrapper.results import TopologyEntry, TopologySnapshot
 from tensa.engines.base import EngineRuntime, TdsStreamPlan
 from tensa.engines.series_names import build_name
 from tensa.engines.sienna.bridge import JuliaBridge
+from tensa.engines.sienna.ext import SiennaExtSpec
 from tensa.engines.sienna.state import SiennaState
 
 log = logging.getLogger("tensa.sienna")
@@ -189,11 +190,14 @@ def _handle_run_tds(
     if not args.get("stream"):
         # The batch run is the state's own (P5-A): the dispatch passes the
         # abort event through, as the ANDES table's special case does.
+        ext_raw = args.get("ext_sienna")
+        ext = SiennaExtSpec.model_validate(ext_raw) if ext_raw is not None else None
         return _serialize_dataclass(
             state.run_tds(
                 tf=args["tf"],
                 h=args.get("h") if args.get("h") is not None else args.get("step"),
                 load_model=args.get("load_model") or "impedance",
+                ext_sienna=ext,
                 abort_event=abort_event,
                 integrator=args.get("integrator"),
                 tds_config_overrides=args.get("tds_config_overrides"),
@@ -227,6 +231,8 @@ def _handle_run_tds(
         raise AndesAppError("dae_vars are ANDES variable names; a sienna stream has none")
     if args.get("controllers"):
         raise AndesAppError("droop and ffr controllers are ANDES-only")
+    if args.get("ext_sienna") is not None:
+        raise AndesAppError("ext.sienna is not taken on a streamed run yet; run it batch")
     h = args.get("h")
     step = args.get("step")
     if h is not None and step is not None:

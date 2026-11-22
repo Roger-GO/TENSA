@@ -96,7 +96,13 @@ _FOREIGN_JULIACALL = (
 )
 
 # Includes the module with Julia's streams sent to a temporary file and answers
-# what was printed and the error, if any, as text. Used for both modules.
+# what was printed and the error, if any, as text. Used for every module.
+# Removing the file is best effort: on Windows another handle on it (a virus
+# scanner, a process started during the include that inherited the redirected
+# streams) makes `rm` fail with EBUSY even with `force`, which forgives only a
+# file that is not there. `tempname` has registered the path with Julia's own
+# cleanup, which removes it later or at exit, so a file left behind does not
+# fail the include.
 _INCLUDE = """\
 let path = tempname(), failure = nothing
     try
@@ -111,7 +117,10 @@ let path = tempname(), failure = nothing
         end
         (read(path, String), failure)
     finally
-        rm(path; force=true)
+        try
+            rm(path; force=true)
+        catch
+        end
     end
 end"""
 
@@ -535,17 +544,21 @@ class JuliaBridge:
         step: float | None = None,
         disturbances: Sequence[Mapping[str, Any]] | None = None,
         load_model: str = "impedance",
+        ext: Mapping[str, Any] | None = None,
         on_step: Callable[[float, Any], bool] | None = None,
     ) -> dict[str, Any]:
         """A time-domain run from 0 to ``tf`` seconds.
 
         ``disturbances`` is a list of disturbance documents, sent to Julia as
-        one JSON string. ``on_step`` is called once for the initial point and
-        once after every accepted step with ``(t, values)``, the values a numpy
-        array of floats in the column plan's order; returning exactly ``False``
-        stops the run. An exception it raises stops the run and is raised again
-        here after Julia has returned; it never unwinds through Julia's frames.
-        A ``status: "failed"`` answer is returned, not raised: the rows up to
+        one JSON string. ``ext`` is the validated ``ext.sienna`` document,
+        sent to Julia as one JSON string; the Julia side applies it to the
+        copy of the System the run is built from. ``on_step`` is called once
+        for the initial point and once after every accepted step with
+        ``(t, values)``, the values a numpy array of floats in the column
+        plan's order; returning exactly ``False`` stops the run. An exception
+        it raises stops the run and is raised again here after Julia has
+        returned; it never unwinds through Julia's frames. A
+        ``status: "failed"`` answer is returned, not raised: the rows up to
         there are a result.
         """
         self.start_dynamics()
@@ -554,6 +567,8 @@ class JuliaBridge:
             keywords["step"] = step
         if disturbances is not None:
             keywords["disturbances"] = json.dumps(list(disturbances))
+        if ext is not None:
+            keywords["ext"] = json.dumps(dict(ext))
         hook = _StepHook(on_step) if on_step is not None else None
         if hook is not None:
             keywords["on_step"] = hook

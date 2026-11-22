@@ -91,6 +91,7 @@ from tensa.engines.sienna.edit_log import (
     make_set_field,
     ops_to_json,
 )
+from tensa.engines.sienna.ext import SiennaExtSpec, ext_to_json, validate_ext
 from tensa.engines.sienna.keys import assign_sienna_keys
 from tensa.engines.sienna.matrix_io import read_matrix
 from tensa.security.paths import (
@@ -1315,6 +1316,24 @@ class SiennaState:
         it.
         """
         quantity = str(column.get("quantity"))
+        if column.get("kind") == "branch":
+            from tensa.engines.keys import branch_key
+
+            from_bus = int(column.get("from", 0))
+            to_bus = int(column.get("to", 0))
+            ckt = str(column.get("ckt", ""))
+            branch = branch_key(from_bus, to_bus, ckt)
+            entry = self._key_book.entry_of(branch)
+            if entry is not None:
+                # Not ``build_name``: the quantity catalogue of spec section
+                # 6.5 is not extended, so it has no ``i_from``/``i_to``; the
+                # name is composed here, as the fallback below composes it.
+                return f"{quantity}|{entry.key}"
+            notes.append(
+                f"no key for branch {from_bus}-{to_bus}-{ckt}; "
+                f"its series is named {quantity}|branch {from_bus}-{to_bus}-{ckt}"
+            )
+            return f"{quantity}|branch {from_bus}-{to_bus}-{ckt}"
         bus = int(column.get("bus", 0))
         if column.get("kind") == "bus":
             key = self._key_book.key_of("Bus", bus)
@@ -1334,6 +1353,7 @@ class SiennaState:
         tf: float,
         h: float | None = None,
         load_model: str = "impedance",
+        ext_sienna: SiennaExtSpec | None = None,
         abort_event: Any = None,
         on_step: Any = None,
         **other: Any,
@@ -1392,7 +1412,23 @@ class SiennaState:
                 f'load_model must be "impedance", "power" or "as-case", got '
                 f"{short_repr(load_model)}"
             )
+        if ext_sienna is not None:
+            validate_ext(ext_sienna, self._key_book, self._topology_json or {})
         self._require_converged_pflow()
+
+        ext_doc = ext_to_json(ext_sienna, self._key_book) if ext_sienna is not None else None
+        if ext_sienna is not None:
+            for branch in ext_sienna.dynamic_branches:
+                log.info(
+                    "ext.sienna: branch %s is simulated dynamically (DynamicBranch)",
+                    branch.target,
+                )
+            for inverter in ext_sienna.inverters:
+                log.info(
+                    "ext.sienna: generator %s runs as an inverter (%s)",
+                    inverter.target,
+                    inverter.parameter_set,
+                )
 
         entries = run_json_entries(self._pending_disturbances, self._key_book)
 
@@ -1412,6 +1448,10 @@ class SiennaState:
                 return True
 
         bridge = self._require_bridge()
+        # ``ext`` is passed only when a document exists, as the bridge passes
+        # it to Julia only then; a bridge double written before the keyword
+        # existed keeps answering the runs that name no ext.
+        ext_kw: dict[str, Any] = {"ext": ext_doc} if ext_doc is not None else {}
         try:
             answer = bridge.tds_run(
                 self._session,
@@ -1420,6 +1460,7 @@ class SiennaState:
                 disturbances=entries or None,
                 load_model=load_model,
                 on_step=hook,
+                **ext_kw,
             )
         finally:
             # As the ANDES runs do (worker.py): an abort sent while nothing ran

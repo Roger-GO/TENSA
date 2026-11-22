@@ -15,6 +15,7 @@ from tensa.core.tds_controllers import (
     ControllerSpec,
 )
 from tensa.core.wrapper.tds import IntegratorName
+from tensa.engines.sienna.ext import SiennaExtSpec
 
 
 class TdsRunRequest(BaseModel):
@@ -134,6 +135,18 @@ class TdsRunRequest(BaseModel):
             "reload or a restored snapshot they start afresh, and it can. The "
             "streaming ``start_tds`` frame takes the same field. Sweeps do not "
             "take controllers."
+        ),
+    )
+    ext_sienna: SiennaExtSpec | None = Field(
+        None,
+        description=(
+            "Sienna-native dynamic components for this run (spec section 6.2): "
+            "``dynamic_branches`` marks branches to simulate dynamically "
+            "(PSID's DynamicBranch) and ``inverters`` attaches a PSID inverter "
+            "model from a published parameter set to a generator that has no "
+            "dynamic record. An ANDES session refuses the field with 422, as "
+            "does the streaming ``start_tds`` frame. ``GET /engines`` lists "
+            "the parameter sets under the Sienna engine's tds routine options."
         ),
     )
     tds_config_overrides: dict[str, float] | None = Field(

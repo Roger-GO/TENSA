@@ -118,6 +118,15 @@ async def run_tds(
         "h": body.h,
         "integrator": body.integrator,
     }
+    if body.ext_sienna is not None:
+        record = mgr._sessions.get(session_id)  # noqa: SLF001 - the route reads the engine off the session record; the manager exposes no public getter for it
+        engine = getattr(record, "engine", "andes") if record is not None else "andes"
+        if engine != "sienna":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="ext_sienna is a Sienna option; an ANDES session does not take it",
+            )
+        args["ext_sienna"] = body.ext_sienna.model_dump()
     if body.tds_config_overrides is not None:
         args["tds_config_overrides"] = body.tds_config_overrides
     if body.load_model is not None:

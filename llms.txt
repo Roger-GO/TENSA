@@ -26,7 +26,11 @@ GET /api/version and tensa --version say which version is running.
                                              naming the engines that have it. A Sienna session also answers
                                              POST /tds (batch; tf, optional h and load_model impedance|power|as-case;
                                              integrator, tds_config_overrides, dae_vars and controllers are 422; traces are
-                                             named quantity|key, rotor_angle_rel is not reported), a streamed run over the
+                                             named quantity|key, rotor_angle_rel is not reported; an optional ext_sienna block
+                                             makes branches dynamic, {"dynamic_branches": [{"target": "branch:7-8-1"}]}, and gives
+                                             a generator with no dynamic model a PSID inverter, {"inverters": [{"target": "gen:2-1",
+                                             "parameter_set": "gfl-omib"|"gfm-omib"}]}; the run then also reports i_from|<branch key>
+                                             and i_to|<branch key>; 422 for ANDES), a streamed run over the
                                              WebSocket (start_tds with tf, h or step, load_model, decimation; columns named
                                              quantity|key; the same refusals), POST /tds/init (test_init
                                              false is 422) and POST/GET /sessions/{id}/disturbances (a Fault on a bus, a
