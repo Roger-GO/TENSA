@@ -216,18 +216,19 @@ ANALYSES = [
 
 
 def test_the_readme_and_the_docs_home_give_one_statement_of_need() -> None:
-    readme = _section(_read("README.md"), "Why TENSA, and who it is for")
-    home = _section(_read("docs/index.md"), "Why TENSA, and who it is for")
+    """One statement of who TENSA is for and what it does, word for word on the
+    README and the documentation's home page, which names when ANDES on its own
+    is the better fit."""
+    readme = _section(_read("README.md"), "What it does")
+    home = _section(_read("docs/index.md"), "What it does")
     assert readme == home, "the two statements have drifted apart"
-    for audience in ("Students and instructors", "Researchers", "Developers of agent-driven"):
-        assert audience in readme
-    assert "script-first" in readme.lower()
+    assert "ANDES directly" in readme
 
 
 def test_each_of_the_five_analyses_has_a_line_of_its_own() -> None:
-    section = _section(_read("README.md"), "Why TENSA, and who it is for")
-    bullets = [line for line in section.splitlines() if line.startswith("- **")]
-    names = [m.group(1) for b in bullets if (m := re.match(r"- \*\*([^*]+)\*\*", b))]
+    section = _section(_read("README.md"), "What it does")
+    bullets = [line for line in section.splitlines() if line.startswith("- ")]
+    names = [m.group(1) for b in bullets if (m := re.match(r"- ([^:]+):", b))]
     assert names == ANALYSES
     assert all(len(b) > 40 for b in bullets)
 

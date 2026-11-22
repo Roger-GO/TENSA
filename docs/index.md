@@ -6,17 +6,15 @@ TENSA is built on [ANDES](https://github.com/CURENT/andes), the power system sim
 
 ![TENSA showing an interactive single-line diagram with a solved power flow](img/hero.jpeg)
 
-## Why TENSA, and who it is for
+## What it does
 
-TENSA is for people who want to see what a power system does without writing a program first. Students and instructors get a workbench that runs on a laptop, needs no account, and shows a system's behavior on its one-line diagram. Researchers doing exploratory dynamic studies can build or edit a case, apply a fault or a line trip, and read the result in plots, tables and the diagram, then repeat the study from a script, because everything the interface does goes through a documented API. Developers of agent-driven workflows get that same API, and an MCP server, over a real simulator. Script-first tools, ANDES itself among them, are the better choice for large batches and for writing new models; TENSA is the interactive layer around ANDES and does not replace it.
+It's meant for teaching, for exploratory dynamic studies where seeing the system matters, and for people who drive power system tools from scripts or LLM agents. For large batch runs or for writing new models, use ANDES directly.
 
-It runs five analyses, each with one click:
-
-- **Power flow** finds the steady-state voltages, angles and line flows for the generation and load you set, and lists the limits the solution breaks.
-- **Time-domain simulation** follows the system through a disturbance such as a fault or a line trip, and plots the result while it is computed.
-- **Eigenvalue analysis** linearizes the system at its operating point and reports its small-signal modes, with their frequency and damping.
-- **Continuation power flow** traces PV and QV curves to find how far the load can grow before the power flow has no solution.
-- **State estimation** estimates the bus voltages from a set of measurements, which TENSA can generate from a solved power flow, and plots the residuals.
+- Power flow: steady-state voltages, angles and line flows, with the limits the solution breaks.
+- Time-domain simulation: the system's response to a fault or line trip, plotted as it computes.
+- Eigenvalue analysis: small-signal modes at the operating point, with frequency and damping.
+- Continuation power flow: PV and QV curves up to the point where the power flow stops converging.
+- State estimation: bus voltages estimated from measurements TENSA can generate from a solved power flow.
 
 ## What you can do
 
