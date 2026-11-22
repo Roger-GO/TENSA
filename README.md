@@ -77,7 +77,7 @@ Sienna adds network matrices, DC power flow, economic dispatch, unit commitment,
 
 ## Scripts and agents
 
-The UI talks to the server over a documented HTTP and WebSocket API. Scripts and LLM agents can use it too: see the [API guide](https://roger-go.github.io/TENSA/api/), the schema at `GET /openapi.json`, [llms.txt](./llms.txt), and worked studies in [examples/](./examples/). There is an MCP server for assistants that speak Model Context Protocol ([setup](https://roger-go.github.io/TENSA/agents/)):
+The UI talks to the server over a documented HTTP and WebSocket API. Scripts and LLM agents can use it too: see the [API guide](https://roger-go.github.io/TENSA/api/), the schema at `GET /openapi.json`, [llms.txt](./llms.txt), and worked examples in [examples/](./examples/). One of them, [`examples/contingency_screening/`](./examples/contingency_screening/), has scripted and LLM agents screen N-2 contingencies on IEEE 39 through the API; it needs `httpx`. There is an MCP server for assistants that speak Model Context Protocol ([setup](https://roger-go.github.io/TENSA/agents/)):
 
 ```bash
 pip install "tensa[mcp]"
