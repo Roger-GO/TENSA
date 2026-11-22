@@ -20,6 +20,7 @@ message log (``tensa.core.messages``).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import os
@@ -27,6 +28,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from tensa.core.disturbance import DisturbanceSpec, FaultSpec, ToggleSpec
 from tensa.core.eig_math import (
     _ZERO_EIGENVALUE_TOL,
     _compute_damping_ratio,
@@ -44,6 +46,7 @@ from tensa.core.errors import (
     NoCaseLoadedError,
     PflowRequestError,
     SiennaError,
+    TdsRequestError,
     short_repr,
 )
 from tensa.core.messages import PathScrubber
@@ -53,12 +56,19 @@ from tensa.core.wrapper.results import PflowResult, TopologySnapshot
 from tensa.engines.case_facts import corrections_document, read_case_facts
 from tensa.engines.identity import _matpower_rows, read_identity
 from tensa.engines.keys import KeyBook
+from tensa.engines.series_names import build_name
 from tensa.engines.sienna.bridge import JuliaBridge
 from tensa.engines.sienna.convert import (
     file_ratings,
     pflow_result,
     report_messages,
     topology_snapshot,
+)
+from tensa.engines.sienna.disturbances import (
+    PendingDisturbance,
+    run_json_entries,
+    to_pending,
+    unit_key_of,
 )
 from tensa.engines.sienna.keys import assign_sienna_keys
 from tensa.engines.sienna.matrix_io import read_matrix
@@ -78,6 +88,27 @@ _ANDES_ONLY_PFLOW_OPTIONS = ("method", "n_factorize", "linesearch")
 
 # The load models a dynamic analysis takes (spec section 6.3).
 _LOAD_MODELS = ("impedance", "power", "as-case")
+
+# The TDS request options the Sienna engine does not have, named for the
+# refusal message. ``integrator`` is special-cased: the route always sends it,
+# and its schema default is read as "not given".
+_TDS_OPTIONS_NOT_TAKEN = ("tds_config_overrides", "dae_vars", "controllers")
+
+# The note a batch result carries for the relative rotor angles it does not
+# hold (the dyn plan's machines report no inertia; see the unit's resolutions).
+_ROTOR_REL_NOTE = (
+    "relative rotor angles need each machine's inertia, "
+    "which the Sienna engine does not report yet"
+)
+
+
+def _finite_or_none(value: Any) -> float | None:
+    """A value of a run's row as a float, or ``None`` for a gap: ``null`` (how
+    the Julia side writes a value that is not finite) or a NaN or infinity."""
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 # The note every Sienna eigenvalue result carries (spec section 13: PSID's own
 # docs call the validation of its small-signal results work in progress, and
@@ -209,6 +240,7 @@ class SiennaState:
         self._versions: dict[str, str] | None = None
         self._eig_result: EigResult | None = None
         self._eig_participation: list[list[float]] | None = None
+        self._pending_disturbances: list[PendingDisturbance] = []
 
     # ---- the bridge ---------------------------------------------------------
 
@@ -264,6 +296,7 @@ class SiennaState:
         self._document = None
         self._eig_result = None
         self._eig_participation = None
+        self._pending_disturbances = []
 
     # ---- load_case ----------------------------------------------------------
 
@@ -388,6 +421,9 @@ class SiennaState:
         self._document = document
         self._eig_result = None
         self._eig_participation = None
+        # A fresh case holds no disturbances, as the ANDES wrapper's load_case
+        # wipes the disturbance log.
+        self._pending_disturbances = []
 
         book = assign_sienna_keys(topology, identity, self._key_book)
 
@@ -720,6 +756,361 @@ class SiennaState:
         """The keys of the loaded case's elements."""
         self._require_session()
         return self._key_book
+
+    # ---- disturbances ---------------------------------------------------------
+
+    def add_disturbance(self, spec: DisturbanceSpec) -> str:
+        """Accept one disturbance for the next run, in the neutral form.
+
+        Returns the position of the entry in the pending list as a string
+        (``"0"``, ``"1"``, ...): the route's ``DisturbanceAck.idx`` wants the
+        handle of what was created, and a Sienna disturbance has no engine idx
+        until a run builds it. Raises :class:`NoCaseLoadedError` with no case
+        and :class:`DisturbanceValidationError` for a spec the engine does not
+        take (``disturbances.to_pending``'s message). There is no pre-setup
+        gate: a Sienna run builds its simulation from the held system each
+        time, so a disturbance is accepted whenever a case is loaded.
+        """
+        self._require_session()
+        pending = to_pending(spec, self._key_book)
+        self._pending_disturbances.append(pending)
+        neutral = pending.neutral
+        target = neutral.get("target") or neutral.get("bus")
+        t = neutral.get("t", neutral.get("t_on"))
+        log.info(
+            "disturbance %s on %s at t=%s is held for the next run",
+            neutral["kind"],
+            target,
+            t,
+        )
+        return str(len(self._pending_disturbances) - 1)
+
+    def list_disturbances(self) -> list[FaultSpec | ToggleSpec]:
+        """The specs accepted since the last load or clear, in order, as the
+        ANDES wrapper's ``list_disturbances`` answers them."""
+        self._require_session()
+        return [item.spec for item in self._pending_disturbances]
+
+    def clear_disturbances(self) -> None:
+        """Forget the pending disturbances."""
+        self._pending_disturbances = []
+
+    # ---- run_tds ------------------------------------------------------------
+
+    def _require_converged_pflow(self) -> None:
+        """The gate every dynamic analysis shares: a solved power flow."""
+        if self._pflow_json is None or not self._pflow_json.get("converged"):
+            raise TdsRequestError("solve the power flow first")
+
+    def _reference_bus(self) -> int:
+        """The bus the relative angles are taken against: the case's reference
+        bus, else the first bus by number."""
+        assert self._topology_json is not None  # noqa: S101
+        buses = sorted(
+            int(row["number"]) for row in self._topology_json.get("buses", [])
+        )
+        for row in self._topology_json.get("buses", []):
+            # The Julia module writes PowerSystems' bus types as they are named
+            # there, ``REF`` for the reference.
+            if str(row.get("type", "")).upper() == "REF":
+                return int(row["number"])
+        return buses[0] if buses else 0
+
+    def _column_key(self, column: Mapping[str, Any], notes: list[str]) -> str:
+        """The key part of a trace name for one column of the run's plan.
+
+        A column whose element the key book lacks is named from its address
+        (``bus 7`` or ``2-1``) and noted; the run's result must not fail for
+        it.
+        """
+        quantity = str(column.get("quantity"))
+        bus = int(column.get("bus", 0))
+        if column.get("kind") == "bus":
+            key = self._key_book.key_of("Bus", bus)
+            if key is not None:
+                return build_name(quantity, key)
+            notes.append(f"no key for bus {bus}; its series is named {quantity}|bus {bus}")
+            return f"{quantity}|bus {bus}"
+        id = str(column.get("id", ""))
+        key = unit_key_of(self._key_book, bus, id)
+        if key is not None:
+            return build_name(quantity, key)
+        notes.append(f"no key for the generator at bus {bus} id {id}; its series is named {quantity}|{bus}-{id}")
+        return f"{quantity}|{bus}-{id}"
+
+    def run_tds(
+        self,
+        tf: float,
+        h: float | None = None,
+        load_model: str = "impedance",
+        abort_event: Any = None,
+        **other: Any,
+    ) -> dict[str, Any]:
+        """The batch time-domain run, in the shape the ANDES engine answers.
+
+        Options the engine does not have (``integrator`` other than the
+        schema's default, ``tds_config_overrides``, ``dae_vars``,
+        ``controllers``, and any other unexpected keyword) are refused by name
+        with :class:`TdsRequestError` before anything runs, as are a ``tf`` or
+        ``h`` that is not a finite number of seconds above 0 and a
+        ``load_model`` outside the three of spec section 6.3. Without a
+        converged power flow the refusal is "solve the power flow first".
+        """
+        self._require_session()
+        integrator = other.pop("integrator", None)
+        if integrator not in (None, "trapezoidal"):
+            raise TdsRequestError(
+                f"the Sienna engine does not take integrator {integrator!r}; "
+                "it runs IDA on the residual model"
+            )
+        for name in _TDS_OPTIONS_NOT_TAKEN:
+            value = other.pop(name, None)
+            if value is not None and value != [] and value != {}:
+                raise TdsRequestError(f"the Sienna engine does not take {name}")
+        for name, value in other.items():
+            if value is not None and value != [] and value != {}:
+                raise TdsRequestError(f"the Sienna engine does not take {name}")
+        if (
+            isinstance(tf, bool)
+            or not isinstance(tf, int | float)
+            or not math.isfinite(float(tf))
+            or float(tf) <= 0
+        ):
+            raise TdsRequestError(
+                f"tf must be a finite number of seconds above 0, got {short_repr(tf)}"
+            )
+        if h is not None and (
+            isinstance(h, bool)
+            or not isinstance(h, int | float)
+            or not math.isfinite(float(h))
+            or float(h) <= 0
+        ):
+            raise TdsRequestError(
+                f"h must be a finite number of seconds above 0, got {short_repr(h)}"
+            )
+        if load_model not in _LOAD_MODELS:
+            raise TdsRequestError(
+                f'load_model must be "impedance", "power" or "as-case", got '
+                f"{short_repr(load_model)}"
+            )
+        self._require_converged_pflow()
+
+        entries = run_json_entries(self._pending_disturbances, self._key_book)
+
+        on_step: Any = None
+        if abort_event is not None:
+
+            def on_step(t: float, values: Any) -> bool:  # noqa: ARG001
+                # The abort channel of spec section 13: False stops the run.
+                try:
+                    return not abort_event.is_set()
+                except Exception:  # noqa: BLE001 - a broken event must not kill a run
+                    return True
+
+        bridge = self._require_bridge()
+        try:
+            answer = bridge.tds_run(
+                self._session,
+                tf=float(tf),
+                step=h,
+                disturbances=entries or None,
+                load_model=load_model,
+                on_step=on_step,
+            )
+        finally:
+            # As the ANDES runs do (worker.py): an abort sent while nothing ran
+            # stops this run at once, and is spent by it, so it never reaches
+            # the run after.
+            if abort_event is not None:
+                with contextlib.suppress(Exception):
+                    abort_event.clear()
+
+        status = str(answer.get("status", "failed"))
+        t_values = [float(v) for v in answer.get("t", [])]
+        final_t = t_values[-1] if t_values else 0.0
+        steps = int(answer.get("steps", 0))
+        converged = status == "completed"
+        if status == "aborted":
+            log.info("the run was aborted at t=%s s", final_t)
+        elif status == "failed":
+            log.warning("the run failed at t=%s s: %s", final_t, answer.get("error"))
+
+        notes: list[str] = []
+        columns = answer.get("columns", [])
+        rows = answer.get("rows", [])
+        variables: list[dict[str, Any]] = []
+        angle_series: list[tuple[int, list[float | None]]] = []
+        for position, column in enumerate(columns):
+            name = self._column_key(column, notes)
+            # The Julia side writes a value that is not finite as null (JSON has
+            # no NaN); either is a gap in the series.
+            values = [_finite_or_none(row[position]) for row in rows]
+            variables.append({"name": name, "values": values})
+            if column.get("kind") == "bus" and column.get("quantity") == "angle":
+                angle_series.append((int(column.get("bus", 0)), values))
+
+        # angle_rel of every bus against the reference bus, by the shared
+        # arithmetic of engines/frames.py. rotor_angle_rel is left out: the
+        # dyn plan's machines report no inertia (see _ROTOR_REL_NOTE).
+        if angle_series:
+            import numpy as np
+
+            from tensa.engines.frames import angle_rel
+
+            reference = self._reference_bus()
+            bus_numbers = [bus for bus, _ in angle_series]
+            reference_index = (
+                bus_numbers.index(reference) if reference in bus_numbers else 0
+            )
+            matrix = np.asarray(
+                [
+                    [math.nan if value is None else value for value in values]
+                    for _, values in angle_series
+                ],
+                dtype=float,
+            ).T
+            relative = angle_rel(matrix, reference_index)
+            for column_index, (bus, _) in enumerate(angle_series):
+                key = self._key_book.key_of("Bus", bus)
+                if key is None:
+                    continue
+                values = [
+                    float(relative[row, column_index])
+                    if math.isfinite(float(relative[row, column_index]))
+                    else None
+                    for row in range(relative.shape[0])
+                ]
+                variables.append({"name": build_name("angle_rel", key), "values": values})
+        notes.append(_ROTOR_REL_NOTE)
+
+        post_payload: dict[str, Any] | None = None
+        post = answer.get("post")
+        if isinstance(post, Mapping) and post.get("series") is not None:
+            post_variables = []
+            for series in post.get("series", []):
+                bus = int(series.get("bus", 0))
+                id = str(series.get("id", ""))
+                key = unit_key_of(self._key_book, bus, id)
+                if key is None:
+                    notes.append(
+                        f"no key for the generator at bus {bus} id {id}; "
+                        "its post series is left out"
+                    )
+                    continue
+                values = [
+                    float(v) if v is not None and math.isfinite(float(v)) else None
+                    for v in series.get("y", [])
+                ]
+                post_variables.append(
+                    {"name": build_name(str(series.get("quantity")), key), "values": values}
+                )
+            post_payload = {
+                "t": [float(v) for v in post.get("t", [])],
+                "variables": post_variables,
+                "truncated": False,
+            }
+
+        log.info(
+            "TDS to %s s: %s, %d steps, load model %s",
+            tf,
+            status,
+            steps,
+            load_model,
+        )
+        for note in answer.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, Mapping):
+                text = str(note.get("text", ""))
+                if note.get("level") in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        loads = answer.get("loads") or {}
+        for left in loads.get("left", []) or []:
+            if isinstance(left, Mapping):
+                log.warning(
+                    "load %s at bus %s was left unconverted: %s",
+                    left.get("name"),
+                    left.get("bus"),
+                    left.get("reason"),
+                )
+
+        payload: dict[str, Any] = {
+            "converged": converged,
+            "final_t": final_t,
+            "callpert_count": steps,
+            "integrator": "ida",
+            "traces": {
+                "t": t_values,
+                "variables": variables,
+                "truncated": False,
+            },
+            "controllers": None,
+            "notes": notes,
+        }
+        if post_payload is not None:
+            payload["post"] = post_payload
+        return payload
+
+    # ---- init_tds -----------------------------------------------------------
+
+    def init_tds(self, test_init: bool = True) -> dict[str, Any]:
+        """The initialisation report, in the route's ``TdsInitResult`` shape.
+
+        The Sienna engine has no residual-test toggle: PSID's
+        ``read_initial_conditions`` always reports what it found, so
+        ``test_init=False`` is refused. ``n_states`` counts the devices'
+        states and ``n_algeb`` the bus voltage parts of PSID's state vector.
+        Fields with no Sienna meaning (``max_residual``, ``nan_residuals``,
+        ``clamped``, ``residuals``) answer the value that states "not used",
+        the convention ``run_pflow`` already uses; PSID reports no residual
+        table and no clamped-limits table.
+        """
+        self._require_session()
+        if not isinstance(test_init, bool):
+            raise TdsRequestError(
+                f"test_init must be true or false, got {short_repr(test_init)}"
+            )
+        if not test_init:
+            raise TdsRequestError(
+                "the Sienna engine always checks the initialisation; "
+                "it does not take test_init false"
+            )
+        self._require_converged_pflow()
+        bridge = self._require_bridge()
+        answer = bridge.tds_init(self._session, load_model="impedance")
+        initialized = bool(answer.get("initialized"))
+        for note in answer.get("notes", []):
+            if isinstance(note, str):
+                text, level = note, "info"
+            elif isinstance(note, Mapping):
+                text, level = str(note.get("text", "")), str(note.get("level", "info"))
+            else:
+                continue
+            if not initialized or level in ("warning", "error"):
+                log.warning("%s", text)
+            else:
+                log.info("%s", text)
+        # PSID's state vector holds the devices' states and, after them, the
+        # real and imaginary voltage of every bus; the Julia answer's
+        # ``n_states`` is the whole vector and its ``states`` the devices' part.
+        # The route's fields are ANDES's: differential states and algebraic
+        # variables apart.
+        n_vector = int(answer.get("n_states", 0))
+        n_device = len(answer.get("states", []))
+        return {
+            "initialized": initialized,
+            "test_ok": initialized,
+            "test_init": True,
+            "n_states": n_device,
+            "n_algeb": max(n_vector - n_device, 0),
+            "max_residual": 0.0,
+            "nan_residuals": 0,
+            "clamped": [],
+            "residuals": [],
+            "diagnostics_truncated": False,
+        }
 
     def versions(self) -> dict[str, str]:
         """The versions the running Julia reports, cached after the first call.

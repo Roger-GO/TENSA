@@ -22,7 +22,12 @@ GET /api/version and tensa --version say which version is running.
                                              and answers POST /case, POST /reload, GET /topology, GET /keys,
                                              POST /pflow (tolerance and max_iterations only; any other setting is
                                              422) and GET /operating-point; every other session route answers 409
-                                             naming the engines that have it. A .dyr with records PowerSystems does
+                                             naming the engines that have it. A Sienna session also answers
+                                             POST /tds (batch only; tf, optional h and load_model impedance|power|as-case;
+                                             integrator, tds_config_overrides, dae_vars and controllers are 422; traces are
+                                             named quantity|key, rotor_angle_rel is not reported), POST /tds/init (test_init
+                                             false is 422) and POST/GET /sessions/{id}/disturbances (a Fault on a bus, a
+                                             Toggle on a Line or on a generator; anything else is 422). A .dyr with records PowerSystems does
                                              not support is refused (422 naming each) unless /case is sent
                                              "on_unsupported": "drop", which loads without them and logs a warning
                                              for each to GET /sessions/{id}/messages)

@@ -57,13 +57,18 @@ _LONG = httpx.Timeout(600.0, connect=10.0)
 _SWEEP_REQUEST_SECONDS = 120.0
 
 _SIENNA_OPS = [
+    "add_disturbance",
+    "clear_disturbances",
     "eig_participation",
+    "init_tds",
+    "list_disturbances",
     "list_keys",
     "load_case",
     "operating_point",
     "reload_case",
     "run_eig",
     "run_pflow",
+    "run_tds",
     "topology",
 ]
 
@@ -280,7 +285,8 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["unavailable_reason"] is None
     assert sienna["ops"] == _SIENNA_OPS
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
-    assert sienna["routines"] == ["pflow", "eig"]
+    assert sienna["routines"] == ["pflow", "eig", "tds"]
+    assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
     assert sienna["editing"] is False
     # Read from the project's Manifest without starting Julia.
     assert sienna["versions"]["julia"].startswith("1.")
@@ -503,6 +509,10 @@ _WORKS = {
     ("GET", "/api/sessions/{session_id}/operating-point"),
     ("POST", "/api/sessions/{session_id}/eig"),
     ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"),
+    ("POST", "/api/sessions/{session_id}/tds"),
+    ("POST", "/api/sessions/{session_id}/tds/init"),
+    ("POST", "/api/sessions/{session_id}/disturbances"),
+    ("GET", "/api/sessions/{session_id}/disturbances"),
     ("POST", "/api/sessions/{session_id}/abort"),
     ("GET", "/api/sessions/{session_id}/jobs"),
     ("GET", "/api/sessions/{session_id}/messages"),
@@ -533,6 +543,11 @@ _BODIES: dict[tuple[str, str], Any] = {
     ("POST", "/api/sessions/{session_id}/case"): {"primary_path": "kundur.raw"},
     ("POST", "/api/sessions/{session_id}/pflow"): {},
     ("POST", "/api/sessions/{session_id}/eig"): {},
+    ("POST", "/api/sessions/{session_id}/tds"): {"tf": 0.1},
+    ("POST", "/api/sessions/{session_id}/tds/init"): {},
+    ("POST", "/api/sessions/{session_id}/disturbances"): {
+        "disturbances": [{"kind": "fault", "bus_idx": 7, "tf": 0.02, "tc": 0.05, "xf": 0.0001, "rf": 0.0}]
+    },
     ("POST", "/api/sessions/{session_id}/save"): {"filename": "copy.xlsx", "format": "xlsx"},
 }
 
@@ -620,6 +635,19 @@ def _request_for(method: str, path: str, operation: dict[str, Any], sid: str, sp
     return {"method": method, "url": "/" + url.lstrip("/"), **kwargs}
 
 
+async def _abort_while_idle_is_spent_by_the_next_run(c: Any, sid: str) -> None:
+    """The abort the sweep sent with nothing running stops the next run at its
+    first step, as on the ANDES engine, and that run spends it: the run after
+    completes. This also leaves the shared session with no abort pending."""
+    await _ok(_load(c, sid, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+    await _ok(c.post(f"/api/sessions/{sid}/pflow", json={}))
+    stopped = await _ok(c.post(f"/api/sessions/{sid}/tds", json={"tf": 0.1}))
+    assert stopped["converged"] is False
+    assert stopped["final_t"] == 0.0
+    completed = await _ok(c.post(f"/api/sessions/{sid}/tds", json={"tf": 0.1}))
+    assert completed["converged"] is True, completed
+
+
 @pytest.mark.parametrize(
     ("method", "path", "operation"),
     _SPEC_ROUTES,
@@ -642,6 +670,9 @@ async def test_every_session_route_works_or_is_refused(
     if (method, path) in (
         ("POST", "/api/sessions/{session_id}/eig"),
         ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"),
+        ("POST", "/api/sessions/{session_id}/tds"),
+        ("POST", "/api/sessions/{session_id}/tds/init"),
+        ("POST", "/api/sessions/{session_id}/disturbances"),
     ):
         # The eig routes need a case with dynamic models and a solved power
         # flow; the sweep's shared session loads Kundur without its .dyr.
@@ -655,6 +686,10 @@ async def test_every_session_route_works_or_is_refused(
             await _ok(c.post(f"/api/sessions/{sid}/pflow", json={}))
         if (method, path) == ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"):
             await _ok(c.post(f"/api/sessions/{sid}/eig", json={}))
+        if (method, path) == ("POST", "/api/sessions/{session_id}/disturbances"):
+            # A fault on bus 7 needs the plain Kundur case (the .dyr load of
+            # the eig routes leaves the same buses, so either is fine).
+            pass
     request = _request_for(method, path, operation, sid, _SPEC)
     resp = await asyncio.wait_for(c.request(**request), timeout=_SWEEP_REQUEST_SECONDS)
     where = f"{method} {path}: {resp.status_code} {resp.text[:400]}"
@@ -663,6 +698,8 @@ async def test_every_session_route_works_or_is_refused(
         assert resp.status_code in (200, 204, 404), where
     elif (method, path) in _WORKS:
         assert resp.status_code in (200, 201, 202, 204), where
+        if (method, path) == ("POST", "/api/sessions/{session_id}/abort"):
+            await _abort_while_idle_is_spent_by_the_next_run(c, sid)
     else:
         assert resp.status_code == 409, where
         detail = resp.json()["detail"]
@@ -749,6 +786,89 @@ async def test_eig_refusals(world: World) -> None:
     resp = await c.post(f"/api/sessions/{world.sienna}/eig", json={})
     assert resp.status_code == 422, resp.text
     assert "eigenvalue analysis failed at" in resp.json()["detail"]
+
+
+# ---- the batch time-domain run and its disturbances ---------------------------
+
+async def test_tds_batch_against_the_api(world: World) -> None:
+    """One batch run on Kundur with its .dyr: converged, final_t at tf, neutral
+    trace names, and the disturbances round-trip through the route."""
+    c, sid = world.client, world.sienna
+    await _ok(_load(c, sid, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+    await _ok(c.post(f"/api/sessions/{sid}/pflow", json={}))
+
+    assert await _ok(c.get(f"/api/sessions/{sid}/disturbances")) == {"disturbances": []}
+    fault = {"kind": "fault", "bus_idx": 7, "tf": 0.05, "tc": 0.1, "xf": 0.0001, "rf": 0.0}
+    posted = await _ok(c.post(f"/api/sessions/{sid}/disturbances", json={"disturbances": [fault]}))
+    assert posted["accepted"] == [{"kind": "fault", "idx": "0"}]
+    listed = await _ok(c.get(f"/api/sessions/{sid}/disturbances"))
+    assert listed["disturbances"] == [fault]
+
+    started = time.monotonic()
+    result = await _ok(c.post(f"/api/sessions/{sid}/tds", json={"tf": 0.2}))
+    world.times["first tds (kundur, fault)"] = time.monotonic() - started
+    if result["converged"] is not True:
+        messages = await _ok(c.get(f"/api/sessions/{sid}/messages"))
+        texts = [m["text"] for m in messages["messages"]][-8:]
+        raise AssertionError(f"the run did not converge: final_t {result['final_t']}; {texts}")
+    assert result["final_t"] == pytest.approx(0.2)
+    assert result["integrator"] == "ida"
+    names = [v["name"] for v in result["traces"]["variables"]]
+    assert "voltage|bus:7" in names
+    assert "rotor_speed|gen:1-1" in names
+    assert "angle_rel|bus:7" in names
+    assert not [n for n in names if n.startswith("rotor_angle_rel|")]
+
+    # A Toggle that closes a branch is refused (the Julia module has no
+    # branch_close), and an Alter is refused naming what the engine takes.
+    resp = await c.post(
+        f"/api/sessions/{sid}/disturbances",
+        json={"disturbances": [{"kind": "alter", "model": "PQ", "dev_idx": "PQ_1", "src": "p0", "t": 1.0, "method": "*", "amount": 1.2}]},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "it does not take an Alter" in resp.json()["detail"]
+
+    # An option the engine does not have is a 422 naming it.
+    resp = await c.post(f"/api/sessions/{sid}/tds", json={"tf": 0.2, "integrator": "qndf"})
+    assert resp.status_code == 422, resp.text
+    assert "integrator" in resp.json()["detail"]
+
+    # tds_init answers the initialisation report.
+    init = await _ok(c.post(f"/api/sessions/{sid}/tds/init", json={}))
+    assert init["initialized"] is True
+    assert init["test_ok"] is True
+    # Four machines of eight states each, and the real and imaginary voltage
+    # of each of the ten buses.
+    assert init["n_states"] == 32
+    assert init["n_algeb"] == 20
+    resp = await c.post(f"/api/sessions/{sid}/tds/init", json={"test_init": False})
+    assert resp.status_code == 422, resp.text
+    assert "test_init" in resp.json()["detail"]
+
+
+async def test_tds_abort_lands_short_of_tf(world: World) -> None:
+    """An abort signalled while a run is in flight ends it with 0 < final_t <
+    tf, the spec's abort channel (section 13), and is spent by that run. The
+    run is long enough (an hour of simulated time; Kundur's minute takes under
+    two seconds once Julia is warm) that the abort lands while it steps."""
+    c, sid = world.client, world.sienna
+    await _ok(_load(c, sid, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+    await _ok(c.post(f"/api/sessions/{sid}/pflow", json={}))
+    tf = 3600.0
+
+    async def _abort_soon() -> None:
+        await asyncio.sleep(2.0)
+        await c.post(f"/api/sessions/{sid}/abort")
+
+    aborter = asyncio.create_task(_abort_soon())
+    try:
+        result = await _ok(c.post(f"/api/sessions/{sid}/tds", json={"tf": tf}))
+    finally:
+        await aborter
+    assert result["converged"] is False
+    assert 0.0 < result["final_t"] < tf, result["final_t"]
+    after = await _ok(c.post(f"/api/sessions/{sid}/tds", json={"tf": 0.1}))
+    assert after["converged"] is True
 
 
 # ---- a second session: two Julias, a quiet worker, a close -------------------

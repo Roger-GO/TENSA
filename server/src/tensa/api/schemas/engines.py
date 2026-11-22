@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -48,6 +50,18 @@ class EngineCapabilities(BaseModel):
             "The routines the engine runs (``pflow``, ``tds``, ``eig``, ``cpf``, ``se``). "
             "A routine an engine lacks is absent here and refused with a 409 that names "
             "the engines that have it."
+        ),
+    )
+    routine_options: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per routine, what the engine takes where it differs from the ANDES "
+            "engine, so a client offers only that: for ``tds``, whether runs "
+            "stream (``streaming``) and can be aborted (``abort``), the "
+            "disturbance kinds it takes (``disturbances``: ``branch_trip``, "
+            "``bus_fault``, ``gen_trip``) and its options with their values "
+            "(``options``: ``load_model``). Empty for an engine that takes "
+            "everything the routine has (ANDES) and for one that is not available."
         ),
     )
     ops: list[str] = Field(

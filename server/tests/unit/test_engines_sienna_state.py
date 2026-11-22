@@ -671,6 +671,12 @@ def test_no_case_raises(state: SiennaState) -> None:
         state.run_eig()
     with pytest.raises(NoCaseLoadedError):
         state.eig_participation(0)
+    with pytest.raises(NoCaseLoadedError):
+        state.list_disturbances()
+    with pytest.raises(NoCaseLoadedError):
+        state.run_tds(tf=1.0)
+    with pytest.raises(NoCaseLoadedError):
+        state.init_tds()
 
 
 def _document(path: Path) -> dict[str, Any]:

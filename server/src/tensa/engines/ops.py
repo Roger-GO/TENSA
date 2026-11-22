@@ -89,6 +89,12 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "list_keys",
             "run_eig",
             "eig_participation",
+            "add_disturbance",
+            "list_disturbances",
+            "clear_disturbances",
+            "init_tds",
+            # Special-cased by the dispatch (it needs the abort event).
+            "run_tds",
         }
     ),
 }

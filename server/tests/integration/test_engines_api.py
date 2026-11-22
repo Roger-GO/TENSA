@@ -24,13 +24,18 @@ pytestmark = pytest.mark.integration
 
 _SIENNA_REASON = sienna_unavailable_reason()
 _SIENNA_OPS = [
+    "add_disturbance",
+    "clear_disturbances",
     "eig_participation",
+    "init_tds",
+    "list_disturbances",
     "list_keys",
     "load_case",
     "operating_point",
     "reload_case",
     "run_eig",
     "run_pflow",
+    "run_tds",
     "topology",
 ]
 
@@ -89,7 +94,7 @@ async def test_list_engines(client: httpx.AsyncClient) -> None:
             "read": ["psse-raw", "psse-dyr", "matpower"],
             "write": [],
         }
-        assert sienna["routines"] == ["pflow", "eig"]
+        assert sienna["routines"] == ["pflow", "eig", "tds"]
         assert sienna["ops"] == _SIENNA_OPS
         assert sienna["editing"] is False
     else:

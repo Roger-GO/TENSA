@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import typing
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -38,10 +39,11 @@ def test_andes_ops_match_the_handler_table() -> None:
 
 
 def test_sienna_ops_match_the_handler_table() -> None:
-    """The Sienna runtime's table cannot drift from the ops table."""
+    """The Sienna runtime's table cannot drift from the ops table. ``run_tds``
+    is dispatched directly (it needs the abort event), not through the table."""
     from tensa.engines.sienna.runtime import _HANDLERS
 
-    assert ENGINE_OPS["sienna"] == frozenset(_HANDLERS)
+    assert ENGINE_OPS["sienna"] == frozenset(_HANDLERS) | {"run_tds"}
 
 
 def test_engines_with_op() -> None:
@@ -50,10 +52,34 @@ def test_engines_with_op() -> None:
     assert engines_with_op("eig_participation") == ["andes", "sienna"]
     assert engines_with_op("run_eig_sweep") == ["andes"]
     assert engines_with_op("eig_state_matrix") == ["andes"]
-    assert engines_with_op("run_tds") == ["andes"]
+    assert engines_with_op("run_tds") == ["andes", "sienna"]
+    assert engines_with_op("init_tds") == ["andes", "sienna"]
+    assert engines_with_op("add_disturbance") == ["andes", "sienna"]
+    assert engines_with_op("replay_disturbances") == ["andes"]
     assert engines_with_op("no-such-op") == []
     # ENGINE_NAMES order, in case a later engine shares an op.
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
+
+
+def test_sienna_ops_are_the_literal_thirteen() -> None:
+    """The Sienna set is held to the literal ops the engine has."""
+    assert ENGINE_OPS["sienna"] == frozenset(
+        {
+            "load_case",
+            "reload_case",
+            "topology",
+            "operating_point",
+            "run_pflow",
+            "list_keys",
+            "run_eig",
+            "eig_participation",
+            "add_disturbance",
+            "list_disturbances",
+            "clear_disturbances",
+            "init_tds",
+            "run_tds",
+        }
+    )
 
 
 def test_engines_with_op_lists_engines_in_engine_names_order(
@@ -216,10 +242,66 @@ def test_engine_capabilities_sienna_available(
         "read": ["psse-raw", "psse-dyr", "matpower"],
         "write": [],
     }
-    assert caps["routines"] == ["pflow", "eig"]
+    assert caps["routines"] == ["pflow", "eig", "tds"]
+    assert caps["routine_options"] == {
+        "tds": {
+            "streaming": False,
+            "abort": True,
+            "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
+            "options": {"load_model": ["impedance", "power", "as-case"]},
+        }
+    }
     assert "run_eig" in caps["ops"]
+    assert "run_tds" in caps["ops"]
     assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
     assert caps["editing"] is False
+
+
+def test_every_sienna_op_has_a_dispatch_path() -> None:
+    """Each op of the Sienna set reaches a handler; an op outside it is a
+    KeyError, which the worker's dispatch refuses before the engine sees it."""
+    from tensa.engines.sienna.runtime import sienna_runtime
+
+    runtime = sienna_runtime()
+
+    class _Stub:
+        def keys(self) -> Any:
+            from tensa.engines.keys import KeyBook
+
+            return KeyBook()
+
+        def list_disturbances(self) -> list[Any]:
+            return []
+
+        def __getattr__(self, name: str) -> Any:
+            if name.startswith("__"):
+                raise AttributeError(name)
+
+            def _answer(*args: Any, **kwargs: Any) -> Any:
+                return {}
+
+            return _answer
+
+    # The smallest args each op's handler reads before it reaches the state.
+    args_by_op: dict[str, dict[str, Any]] = {
+        "load_case": {"path": "case.raw"},
+        "run_tds": {"tf": 1.0},
+        "eig_participation": {"mode_idx": "0"},
+        "add_disturbance": {
+            "spec": {
+                "kind": "fault",
+                "bus_idx": 7,
+                "tf": 1.0,
+                "tc": 1.1,
+                "xf": 0.05,
+                "rf": 0.0,
+            }
+        },
+    }
+    for op in ENGINE_OPS["sienna"]:
+        runtime.dispatch(_Stub(), op, args_by_op.get(op, {}), None, None, None)
+    with pytest.raises(KeyError):
+        runtime.dispatch(_Stub(), "run_cpf", {}, None, None, None)
 
 
 def test_engine_unsupported_error_message_and_attributes() -> None:

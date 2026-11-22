@@ -3,8 +3,9 @@
 Shaped like the worker's own table (``tensa.core.worker.HANDLERS``): each
 handler takes the state and the op's args and answers the payload the worker
 sends back, serialised with the worker's ``_serialize_dataclass``. The ops
-are exactly the eight the engine has; an op outside the table is refused by
-the worker before dispatch.
+are exactly the thirteen the engine has; an op outside the table is refused
+by the worker before dispatch. ``run_tds`` is dispatched directly, as the
+ANDES table special-cases it: it needs the abort event.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter
+
+from tensa.core.disturbance import DisturbanceSpec
 from tensa.core.errors import NoCaseLoadedError
 from tensa.core.messages import NOTICE_LOGGER
 from tensa.core.worker import _serialize_dataclass
@@ -84,6 +88,43 @@ def _handle_eig_participation(state: SiennaState, args: dict[str, Any]) -> Any:
     return state.eig_participation(int(args["mode_idx"]))
 
 
+def _handle_add_disturbance(state: SiennaState, args: dict[str, Any]) -> Any:
+    spec = TypeAdapter(DisturbanceSpec).validate_python(args["spec"])
+    return state.add_disturbance(spec)
+
+
+def _handle_list_disturbances(state: SiennaState, args: dict[str, Any]) -> Any:
+    """The specs accepted since the last load or clear. A listing is a read:
+    with no case loaded the truthful answer is an empty list, as
+    ``_handle_list_keys`` answers."""
+    try:
+        return [spec.model_dump() for spec in state.list_disturbances()]
+    except NoCaseLoadedError:
+        return []
+
+
+def _handle_clear_disturbances(state: SiennaState, args: dict[str, Any]) -> Any:
+    state.clear_disturbances()
+    return None
+
+
+def _handle_run_tds(state: SiennaState, args: dict[str, Any], abort_event: Any) -> Any:
+    return state.run_tds(
+        tf=args["tf"],
+        h=args.get("h"),
+        load_model=args.get("load_model") or "impedance",
+        abort_event=abort_event,
+        integrator=args.get("integrator"),
+        tds_config_overrides=args.get("tds_config_overrides"),
+        dae_vars=args.get("dae_vars"),
+        controllers=args.get("controllers"),
+    )
+
+
+def _handle_init_tds(state: SiennaState, args: dict[str, Any]) -> Any:
+    return state.init_tds(test_init=args.get("test_init", True))
+
+
 def _handle_list_keys(state: SiennaState, args: dict[str, Any]) -> Any:
     """The keys of the loaded case's elements, in assignment order, with the
     problems the assignment noted. A listing is a read: with no case loaded
@@ -116,6 +157,10 @@ _HANDLERS: dict[str, Any] = {
     "list_keys": _handle_list_keys,
     "run_eig": _handle_run_eig,
     "eig_participation": _handle_eig_participation,
+    "add_disturbance": _handle_add_disturbance,
+    "list_disturbances": _handle_list_disturbances,
+    "clear_disturbances": _handle_clear_disturbances,
+    "init_tds": _handle_init_tds,
 }
 
 
@@ -128,6 +173,8 @@ def _dispatch(
     seq: Any,
 ) -> Any:
     """Answer one op on a ``SiennaState``."""
+    if op == "run_tds":
+        return _handle_run_tds(state, args, abort_event)
     return _HANDLERS[op](state, args)
 
 
@@ -182,7 +229,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the eight ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the thirteen ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(

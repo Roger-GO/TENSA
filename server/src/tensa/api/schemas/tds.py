@@ -297,12 +297,14 @@ class TdsBatchResult(BaseModel):
             "the run. Useful as a sanity check that streaming is wired."
         ),
     )
-    integrator: IntegratorName | None = Field(
+    integrator: IntegratorName | Literal["ida"] | None = Field(
         default=None,
         description=(
-            "The integrator the run used, as the request named it (the "
-            "default ``trapezoidal`` when it named none). ``null`` only on "
-            "responses from before this field existed."
+            "The integrator the run used. An ANDES session answers the one the "
+            "request named (the default ``trapezoidal`` when it named none); a "
+            "Sienna session answers ``ida``, Sundials' IDA on the residual "
+            "model, which is the one it runs. ``null`` only on responses from "
+            "before this field existed."
         ),
     )
     job_id: str | None = Field(
@@ -319,8 +321,21 @@ class TdsBatchResult(BaseModel):
     traces: TdsTraces | None = Field(
         default=None,
         description=(
-            "The values of the request's ``dae_vars``, every step of the run. "
-            "``null`` when the request named none."
+            "The recorded series, every step of the run. An ANDES session "
+            "answers the values of the request's ``dae_vars`` (``null`` when "
+            "the request named none); a Sienna session answers its column plan "
+            "under neutral names (``voltage|bus:7``, ``rotor_speed|gen:1-1``, "
+            "``angle_rel|bus:7``)."
+        ),
+    )
+    post: TdsTraces | None = Field(
+        default=None,
+        description=(
+            "Series read from the engine's own results after the run, on their "
+            "own time base, which can hold an instant twice at a disturbance: "
+            "a Sienna session answers each generating unit's electrical power "
+            "(``p|gen:1-1`` in MW, ``q|gen:1-1`` in MVAr). ``null`` for an "
+            "ANDES session and when none could be read."
         ),
     )
     controllers: list[TdsControllerResult] | None = Field(

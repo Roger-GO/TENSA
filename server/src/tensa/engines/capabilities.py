@@ -2,9 +2,11 @@
 
 The shapes of section 7 of ``design/multiengine/spec.md``, first scope: name,
 availability, versions, the formats it reads and writes, its routines, the ops its
-worker answers, and whether it edits a case. This module imports only
-``importlib.metadata`` for the ANDES version, never ``andes`` itself, so the server
-process does not load ANDES to answer.
+worker answers, and whether it edits a case. The section-7 object shape (an
+object keyed by routine name) is the target; the first-scope form is the flat
+list plus a ``routine_options`` sibling on the Sienna block, which is additive.
+This module imports only ``importlib.metadata`` for the ANDES version, never
+``andes`` itself, so the server process does not load ANDES to answer.
 """
 
 from __future__ import annotations
@@ -41,7 +43,15 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "unavailable_reason": None,
             "versions": sienna_versions(),
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
-            "routines": ["pflow", "eig"],
+            "routines": ["pflow", "eig", "tds"],
+            "routine_options": {
+                "tds": {
+                    "streaming": False,
+                    "abort": True,
+                    "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
+                    "options": {"load_model": ["impedance", "power", "as-case"]},
+                }
+            },
             "ops": sorted(ENGINE_OPS[name]),
             "editing": False,
         }

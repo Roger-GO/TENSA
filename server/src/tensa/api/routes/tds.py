@@ -207,6 +207,7 @@ async def run_tds(
         _broadcast_job(mgr, session_id, run_id)
 
     traces = payload.get("traces")
+    post = payload.get("post")
     controllers = payload.get("controllers")
     return TdsBatchResult(
         run_id=run_id,
@@ -222,6 +223,15 @@ async def run_tds(
                 truncated=bool(traces["truncated"]),
             )
             if traces
+            else None
+        ),
+        post=(
+            TdsTraces(
+                t=post["t"],
+                variables=[TdsTraceSeries(**v) for v in post["variables"]],
+                truncated=bool(post.get("truncated", False)),
+            )
+            if post
             else None
         ),
         controllers=(

@@ -88,7 +88,7 @@ def kundur(workspace: Path) -> Path:
     return dst
 
 
-def test_the_handler_table_is_exactly_the_eight_ops() -> None:
+def test_the_handler_table_is_exactly_the_thirteen_ops() -> None:
     assert set(_HANDLERS) == {
         "load_case",
         "reload_case",
@@ -98,8 +98,12 @@ def test_the_handler_table_is_exactly_the_eight_ops() -> None:
         "list_keys",
         "run_eig",
         "eig_participation",
+        "add_disturbance",
+        "list_disturbances",
+        "clear_disturbances",
+        "init_tds",
     }
-    assert set(_HANDLERS) == ENGINE_OPS["sienna"]
+    assert set(_HANDLERS) | {"run_tds"} == ENGINE_OPS["sienna"]
 
 
 def test_runtime_shape() -> None:
@@ -277,6 +281,48 @@ def test_dispatch_of_an_op_outside_the_table_is_a_key_error(state: SiennaState) 
     runtime = sienna_runtime()
     with pytest.raises(KeyError):
         runtime.dispatch(state, "run_cpf", {}, None, None, None)
+
+
+def test_dispatch_passes_the_abort_event_to_run_tds(state: SiennaState) -> None:
+    """``run_tds`` is dispatched directly with the abort event, as the ANDES
+    table special-cases it."""
+    seen: list[Any] = []
+
+    class _Double:
+        def run_tds(self, **kwargs: Any) -> dict[str, Any]:
+            seen.append(kwargs.get("abort_event"))
+            return {"converged": True}
+
+    event = object()
+    runtime = sienna_runtime()
+    payload = runtime.dispatch(_Double(), "run_tds", {"tf": 1.0}, event, None, None)
+    assert seen == [event]
+    assert payload == {"converged": True}
+
+
+def test_add_disturbance_handler_validates_the_spec(state: SiennaState) -> None:
+    """A fault spec dict round-trips through the handler; an unknown kind is a
+    pydantic validation error."""
+    from pydantic import ValidationError
+
+    class _Double:
+        def __init__(self) -> None:
+            self.specs: list[Any] = []
+
+        def add_disturbance(self, spec: Any) -> str:
+            self.specs.append(spec)
+            return "0"
+
+    double = _Double()
+    spec = {"kind": "fault", "bus_idx": 7, "tf": 1.0, "tc": 1.1, "xf": 0.05, "rf": 0.0}
+    assert _HANDLERS["add_disturbance"](double, {"spec": spec}) == "0"
+    assert double.specs[0].model_dump() == spec
+    with pytest.raises(ValidationError):
+        _HANDLERS["add_disturbance"](double, {"spec": {"kind": "nope"}})
+
+
+def test_list_disturbances_with_no_case_is_empty(state: SiennaState) -> None:
+    assert _HANDLERS["list_disturbances"](state, {}) == []
 
 
 def test_list_keys_with_no_case_is_empty(state: SiennaState) -> None:
