@@ -41,30 +41,44 @@ from tensa import __version__
 from tensa.api.error_mapping import recovery_for
 from tensa.api.request_log import make_request_log_middleware
 from tensa.api.routes.bundle import router as bundle_import_router
+from tensa.api.routes.case_document import router as case_document_router
 from tensa.api.routes.cases import router as cases_router
 from tensa.api.routes.clone import router as clone_router
+from tensa.api.routes.compare import router as compare_router
 from tensa.api.routes.comtrade import router as comtrade_router
 from tensa.api.routes.cpf import router as cpf_router
+from tensa.api.routes.dispatch import router as dispatch_router
 from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
+from tensa.api.routes.engines import router as engines_router
 from tensa.api.routes.examples import router as examples_router
+from tensa.api.routes.external_results import router as external_results_router
+from tensa.api.routes.fidelity import router as fidelity_router
 from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
+from tensa.api.routes.keys import router as keys_router
 from tensa.api.routes.messages import router as messages_router
 from tensa.api.routes.metrics import router as metrics_router
+from tensa.api.routes.models import router as models_router
+from tensa.api.routes.network_matrix import router as network_matrix_router
 from tensa.api.routes.pflow import router as pflow_router
 from tensa.api.routes.pmu import router as pmu_router
 from tensa.api.routes.profiles import router as profiles_router
 from tensa.api.routes.reports import router as reports_router
+from tensa.api.routes.results_doc import router as results_doc_router
 from tensa.api.routes.se import router as se_router
 from tensa.api.routes.sessions import router as sessions_router
+from tensa.api.routes.sim import router as sim_router
 from tensa.api.routes.snapshot import router as snapshot_router
+from tensa.api.routes.studies import router as studies_router
 from tensa.api.routes.sweep import router as sweep_router
 from tensa.api.routes.tds import router as tds_router
+from tensa.api.routes.uc import router as uc_router
 from tensa.api.routes.version import router as version_router
 from tensa.api.routes.workspace import router as workspace_router
 from tensa.api.routes.ws import router as ws_router
+from tensa.api.routes.ybus import router as ybus_router
 from tensa.api.schemas import JobRecordSchema, ProblemDetails
 from tensa.core.errors import SessionBusyError, WorkerDiedError
 from tensa.core.session import SessionManager, SweepInProgressError
@@ -359,16 +373,30 @@ def make_app(
     # is registered by FastAPI itself and stays at the root path.
     app.include_router(sessions_router, prefix="/api", tags=["sessions"])
     app.include_router(cases_router, prefix="/api", tags=["cases"])
+    app.include_router(ybus_router, prefix="/api", tags=["ybus"])
+    app.include_router(network_matrix_router, prefix="/api", tags=["network-matrix"])
+    app.include_router(keys_router, prefix="/api", tags=["keys"])
+    app.include_router(case_document_router, prefix="/api", tags=["case-document"])
+    app.include_router(fidelity_router, prefix="/api", tags=["fidelity"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
+    app.include_router(dispatch_router, prefix="/api", tags=["dispatch"])
+    app.include_router(uc_router, prefix="/api", tags=["uc"])
+    app.include_router(sim_router, prefix="/api", tags=["sim"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(clone_router, prefix="/api", tags=["clone"])
     app.include_router(tds_router, prefix="/api", tags=["tds"])
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
+    app.include_router(results_doc_router, prefix="/api", tags=["results"])
+    app.include_router(compare_router, prefix="/api", tags=["results"])
+    app.include_router(studies_router, prefix="/api", tags=["results"])
+    app.include_router(external_results_router, prefix="/api", tags=["external-results"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
     app.include_router(examples_router, prefix="/api", tags=["examples"])
     app.include_router(version_router, prefix="/api", tags=["version"])
+    app.include_router(models_router, prefix="/api", tags=["models"])
+    app.include_router(engines_router, prefix="/api", tags=["engines"])
     app.include_router(health_router, prefix="/api", tags=["health"])
     # Houses both the Unit-3 bundle-export endpoint AND the Unit-7
     # snapshot save / restore / list / delete endpoints. The OpenAPI tag

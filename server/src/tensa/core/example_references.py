@@ -8,10 +8,12 @@ undisturbed runs leave out, the disturbance the case is shown with, the small di
 whose ring-down is looked at).
 
 A value is a ``ReferenceCheck``. ``quantity`` names what the harness measures from the run
-(``QUANTITIES``), ``kind`` says what ``expected`` is (the five kinds of the catalog's
+(``QUANTITIES``), ``kind`` says what ``expected`` is (the kinds of the catalog's
 ``VerificationCheck``: ``independent-solver``, ``published``, ``stored-solution``,
-``ring-down`` and ``regression-baseline``, which is TENSA's own earlier output and so no
-verification), and ``reference`` names the source so that it can be found.
+``ring-down``, ``regression-baseline``, which is TENSA's own earlier output and so no
+verification, and ``cross-engine``, which holds the case run under another engine of the
+same server to the ANDES run, compared through ``POST /compare``), and ``reference`` names
+the source so that it can be found.
 
 The models are validated when a file is read, so a reference that does not hold together
 (a map where a number belongs, a mode with no frequency window) fails the tests, not a
@@ -141,6 +143,8 @@ class ReferenceCheck(_Model):
                 problems.append(f"{self.quantity} needs window_hz as [low, high] with low < high")
         elif self.window_hz is not None:
             problems.append("window_hz belongs to an eigenvalue quantity only")
+        if self.kind == "cross-engine" and self.reference and "sienna" not in self.reference.lower():
+            problems.append("a cross-engine check names the engine it compares with in its reference")
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -233,6 +237,56 @@ class RingDownCompare(_Model):
         return self
 
 
+class CrossEnginePlan(_Model):
+    """How the case is compared between the ANDES and Sienna engines."""
+
+    engine: Literal["sienna"] = Field(
+        "sienna",
+        description="The engine the case is run under besides ANDES. Only Sienna exists.",
+    )
+    pf_voltage_pu: float = Field(
+        2e-5, gt=0, description="Largest allowed difference of any bus voltage magnitude, pu."
+    )
+    pf_angle_rad: float = Field(
+        2e-5, gt=0, description="Largest allowed difference of any bus angle, rad."
+    )
+    pf_power_mw: float = Field(
+        1e-3, gt=0, description="Largest allowed difference of losses and slack power, MW."
+    )
+    series_rms_pu: float = Field(
+        2e-4, gt=0, description="Largest allowed time-weighted RMS difference of any compared series."
+    )
+    series_max_pu: float = Field(
+        2e-3, gt=0, description="Largest allowed difference at one instant of any compared series."
+    )
+    known_difference: str | None = Field(
+        None,
+        description=(
+            "The id of the entry of engines/known_differences.json that explains a difference "
+            "the checks of this case allow. ``null`` expects exact agreement."
+        ),
+    )
+    sienna: str = Field(
+        "unchecked",
+        pattern=r"^(pass|differ:[a-z0-9][a-z0-9_-]*|refused|unchecked)$",
+        description=(
+            "What the Sienna engine is expected to do with this case: ``pass`` the comparison, "
+            "``differ:<id>`` pass with the known difference of that id, ``refused`` refuse the "
+            "case (the checks then assert the refusal, not agreement), or ``unchecked``, which "
+            "every expectation is until the reviewer runs the script and records what the case "
+            "does. The worker does not guess outcomes."
+        ),
+    )
+    refusal_stage: str | None = Field(
+        None,
+        description=(
+            "For sienna = refused: the stage of the refusal, from the vocabulary of decision 38 "
+            "(not_ready, arguments, disturbances, matrix, build, eig, internal), when the case "
+            "loads but the run is refused; ``null`` when the load itself is refused."
+        ),
+    )
+
+
 class RingDownPlan(_Model):
     """The small disturbance whose ring-down the harness compares with the eigenvalues."""
 
@@ -293,6 +347,13 @@ class ExampleReference(_Model):
         None, description="What the case's disturbance run does. ``null`` for a power-flow case."
     )
     ring_down: RingDownPlan = Field(default_factory=lambda: RingDownPlan.model_validate({}))
+    cross_engine: CrossEnginePlan | None = Field(
+        None,
+        description=(
+            "How this case is checked under the Sienna engine against the ANDES run, when the "
+            "script runs with --engines andes,sienna. ``null``: no cross-engine check is made."
+        ),
+    )
     checks: list[ReferenceCheck] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -303,6 +364,21 @@ class ExampleReference(_Model):
             raise ValueError(f"check names must be unique: {', '.join(dupes)}")
         if self.disturbance is None and any(c.analysis == "tds" for c in self.checks):
             raise ValueError("a time-domain check needs a disturbance plan")
+        if self.cross_engine is not None:
+            if self.cross_engine.sienna == "refused" and any(
+                c.kind == "cross-engine" for c in self.checks
+            ):
+                raise ValueError("a case Sienna refuses carries no cross-engine checks")
+            if self.cross_engine.sienna.startswith("differ:"):
+                named = self.cross_engine.sienna.split(":", 1)[1]
+                if self.cross_engine.known_difference != named:
+                    raise ValueError(
+                        "sienna = differ:<id> needs known_difference set to the same id"
+                    )
+            if self.cross_engine.known_difference and not self.cross_engine.sienna.startswith(
+                "differ:"
+            ):
+                raise ValueError("known_difference belongs to sienna = differ:<id>")
         return self
 
 

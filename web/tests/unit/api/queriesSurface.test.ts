@@ -32,9 +32,13 @@ import type {
   DeleteSnapshotVars,
   EditElementVars,
   EditElementsVars,
+  EigSweepVars,
+  ExternalResultsResponse,
+  ExternalSeries,
   ExportBundleVars,
   ExportPmuCsvVars,
   ImportBundleVars,
+  ImportExternalResultsVars,
   ListSnapshotsResponse,
   LoadCaseVars,
   PutSidecarVars,
@@ -52,6 +56,7 @@ import type {
   StartSweepResponse,
   StartSweepVars,
   SweepParamKind,
+  TdsInitVars,
   UploadProfileVars,
   UploadWorkspaceFileVars,
 } from '@/api/queries';
@@ -82,9 +87,13 @@ export type PublicTypes = [
   DeleteSnapshotVars,
   EditElementVars,
   EditElementsVars,
+  EigSweepVars,
+  ExternalResultsResponse,
+  ExternalSeries,
   ExportBundleVars,
   ExportPmuCsvVars,
   ImportBundleVars,
+  ImportExternalResultsVars,
   ListSnapshotsResponse,
   LoadCaseVars,
   PutSidecarVars,
@@ -102,6 +111,7 @@ export type PublicTypes = [
   StartSweepResponse,
   StartSweepVars,
   SweepParamKind,
+  TdsInitVars,
   UploadProfileVars,
   UploadWorkspaceFileVars,
 ];
@@ -111,7 +121,9 @@ const PUBLIC_VALUES = [
   'CLONE_EDIT_BUSY_RETRY_DELAYS_MS',
   'SAVE_CASE_MUTATION_KEY',
   '__resetRecoveryDebounceForTests',
+  'convertResult',
   'fetchComtradeRecord',
+  'fetchKeyListing',
   'fetchResponseMetrics',
   'handleGlobalRecoveryError',
   'isWaitingForSession',
@@ -133,6 +145,7 @@ const PUBLIC_VALUES = [
   'useCloneSaveAs',
   'useCloneUndo',
   'useCommitDisturbances',
+  'useCompareResults',
   'useConnectivity',
   'useCpfQvRun',
   'useCpfRun',
@@ -147,11 +160,15 @@ const PUBLIC_VALUES = [
   'useEditElement',
   'useEditElements',
   'useEigParticipation',
+  'useEngines',
   'useEigRun',
+  'useEigSweepRun',
   'useExportBundle',
   'useExportPmuCsv',
+  'useForgetYbus',
   'useGetSidecar',
   'useImportBundle',
+  'useImportExternalResults',
   'useInitClone',
   'useListExamples',
   'useListPmus',
@@ -159,6 +176,8 @@ const PUBLIC_VALUES = [
   'useListSnapshots',
   'useListWorkspaceFiles',
   'useLoadCase',
+  'useModelDoc',
+  'useNetworkMatrix',
   'usePutSidecar',
   'useRedoEdit',
   'useRefreshTopology',
@@ -172,7 +191,9 @@ const PUBLIC_VALUES = [
   'useSeGenerateMeasurements',
   'useSeRun',
   'useStartSweep',
+  'useSupportedModels',
   'useTdsControllers',
+  'useTdsInit',
   'useTopology',
   'useTopologyRefetching',
   'useTopologySchema',
@@ -180,6 +201,7 @@ const PUBLIC_VALUES = [
   'useUploadProfile',
   'useUploadWorkspaceFile',
   'useVersionInfo',
+  'useYbus',
   'wireGlobalErrorRecovery',
 ];
 
@@ -203,6 +225,7 @@ describe('@/api/queries public surface', () => {
   it('keeps the query keys the invalidations rely on', () => {
     const id = parseSessionId('s1');
     expect(queries.queryKeys.topology(id)).toEqual(['topology', 's1']);
+    expect(queries.queryKeys.ybus(id)).toEqual(['ybus', 's1']);
     expect(queries.queryKeys.report(id, 'pflow')).toEqual(['report', 's1', 'pflow']);
     expect(queries.SAVE_CASE_MUTATION_KEY).toEqual(['save-case']);
   });

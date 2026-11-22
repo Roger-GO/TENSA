@@ -278,6 +278,45 @@ describe('runFromArchive', () => {
     expect(back?.t).toBe(data.t);
   });
 
+  it('keeps the engine and keys of a run that recorded them', () => {
+    const withIdentity = finishedRun('r1', {
+      engine: 'andes',
+      keys: [{ key: 'bus:7', bucket: 'bus', model: 'Bus', idx: 7, source: 'file' }],
+    });
+    const back = runFromArchive(runMetaOf(withIdentity), runDataOf(withIdentity));
+    expect(back?.engine).toBe('andes');
+    expect(back?.keys).toEqual([
+      { key: 'bus:7', bucket: 'bus', model: 'Bus', idx: 7, source: 'file' },
+    ]);
+  });
+
+  it.each([
+    ['an engine that is not a non-empty string', { engine: '' }],
+    ['an engine that is not a string', { engine: 3 }],
+    ['keys that are not an array', { keys: 'bus:7' }],
+    [
+      'a key entry without a string key',
+      { keys: [{ key: 7, bucket: 'bus', model: 'Bus', idx: 7 }] },
+    ],
+    [
+      'a key entry without a string bucket',
+      { keys: [{ key: 'bus:7', bucket: 1, model: 'Bus', idx: 7 }] },
+    ],
+    [
+      'a key entry without a string model',
+      { keys: [{ key: 'bus:7', bucket: 'bus', model: null, idx: 7 }] },
+    ],
+    [
+      'a key entry whose idx is neither string nor number',
+      { keys: [{ key: 'bus:7', bucket: 'bus', model: 'Bus', idx: null }] },
+    ],
+  ])('drops %s and keeps the run', (_what, bad) => {
+    const back = runFromArchive({ ...meta, ...bad }, data);
+    expect(back).not.toBeNull();
+    const key = Object.keys(bad)[0]!;
+    expect(back).not.toHaveProperty(key);
+  });
+
   it.each([
     ['a run that had not finished', { ...meta, state: 'streaming' }, data],
     ['samples of another run', meta, { ...data, runId: 'r2' }],

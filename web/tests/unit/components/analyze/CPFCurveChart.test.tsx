@@ -231,6 +231,82 @@ describe('<CPFCurveChart /> what the run was asked for', () => {
   });
 });
 
+describe('<CPFCurveChart /> a run to a target lambda', () => {
+  beforeEach(() => {
+    resetAnalyzeStore();
+  });
+
+  // As the server reports one that landed on its target below the nose: no
+  // nose (so truncated), complete, and stop_at 'nose' with the target beside it.
+  const REACHED: CpfResult = {
+    ...TRUNCATED_RESULT,
+    done_msg: 'Reached target lambda=0.3',
+    direction: 'load',
+    stop_at: 'nose',
+    complete: true,
+    q_limits_enforced: false,
+    stop_at_lambda: 0.3,
+  };
+
+  // And one whose nose came first: the nose found, not complete.
+  const SHORT: CpfResult = {
+    ...PV_RESULT,
+    lambdas: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.25],
+    voltages_per_bus: {
+      '1': [1.06, 1.05, 1.04, 1.03, 1.02, 1.0, 0.97, 0.92],
+    },
+    bus_idxes: ['1'],
+    done_msg: 'Nose point at lambda=3.250000, short of the target lambda=3.5',
+    direction: 'load',
+    stop_at: 'nose',
+    complete: false,
+    q_limits_enforced: false,
+    stop_at_lambda: 3.5,
+  };
+
+  it('says a run that reached its target stopped there as asked, with no truncation warning', () => {
+    render(<CPFCurveChart result={REACHED} />);
+    expect(screen.getByTestId('cpf-target-reached-note')).toHaveTextContent(
+      'The run stopped at the target λ = 0.3, as asked, before it reached a nose.',
+    );
+    expect(screen.queryByTestId('cpf-truncated-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cpf-incomplete-banner')).not.toBeInTheDocument();
+    expect(screen.queryByText('(truncated)')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-truncated-label')).toHaveTextContent(
+      'Stopped at the target λ=0.3 (no nose before it)',
+    );
+    expect(screen.getByTestId('cpf-run-caption')).toHaveTextContent('stop at λ = 0.3');
+  });
+
+  it('says a run whose nose came first ended at the nose, not that a lower branch broke off', () => {
+    render(<CPFCurveChart result={SHORT} />);
+    expect(screen.getByTestId('cpf-target-short-banner')).toHaveTextContent(
+      'The nose came before the target λ = 3.5, so the run ended at the nose, λ = 3.2500',
+    );
+    expect(screen.queryByTestId('cpf-incomplete-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cpf-truncated-banner')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-nose-marker')).toBeInTheDocument();
+  });
+
+  it('a run to a target that ran out of steps first says it reached neither', () => {
+    render(
+      <CPFCurveChart
+        result={{
+          ...REACHED,
+          complete: false,
+          done_msg: 'Reached max steps (3)',
+          stop_at_lambda: 2,
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('cpf-target-reached-note')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cpf-truncated-banner')).toHaveTextContent(
+      'The run ended before it reached a nose or its target λ = 2.',
+    );
+    expect(screen.getByText('(truncated)')).toBeInTheDocument();
+  });
+});
+
 describe('interpolateBusVoltage on one branch', () => {
   it('reads the upper branch up to the nose and the lower branch from it', () => {
     expect(interpolateBusVoltage(FULL_RESULT, '1', 0.4, 'upper')).toBeCloseTo(0.98, 6);

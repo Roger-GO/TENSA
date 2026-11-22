@@ -20,7 +20,9 @@ Trust model (canonical statement; AGENTS.md links here)
   user when they choose to load them — analogous to opening an .xlsx in
   Excel. ANDES's secondary file-read machinery (``addfile=``, dynamic-model
   ``path=``) is logged via ``sys.audit`` as best-effort visibility (Python-level
-  only — does not catch C-extension reads from numpy/pandas/openpyxl). For
+  only — does not catch C-extension reads from numpy/pandas/openpyxl). An
+  engine's own runtime (Julia, for the Sienna engine) reads files outside the
+  hook's sight in the same way, as C extensions do. For
   actual workspace enforcement, kernel-level controls (Linux seccomp,
   Landlock) are required, and they are not implemented.
 * On Windows, path canonicalization is best-effort: the workspace boundary is

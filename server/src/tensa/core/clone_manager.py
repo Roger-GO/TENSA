@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from tensa.core.clone_writers import DyrLocator
 from tensa.core.clone_writers import apply_edit as _writer_apply_edit
+from tensa.core.dyr_columns import put_back_dyr_columns
 from tensa.core.errors import (
     CloneEditError,
     ElementNotFoundError,
@@ -635,6 +636,7 @@ class CloneManager:
         )
         if ss is None:
             return {}
+        put_back_dyr_columns(ss, addfiles, notify=False)
         model_obj = getattr(ss, model, None)
         if model_obj is None:
             return {}
@@ -681,6 +683,9 @@ class CloneManager:
             raise CloneEditError(
                 f"andes.load returned None for clone {clone_case.name!r}"
             )
+        # The load of the original said what it put back; a clone holds the
+        # same records with the user's edits, in PSS/E's columns.
+        put_back_dyr_columns(ss, clone_addfiles, notify=False)
         # Rebind the wrapper's System to the clone-loaded one, then commit
         # setup so runs are ready. ``_bind_clone_system`` mirrors the state
         # reset ``load_case`` performs (without re-pointing ``_case_path`` at

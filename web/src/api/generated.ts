@@ -14,7 +14,7 @@ export interface paths {
         /** List currently-active sessions. */
         get: operations["listSessions"];
         put?: never;
-        /** Create a new session backed by a fresh ANDES worker subprocess. */
+        /** Create a new session backed by a fresh worker subprocess for its engine. */
         post: operations["createSession"];
         delete?: never;
         options?: never;
@@ -149,6 +149,104 @@ export interface paths {
          *     surfaces as 422 with the standard reload-recovery hint.
          */
         get: operations["getConnectivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/ybus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the bus admittance matrix of the loaded case, as sparse triplets.
+         * @description The bus admittance matrix ANDES builds from the case's lines,
+         *     transformers and shunts, in per unit on the system base, as the nonzero
+         *     entries with ``bus_idx`` and ``bus_key`` naming the bus of each row and
+         *     column. It reflects the status of each device at the time of the call.
+         *
+         *     ANDES builds the matrix only on a System that is set up, so the wrapper
+         *     sets it up first when it is not, as the connectivity check does; after
+         *     that no disturbance can be added until the case is reloaded. No power
+         *     flow is needed. A ``SetupFailedError`` answers 422 with its reload hint and
+         *     the ``reload-case`` recovery.
+         */
+        get: operations["getBusAdmittanceMatrix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/network-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a network matrix (ptdf, lodf, ybus or incidence) of the loaded case.
+         * @description One network matrix of the loaded case of a Sienna session, built by
+         *     PowerNetworkMatrices: the PTDF, the LODF, the bus admittance matrix or the
+         *     incidence matrix, in per unit on the system base. The axes name each row
+         *     and column: arcs as ``from`` and ``to`` bus numbers with the keys of the
+         *     branches on the arc, buses with their keys. The dense kinds answer the
+         *     values inline, row by row; ``ybus`` answers its nonzero entries as sparse
+         *     triplets. A matrix with more entries than one answer carries is a 422
+         *     with the count.
+         */
+        get: operations["getNetworkMatrix"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the keys of the loaded case's elements, in assignment order.
+         * @description Every key of the case, each with its bucket, model, idx and source, and
+         *     the problems the assignment noted. With no case loaded the lists are empty:
+         *     a listing is a read.
+         */
+        get: operations["listKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/case/neutral": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The loaded case in the engine-neutral form of section 5.
+         * @description The neutral case document of the session's loaded case.
+         */
+        get: operations["getCaseDocument"];
         put?: never;
         post?: never;
         delete?: never;
@@ -316,7 +414,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Write the current System to the workspace as xlsx or json. */
+        /** Write the current System to the workspace as xlsx, json, raw or m. */
         post: operations["saveCase"];
         delete?: never;
         options?: never;
@@ -506,6 +604,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/tds/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initialise the time-domain simulation without running it, and report the initialisation diagnostics.
+         * @description Runs ANDES's ``TDS.init()`` and stops before the first step: every
+         *     dynamic model is initialised from the power flow (which runs first if it
+         *     has not), and the answer says whether the initialisation test passed and,
+         *     when the case did not start from a steady state, which variables were
+         *     clamped at a limit and which equations kept a residual. The session is left
+         *     set up and initialised: disturbances and edits are refused until a reload,
+         *     as after a first run, and the next run carries on from this
+         *     initialisation. A quick check rather than a run, so no job is recorded.
+         */
+        post: operations["initTds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/dae-variables": {
         parameters: {
             query?: never;
@@ -605,6 +730,88 @@ export interface paths {
          *     of the shared ``t`` and its ``values`` sent as ``y``.
          */
         post: operations["computeResponseMetrics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/results/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn one engine result into a neutral results document (tensa_results: 1).
+         * @description Convert one engine result to the neutral document. Needs no session:
+         *     send the result as the engine's API answered it, with the session's keys
+         *     lookup for a time-domain result of an ANDES session.
+         */
+        post: operations["convertResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare two results documents: per quantity and key the largest and RMS difference over the overlap of the time ranges, the swing of the reference, and the eigenvalues matched as modes.
+         * @description Compare the ``comparison`` document against the ``reference`` one.
+         *
+         *     Both documents are validated first; one with problems is refused with a
+         *     422 that names the side and each problem, and nothing is compared. The
+         *     power flow comparison comes first, then the series, then the eigenvalues.
+         *     Differences are comparison minus reference; for quantities in radians the
+         *     difference is wrapped to [-pi, pi). Unmatched keys and modes are listed,
+         *     never ignored. A unit mismatch on a pair of series is a 422, because the
+         *     two documents disagree about what the number is.
+         */
+        post: operations["compareResults"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/external-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import a TSAT or PSS/E Excel export as series to overlay on a run's traces.
+         * @description Read the request body as a TSAT or PSS/E Excel export and answer with its
+         *     series.
+         *
+         *     The first sheet is read as ANDES's ``tsat_to_df`` and ``psse_to_df`` read it:
+         *     its first row is a header, the next 6 rows (TSAT) or 1 row (PSS/E) are
+         *     skipped, the first column after them is time and the others are signals. The
+         *     signals come back in the order the tool wrote them, named ``column 1``,
+         *     ``column 2``, ... because the format carries no names ANDES reads; the caller
+         *     labels them (ANDES's own comparison plot takes the names separately). A value
+         *     that is not a finite number is ``null``, and a row whose time is not one is
+         *     left out. The response is the ``series`` shape of ``POST /response-metrics``,
+         *     so the same client code plots a TENSA run's ``traces`` and an imported export
+         *     together. Needs no session.
+         */
+        post: operations["importExternalResults"];
         delete?: never;
         options?: never;
         head?: never;
@@ -766,6 +973,82 @@ export interface paths {
          *     change while the server runs.
          */
         get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every model ANDES ships, grouped as ANDES groups them.
+         * @description Every model class ANDES ships (about a hundred in ANDES 2.0.0), under the
+         *     group ANDES puts it in, in ANDES's own order. Any of them names a model
+         *     for ``GET /sessions/{id}/models/{model}/doc``.
+         *
+         *     This is wider than what can be built: the element routes add and edit
+         *     only the models ``GET /topology/schema`` lists, and a case file may hold
+         *     any model here. No case is needed; the session's System is not touched.
+         */
+        get: operations["listSupportedModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/models/{model}/doc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get ANDES's own documentation of one model, as plain text.
+         * @description The text ANDES prints for ``andes doc <model>``, verbatim: plain text
+         *     set in tables 78 columns wide (a heading with the model and its group, the
+         *     description, then the parameters with their defaults and units, the
+         *     variables, the initialization, differential and algebraic equations, the
+         *     services, discretes and blocks, and the model's config fields, as the
+         *     model has them). Read it in a fixed-width font. The longest, of the renewable
+         *     controllers, are under 30 kB.
+         *
+         *     ``model`` is matched exactly, case included, against the names
+         *     ``GET /sessions/{id}/models`` lists; any other name answers 404. No case
+         *     is needed; the session's System is not touched.
+         */
+        get: operations["getModelDoc"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the engines the server can start a session for, with their capabilities.
+         * @description Static endpoint: the capabilities are data and never change while the server runs.
+         */
+        get: operations["listEngines"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1002,6 +1285,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/eig/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Eigenvalues at each of a list of values of one parameter of one device (root loci data).
+         * @description Take the eigenvalues at each value of one parameter of one device.
+         *
+         *     Synchronous, like ``POST /eig``, and run as a job of kind ``eig``. Each
+         *     value is a read, a setup, a power flow and an eigenvalue analysis of the
+         *     case, so the time grows with the number of values; the session's own
+         *     System is not touched.
+         */
+        post: operations["runEigSweep"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation": {
         parameters: {
             query?: never;
@@ -1144,7 +1452,8 @@ export interface paths {
          *     Failure modes mapped to 422:
          *
          *     - Under-determined measurement set (gain matrix singular).
-         *     - WLS non-convergent within ``config.max_iter``.
+         *     - Estimator non-convergent within ``config.max_iter``.
+         *     - An invalid run option (``SeOptionError``).
          */
         post: operations["runSe"];
         delete?: never;
@@ -1882,6 +2191,12 @@ export interface components {
              */
             case_files: string[];
             /**
+             * Engine
+             * @description Engine that wrote the bundle. ``andes`` for a bundle written before the stamp existed.
+             * @default andes
+             */
+            engine: string;
+            /**
              * Conflicts
              * @description Conflicts detected between the bundle and this server/workspace.
              */
@@ -2000,6 +2315,153 @@ export interface components {
             y: number;
         };
         /**
+         * BusRecord
+         * @description One bus of the case.
+         */
+        BusRecord: {
+            /**
+             * Key
+             * @description The bus's TENSA key, as GET /sessions/{id}/keys lists it.
+             */
+            key: string;
+            /**
+             * Number
+             * @description The bus number of the case.
+             */
+            number: number;
+            /**
+             * Name
+             * @description The bus's name in the case.
+             */
+            name?: string | null;
+            /**
+             * Vn Kv
+             * @description The base voltage, in kV.
+             */
+            vn_kv?: number | null;
+            /**
+             * Type
+             * @description The bus type: pq, pv, ref (the angle reference) or isolated.
+             * @enum {string}
+             */
+            type: "pq" | "pv" | "ref" | "isolated";
+            /**
+             * V Pu
+             * @description The voltage magnitude the case stores, per unit of vn_kv.
+             */
+            v_pu?: number | null;
+            /**
+             * Angle Deg
+             * @description The voltage angle the case stores, in degrees.
+             */
+            angle_deg?: number | null;
+            /**
+             * Area
+             * @description The area number, when the case has one.
+             */
+            area?: number | null;
+            /**
+             * Zone
+             * @description The zone number, when the case has one.
+             */
+            zone?: number | null;
+            /**
+             * Area Slack
+             * @description True for a bus the case names as its area's interchange slack; null when not known.
+             */
+            area_slack?: boolean | null;
+            /**
+             * In Service
+             * @description Whether the bus is in service.
+             * @default true
+             */
+            in_service: boolean;
+        };
+        /**
+         * CaseDocument
+         * @description The neutral case document, version 1.
+         */
+        CaseDocument: {
+            /**
+             * Tensa Case
+             * @description The version of the document's form.
+             * @default 1
+             * @constant
+             */
+            tensa_case: 1;
+            /**
+             * Name
+             * @description The case's name, its file's name without the extension.
+             */
+            name: string;
+            /**
+             * Base Mva
+             * @description The system MVA base.
+             */
+            base_mva?: number | null;
+            /**
+             * Freq Hz
+             * @description The system frequency, in Hz.
+             */
+            freq_hz?: number | null;
+            /** @description Where the case came from; null for a case built in the session. */
+            source?: components["schemas"]["CaseSource"] | null;
+            /**
+             * Buses
+             * @description The buses, in the case's order.
+             */
+            buses?: components["schemas"]["BusRecord"][];
+            /**
+             * Lines
+             * @description The branches that are not transformers.
+             */
+            lines?: components["schemas"]["LineRecord"][];
+            /**
+             * Transformers
+             * @description The two-winding transformers.
+             */
+            transformers?: components["schemas"]["TransformerRecord"][];
+            /**
+             * Generators
+             * @description The static generators.
+             */
+            generators?: components["schemas"]["GeneratorRecord"][];
+            /**
+             * Loads
+             * @description The loads.
+             */
+            loads?: components["schemas"]["LoadRecord"][];
+            /**
+             * Shunts
+             * @description The fixed shunts.
+             */
+            shunts?: components["schemas"]["ShuntRecord"][];
+            /**
+             * Dynamics
+             * @description The dynamic models of the generating units.
+             */
+            dynamics?: components["schemas"]["DynamicRecord"][];
+            /**
+             * Events
+             * @description What the case file says happens in time, as neutral events.
+             */
+            events?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Notes
+             * @description What the document leaves out or holds only in part, and why.
+             */
+            notes?: string[];
+            /**
+             * Ext
+             * @description What only one engine holds, under that engine's name.
+             */
+            ext?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
          * CaseEvent
          * @description A timed event the next time-domain run applies that the client did not
          *     schedule: one the case's files define, or one a bundle import or a snapshot
@@ -2071,6 +2533,58 @@ export interface components {
              * @description Number of generators (static generators, slack included).
              */
             generators: number;
+        };
+        /**
+         * CaseSource
+         * @description Where the case came from: its format, its files and their digests.
+         */
+        CaseSource: {
+            /**
+             * Format
+             * @description The format of the case file: psse-raw, matpower, xlsx or the like.
+             */
+            format: string;
+            /**
+             * Files
+             * @description The names of the files the case was read from, the case file first.
+             */
+            files: string[];
+            /**
+             * Sha256
+             * @description The SHA-256 of each file, in the order of files; null when one could not be read.
+             */
+            sha256?: string[] | null;
+        };
+        /**
+         * ChiSquaredTest
+         * @description The chi-squared bad-data test on the SE objective ``J`` (WLS only).
+         */
+        ChiSquaredTest: {
+            /**
+             * Passed
+             * @description ``True`` when ``J`` is below the threshold: no bad data detected at this confidence.
+             */
+            passed: boolean;
+            /**
+             * J
+             * @description The WLS objective ``sum(r_i^2 / sigma_i^2)`` the test ran on (equal to ``mismatch``).
+             */
+            J: number;
+            /**
+             * Threshold
+             * @description The chi-squared quantile at ``confidence`` with ``dof`` degrees of freedom; ``J`` is compared against it.
+             */
+            threshold: number;
+            /**
+             * Dof
+             * @description Degrees of freedom, ``measurement_count - 2 * <bus count>``; ``measurement_count`` includes the angle-reference pseudo-measurement, which stands in for the one state it fixes.
+             */
+            dof: number;
+            /**
+             * Confidence
+             * @description The confidence level the threshold was taken at (0.95).
+             */
+            confidence: number;
         };
         /** Citation */
         Citation: {
@@ -2275,6 +2789,76 @@ export interface components {
             job_id?: string | null;
         };
         /**
+         * CompareRequest
+         * @description Request body for ``POST /compare``.
+         */
+        CompareRequest: {
+            /** @description The reference results document: differences are comparison minus reference, and the swing is the reference series'. */
+            reference: components["schemas"]["ResultsDocument"];
+            /** @description The results document compared against the reference. */
+            comparison: components["schemas"]["ResultsDocument"];
+            /** @description The tolerances; defaults are in ``engines/compare.py``. */
+            tolerances?: components["schemas"]["Tolerances"];
+        };
+        /**
+         * CompareResponse
+         * @description Response body for ``POST /compare``: power flow first, then series, then
+         *     eigenvalues.
+         */
+        CompareResponse: {
+            /** @description The reference document's engine block. */
+            engine_reference: components["schemas"]["EngineBlock"];
+            /** @description The comparison document's engine block. */
+            engine_comparison: components["schemas"]["EngineBlock"];
+            /**
+             * Operating Point Differs
+             * @description True when the power flow comparison is outside its tolerance: a dynamic difference that starts from a different operating point must be read as that.
+             */
+            operating_point_differs: boolean;
+            /** @description The power flow comparison; ``null`` unless both documents carry one. */
+            power_flow: components["schemas"]["PflowComparisonOut"] | null;
+            /**
+             * Series
+             * @description One entry per compared pair of series.
+             */
+            series: components["schemas"]["SeriesDifferenceOut"][];
+            /**
+             * Not Comparable
+             * @description Pairs that cannot be compared, each with the reason.
+             */
+            not_comparable: components["schemas"]["NotComparableOut"][];
+            /**
+             * Unmatched Series Reference
+             * @description ``quantity|key`` of series only the reference has.
+             */
+            unmatched_series_reference: string[];
+            /**
+             * Unmatched Series Comparison
+             * @description ``quantity|key`` of series only the comparison has.
+             */
+            unmatched_series_comparison: string[];
+            /**
+             * Eigenvalues
+             * @description The matched modes, sorted by the reference frequency.
+             */
+            eigenvalues: components["schemas"]["EigenvaluePairOut"][];
+            /**
+             * Unmatched Eigenvalues Reference
+             * @description Indices of reference eigenvalues with no match.
+             */
+            unmatched_eigenvalues_reference: number[];
+            /**
+             * Unmatched Eigenvalues Comparison
+             * @description Indices of comparison eigenvalues with no match.
+             */
+            unmatched_eigenvalues_comparison: number[];
+            /**
+             * Errors
+             * @description Per-series problems (times that run backwards, too few samples, no overlap); one bad series does not fail the request.
+             */
+            errors: string[];
+        };
+        /**
          * ComplexNumberModel
          * @description JSON-friendly complex number ``{real, imag}``.
          */
@@ -2386,6 +2970,75 @@ export interface components {
              * @description Convenience: just the degree-zero (lone) bus idxes. Each appears as its own singleton in ``islands`` too. The SLD uses this for the primary 'grey out' trigger.
              */
             islanded_bus_idxes: string[];
+        };
+        /**
+         * ConvertResultRequest
+         * @description Request body for ``POST /results/convert``: one engine result, answered
+         *     as a neutral results document (section 6.5).
+         */
+        ConvertResultRequest: {
+            /**
+             * Kind
+             * @description Which builder the result goes through.
+             * @enum {string}
+             */
+            kind: "pflow" | "tds" | "eig";
+            /**
+             * Engine
+             * @description The engine that produced the result (``andes``, ``sienna``).
+             */
+            engine: string;
+            /**
+             * Versions
+             * @description The package versions the engine ran with; carried into the document as given.
+             */
+            versions?: {
+                [key: string]: string;
+            };
+            /**
+             * Study
+             * @description The study as run; stored in the document verbatim.
+             */
+            study?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Result
+             * @description The engine's own result as JSON: for ``pflow`` the fields of the power flow result, for ``tds`` a traces object (``t``, ``variables``, ``truncated``), for ``eig`` the eigenvalue result.
+             */
+            result: {
+                [key: string]: unknown;
+            };
+            /**
+             * Keys
+             * @description The session's keys as ``GET /sessions/{id}/keys`` lists them (its ``keys`` list: key, bucket, model, idx, source). Used to map ANDES time-domain column names, a machine's through its own entry (``gen:1-1/machine``); ignored for ``sienna`` and for ``pflow`` (whose result carries its own ``keys``).
+             */
+            keys?: components["schemas"]["KeyEntrySchema"][];
+            /**
+             * Status
+             * @description How the run ended; carried into the document.
+             * @default completed
+             * @enum {string}
+             */
+            status: "completed" | "aborted" | "failed";
+        };
+        /**
+         * ConvertResultResponse
+         * @description Answer of ``POST /results/convert``: the document, and what is not in it.
+         */
+        ConvertResultResponse: {
+            /** @description The neutral results document. */
+            document: components["schemas"]["ResultsDocument"];
+            /**
+             * Skipped
+             * @description Every column of the result that is not part of the document, and why.
+             */
+            skipped?: components["schemas"]["SkippedSeries"][];
+            /**
+             * Notes
+             * @description What the answer does not say in the document, such as a truncated result.
+             */
+            notes?: string[];
         };
         /**
          * CpfGeneratorIncrease
@@ -2604,14 +3257,14 @@ export interface components {
             q_limits_enforced: boolean;
             /**
              * Stop At
-             * @description What the run was asked to trace: up to the nose, or the full curve.
+             * @description What the run was asked to trace: up to the nose, or the full curve. A run given a target lambda has ``'nose'`` here and the target in ``stop_at_lambda``.
              * @default nose
              * @enum {string}
              */
             stop_at: "nose" | "full";
             /**
              * Complete
-             * @description Whether the run ended the way ``stop_at`` asked. ``false`` with ``truncated: false`` is a full curve whose lower branch broke off; ``done_msg`` says where.
+             * @description Whether the run ended the way ``stop_at`` asked. ``false`` with ``truncated: false`` is a full curve whose lower branch broke off, or a run whose nose came before its target lambda; ``done_msg`` says where. A run that reached its target lambda is complete, with ``truncated: true`` since it found no nose.
              * @default true
              */
             complete: boolean;
@@ -2620,6 +3273,43 @@ export interface components {
              * @description The direction of the increase a PV run was asked for; ``null`` for a QV curve.
              */
             direction?: ("load" | "load-only" | "gen" | "custom") | null;
+            /**
+             * Angles Per Bus
+             * @description Bus voltage angles in radians at every step (``CPF.theta``), keyed by bus idx and index-aligned with ``lambdas`` and that bus's ``voltages_per_bus`` row. Empty for a QV curve, and when ANDES's angles could not be aligned with the points kept.
+             */
+            angles_per_bus?: {
+                [key: string]: number[];
+            };
+            /**
+             * Parameterization
+             * @description The parameterization the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            parameterization?: ("natural" | "arclength" | "pseudo_arclength") | null;
+            /**
+             * Tol
+             * @description The corrector tolerance the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            tol?: number | null;
+            /**
+             * Corrector Max Iter
+             * @description The corrector's Newton iterations per step the run used, as the request gave them; ``null`` where the case's own setting was kept.
+             */
+            corrector_max_iter?: number | null;
+            /**
+             * Step Min
+             * @description The smallest step the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            step_min?: number | null;
+            /**
+             * Step Max
+             * @description The largest step the run used, as the request gave it; ``null`` where the case's own setting was kept.
+             */
+            step_max?: number | null;
+            /**
+             * Stop At Lambda
+             * @description The target lambda the run was given in ``stop_at``; ``null`` when ``stop_at`` was ``'nose'`` or ``'full'``.
+             */
+            stop_at_lambda?: number | null;
             /**
              * Job Id
              * @description Job-registry id mirroring this CPF routine (kind ``cpf`` for the PV sweep, ``cpf-qv`` for the QV curve). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
@@ -2633,8 +3323,11 @@ export interface components {
          *     All fields are optional, and each applies to this run only.
          *     ``direction`` says what lambda increases, ``enforce_q_limits`` holds
          *     generators to their reactive limits along the path, ``stop_at`` asks
-         *     for the lower branch as well, and ``step`` and ``max_iter`` set the
-         *     corresponding ``ss.CPF.config`` values for the run.
+         *     for the lower branch as well or names a target lambda, ``step`` and
+         *     ``max_iter`` set ``ss.CPF.config.step`` and ``max_steps`` for the run,
+         *     and ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``
+         *     and ``step_max`` the routine's settings of those names (ANDES calls
+         *     ``corrector_max_iter`` ``max_iter``).
          */
         CpfRunRequest: {
             /**
@@ -2661,11 +3354,35 @@ export interface components {
             enforce_q_limits?: boolean | null;
             /**
              * Stop At
-             * @description ``'nose'`` (default) stops at the nose. ``'full'`` turns there and follows the lower-voltage solutions back to ``lambda = 0`` (``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` are that lower branch.
+             * @description ``'nose'`` (default) stops at the nose. ``'full'`` turns there and follows the lower-voltage solutions back to ``lambda = 0`` (``CPF.config.stop_at = 'FULL'``); the steps after ``nose_idx`` are that lower branch. A number above zero is a target lambda: the routine shortens the step that would cross it and lands on it, and the run ends there (``complete`` true, with no nose, so ``truncated`` true). A target past the nose is never crossed: the run ends at the nose (``complete`` false, ``done_msg`` naming the target), where ANDES alone would go on down the lower branch. Not with ``parameterization: 'natural'`` and ``'full'`` together.
              * @default nose
-             * @enum {string}
              */
-            stop_at: "nose" | "full";
+            stop_at: ("nose" | "full") | number;
+            /**
+             * Parameterization
+             * @description The equation that fixes the length of a step in the corrector (``CPF.config.parameterization``). ``'pseudo_arclength'`` is ANDES's default and the most robust at the nose; ``'arclength'`` also goes round it. ``'natural'`` fixes lambda, which is singular at the nose: the routine finds the nose by halving the step until it fails, with about twice the points and none past it, and it cannot trace the lower branch, so it is refused with ``stop_at: 'full'``. Left out, the case's setting stands.
+             */
+            parameterization?: ("natural" | "arclength" | "pseudo_arclength") | null;
+            /**
+             * Tol
+             * @description The corrector's tolerance on the mismatch, in pu (``CPF.config.tol``; ANDES's default 1e-6). At most 1e-4: the nose and the switches of reactive limits are found from the points the corrector solves. Left out, the case's setting stands.
+             */
+            tol?: number | null;
+            /**
+             * Corrector Max Iter
+             * @description The Newton iterations the corrector takes per continuation step (ANDES's own ``CPF.config.max_iter``; its default 20). Not the cap on continuation steps, which is what ``max_iter`` sets. A step whose corrector runs out of iterations fails, and the routine calls the nose where failures pile up, so a low cap can call it early; at least 2. Left out, the case's setting stands.
+             */
+            corrector_max_iter?: number | null;
+            /**
+             * Step Min
+             * @description The smallest continuation step (``CPF.config.step_min``; ANDES's default 1e-4). A failed step is halved, and once it is below this the routine calls the nose, so a larger value ends the search for it sooner. Not above ``step_max`` (the request's or the case's). Left out, the case's setting stands.
+             */
+            step_min?: number | null;
+            /**
+             * Step Max
+             * @description The largest step the routine grows its adaptive step to (``CPF.config.step_max``; ANDES's default 0.5): smaller draws the curve with more points. Left out, the case's setting stands.
+             */
+            step_max?: number | null;
             /**
              * Step
              * @description Optional initial continuation step size for lambda (``ss.CPF.config.step`` for this run). Default uses ANDES's own default (0.1).
@@ -2867,6 +3584,11 @@ export interface components {
             /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
             redo?: components["schemas"]["EditStep"] | null;
             /**
+             * Has Dynamics
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``. This server always sends true or false; ``null`` only means a server that does not report it.
+             */
+            has_dynamics?: boolean | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
@@ -3000,6 +3722,60 @@ export interface components {
             p_max?: number | null;
         };
         /**
+         * DynamicRecord
+         * @description One dynamic model of a generating unit.
+         *
+         *     ``values`` and ``names`` are null in this version of the document (the
+         *     positional parameter tables are a later unit); the document's ``notes``
+         *     say so.
+         */
+        DynamicRecord: {
+            /**
+             * Key
+             * @description The model's TENSA key, the unit's key and its role.
+             */
+            key: string;
+            /**
+             * Unit
+             * @description The key of the generator the model belongs to.
+             */
+            unit: string;
+            /**
+             * Role
+             * @description What the model does in the unit: machine, exciter, governor, ...
+             */
+            role: string;
+            /**
+             * Model
+             * @description The model's name, as its dynamic data file names it.
+             */
+            model: string;
+            /**
+             * Values
+             * @description The parameters in the order of the model's PSS/E record; null in this version.
+             */
+            values?: number[] | null;
+            /**
+             * Names
+             * @description The names of values, for people; never read back.
+             */
+            names?: string[] | null;
+            /**
+             * Vocabulary
+             * @description Whose parameter names the record uses: psse (values by position) or an engine's (params).
+             * @default psse
+             * @enum {string}
+             */
+            vocabulary: "psse" | "andes" | "sienna";
+            /**
+             * Params
+             * @description The parameters by the engine's own names, for a model with no PSS/E record.
+             */
+            params?: {
+                [key: string]: number;
+            } | null;
+        };
+        /**
          * EditElementRequest
          * @description Request body for ``PUT /sessions/{id}/elements/{model}/{idx}``.
          *
@@ -3112,6 +3888,16 @@ export interface components {
              */
             tds_initialized: boolean;
             /**
+             * Load Model
+             * @description The load model the analysis used (``impedance``, ``power`` or ``as-case``). Set by the Sienna engine; ``null`` for ANDES, whose loads behave as the case and its own defaults leave them.
+             */
+            load_model?: string | null;
+            /**
+             * Notes
+             * @description Standing notes on the result. A Sienna result carries the note that PSID's small-signal results are work in progress in validation, by PSID's own documentation (spec section 13). Empty for ANDES.
+             */
+            notes?: string[];
+            /**
              * Job Id
              * @description Job-registry id mirroring this EIG routine (kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
@@ -3126,7 +3912,210 @@ export interface components {
          *     ``model_config`` ``extra="forbid"`` and reject typos in the
          *     forward-compatible way.
          */
-        EigRunRequest: Record<string, never>;
+        EigRunRequest: {
+            /**
+             * Load Model
+             * @description How loads behave in the analysis: ``impedance`` (the default), ``power`` or ``as-case``. A Sienna session takes all three; an ANDES session takes it left out or ``impedance``, which is what ANDES does, and refuses the other two with 422.
+             */
+            load_model?: ("impedance" | "power" | "as-case") | null;
+        };
+        /**
+         * EigSweepPointModel
+         * @description The eigenvalues at one value of the swept parameter.
+         */
+        EigSweepPointModel: {
+            /**
+             * Value
+             * @description The parameter value of this point: ``points[i]`` is at ``values[i]`` of the request.
+             */
+            value: number;
+            /**
+             * Eigenvalues
+             * @description Eigenvalues of the reduced state matrix at this value, each ``{real, imag}``, as ``POST /sessions/{id}/eig`` gives them for a case opened with the value (an eigenvalue ANDES counts as zero is exactly ``{0, 0}``). The order is not comparable across points, since ANDES does not keep one: each point is a list of its own and no mode is followed through the sweep, so a client drawing root loci matches the modes itself.
+             */
+            eigenvalues: components["schemas"]["ComplexNumberModel"][];
+            /**
+             * Damping Ratios
+             * @description Per-mode damping ratio ``-Re(z) / |z|`` at this value, index-aligned with ``eigenvalues``; 1.0 for a zero eigenvalue.
+             */
+            damping_ratios: number[];
+            /**
+             * Frequencies Hz
+             * @description Per-mode oscillation frequency ``|Im(z)| / (2*pi)`` in Hz at this value, index-aligned with ``eigenvalues``.
+             */
+            frequencies_hz: number[];
+        };
+        /**
+         * EigSweepRequest
+         * @description Request body for ``POST /sessions/{id}/eig/sweep``: one parameter of
+         *     one device and the values to take the eigenvalues at.
+         */
+        EigSweepRequest: {
+            /**
+             * Model
+             * @description ANDES model name, e.g. 'GENROU'.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description idx of the device within the model, as a string, e.g. '1'.
+             */
+            idx: string;
+            /**
+             * Param
+             * @description Parameter name as ANDES names it, e.g. 'M': a numeric parameter of the model that is not copied from another model, the ones GET /sessions/{id}/topology/models/{model}/alterable_params lists before its services.
+             */
+            param: string;
+            /**
+             * Values
+             * @description The values to take the eigenvalues at, in order: 1 to 200 finite numbers. A value is on the base the case file and an edit of the element use, which for a per-unit parameter is the device's own base (ANDES's ``vin``). Each value costs a read, a setup, a power flow and an eigenvalue analysis of the case.
+             */
+            values: number[];
+        };
+        /**
+         * EigSweepResponse
+         * @description Wire shape of ``POST /sessions/{id}/eig/sweep``.
+         */
+        EigSweepResponse: {
+            /**
+             * Model
+             * @description The model of the swept parameter, as requested.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The device of the swept parameter, as requested.
+             */
+            idx: string;
+            /**
+             * Param
+             * @description The swept parameter, as requested.
+             */
+            param: string;
+            /**
+             * Points
+             * @description One point per requested value, in the request's order. Each is an eigenvalue analysis of a system of its own: the case with the session's edits and the parameter at the value, its power flow solved with the settings of the session's last one. The session's own system is not changed by the sweep.
+             */
+            points: components["schemas"]["EigSweepPointModel"][];
+            /**
+             * Mode Count
+             * @description Number of eigenvalues at every point. A sweep whose points differ in it is refused (422), not answered with lists of different lengths.
+             */
+            mode_count: number;
+            /**
+             * Tds Initialized
+             * @description Whether the session's dynamic state is initialised, which the sweep does not change: ``false`` unless an eigenvalue analysis or a time-domain run of the session initialised it, so a power flow can still run after a sweep that followed one.
+             */
+            tds_initialized: boolean;
+            /**
+             * Job Id
+             * @description Job-registry id mirroring this sweep (kind ``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record.
+             */
+            job_id?: string | null;
+        };
+        /**
+         * EigenvaluePairOut
+         * @description Two eigenvalues matched as one mode.
+         */
+        EigenvaluePairOut: {
+            /**
+             * Index Ref
+             * @description Its index in the reference table.
+             */
+            index_ref: number;
+            /**
+             * Index New
+             * @description Its index in the comparison table.
+             */
+            index_new: number;
+            /**
+             * Eigenvalue Ref Re
+             * @description Real part of the reference eigenvalue, 1/s.
+             */
+            eigenvalue_ref_re: number;
+            /**
+             * Eigenvalue Ref Im
+             * @description Imaginary part of the reference eigenvalue, 1/s.
+             */
+            eigenvalue_ref_im: number;
+            /**
+             * Eigenvalue New Re
+             * @description Real part of the comparison eigenvalue, 1/s.
+             */
+            eigenvalue_new_re: number;
+            /**
+             * Eigenvalue New Im
+             * @description Imaginary part of the comparison eigenvalue, 1/s.
+             */
+            eigenvalue_new_im: number;
+            /**
+             * Distance
+             * @description Distance in the complex plane, 1/s.
+             */
+            distance: number;
+            /**
+             * Frequency Hz Ref
+             * @description Frequency of the reference mode, hertz.
+             */
+            frequency_hz_ref: number;
+            /**
+             * Frequency Hz New
+             * @description Frequency of the comparison mode, hertz.
+             */
+            frequency_hz_new: number;
+            /**
+             * Damping Ratio Ref
+             * @description Damping ratio of the reference mode.
+             */
+            damping_ratio_ref: number;
+            /**
+             * Damping Ratio New
+             * @description Damping ratio of the comparison mode.
+             */
+            damping_ratio_new: number;
+            /**
+             * Within Tolerance
+             * @description Whether frequency and damping are both within their tolerances.
+             */
+            within_tolerance: boolean;
+        };
+        /**
+         * EigenvalueRow
+         * @description One mode of an eigenvalue table.
+         */
+        EigenvalueRow: {
+            /**
+             * Re
+             * @description Real part of the eigenvalue, in 1/s.
+             */
+            re: number;
+            /**
+             * Im
+             * @description Imaginary part of the eigenvalue, in 1/s.
+             */
+            im: number;
+            /**
+             * Frequency Hz
+             * @description Oscillation frequency, in hertz.
+             */
+            frequency_hz: number;
+            /**
+             * Damping Ratio
+             * @description Damping ratio; 1.0 for a zero eigenvalue.
+             */
+            damping_ratio: number;
+        };
+        /**
+         * EigenvalueTable
+         * @description The eigenvalue table of a results document, one row per mode.
+         */
+        EigenvalueTable: {
+            /**
+             * Eigenvalues
+             * @description One row per mode, index-aligned with the source result.
+             */
+            eigenvalues?: components["schemas"]["EigenvalueRow"][];
+        };
         /**
          * ElementCreated
          * @description Response body for ``POST /sessions/{id}/elements`` (201).
@@ -3144,6 +4133,105 @@ export interface components {
              * @description Job-registry id mirroring the element-add routine (kind ``element-add``). ``null`` on legacy responses.
              */
             job_id?: string | null;
+        };
+        /**
+         * EngineBlock
+         * @description The engine that produced the result and the versions it ran with.
+         */
+        EngineBlock: {
+            /**
+             * Name
+             * @description The engine's registry name: ``andes`` or ``sienna``.
+             */
+            name: string;
+            /**
+             * Versions
+             * @description The package versions the engine ran with, caller-supplied. Empty until the adapter reports them; the builders never invent one.
+             */
+            versions?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * EngineCapabilities
+         * @description What one engine can do, as ``GET /engines`` reports it (spec section 7).
+         */
+        EngineCapabilities: {
+            /**
+             * Name
+             * @description The engine's name (``andes``, ``sienna``).
+             */
+            name: string;
+            /**
+             * Available
+             * @description Whether this build can start a session for the engine.
+             */
+            available: boolean;
+            /**
+             * Unavailable Reason
+             * @description Why the engine cannot start a session, or null when it can.
+             */
+            unavailable_reason: string | null;
+            /**
+             * Versions
+             * @description The versions the engine runs with, by package (``andes`` for the ANDES engine). Empty for an engine that is not available.
+             */
+            versions: {
+                [key: string]: string;
+            };
+            /** @description The case file formats the engine reads and writes. */
+            formats: components["schemas"]["EngineFormats"];
+            /**
+             * Routines
+             * @description The routines the engine runs (``pflow``, ``tds``, ``eig``, ``cpf``, ``se``). A routine an engine lacks is absent here and refused with a 409 that names the engines that have it.
+             */
+            routines: string[];
+            /**
+             * Routine Options
+             * @description Per routine, what the engine takes where it differs from the ANDES engine, so a client offers only that: for ``tds``, whether runs stream (``streaming``) and can be aborted (``abort``), the disturbance kinds it takes (``disturbances``: ``branch_trip``, ``bus_fault``, ``gen_trip``) and its options with their values (``options``: ``load_model``). Empty for an engine that takes everything the routine has (ANDES) and for one that is not available.
+             */
+            routine_options?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /**
+             * Ops
+             * @description Every worker op the engine answers, sorted. Empty for an engine that is not available.
+             */
+            ops: string[];
+            /**
+             * Editing
+             * @description Whether the engine edits a case (add, edit and delete elements).
+             */
+            editing: boolean;
+        };
+        /**
+         * EngineFormats
+         * @description The case file formats an engine reads and writes.
+         */
+        EngineFormats: {
+            /**
+             * Read
+             * @description The formats the engine loads a case from (``xlsx``, ``json``, ``psse-raw``, ``psse-dyr``, ``matpower``). Empty for an engine that is not available.
+             */
+            read: string[];
+            /**
+             * Write
+             * @description The formats the engine saves a case as. Empty for an engine that is not available.
+             */
+            write: string[];
+        };
+        /**
+         * EngineList
+         * @description Response shape for ``GET /engines``.
+         */
+        EngineList: {
+            /**
+             * Engines
+             * @description Every engine the server knows, available or not, in a fixed order.
+             */
+            engines: components["schemas"]["EngineCapabilities"][];
         };
         /**
          * ExampleList
@@ -3246,6 +4334,49 @@ export interface components {
              * @description Whether every file the case copies can be found: in the installed ANDES, or in this package. ``false`` for a case that has no file (``external``), and for an ANDES case the installed release does not hold.
              */
             available: boolean;
+        };
+        /**
+         * ExternalResultsResponse
+         * @description Response body for ``POST /external-results``.
+         */
+        ExternalResultsResponse: {
+            /**
+             * Source
+             * @description The format the file was read as.
+             * @enum {string}
+             */
+            source: "tsat" | "psse";
+            /**
+             * Series
+             * @description One series per signal column of the export, in the order the tool wrote them, all on the same ``t``. Feed them to ``POST /response-metrics`` as they are (at most 64 series a request), or plot them against a run's ``traces``.
+             */
+            series: components["schemas"]["ExternalSeries"][];
+            /**
+             * Samples
+             * @description The length of every series' ``t`` and ``y``.
+             */
+            samples: number;
+        };
+        /**
+         * ExternalSeries
+         * @description One signal of an imported export, in the wire shape of ``MetricsSeries``.
+         */
+        ExternalSeries: {
+            /**
+             * Name
+             * @description What the series is called. The export format carries no signal names ANDES reads, so the import names them by position: ``column 1``, ``column 2``, ... in the order the tool wrote them.
+             */
+            name: string;
+            /**
+             * T
+             * @description Sample times in seconds, in the order the export gives them (not sorted); a row whose time is not a finite number is left out.
+             */
+            t: number[];
+            /**
+             * Y
+             * @description The signal's value at each time. A value the export did not carry as a finite number (text, a date, an empty cell, an Excel error) is ``null``.
+             */
+            y: (number | null)[];
         };
         /** ExtraFile */
         ExtraFile: {
@@ -3390,9 +4521,9 @@ export interface components {
             p: number;
             /**
              * Q
-             * @description Reactive power generated at the terminal bus, in MVAr.
+             * @description Reactive power generated at the terminal bus, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            q: number;
+            q: number | null;
             /**
              * V
              * @description Terminal bus voltage magnitude (pu).
@@ -3413,6 +4544,63 @@ export interface components {
              * @description Upper reactive power limit the case sets (``qmax``), in MVAr. Power flow does not enforce it unless the run asked for ``enforce_q_limits``, so ``q`` can lie above it. ``null`` for a generator that is switched off.
              */
             q_max?: number | null;
+        };
+        /**
+         * GeneratorRecord
+         * @description One static generator.
+         */
+        GeneratorRecord: {
+            /**
+             * Key
+             * @description The generating unit's TENSA key.
+             */
+            key: string;
+            /**
+             * Bus
+             * @description The number of the bus the generator is on.
+             */
+            bus: number;
+            /**
+             * Id
+             * @description The generator's id on its bus.
+             */
+            id: string;
+            /**
+             * P Mw
+             * @description The scheduled active power, in MW.
+             */
+            p_mw?: number | null;
+            /**
+             * Q Mvar
+             * @description The reactive power the case stores, in MVAr.
+             */
+            q_mvar?: number | null;
+            /**
+             * V Set Pu
+             * @description The voltage setpoint, per unit of the bus's base voltage.
+             */
+            v_set_pu?: number | null;
+            /**
+             * Q Min Mvar
+             * @description The lower reactive limit, in MVAr.
+             */
+            q_min_mvar?: number | null;
+            /**
+             * Q Max Mvar
+             * @description The upper reactive limit, in MVAr.
+             */
+            q_max_mvar?: number | null;
+            /**
+             * Mbase Mva
+             * @description The machine's MVA rating, the base of its dynamic parameters.
+             */
+            mbase_mva?: number | null;
+            /**
+             * In Service
+             * @description Whether the generator is in service.
+             * @default true
+             */
+            in_service: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -3554,6 +4742,54 @@ export interface components {
              * @default 0
              */
             repeated_count: number;
+        };
+        /**
+         * KeyEntrySchema
+         * @description One element of the loaded case and the key it was given.
+         */
+        KeyEntrySchema: {
+            /**
+             * Key
+             * @description The element's key: a string that names it the same way in every engine that loads the case (``bus:7``, ``branch:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``), built from the case by the rule of section 4 of ``design/multiengine/spec.md``.
+             */
+            key: string;
+            /**
+             * Bucket
+             * @description The part of the case the element belongs to: ``bus``, ``line``, ``transformer``, ``generator``, ``load``, ``shunt``, ``dynamic`` or ``other``.
+             */
+            bucket: string;
+            /**
+             * Model
+             * @description The engine's model of the element (an ANDES model class name).
+             */
+            model: string;
+            /**
+             * Idx
+             * @description The engine's own handle of the element within ``model``.
+             */
+            idx: number | string;
+            /**
+             * Source
+             * @description Where the id in the key came from: ``file`` for one read from the case file, ``engine`` for one the engine holds, ``ordinal`` for one made up from order.
+             */
+            source: string;
+        };
+        /**
+         * KeyList
+         * @description Every key of the loaded case, in assignment order, with the problems
+         *     the assignment noted.
+         */
+        KeyList: {
+            /**
+             * Keys
+             * @description One entry per element of the loaded case, in the order the keys were assigned. Empty when no case is loaded.
+             */
+            keys?: components["schemas"]["KeyEntrySchema"][];
+            /**
+             * Problems
+             * @description What assigning the keys found worth saying (a collision, an element the file does not name, ...). Empty when there is nothing to say.
+             */
+            problems?: string[];
         };
         /**
          * LayoutBranchRoute
@@ -3736,9 +4972,9 @@ export interface components {
             p: number;
             /**
              * Q
-             * @description Reactive power leaving ``bus1`` into the line, in MVAr.
+             * @description Reactive power leaving ``bus1`` into the line, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            q: number;
+            q: number | null;
             /**
              * From Idx
              * @description ANDES idx of the ``bus1`` terminal (the from-side bus).
@@ -3756,9 +4992,9 @@ export interface components {
             p_to: number;
             /**
              * Q To
-             * @description Reactive power leaving ``bus2`` into the line, in MVAr.
+             * @description Reactive power leaving ``bus2`` into the line, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            q_to: number;
+            q_to: number | null;
             /**
              * Loss
              * @description Active power the line dissipates, in MW: ``p + p_to``.
@@ -3774,6 +5010,58 @@ export interface components {
              * @description The larger of the apparent powers at the two terminals, ``sqrt(p^2 + q^2)`` and ``sqrt(p_to^2 + q_to^2)``, as a percentage of ``rate_a``. Above 100 is an overload. ``null`` when the line has no rating.
              */
             loading_pct?: number | null;
+        };
+        /**
+         * LineRecord
+         * @description One non-transformer branch; impedances per unit on ``base_mva``.
+         */
+        LineRecord: {
+            /**
+             * Key
+             * @description The branch's TENSA key.
+             */
+            key: string;
+            /**
+             * From
+             * @description The number of the bus the branch leaves.
+             */
+            from: number;
+            /**
+             * To
+             * @description The number of the bus the branch reaches.
+             */
+            to: number;
+            /**
+             * Ckt
+             * @description The circuit id that tells parallel branches apart.
+             */
+            ckt: string;
+            /**
+             * R Pu
+             * @description The series resistance, per unit on base_mva and the bus voltage.
+             */
+            r_pu?: number | null;
+            /**
+             * X Pu
+             * @description The series reactance, per unit on base_mva and the bus voltage.
+             */
+            x_pu?: number | null;
+            /**
+             * B Pu
+             * @description The total line charging susceptance, per unit on base_mva and the bus voltage.
+             */
+            b_pu?: number | null;
+            /**
+             * Rate A Mva
+             * @description The long-term flow limit, in MVA; 0 where the case gives none.
+             */
+            rate_a_mva?: number | null;
+            /**
+             * In Service
+             * @description Whether the branch is in service.
+             * @default true
+             */
+            in_service: boolean;
         };
         /** Link */
         Link: {
@@ -3863,6 +5151,11 @@ export interface components {
              * @description Optional list of workspace-relative addfile paths. PSS/E .raw (steady-state) and .dyr (dynamics) are paired via this mechanism; pass [.dyr path] when loading a .raw.
              */
             addfiles?: string[] | null;
+            /**
+             * On Unsupported
+             * @description What the Sienna engine does with a dynamic record it does not support: ``refuse`` (the default) fails the load and names every such record; ``drop`` loads the case without them and logs a warning for each. The ANDES engine ignores this.
+             */
+            on_unsupported?: ("refuse" | "drop") | null;
         };
         /**
          * LoadConsumption
@@ -3877,14 +5170,53 @@ export interface components {
             p: number;
             /**
              * Q
-             * @description Reactive power drawn, in MVAr.
+             * @description Reactive power drawn, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            q: number;
+            q: number | null;
             /**
              * Bus
              * @description Terminal bus idx.
              */
             bus: number | string;
+        };
+        /**
+         * LoadRecord
+         * @description One load.
+         */
+        LoadRecord: {
+            /**
+             * Key
+             * @description The load's TENSA key.
+             */
+            key: string;
+            /**
+             * Bus
+             * @description The number of the bus the load is on.
+             */
+            bus: number;
+            /**
+             * Id
+             * @description The load's id on its bus.
+             */
+            id: string;
+            /**
+             * P Mw
+             * @description The active power at 1.0 pu voltage, in MW.
+             */
+            p_mw?: number | null;
+            /**
+             * Q Mvar
+             * @description The reactive power at 1.0 pu voltage, in MVAr.
+             */
+            q_mvar?: number | null;
+            /** @description How the power varies with the voltage; null when the engine does not hold it. */
+            zip?: components["schemas"]["ZipFractions"] | null;
+            /**
+             * In Service
+             * @description Whether the load is in service.
+             * @default true
+             */
+            in_service: boolean;
         };
         /**
          * MetricExtremum
@@ -3924,6 +5256,172 @@ export interface components {
             y: (number | null)[];
         };
         /**
+         * ModelDoc
+         * @description ANDES's own documentation of one model.
+         */
+        ModelDoc: {
+            /**
+             * Model
+             * @description The ANDES model class name the documentation is for.
+             */
+            model: string;
+            /**
+             * Doc
+             * @description The text ANDES prints for the model (``andes doc <model>``), verbatim: plain text with tables 78 columns wide of its parameters, variables and equations, to be read in a fixed-width font.
+             */
+            doc: string;
+        };
+        /**
+         * NetworkMatrixArcSchema
+         * @description One arc of a matrix axis, with the keys of its branches.
+         */
+        NetworkMatrixArcSchema: {
+            /**
+             * From
+             * @description Bus number of the arc's from end.
+             */
+            from: number;
+            /**
+             * To
+             * @description Bus number of the arc's to end.
+             */
+            to: number;
+            /**
+             * Keys
+             * @description The key of every branch on this arc, as GET /sessions/{id}/keys gives them; parallel circuits share an arc.
+             */
+            keys: string[];
+        };
+        /**
+         * NetworkMatrixBusSchema
+         * @description One bus of a matrix axis, with its key.
+         */
+        NetworkMatrixBusSchema: {
+            /**
+             * Bus
+             * @description Bus number.
+             */
+            bus: number;
+            /**
+             * Key
+             * @description The bus's key, as GET /sessions/{id}/keys gives it.
+             */
+            key: string;
+        };
+        /**
+         * NetworkMatrixEntrySchema
+         * @description One nonzero of a complex matrix (ybus), as the ANDES ybus entry.
+         */
+        NetworkMatrixEntrySchema: {
+            /**
+             * Row
+             * @description Row of the entry, from 0.
+             */
+            row: number;
+            /**
+             * Col
+             * @description Column of the entry, from 0.
+             */
+            col: number;
+            /**
+             * Re
+             * @description Real part, in per unit on the system base.
+             */
+            re: number;
+            /**
+             * Im
+             * @description Imaginary part, in per unit on the system base.
+             */
+            im: number;
+        };
+        /**
+         * NetworkMatrixResponse
+         * @description One network matrix of the loaded case, built by PowerNetworkMatrices.
+         */
+        NetworkMatrixResponse: {
+            /**
+             * Kind
+             * @description ptdf, lodf, ybus or incidence.
+             */
+            kind: string;
+            /**
+             * N Rows
+             * @description Number of rows of the matrix.
+             */
+            n_rows: number;
+            /**
+             * N Cols
+             * @description Number of columns of the matrix.
+             */
+            n_cols: number;
+            /**
+             * N Entries
+             * @description n_rows times n_cols for a dense matrix; the nonzero count for ybus.
+             */
+            n_entries: number;
+            /**
+             * Complex
+             * @description True for ybus, which is complex.
+             */
+            complex: boolean;
+            /**
+             * Base Mva
+             * @description The system MVA base the per-unit values are on.
+             */
+            base_mva: number;
+            /**
+             * Rows
+             * @description Row axis: bus entries for ybus, arc entries for ptdf, lodf, incidence.
+             */
+            rows: components["schemas"]["NetworkMatrixBusSchema"][] | components["schemas"]["NetworkMatrixArcSchema"][];
+            /**
+             * Cols
+             * @description Column axis: bus entries for ptdf, ybus, incidence; arc entries for lodf.
+             */
+            cols: components["schemas"]["NetworkMatrixBusSchema"][] | components["schemas"]["NetworkMatrixArcSchema"][];
+            /**
+             * Ref Buses
+             * @description Keys of the reference buses the matrix was built against; absent for ybus.
+             */
+            ref_buses?: string[] | null;
+            /**
+             * Distributed Slack
+             * @description Always false; no distributed slack is applied.
+             */
+            distributed_slack: boolean;
+            /**
+             * Values
+             * @description The matrix, row by row, for ptdf, lodf and incidence; absent for ybus.
+             */
+            values?: number[][] | null;
+            /**
+             * Entries
+             * @description The nonzero entries for ybus; absent for the dense kinds.
+             */
+            entries?: components["schemas"]["NetworkMatrixEntrySchema"][] | null;
+        };
+        /**
+         * NotComparableOut
+         * @description A pair of series that cannot be compared, with the reason.
+         */
+        NotComparableOut: {
+            /**
+             * Quantity
+             * @description The quantity.
+             */
+            quantity: string;
+            /**
+             * Key
+             * @description The element key.
+             */
+            key: string;
+            /**
+             * Reason
+             * @description Why the pair cannot be compared.
+             */
+            reason: string;
+        };
+        /**
          * ParticipationFactorModel
          * @description One per-state participation factor row entry.
          */
@@ -3938,6 +5436,123 @@ export interface components {
              * @description Participation factor magnitude. By ANDES convention (``calc_pfactor`` in routines/eig.py) these are real-valued.
              */
             factor: number;
+        };
+        /**
+         * PflowBranchRow
+         * @description One branch of a power flow table, flows at both ends.
+         */
+        PflowBranchRow: {
+            /**
+             * Key
+             * @description The branch's key (``branch:7-8-1``).
+             */
+            key: string;
+            /**
+             * P From Mw
+             * @description Active power into the branch at its from end, in MW.
+             */
+            p_from_mw: number;
+            /**
+             * Q From Mvar
+             * @description Reactive power into the branch at its from end, in MVAr.
+             */
+            q_from_mvar?: number | null;
+            /**
+             * P To Mw
+             * @description Active power into the branch at its to end, in MW.
+             */
+            p_to_mw?: number | null;
+            /**
+             * Q To Mvar
+             * @description Reactive power into the branch at its to end, in MVAr.
+             */
+            q_to_mvar?: number | null;
+        };
+        /**
+         * PflowBusRow
+         * @description One bus of a power flow table.
+         */
+        PflowBusRow: {
+            /**
+             * Key
+             * @description The bus's key (``bus:7``).
+             */
+            key: string;
+            /**
+             * V Pu
+             * @description Voltage magnitude, per unit.
+             */
+            v_pu: number;
+            /**
+             * Angle Rad
+             * @description Voltage angle, in radians.
+             */
+            angle_rad: number;
+        };
+        /**
+         * PflowComparisonOut
+         * @description The power flow comparison, always shown first.
+         */
+        PflowComparisonOut: {
+            /**
+             * Converged Reference
+             * @description Whether the reference power flow converged.
+             */
+            converged_reference: boolean;
+            /**
+             * Converged Comparison
+             * @description Whether the comparison power flow converged.
+             */
+            converged_comparison: boolean;
+            /**
+             * Rows
+             * @description One row per compared value.
+             */
+            rows: components["schemas"]["TableRowDifferenceOut"][];
+            /** @description Keys present on one side only. */
+            unmatched: components["schemas"]["UnmatchedKeysOut"];
+        };
+        /**
+         * PflowGeneratorRow
+         * @description One generator of a power flow table.
+         */
+        PflowGeneratorRow: {
+            /**
+             * Key
+             * @description The generator's key (``gen:1-1``).
+             */
+            key: string;
+            /**
+             * P Mw
+             * @description Active power injected, in MW.
+             */
+            p_mw: number;
+            /**
+             * Q Mvar
+             * @description Reactive power injected, in MVAr.
+             */
+            q_mvar?: number | null;
+        };
+        /**
+         * PflowLoadRow
+         * @description One load of a power flow table.
+         */
+        PflowLoadRow: {
+            /**
+             * Key
+             * @description The load's key (``load:7-1``).
+             */
+            key: string;
+            /**
+             * P Mw
+             * @description Active power absorbed, in MW.
+             */
+            p_mw: number;
+            /**
+             * Q Mvar
+             * @description Reactive power absorbed, in MVAr.
+             */
+            q_mvar?: number | null;
         };
         /**
          * PflowResult
@@ -3956,7 +5571,7 @@ export interface components {
             converged: boolean;
             /**
              * Iterations
-             * @description Number of Newton-Raphson iterations executed.
+             * @description Number of Newton-Raphson iterations executed. 0 for a run with ``method`` ``NK``, whose SciPy solver keeps no count ANDES reads.
              */
             iterations: number;
             /**
@@ -4004,6 +5619,15 @@ export interface components {
             /** @description System totals: generation, load, bus shunts, line losses and the slack output. ``null`` when the run did not converge, and on ``GET /sessions/{id}/operating-point``. */
             summary?: components["schemas"]["PflowSummary"] | null;
             /**
+             * Keys
+             * @description The key of every element the result names, per kind: ``keys["bus"]`` maps the stringified idx of every bus in ``bus_voltages`` to its key, and ``line``, ``generator`` and ``load`` do the same for ``line_flows``, ``generator_outputs`` and ``load_consumption``. A key names an element the same way in every engine (section 4 of ``design/multiengine/spec.md``). An idx with no key is left out.
+             */
+            keys?: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
+            /**
              * Job Id
              * @description Job-registry id mirroring this routine invocation. Additive: ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``pflow``). ``null`` only on legacy responses synthesised outside the job lifecycle.
              */
@@ -4037,6 +5661,21 @@ export interface components {
              * @description Hold a PV or slack generator at ``qmin`` or ``qmax`` when its reactive power goes past one (PV to PQ switching). Without it the limits are reported and not enforced. Left out, the case's own setting stands; ``false`` turns off enforcement the case file asks for.
              */
             enforce_q_limits?: boolean | null;
+            /**
+             * Method
+             * @description The solver the session's engine runs. An ANDES session takes ``"NR"`` Newton-Raphson (the default), ``"dishonest"`` the same but reusing the Jacobian after the first ``n_factorize`` iterations, ``"NK"`` Newton-Krylov from SciPy; one of those three, case-sensitively. ``NK`` stops by SciPy's own rule, so ``tolerance``, ``max_iterations`` and ``linesearch`` do not apply to it, and its result reports ``iterations`` as 0. A Sienna session takes ``"ac"`` (the default), ``"dc"`` or ``"ptdf-dc"``; a DC method takes neither ``tolerance`` nor ``max_iterations``. Left out, the case's own setting stands.
+             */
+            method?: string | null;
+            /**
+             * N Factorize
+             * @description The first N iterations of the dishonest method that refactorize the Jacobian; ignored by ``NR`` and ``NK``; ANDES's default is 4. Left out, the case's own setting stands.
+             */
+            n_factorize?: number | null;
+            /**
+             * Linesearch
+             * @description The nonmonotone backtracking line search on the Newton step, which shortens a step whose residual would grow and can pull a run that overshoots back to convergence; read only by the NR and dishonest solvers, so without effect under ``NK``; ANDES's default is on. Left out, the case's own setting stands.
+             */
+            linesearch?: boolean | null;
         };
         /**
          * PflowSettings
@@ -4064,6 +5703,21 @@ export interface components {
              * @description ``true`` if a PV or slack generator whose reactive power went past ``qmin`` or ``qmax`` was held at that limit (PV to PQ switching).
              */
             enforce_q_limits: boolean;
+            /**
+             * Method
+             * @description The solver the run used. For an ANDES session: ``NR`` (Newton-Raphson), ``dishonest`` (Newton-Raphson that reuses the Jacobian after the first ``n_factorize`` iterations) or ``NK`` (Newton-Krylov from SciPy, which stops by SciPy's own rule: it reads neither ``tolerance`` nor ``max_iterations`` and keeps no iteration count). For a Sienna session: ``NR`` for the AC power flow, ``dc`` or ``ptdf-dc`` for a DC power flow.
+             */
+            method?: string | null;
+            /**
+             * N Factorize
+             * @description The number of initial iterations on which the dishonest method refactorized the Jacobian; meaningless for the other methods.
+             */
+            n_factorize?: number | null;
+            /**
+             * Linesearch
+             * @description Whether the backtracking line search was on; read by ``NR`` and ``dishonest`` only.
+             */
+            linesearch?: boolean | null;
         };
         /**
          * PflowSummary
@@ -4081,9 +5735,9 @@ export interface components {
             generation_p: number;
             /**
              * Generation Q
-             * @description Reactive power the in-service generators produce, in MVAr.
+             * @description Reactive power the in-service generators produce, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            generation_q: number;
+            generation_q: number | null;
             /**
              * Load P
              * @description Active power the loads draw, in MW.
@@ -4091,9 +5745,9 @@ export interface components {
             load_p: number;
             /**
              * Load Q
-             * @description Reactive power the loads draw, in MVAr.
+             * @description Reactive power the loads draw, in MVAr. ``null`` for a DC power flow, which computes no reactive power.
              */
-            load_q: number;
+            load_q: number | null;
             /**
              * Shunt P
              * @description Active power the bus shunts absorb, in MW (0 for a pure susceptance).
@@ -4101,9 +5755,9 @@ export interface components {
             shunt_p: number;
             /**
              * Shunt Q
-             * @description Reactive power the bus shunts absorb, in MVAr: negative for a capacitor, which supplies it.
+             * @description Reactive power the bus shunts absorb, in MVAr: negative for a capacitor, which supplies it. ``null`` for a DC power flow, which computes no reactive power.
              */
-            shunt_q: number;
+            shunt_q: number | null;
             /**
              * Loss P
              * @description Active power the lines and transformers dissipate, in MW.
@@ -4111,9 +5765,9 @@ export interface components {
             loss_p: number;
             /**
              * Loss Q
-             * @description Reactive power the lines and transformers absorb, in MVAr: their series losses less their charging, so negative when charging dominates.
+             * @description Reactive power the lines and transformers absorb, in MVAr: their series losses less their charging, so negative when charging dominates. ``null`` for a DC power flow, which computes no reactive power.
              */
-            loss_q: number;
+            loss_q: number | null;
             /**
              * Slack P
              * @description Active power the in-service slack generators produce, in MW: what the case's schedules leave for the slack to make up. ``null`` when there is none.
@@ -4124,6 +5778,37 @@ export interface components {
              * @description Reactive power the in-service slack generators produce, in MVAr. ``null`` when there is none.
              */
             slack_q?: number | null;
+        };
+        /**
+         * PflowTable
+         * @description The power flow table of a results document. Rows are keyed by key.
+         */
+        PflowTable: {
+            /**
+             * Converged
+             * @description Whether the power flow converged.
+             */
+            converged: boolean;
+            /**
+             * Buses
+             * @description One row per keyed bus.
+             */
+            buses?: components["schemas"]["PflowBusRow"][];
+            /**
+             * Branches
+             * @description One row per keyed branch.
+             */
+            branches?: components["schemas"]["PflowBranchRow"][];
+            /**
+             * Generators
+             * @description One row per keyed static generator.
+             */
+            generators?: components["schemas"]["PflowGeneratorRow"][];
+            /**
+             * Loads
+             * @description One row per keyed load.
+             */
+            loads?: components["schemas"]["PflowLoadRow"][];
         };
         /**
          * ProblemDetails
@@ -4375,26 +6060,73 @@ export interface components {
             job_id?: string | null;
         };
         /**
+         * ResultsDocument
+         * @description The neutral results document, field by field the section 6.5 JSON.
+         */
+        ResultsDocument: {
+            /**
+             * Tensa Results
+             * @description Document version. A reader refuses a newer major.
+             * @constant
+             */
+            tensa_results: 1;
+            /** @description The engine that produced the result. */
+            engine: components["schemas"]["EngineBlock"];
+            /**
+             * Study
+             * @description The study as run, stored verbatim; ``null`` when there is none.
+             */
+            study?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Status
+             * @description How the run ended.
+             * @enum {string}
+             */
+            status: "completed" | "aborted" | "failed";
+            /**
+             * Series
+             * @description The time series.
+             */
+            series?: components["schemas"]["Series"][];
+            /** @description The tables, under ``pflow`` and ``eig``; either, both or neither. */
+            tables?: components["schemas"]["ResultsTables"];
+        };
+        /**
+         * ResultsTables
+         * @description The tables of a results document: a power flow under ``pflow``, the
+         *     eigenvalues under ``eig``; either, both or neither. Each name holds its own
+         *     table only, and no other name is taken.
+         */
+        ResultsTables: {
+            /** @description The power flow table. */
+            pflow?: components["schemas"]["PflowTable"] | null;
+            /** @description The eigenvalue table. */
+            eig?: components["schemas"]["EigenvalueTable"] | null;
+        };
+        /**
          * SaveCaseRequest
          * @description Request body for ``POST /sessions/{id}/save``.
          *
          *     ``filename`` is workspace-relative; the substrate canonicalizes it
          *     through the workspace path validator (rejects traversal). ``format``
-         *     selects the writer: ANDES's own for xlsx and json, and the substrate's
-         *     PSS/E v33 writer for raw (ANDES 2.0 has none).
+         *     selects the writer: ANDES's own for xlsx and json, the substrate's
+         *     PSS/E v33 writer for raw and its MATPOWER v2 writer for m (ANDES 2.0
+         *     has neither).
          */
         SaveCaseRequest: {
             /**
              * Filename
-             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json, ``.raw`` for raw). The file name must be portable to Windows: no ``:``, trailing dot or space, or device names such as ``CON`` or ``nul.xlsx``.
+             * @description Workspace-relative output filename. Extension must match ``format`` (``.xlsx`` for xlsx, ``.json`` for json, ``.raw`` for raw, ``.m`` for m). The file name must be portable to Windows: no ``:``, trailing dot or space, or device names such as ``CON`` or ``nul.xlsx``.
              */
             filename: string;
             /**
              * Format
-             * @description Output format. ``xlsx`` is the ANDES-native Excel layout. ``json`` is the ANDES JSON serialization. ``raw`` is PSS/E v33 emitted by the substrate's hand-rolled writer; it covers the power-flow data: Bus, PQ loads, Shunt, PV and Slack generators, Line, and 2W transformers. 3W transformers and other PSS/E sections are emitted as empty terminators. A ``.raw`` holds no dynamic data, so the dynamic models of the case (machines, exciters, a ZIP load) are left out: save as ``xlsx`` or ``json`` to keep them.
+             * @description Output format. ``xlsx`` is the ANDES-native Excel layout. ``json`` is the ANDES JSON serialization. ``raw`` is PSS/E v33 emitted by the substrate's hand-rolled writer; it covers the power-flow data: Bus, PQ loads, Shunt, PV and Slack generators, Line, and 2W transformers. 3W transformers and other PSS/E sections are emitted as empty terminators. A ``.raw`` holds no dynamic data, so the dynamic models of the case (machines, exciters, a ZIP load) are left out: save as ``xlsx`` or ``json`` to keep them. ``m`` is MATPOWER v2 emitted by the substrate's writer around ANDES's ``system2mpc``; it covers the power-flow data (Bus, PQ, Shunt, PV and Slack generators, Line) and holds no dynamic data, so save as ``xlsx`` or ``json`` to keep machines and controllers; string bus idxes come back as integers on a round-trip; bus area and zone are written as zero; the loads and shunts of a bus are added up into one. What the file leaves out of the system is logged as a warning in ``GET /sessions/{id}/messages``.
              * @enum {string}
              */
-            format: "xlsx" | "json" | "raw";
+            format: "xlsx" | "json" | "raw" | "m";
             /**
              * Overwrite
              * @description When ``true``, overwrites an existing file at the same path. Default ``false`` returns 409 if the file exists.
@@ -4522,12 +6254,12 @@ export interface components {
             converged: boolean;
             /**
              * Iterations
-             * @description Number of WLS Gauss-Newton iterations to convergence. ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim.
+             * @description Number of iterations to convergence (Gauss-Newton for WLS, reweighted steps for LAV). ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim.
              */
             iterations: number;
             /**
              * Mismatch
-             * @description Final WLS objective ``J = sum(w * r^2)``. Smaller is better; the chi-squared test on ``J`` (not surfaced yet) flags whether the measurement set fits the model at a given confidence level.
+             * @description Final objective ``J``: for WLS ``sum(r^2 / sigma^2)``, which ``chi_squared`` tests against its distribution; for LAV ``sum(|r| / sigma)``. Smaller is better.
              */
             mismatch: number;
             /**
@@ -4546,6 +6278,15 @@ export interface components {
              */
             flagged_indices: number[];
             /**
+             * Algorithm
+             * @description The estimator the run used (``"wls"`` or ``"lav"``); ``null`` only from a server that predates the choice, which always ran WLS.
+             */
+            algorithm?: ("wls" | "lav") | null;
+            /** @description The ``tol``, ``max_iter`` and ``noise_seed`` the run used (the effective values, after any per-run override). */
+            settings?: components["schemas"]["SeRunSettings"] | null;
+            /** @description The chi-squared bad-data test on the objective ``J`` at 95% confidence; ``null`` for LAV runs, where ``J`` does not follow a chi-squared distribution. */
+            chi_squared?: components["schemas"]["ChiSquaredTest"] | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the SE run routine (kind ``se``). ``GET /sessions/{id}/jobs/{job_id}`` returns the matching record; ``null`` on legacy responses.
              */
@@ -4555,12 +6296,154 @@ export interface components {
          * SeRunRequest
          * @description Request body for ``POST /sessions/{id}/se``.
          *
-         *     Empty body — the substrate's ``Wrapper.run_se`` reads the cached
-         *     measurement set from the prior generate call. Kept as a model so
-         *     the route can declare ``extra="forbid"`` and reject typos forward-
+         *     Every field is optional and applies to this run only; a body that
+         *     names none behaves exactly as before (WLS with the case's
+         *     ``SE.config`` defaults and the generate step's noise draw). Kept as
+         *     a model with ``extra="forbid"`` so typos are rejected forward-
          *     compatibly.
          */
-        SeRunRequest: Record<string, never>;
+        SeRunRequest: {
+            /**
+             * Algorithm
+             * @description The estimator. ``"wls"`` (default) is weighted least squares (Gauss-Newton); ``"lav"`` is least absolute value via iteratively reweighted least squares, robust to gross measurement errors. LAV converges linearly and often needs more than the default 100 iterations when a measurement is bad, so raise ``max_iter`` with it (a run that runs out answers 422). The chi-squared test is only computed for WLS.
+             */
+            algorithm?: ("wls" | "lav") | null;
+            /**
+             * Tol
+             * @description Convergence tolerance on the max absolute state correction for this run only. ``None`` keeps the case's ``SE.config.tol`` (ANDES default 1e-4).
+             */
+            tol?: number | null;
+            /**
+             * Max Iter
+             * @description Maximum iterations for this run only. ``None`` keeps the case's ``SE.config.max_iter`` (ANDES default 100).
+             */
+            max_iter?: number | null;
+            /**
+             * Noise Seed
+             * @description When set, this run's measurement values are drawn afresh from the power flow solution with this seed (the noise is drawn here, as the generate step draws it), over the cached set's measurements and sigmas; the cached values are left as the generate step made them. The same seed gives the same run. ``None`` runs on the cached values.
+             */
+            noise_seed?: number | null;
+        };
+        /**
+         * SeRunSettings
+         * @description The settings a state-estimation run used: the request's where it gave
+         *     one, the case's ``SE.config`` (ANDES's default unless the case file sets
+         *     one) where it did not.
+         */
+        SeRunSettings: {
+            /**
+             * Tol
+             * @description Convergence tolerance on the max absolute state correction.
+             */
+            tol: number;
+            /**
+             * Max Iter
+             * @description Iteration limit.
+             */
+            max_iter: number;
+            /**
+             * Noise Seed
+             * @description The seed this run's measurement noise was drawn with; ``null`` when the run used the cached values from the generate step.
+             */
+            noise_seed?: number | null;
+        };
+        /**
+         * Series
+         * @description One series of the document: a quantity of one element over time.
+         */
+        Series: {
+            /**
+             * Quantity
+             * @description The quantity, a name of the section 6.5 catalogue.
+             */
+            quantity: string;
+            /**
+             * Of
+             * @description What the quantity is of: a key (``bus:7``, ``gen:1-1``), or for a ``state`` series ``<key>#<state name>``.
+             */
+            of: string;
+            /**
+             * Unit
+             * @description The unit the values are in, the catalogue's for the quantity.
+             */
+            unit: string;
+            /**
+             * T
+             * @description Sample times in seconds, not decreasing.
+             */
+            t: number[];
+            /**
+             * Y
+             * @description The value at each time. ``null`` is a gap (a diverged step).
+             */
+            y: (number | null)[];
+        };
+        /**
+         * SeriesDifferenceOut
+         * @description The difference of one pair of series.
+         */
+        SeriesDifferenceOut: {
+            /**
+             * Quantity
+             * @description The quantity compared.
+             */
+            quantity: string;
+            /**
+             * Key
+             * @description The element key.
+             */
+            key: string;
+            /**
+             * Unit
+             * @description The unit of the values.
+             */
+            unit: string;
+            /**
+             * Samples
+             * @description Instants compared, gaps left out.
+             */
+            samples: number;
+            /**
+             * T Start
+             * @description Start of the overlap used, in seconds.
+             */
+            t_start: number;
+            /**
+             * T End
+             * @description End of the overlap used, in seconds.
+             */
+            t_end: number;
+            /**
+             * Max Diff
+             * @description The largest absolute difference.
+             */
+            max_diff: number;
+            /**
+             * Max Diff T
+             * @description The time it occurs at, in seconds.
+             */
+            max_diff_t: number;
+            /**
+             * Rms Diff
+             * @description The time-weighted RMS difference: ``sqrt(integral(d^2 dt) / span)`` over the overlap, gaps left out.
+             */
+            rms_diff: number;
+            /**
+             * Swing Ref
+             * @description The reference series' max minus min over the compared stretch.
+             */
+            swing_ref: number;
+            /**
+             * Within Tolerance
+             * @description Whether ``max_diff`` is within the tolerance; ``null`` when there is none.
+             */
+            within_tolerance: boolean | null;
+            /**
+             * Tolerance
+             * @description The tolerance applied; ``null`` when the quantity has none.
+             */
+            tolerance: number | null;
+        };
         /**
          * SeriesMetrics
          * @description What one signal's response metrics came to. Either ``error`` says why it
@@ -4645,6 +6528,11 @@ export interface components {
              * @default
              */
             workspace_id: string;
+            /**
+             * Engine
+             * @description The engine the session runs (``andes``, ``sienna``). A session is created for one engine and keeps it; the capabilities of the engine are listed by ``GET /engines``, not repeated here.
+             */
+            engine: string;
         };
         /**
          * SessionList
@@ -4730,6 +6618,43 @@ export interface components {
              * @description How many messages were lost to the caps (the worker keeps 1000 between two replies, the session keeps the latest 2000), over the session's life. Clearing the log does not count.
              */
             dropped: number;
+        };
+        /**
+         * ShuntRecord
+         * @description One shunt.
+         */
+        ShuntRecord: {
+            /**
+             * Key
+             * @description The shunt's TENSA key.
+             */
+            key: string;
+            /**
+             * Bus
+             * @description The number of the bus the shunt is on.
+             */
+            bus: number;
+            /**
+             * Id
+             * @description The shunt's id on its bus.
+             */
+            id: string;
+            /**
+             * G Mw
+             * @description The active power it draws at 1.0 pu voltage, in MW.
+             */
+            g_mw?: number | null;
+            /**
+             * B Mvar
+             * @description The reactive power it supplies at 1.0 pu voltage, in MVAr (positive for a capacitor).
+             */
+            b_mvar?: number | null;
+            /**
+             * In Service
+             * @description Whether the shunt is in service.
+             * @default true
+             */
+            in_service: boolean;
         };
         /**
          * SidecarLayout
@@ -4831,6 +6756,22 @@ export interface components {
             last_modified: string;
         };
         /**
+         * SkippedSeries
+         * @description One column of an engine result that is not in the document, and why.
+         */
+        SkippedSeries: {
+            /**
+             * Name
+             * @description The column's name as the engine gave it.
+             */
+            name: string;
+            /**
+             * Reason
+             * @description Why it is not part of the document.
+             */
+            reason: string;
+        };
+        /**
          * SnapshotListEntry
          * @description One entry in the ``GET /sessions/{id}/snapshots`` response.
          */
@@ -4866,6 +6807,12 @@ export interface components {
              */
             andes_version: string;
             /**
+             * Engine
+             * @description Engine that saved the snapshot. ``andes`` for a snapshot saved before the stamp existed. The UI marks a foreign one before a restore is attempted.
+             * @default andes
+             */
+            engine: string;
+            /**
              * Disturbance Count
              * @description Number of disturbance specs recorded in the snapshot metadata.
              */
@@ -4886,6 +6833,12 @@ export interface components {
              * @description tensa version that produced the snapshot.
              */
             tensa_version: string;
+            /**
+             * Engine
+             * @description Engine that saved the snapshot. ``andes`` for a snapshot saved before the stamp existed.
+             * @default andes
+             */
+            engine: string;
             /**
              * Case Filename
              * @description Workspace-relative case filename loaded when the snapshot was saved.
@@ -4947,6 +6900,19 @@ export interface components {
              * @description Job-registry id mirroring this sweep. Additive and IDENTICAL to ``sweep_id`` — the two fields alias the same value, with ``sweep_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``sweep``).
              */
             job_id?: string | null;
+        };
+        /**
+         * SupportedModels
+         * @description Every model ANDES ships, grouped as ANDES groups them.
+         */
+        SupportedModels: {
+            /**
+             * Groups
+             * @description The ANDES model class names, keyed by the group ANDES puts each in (``Bus`` under ``ACNode``, ``GENROU`` under ``SynGen``), groups and models in ANDES's own order. A name here is what ``model`` takes on ``GET /sessions/{id}/models/{model}/doc``. It is not the list of what the element routes build: those take only the models ``GET /topology/schema`` lists.
+             */
+            groups: {
+                [key: string]: string[];
+            };
         };
         /**
          * SweepParameter
@@ -5038,6 +7004,52 @@ export interface components {
             vars?: string[] | null;
         };
         /**
+         * TableRowDifferenceOut
+         * @description One power flow value compared.
+         */
+        TableRowDifferenceOut: {
+            /**
+             * Quantity
+             * @description The quantity compared.
+             */
+            quantity: string;
+            /**
+             * Key
+             * @description The element key.
+             */
+            key: string;
+            /**
+             * Unit
+             * @description The unit of the values.
+             */
+            unit: string;
+            /**
+             * Reference
+             * @description The reference value.
+             */
+            reference: number;
+            /**
+             * Value
+             * @description The comparison value.
+             */
+            value: number;
+            /**
+             * Diff
+             * @description ``value - reference``.
+             */
+            diff: number;
+            /**
+             * Within Tolerance
+             * @description Whether ``|diff|`` is within the tolerance; ``null`` when there is none.
+             */
+            within_tolerance: boolean | null;
+            /**
+             * Tolerance
+             * @description The tolerance applied; ``null`` when the quantity has none.
+             */
+            tolerance: number | null;
+        };
+        /**
          * TdsBatchResult
          * @description Result of a batch TDS run (post-completion delivery).
          *
@@ -5070,12 +7082,19 @@ export interface components {
              */
             callpert_count: number;
             /**
+             * Integrator
+             * @description The integrator the run used. An ANDES session answers the one the request named (the default ``trapezoidal`` when it named none); a Sienna session answers ``ida``, Sundials' IDA on the residual model, which is the one it runs. ``null`` only on responses from before this field existed.
+             */
+            integrator?: ("trapezoidal" | "trap_adapt" | "backeuler" | "qndf") | "ida" | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring this TDS run. Additive and IDENTICAL to ``run_id`` — the two fields alias the same value, with ``run_id`` preserved for backward compatibility. ``GET /sessions/{id}/jobs/{job_id}`` returns the matching ``JobRecord`` (kind ``tds-batch``). ``null`` only on legacy responses synthesised outside the job lifecycle.
              */
             job_id?: string | null;
-            /** @description The values of the request's ``dae_vars``, every step of the run. ``null`` when the request named none. */
+            /** @description The recorded series, every step of the run. An ANDES session answers the values of the request's ``dae_vars`` (``null`` when the request named none); a Sienna session answers its column plan under neutral names (``voltage|bus:7``, ``rotor_speed|gen:1-1``, ``angle_rel|bus:7``). */
             traces?: components["schemas"]["TdsTraces"] | null;
+            /** @description Series read from the engine's own results after the run, on their own time base, which can hold an instant twice at a disturbance: a Sienna session answers each generating unit's electrical power (``p|gen:1-1`` in MW, ``q|gen:1-1`` in MVAr). ``null`` for an ANDES session and when none could be read. */
+            post?: components["schemas"]["TdsTraces"] | null;
             /**
              * Controllers
              * @description What each of the request's ``controllers`` did, in the order asked, with its samples. ``null`` when the request named none.
@@ -5269,6 +7288,131 @@ export interface components {
             soc?: string | null;
         };
         /**
+         * TdsInitClamp
+         * @description One variable clamped at a limit during TDS initialisation.
+         */
+        TdsInitClamp: {
+            /**
+             * Model
+             * @description ANDES model of the clamped variable.
+             */
+            model: string;
+            /**
+             * Idx
+             * @description Idx of the device, as a string.
+             */
+            idx: string;
+            /**
+             * Var
+             * @description The clamped variable's name within the model.
+             */
+            var: string;
+            /**
+             * Limit Name
+             * @description The name of the limit parameter.
+             */
+            limit_name: string;
+            /**
+             * Limit Val
+             * @description The limit's value.
+             */
+            limit_val: number;
+            /**
+             * Unconstr
+             * @description The unconstrained value ANDES computed for the variable.
+             */
+            unconstr: number;
+        };
+        /**
+         * TdsInitRequest
+         * @description Request body for ``POST /sessions/{id}/tds/init``.
+         */
+        TdsInitRequest: {
+            /**
+             * Test Init
+             * @description Whether ANDES checks the initialisation residuals against ``TDS.config.tol``, gives its verdict in ``test_ok`` and logs the clamped limits and mismatched equations to the session messages when the check fails. ``false`` initialises without the check: ``test_ok`` is then ``null``, and ``clamped`` and ``residuals`` still list what the System shows. Applies to this call only; the case's own setting is put back.
+             * @default true
+             */
+            test_init: boolean;
+        };
+        /**
+         * TdsInitResidual
+         * @description One equation with a non-zero residual after TDS initialisation.
+         */
+        TdsInitResidual: {
+            /**
+             * Name
+             * @description The variable's ``dae.xy_name`` name.
+             */
+            name: string;
+            /**
+             * Mismatch
+             * @description The equation's residual; ``null`` when the residual is NaN.
+             */
+            mismatch: number | null;
+            /**
+             * Equation
+             * @description ANDES's equation string, empty where the model gives none.
+             */
+            equation: string;
+        };
+        /**
+         * TdsInitResult
+         * @description Result of ``POST /sessions/{id}/tds/init``.
+         */
+        TdsInitResult: {
+            /**
+             * Initialized
+             * @description ``true`` means the System is ready for a time-domain run and a later ``POST /tds`` (or a streamed run) continues from this initialisation, with the integrator it names (QNDF included): its record starts at the first step rather than at 0 s, and it is reported as not converged when ``test_ok`` is ``false``. With a fixed step it solves the steps a run from scratch does; the two variable-step integrators choose other steps before the first event, and the same steps after it.
+             */
+            initialized: boolean;
+            /**
+             * Test Ok
+             * @description ``null`` when the request's ``test_init`` was false and ANDES did not check (it does not mean the case initialised cleanly: read ``residuals``); otherwise the verdict of ANDES's residual test. ``false`` means initialisation residuals reach ``TDS.config.tol`` or are NaN, and the two lists name the causes (clamped variables) and the effects (equations with nonzero residuals), the same tables ANDES logs.
+             */
+            test_ok?: boolean | null;
+            /**
+             * Test Init
+             * @description The ``test_init`` setting the call used, as the pflow result's ``settings`` does.
+             */
+            test_init: boolean;
+            /**
+             * N States
+             * @description Number of state variables (``dae.n``).
+             */
+            n_states: number;
+            /**
+             * N Algeb
+             * @description Number of algebraic variables (``dae.m``).
+             */
+            n_algeb: number;
+            /**
+             * Max Residual
+             * @description The largest absolute initialisation residual that is a number, over the equations ANDES checks; 0 when there are none.
+             */
+            max_residual: number;
+            /**
+             * Nan Residuals
+             * @description How many initialisation residuals are NaN.
+             */
+            nan_residuals: number;
+            /**
+             * Clamped
+             * @description Variables clamped at limits during initialisation, read from the limiters whether or not the test ran. A clamp can stand on a case that passes the test. Empty when nothing clamped.
+             */
+            clamped?: components["schemas"]["TdsInitClamp"][];
+            /**
+             * Residuals
+             * @description Equations whose initialisation residual reaches ``TDS.config.tol`` or is NaN, by the rule of ANDES's test, listed whether or not the test ran. Empty when the case initialised to a steady state.
+             */
+            residuals?: components["schemas"]["TdsInitResidual"][];
+            /**
+             * Diagnostics Truncated
+             * @description ``true`` when ``clamped`` or ``residuals`` was cut at 500 rows; when the test ran and failed, the full tables are in the session messages.
+             */
+            diagnostics_truncated: boolean;
+        };
+        /**
          * TdsRunRequest
          * @description Request body for ``POST /sessions/{id}/tds`` (batch mode).
          *
@@ -5283,9 +7427,14 @@ export interface components {
             tf: number;
             /**
              * H
-             * @description Integration step size, in seconds, applied as ANDES ``TDS.config.tstep``. With the default ``trapezoidal`` integrator this is the fixed step; ``None`` keeps the ANDES default (1/30 s). The ``qndf`` integrator picks its own step and ignores it; bound its step with ``tds_config_overrides.max_step`` instead.
+             * @description Integration step size, in seconds, applied as ANDES ``TDS.config.tstep``. With the default ``trapezoidal`` integrator this is the fixed step, and so it is with ``backeuler``; ``None`` keeps the ANDES default (1/30 s). The ``trap_adapt`` and ``qndf`` integrators pick their own steps and ignore it; bound their steps with ``tds_config_overrides.max_step`` and ``min_step`` instead.
              */
             h?: number | null;
+            /**
+             * Load Model
+             * @description How loads behave in the run: ``impedance`` (the default), ``power`` or ``as-case``. A Sienna session takes all three; an ANDES session takes it left out or ``impedance``, which is what ANDES does, and refuses the other two with 422.
+             */
+            load_model?: ("impedance" | "power" | "as-case") | null;
             /**
              * Vars
              * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes and angles; ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``gen_power`` adds their electrical ``Pe`` / ``Qe``; ``line_flow`` adds active and reactive power at each line's bus1 terminal; ``load_pq`` adds each PQ load's consumption. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime: it returns the values of ``dae_vars`` instead, and accepts this field for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v", "gen_state"]`` when omitted on the streaming path.
@@ -5298,11 +7447,11 @@ export interface components {
             dae_vars?: string[] | null;
             /**
              * Integrator
-             * @description DAE integrator. ``"trapezoidal"`` (default) maps to ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``). ``"qndf"`` selects the variable-order, variable-step QNDF (NDF) method and forces ``fixt = 0`` so ANDES enables LTE-driven step control. Combine ``integrator="qndf"`` with the Auto preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing the values via ``tds_config_overrides``.
+             * @description DAE integrator. ``"trapezoidal"`` (default) is ANDES's fixed-step Implicit Trapezoidal Method (``ss.TDS.config.method = "trapezoid"``), stepping at ``h``. ``"backeuler"`` is fixed-step backward Euler (``method = "backeuler"``), first order and so more damped, also stepping at ``h``. ``"trap_adapt"`` is the trapezoidal method with a variable step (``method = "trap_adapt"``) chosen from an estimate of the local error, one step against two half steps, held to ``rtol`` and ``atol``. ``"qndf"`` is the variable-order, variable-step QNDF (NDF) method (``method = "qndf"``). The two variable-step integrators run with ``fixt = 0``, ignore ``h`` and take ``rtol``, ``atol``, ``max_step`` and ``min_step`` from ``tds_config_overrides`` (the Auto preset is ``rtol=1e-3, atol=1e-6, max_step=0.05``). Any integrator can follow any other on the same System except ``qndf``, which keeps a history: after a run with another integrator it is refused with 422 until the case is reloaded.
              * @default trapezoidal
              * @enum {string}
              */
-            integrator: "trapezoidal" | "qndf";
+            integrator: "trapezoidal" | "trap_adapt" | "backeuler" | "qndf";
             /**
              * Controllers
              * @description Controllers that act while the run goes: each reads the frequency once a sample ``period`` and sets the power of a battery or another distributed generation device, on top of the device's own set-point. Two kinds, picked by ``type``: ``droop`` (power in proportion to the frequency deviation beyond a dead band) and ``ffr`` (a fixed power, once, for a set time when the frequency leaves a threshold or moves too fast). Powers are in MW, positive discharging, and frequencies in Hz. ``GET /sessions/{id}/tds/controllers`` lists the devices that can be named. A controller that names a device the case does not have is refused with 422 before anything runs. What each did comes back in the result's ``controllers``; when the run ends the devices' inputs are as they were. A later run that names the same controllers and goes on from where this one stopped (a larger ``tf``) keeps their state, so an ``ffr`` that has fired does not fire again. After a reload or a restored snapshot they start afresh, and it can. The streaming ``start_tds`` frame takes the same field. Sweeps do not take controllers.
@@ -5310,7 +7459,7 @@ export interface components {
             controllers?: (components["schemas"]["DroopController"] | components["schemas"]["FfrController"])[] | null;
             /**
              * Tds Config Overrides
-             * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ ``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances have no effect when ``integrator="trapezoidal"`` (the fixed-step path ignores ``reltol/abstol`` and uses ``h`` for stepping).
+             * @description Optional adaptive-integrator tolerance overrides. Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), ``atol`` (→ ``ss.TDS.config.abstol``), ``max_step`` (→ ``ss.TDS.config.dtmax``) and ``min_step`` (→ ``ss.TDS.config.dtmin_adapt``, the smallest step a variable-step integrator may shrink to), or the name of any ``ss.TDS.config`` field. An unknown key is refused with 422. So is a value that ANDES would take and then misbehave on: ``tstep`` must be finite and greater than 0, ``max_step`` (``dtmax``) and ``min_step`` (``dtmin_adapt``) finite and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and every other value a finite number. The tolerances and the two bounds apply to ``trap_adapt`` and ``qndf`` only: the fixed-step integrators ignore ``reltol/abstol`` and use ``h`` for stepping.
              */
             tds_config_overrides?: {
                 [key: string]: number;
@@ -5386,6 +7535,36 @@ export interface components {
             t: number;
         };
         /**
+         * Tolerances
+         * @description The tolerances a row is read against. A quantity absent from
+         *     ``quantities`` takes the default of ``engines/compare.py``; one with no
+         *     default is reported without a verdict.
+         */
+        Tolerances: {
+            /**
+             * Quantities
+             * @description Absolute tolerance per quantity, in the quantity's unit; it replaces the default for that quantity.
+             */
+            quantities?: {
+                [key: string]: number;
+            };
+            /**
+             * Frequency Hz
+             * @description Tolerance on the frequency of a matched mode, in hertz.
+             */
+            frequency_hz?: number;
+            /**
+             * Damping Ratio
+             * @description Tolerance on the damping ratio of a matched mode.
+             */
+            damping_ratio?: number;
+            /**
+             * Max Mode Distance
+             * @description The largest distance in the complex plane, in 1/s, at which two eigenvalues still count as one mode.
+             */
+            max_mode_distance?: number;
+        };
+        /**
          * TopologyEntry
          * @description One element in a topology summary.
          */
@@ -5412,6 +7591,11 @@ export interface components {
             params?: {
                 [key: string]: number | string | boolean;
             };
+            /**
+             * Key
+             * @description The element's key: a string that names it the same way in every engine that loads the case (``bus:7``, ``branch:7-8-1``, ``gen:1-1``, ``gen:1-1/exciter``), built from the case by the rule of section 4 of ``design/multiengine/spec.md``. ``idx`` stays the engine's own handle. ``null`` where the entry was built away from the key book.
+             */
+            key?: string | null;
             /**
              * Job Id
              * @description Job-registry id mirroring the mutation that produced this entry. Populated only when this ``TopologyEntry`` is the top-level response of an edit / PMU-add / profile-add routine; ``null`` for nested entries inside a ``TopologySummary``.
@@ -5538,10 +7722,107 @@ export interface components {
             /** @description The edit ``POST /sessions/{id}/redo-edit`` would put back: the one taken back last. ``null`` when there is none, which is the case after any new edit. */
             redo?: components["schemas"]["EditStep"] | null;
             /**
+             * Has Dynamics
+             * @description Whether the case carries dynamic models (a synchronous machine, an exciter, a governor, ...), so a client need not infer it from the model names in ``generators`` and ``controllers``. This server always sends true or false; ``null`` only means a server that does not report it.
+             */
+            has_dynamics?: boolean | null;
+            /**
              * Job Id
              * @description Job-registry id mirroring the routine that produced this topology snapshot: case load / reload, element delete / undo / redo, or blank-system create. ``null`` when the summary is a plain read (``GET /topology``).
              */
             job_id?: string | null;
+        };
+        /**
+         * TransformerRecord
+         * @description One two-winding transformer. ``r_pu`` and ``x_pu`` are per unit on the
+         *     bases the record states: ``rate_mva`` and the rated voltages
+         *     ``vn_from_kv`` and ``vn_to_kv`` (the transformer's own rating where the
+         *     engine holds it so, the system base and the bus voltages where it holds
+         *     them on those). ``rate_a_mva`` is a flow limit, not a base.
+         */
+        TransformerRecord: {
+            /**
+             * Key
+             * @description The transformer's TENSA key.
+             */
+            key: string;
+            /**
+             * From
+             * @description The number of the bus of the first winding.
+             */
+            from: number;
+            /**
+             * To
+             * @description The number of the bus of the second winding.
+             */
+            to: number;
+            /**
+             * Ckt
+             * @description The circuit id that tells parallel branches apart.
+             */
+            ckt: string;
+            /**
+             * R Pu
+             * @description The series resistance, per unit on rate_mva and vn_from_kv.
+             */
+            r_pu?: number | null;
+            /**
+             * X Pu
+             * @description The series reactance, per unit on rate_mva and vn_from_kv.
+             */
+            x_pu?: number | null;
+            /**
+             * Rate Mva
+             * @description The MVA base the impedances are given on.
+             */
+            rate_mva?: number | null;
+            /**
+             * Vn From Kv
+             * @description The rated voltage of the first winding, in kV.
+             */
+            vn_from_kv?: number | null;
+            /**
+             * Vn To Kv
+             * @description The rated voltage of the second winding, in kV.
+             */
+            vn_to_kv?: number | null;
+            /**
+             * Tap
+             * @description The off-nominal turns ratio, per unit.
+             */
+            tap?: number | null;
+            /**
+             * Shift Deg
+             * @description The phase shift, in degrees.
+             */
+            shift_deg?: number | null;
+            /**
+             * Rate A Mva
+             * @description The long-term flow limit, in MVA; 0 where the case gives none.
+             */
+            rate_a_mva?: number | null;
+            /**
+             * In Service
+             * @description Whether the transformer is in service.
+             * @default true
+             */
+            in_service: boolean;
+        };
+        /**
+         * UnmatchedKeysOut
+         * @description Keys present on one side only, sorted.
+         */
+        UnmatchedKeysOut: {
+            /**
+             * Missing In Comparison
+             * @description Keys the reference has and the comparison does not.
+             */
+            missing_in_comparison: string[];
+            /**
+             * Missing In Reference
+             * @description Keys the comparison has and the reference does not.
+             */
+            missing_in_reference: string[];
         };
         /**
          * UploadProfileResponse
@@ -5711,6 +7992,79 @@ export interface components {
              */
             files: components["schemas"]["WorkspaceFile"][];
         };
+        /**
+         * YbusEntrySchema
+         * @description One nonzero of the bus admittance matrix.
+         */
+        YbusEntrySchema: {
+            /**
+             * Row
+             * @description Row of the entry, from 0; bus_idx[row] is the bus of the row.
+             */
+            row: number;
+            /**
+             * Col
+             * @description Column of the entry, from 0; bus_idx[col] is the bus of the column.
+             */
+            col: number;
+            /**
+             * Re
+             * @description Real part (conductance), in per unit on the system base (base_mva).
+             */
+            re: number;
+            /**
+             * Im
+             * @description Imaginary part (susceptance), in per unit on the system base (base_mva).
+             */
+            im: number;
+        };
+        /**
+         * YbusResponse
+         * @description The bus admittance matrix of the loaded case, as sparse triplets.
+         */
+        YbusResponse: {
+            /**
+             * N Bus
+             * @description Number of buses; the matrix is n_bus by n_bus.
+             */
+            n_bus: number;
+            /**
+             * Base Mva
+             * @description The system MVA base the per-unit values are on: an admittance in siemens is the per-unit value times base_mva over the square of the bus's rated voltage in kV. Null when the case carries no usable base.
+             */
+            base_mva: number | null;
+            /**
+             * Bus Idx
+             * @description bus_idx[i] is the ANDES idx of the bus of row and column i.
+             */
+            bus_idx: string[];
+            /**
+             * Bus Key
+             * @description bus_key[i] is the key of the bus of row and column i, as GET /sessions/{id}/keys gives it; null for a bus that has none.
+             */
+            bus_key: (string | null)[];
+            /**
+             * Entries
+             * @description The nonzero entries of the bus admittance matrix ANDES builds from its lines, transformers and shunts (the models it flags ybus), in per unit on the system base; an entry not listed is zero. Device status at the time of the call is reflected (a line switched off adds nothing); the models that contribute are those present at setup. Loads and generators are not in it.
+             */
+            entries: components["schemas"]["YbusEntrySchema"][];
+        };
+        /**
+         * ZipFractions
+         * @description The constant impedance, current and power fractions of a load at 1.0 pu.
+         */
+        ZipFractions: {
+            /**
+             * P
+             * @description The active power's constant impedance, current and power fractions, summing to 1.
+             */
+            p: number[];
+            /**
+             * Q
+             * @description The reactive power's constant impedance, current and power fractions, summing to 1.
+             */
+            q: number[];
+        };
     };
     responses: never;
     parameters: never;
@@ -5758,7 +8112,16 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDescriptor"];
                 };
             };
-            /** @description Body included a client-supplied session_id (rejected). */
+            /** @description The named engine is not part of this build; the detail says why. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Body failed validation (an unknown engine, or a field other than engine). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6097,6 +8460,195 @@ export interface operations {
             };
         };
     };
+    getBusAdmittanceMatrix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["YbusResponse"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES setup() failed before the matrix could be built (recovery reload-case: POST /api/sessions/{id}/reload), or the matrix has more than 500000 nonzero entries, the most one answer carries. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    getNetworkMatrix: {
+        parameters: {
+            query?: {
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkMatrixResponse"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session yet, or the session's engine does not build network matrices (an ANDES session has GET /sessions/{id}/ybus instead). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The kind is not one of ptdf, lodf, ybus, incidence, or the matrix has more than 500000 entries, the most one answer carries. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyList"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseDocument"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     runPflow: {
         parameters: {
             query?: never;
@@ -6139,7 +8691,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. Also a setting outside its range (``tolerance``, ``max_iterations``), which needs no reload: fix the request. */
+            /** @description ANDES setup() failed, OR a previous EIG run mutated dae state (``TDS.initialized=True``). Either case requires POST /reload to recover. Also a setting outside its range (``tolerance``, ``max_iterations``, ``method``, ``n_factorize``, ``linesearch``), which needs no reload: fix the request. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7128,6 +9680,59 @@ export interface operations {
             };
         };
     };
+    initTds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TdsInitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TdsInitResult"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case has been loaded into this session. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The power flow did not converge, TDS.init raised, the case has no dynamic models, or the System is already initialised, by this route, a run or an eigenvalue analysis (the detail says which; call POST /api/sessions/{id}/reload to initialise again). A failed initialisation test is not an error: it answers 200 with test_ok false. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     listDaeVariables: {
         parameters: {
             query?: {
@@ -7291,6 +9896,154 @@ export interface operations {
                 };
             };
             /** @description The body is malformed, or a limit is exceeded: more than 64 series, more than 200000 samples in one, or a setting out of range. A series that is only too short to describe is not an error: it is answered with its own ``error``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    convertResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConvertResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvertResultResponse"];
+                };
+            };
+            /** @description The body is larger than 123 MiB. It is refused before it is read. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is malformed, the result does not fit its kind, the power flow did not converge, or a Sienna series name is not neutral. The detail says which. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    compareResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareResponse"];
+                };
+            };
+            /** @description The body is larger than 129 MiB, more than a request within the limits takes (2000000 samples in all). It is refused before it is read. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is malformed or a limit is exceeded, a document has problems (the detail names the side and each problem), or the two documents give one series different units. A series that only cannot be compared (too few samples, no overlap) is not an error: it is listed in ``not_comparable``. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    importExternalResults: {
+        parameters: {
+            query: {
+                /** @description The tool whose export the file is: ``tsat`` or ``psse``. */
+                source: "tsat" | "psse";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The export's bytes, verbatim: an ``.xlsx`` workbook. Not multipart form data, which is refused with 415. */
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalResultsResponse"];
+                };
+            };
+            /** @description The upload was interrupted before the whole file arrived. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is larger than 32 MiB, which is refused before it is read, or the workbook is past a bound of what an import reads: it unpacks to more than 128 MiB, or its first sheet has more than 200000 rows after the offset, more than 1024 columns, or more than 1000000 cells. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body was sent as multipart form data instead of the raw file. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ``source`` is missing or is not ``tsat`` or ``psse``, or the file is not an export the reader takes or holds nothing usable: an empty body, a file that is not an ``.xlsx`` workbook (``.xls``, ``.xlsb``, ``.ods`` and CSV are not read), or no signal columns or no samples after the format's offset. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7651,6 +10404,125 @@ export interface operations {
             };
         };
     };
+    listSupportedModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportedModels"];
+                };
+            };
+            /** @description Session not found or already closed. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session's engine is not ANDES, and only ANDES documents its models. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getModelDoc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelDoc"];
+                };
+            };
+            /** @description Session not found or already closed, or no model ANDES ships has that name (GET /api/sessions/{id}/models lists them). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session's engine is not ANDES, and only ANDES documents its models. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description ANDES failed to write the documentation of that model. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    listEngines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngineList"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -7828,7 +10700,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No case loaded — restore needs a case to scope the snapshot directory. */
+            /** @description No case loaded — restore needs a case to scope the snapshot directory. OR the snapshot was written by another engine (the detail points at opening the case file under the engine that saved it). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7978,7 +10850,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Conflicts detected (sha mismatch / version mismatch / addfile missing). Body is a ``BundleImportResponse`` with ``status='plan'`` so the UI can render the conflict resolver. */
+            /** @description Conflicts detected (sha mismatch / version mismatch / addfile missing). Body is a ``BundleImportResponse`` with ``status='plan'`` so the UI can render the conflict resolver. OR the bundle was written by another engine (a plain problem document; the detail points at opening the case file under the engine that wrote it). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8111,6 +10983,59 @@ export interface operations {
                 };
             };
             /** @description ANDES eigenvalue routine raised (e.g., singular Jacobian after regularization). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    runEigSweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EigSweepRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EigSweepResponse"];
+                };
+            };
+            /** @description Session not found or already closed, OR the case has no such model, device or parameter. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No case loaded OR the session has no converged power flow. Run /pflow first: the sweep solves each point's power flow with that run's settings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The values are not 1 to 200 finite numbers, OR a point failed: its system did not set up, its power flow did not converge, the eigenvalue routine failed, or it has another number of eigenvalues than the first point. The detail names the value. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8421,7 +11346,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Either: (a) the measurement set is under-determined (insufficient redundancy; gain matrix singular), or (b) the WLS Gauss-Newton did not converge within ``config.max_iter``. */
+            /** @description Either: (a) the measurement set is under-determined (insufficient redundancy; gain matrix singular), (b) the estimator did not converge within ``config.max_iter``, or (c) an invalid option (``SeOptionError``: unknown algorithm, non-positive tol, max_iter below 1, negative seed). */
             422: {
                 headers: {
                     [name: string]: unknown;

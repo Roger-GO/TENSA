@@ -51,11 +51,15 @@ import { useAnalyzeStore } from '@/store/analyze';
 import { useSweepStore } from '@/store/sweep';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useExampleCasesStore } from '@/store/exampleCases';
+import { useModelDocStore } from '@/store/modelDoc';
 import { useShortcutCheatsheetStore } from '@/store/shortcutCheatsheet';
 import { useHistoryStore } from '@/store/history';
 import { useEditJournalStore } from '@/store/editJournal';
 import { redoTarget, undoTarget, useLayoutHistoryStore } from '@/store/layoutHistory';
 import { useReportDialogStore } from '@/store/reportDialog';
+import { useYbusDialogStore } from '@/store/ybusDialog';
+import { useNetworkMatrixStore } from '@/store/networkMatrix';
+import { useCompareViewStore } from '@/store/compareView';
 import {
   useAbortRun,
   useCloneRedo,
@@ -87,6 +91,7 @@ import { openRunHistory } from '@/lib/runHistory';
 import { saveHtmlReport } from '@/lib/saveHtmlReport';
 import { useSaveOpenCase } from '@/lib/useSaveOpenCase';
 import { SHORTCUTS } from '@/lib/shortcuts';
+import { engineHasOp } from '@/lib/engines';
 import { hasDynamicModels, runReadinessNow, type RunRoutine } from '@/lib/useRunReadiness';
 import { EIG_THEN_RELOAD } from '@/lib/runLock';
 import { FIGURE_FOR_A_PAPER } from '@/lib/figureWording';
@@ -213,6 +218,8 @@ interface CommandSets {
 function useCommandSets(): CommandSets {
   // ---- subscriptions used by gates + actions -----------------------------
   const sessionId = useSessionStore((s) => s.sessionId);
+  const engine = useSessionStore((s) => s.engine);
+  const engines = useSessionStore((s) => s.engines);
   const caseSelection = useCaseStore((s) => s.selection);
   const topology = useCurrentTopology();
   const topologyRefetching = useTopologyRefetching();
@@ -343,6 +350,9 @@ function useCommandSets(): CommandSets {
   const diagramHeld = useSldStore((s) => s.diagramHeld);
   const diagramVisible =
     topology !== null && topology.buses.length > 0 && !resultsViewActive && !diagramHeld;
+  // The Sienna engine builds the network matrices of the loaded case; an ANDES
+  // session has the Ybus dialog instead.
+  const networkMatricesAvailable = engineHasOp(engines, engine, 'network_matrix');
 
   // ---- the arrangement of the diagram -----------------------------------
   // Moves, Tidy diagram and alignments have a history of their own, kept by
@@ -541,9 +551,19 @@ function useCommandSets(): CommandSets {
         id: 'workspace.save-system',
         label: 'Save system as…',
         description:
-          'Writes the whole system to a new file in the workspace, as xlsx, raw or json, and leaves the case you opened as it is. To keep controller parameter edits in the format of the case, use Save parameter edits as case.',
+          'Writes the whole system to a new file in the workspace, in a format the engine writes (xlsx, raw, MATPOWER m or json), and leaves the case you opened as it is. To keep controller parameter edits in the format of the case, use Save parameter edits as case.',
         group: 'workspace',
-        keywords: ['save', 'save as', 'export', 'xlsx', 'raw', 'json', 'system', 'new file'],
+        keywords: [
+          'save',
+          'save as',
+          'export',
+          'xlsx',
+          'raw',
+          'matpower',
+          'json',
+          'system',
+          'new file',
+        ],
         action: () => __requestPaletteDialog('save-system'),
         when: () => sessionId !== null && topology !== null,
       },
@@ -922,6 +942,21 @@ function useCommandSets(): CommandSets {
                 ? 'The diagram of this case is not drawn, so there is nothing to make a figure of.'
                 : 'The diagram has no buses yet, so there is nothing to draw.',
       },
+      // The bus admittance matrix of the loaded case, read on demand: the dialog
+      // says what the read does (it sets the system up) before anything is asked
+      // of the server, and builds the CSV and MATLAB downloads in the browser.
+      {
+        id: 'export.ybus',
+        label: 'Admittance matrix (Ybus)…',
+        description:
+          'The bus admittance matrix of the loaded case, as sparse triplets: read it, filter and sort it, and download it as CSV or as a MATLAB file.',
+        group: 'export',
+        keywords: ['ybus', 'admittance', 'matrix', 'sparse', 'matlab', 'csv', 'network'],
+        action: () => useYbusDialogStore.getState().openDialog(),
+        when: () => sessionId !== null && topology !== null,
+        unavailableReason: () =>
+          sessionScopeDisabled ? null : 'Open a case first: the matrix is of the loaded case.',
+      },
 
       // ---- view ----------------------------------------------------------
       // v3 Unit 2 — IDE-style pane toggles. Each command mirrors a
@@ -1049,6 +1084,58 @@ function useCommandSets(): CommandSets {
         ],
         action: openPflowComparePanel,
         when: () => hasPflowHistory,
+      },
+      // The PTDF, LODF, Ybus or incidence matrix of the loaded case, built by
+      // the Sienna engine. Listed greyed out for an engine without the op:
+      // the matrices are a feature a user would look for, and the reason says
+      // where the ANDES equivalent is.
+      {
+        id: 'analysis.network-matrices',
+        label: 'Network matrices…',
+        description:
+          'The PTDF, LODF, Ybus or incidence matrix of the loaded case, built by the Sienna engine: a table labelled by element key, searchable, downloadable as CSV.',
+        group: 'view',
+        keywords: [
+          'matrix',
+          'matrices',
+          'ptdf',
+          'lodf',
+          'ybus',
+          'admittance',
+          'incidence',
+          'sienna',
+          'network',
+        ],
+        action: () => useNetworkMatrixStore.getState().openDialog(),
+        when: () => networkMatricesAvailable && topology !== null,
+        unavailableReason: () => {
+          if (sessionId === null) return null;
+          if (!networkMatricesAvailable) {
+            return 'Network matrices are built by the Sienna engine; an ANDES session has the Ybus dialog.';
+          }
+          return 'Open a case first: the matrix is of the loaded case.';
+        },
+      },
+      // Two results documents side by side: two kept runs, or a results
+      // document file for either side. Always offered: two files need no run.
+      {
+        id: 'view.compareResults',
+        label: 'Compare results…',
+        description:
+          'Two results side by side: the operating point first, then per quantity and element the largest and RMS difference against tolerances you can change, and the eigenvalue modes matched side by side.',
+        group: 'view',
+        keywords: [
+          'compare',
+          'difference',
+          'diff',
+          'delta',
+          'results',
+          'runs',
+          'tolerance',
+          'eigenvalues',
+          'a vs b',
+        ],
+        action: () => useCompareViewStore.getState().openCompareView(),
       },
       // v3.1 — full-space results view. Toggles
       // ``useLayoutStore.resultsViewActive``, which makes the AppShell
@@ -1416,6 +1503,28 @@ function useCommandSets(): CommandSets {
         action: toggleCheatsheet,
         shortcut: SHORTCUTS.cheatsheet,
       },
+      // ANDES's own documentation of every model it ships. It needs only a
+      // session, like the catalogue it lists. Read via getState, as the theme
+      // toggle does, so the registry's subscription set is unchanged.
+      {
+        id: 'help.model-doc',
+        label: 'Model documentation...',
+        description:
+          "Every model ANDES ships, by group, with ANDES's own documentation of each: parameters, variables and equations.",
+        group: 'help',
+        keywords: [
+          'model',
+          'documentation',
+          'docs',
+          'help',
+          'andes',
+          'parameters',
+          'equations',
+          'reference',
+        ],
+        action: () => useModelDocStore.getState().openDialog(),
+        when: () => sessionId !== null,
+      },
       // Dark-mode cycle (Unit 12). Cycles light → dark → system →
       // light via the theme slice. We read the action via
       // ``useThemeStore.getState().cycleTheme()`` so the closure
@@ -1514,6 +1623,7 @@ function useCommandSets(): CommandSets {
     abortableRun,
     abortMutation,
     diagramVisible,
+    networkMatricesAvailable,
     // Not only through `diagramVisible`: the figure says which of the three
     // reasons it has for not being there to draw.
     resultsViewActive,

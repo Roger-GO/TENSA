@@ -99,6 +99,7 @@ from tensa.core.disturbance import AlterSpec  # noqa: E402
 from tensa.core.example_catalog import Example, examples_dir, load_catalog  # noqa: E402
 from tensa.core.example_references import (  # noqa: E402
     MAP_QUANTITIES,
+    CrossEnginePlan,
     DisturbancePlan,
     EventRef,
     ExampleReference,
@@ -129,6 +130,14 @@ GROWTH_LIMIT = 2.0
 # A tight bound on how long a server takes to bind, and on one request.
 SERVER_START_TIMEOUT = 180.0
 REQUEST_TIMEOUT = 900.0
+# The engines ``--engines`` accepts. The ANDES run is the reference the others are held to.
+KNOWN_ENGINES = ("andes", "sienna")
+# The register of the differences the engines are allowed to have, read when it is present.
+KNOWN_DIFFERENCES = REPO_ROOT / "server" / "src" / "tensa" / "engines" / "known_differences.json"
+# The tolerance of a cross-engine eigenvalue comparison, in Hz and in damping ratio: the
+# ones the references' regression baselines already use for modes.
+EIG_CROSS_TOLERANCE_HZ = 0.002
+EIG_CROSS_TOLERANCE_DAMPING = 0.002
 # The line ``tensa serve`` prints, or uvicorn's, with the port the OS chose.
 _SERVING = re.compile(r"(?:serving|running on) http://127\.0\.0\.1:(\d+)")
 
@@ -423,6 +432,19 @@ def distinct_eigenvalues(matches: Sequence[dict[str, Any]]) -> int:
 
 
 @dataclass
+class EngineRun:
+    """What one engine's run of one case produced, for the cross-engine comparison."""
+
+    engine: str
+    pf: dict[str, Any] | None = None
+    tds_undisturbed: dict[str, Any] | None = None  # the traces answer of the 10 s run
+    tds_disturbance: dict[str, Any] | None = None  # the traces answer of the disturbance run
+    eig: dict[str, Any] | None = None
+    refused: str | None = None  # the refusal's message when the engine would not load or run
+    refusal_stage: str | None = None
+
+
+@dataclass
 class Measured:
     """What the runs of one case produced, for the reference checks to read."""
 
@@ -510,6 +532,174 @@ def _unit_suffix(quantity: str) -> str:
         if quantity.endswith(ending):
             return text
     return ""
+
+
+def wrap_angle_diff(angle: float) -> float:
+    """An angle difference wrapped to [-pi, pi) (decision 35)."""
+    return (angle + math.pi) % (2 * math.pi) - math.pi
+
+
+def _pf_by_key(pf: dict[str, Any], field: str) -> dict[str, float]:
+    """One per-bus power flow result re-keyed from the engine's idx to the element key.
+
+    The result carries ``keys`` per kind (``{"Bus": {"<idx>": "<key>"}}``); a value whose
+    idx has no key keeps its idx, so it is reported as unmatched rather than lost.
+    """
+    values = pf.get(field) or {}
+    lookup = (pf.get("keys") or {}).get("Bus") or {}
+    return {str(lookup.get(idx, idx)): float(v) for idx, v in values.items()}
+
+
+def compare_power_flow(
+    andes_pf: dict[str, Any], sienna_pf: dict[str, Any], plan: CrossEnginePlan
+) -> list[dict[str, Any]]:
+    """Compare two power flow results by key: magnitudes, angles, losses and slack power.
+
+    Each entry of the answer is one quantity group: ``passed``, the ``worst`` difference,
+    the ``key`` it is at, how many values were compared (``n``) and the ``unmatched`` keys
+    of either side, which fail the check and are never ignored (spec section 10). Angle
+    differences are wrapped to [-pi, pi) before the absolute value (decision 35).
+    """
+    groups: list[dict[str, Any]] = []
+    for pf_field, tolerance, wrap in (
+        ("bus_voltages", plan.pf_voltage_pu, False),
+        ("bus_angles", plan.pf_angle_rad, True),
+    ):
+        reference = _pf_by_key(andes_pf, pf_field)
+        candidate = _pf_by_key(sienna_pf, pf_field)
+        unmatched = sorted(set(reference) ^ set(candidate))
+        worst, worst_key = 0.0, None
+        for key in sorted(set(reference) & set(candidate)):
+            gap = abs(reference[key] - candidate[key])
+            if wrap:
+                gap = abs(wrap_angle_diff(reference[key] - candidate[key]))
+            if gap >= worst:
+                worst, worst_key = gap, key
+        groups.append(
+            {
+                "passed": not unmatched and worst <= tolerance,
+                "worst": worst,
+                "key": worst_key,
+                "n": len(set(reference) & set(candidate)),
+                "unmatched": unmatched,
+            }
+        )
+    summary_a = andes_pf.get("summary") or {}
+    summary_s = sienna_pf.get("summary") or {}
+    scalars = []
+    for summary_field in ("loss_p", "slack_p"):
+        a, s = summary_a.get(summary_field), summary_s.get(summary_field)
+        scalars.append(None if a is None or s is None else abs(float(a) - float(s)))
+    groups.append(
+        {
+            "passed": all(g is not None and g <= plan.pf_power_mw for g in scalars),
+            "worst": max((g for g in scalars if g is not None), default=None),
+            "key": None,
+            "n": sum(g is not None for g in scalars),
+            "unmatched": [],
+        }
+    )
+    return groups
+
+
+def evaluate_compare_rows(
+    comparison: dict[str, Any], rms_tolerance: float, max_tolerance: float
+) -> dict[str, Any]:
+    """Read the answer of ``POST /compare`` against the series tolerances.
+
+    Every compared series must be inside both bounds, and no series may be unmatched
+    (spec section 10: unmatched keys are listed, never ignored). The answer names the
+    worst RMS row and the worst single difference with its time.
+    """
+    rows = list(comparison.get("series") or [])
+    unmatched = sorted(
+        (comparison.get("unmatched_series_reference") or [])
+        + (comparison.get("unmatched_series_comparison") or [])
+    )
+    worst_rms = max(rows, key=lambda r: float(r["rms_diff"]), default=None)
+    worst_max = max(rows, key=lambda r: float(r["max_diff"]), default=None)
+    passed = (
+        not unmatched
+        and all(
+            float(r["rms_diff"]) <= rms_tolerance and float(r["max_diff"]) <= max_tolerance
+            for r in rows
+        )
+        and bool(rows)
+    )
+    return {
+        "passed": passed,
+        "n": len(rows),
+        "unmatched": unmatched,
+        "worst_rms": None if worst_rms is None else float(worst_rms["rms_diff"]),
+        "worst_rms_row": worst_rms,
+        "worst_max": None if worst_max is None else float(worst_max["max_diff"]),
+        "worst_max_row": worst_max,
+    }
+
+
+def refusal_stage_of(detail: str) -> str | None:
+    """The stage of decision 38's vocabulary a Sienna refusal names, or ``None``."""
+    match = re.search(
+        r"\b(not_ready|arguments|disturbances|matrix|build|eig|internal)\b", detail
+    )
+    return match.group(1) if match else None
+
+
+def refusal_check(plan: CrossEnginePlan, refused: str | None, actual_stage: str | None) -> Check:
+    """The check of what the Sienna engine did with the case against what was expected."""
+    name = "Sienna refuses the case as expected"
+    base = {"name": name, "analysis": "pf", "kind": "cross-engine"}
+    if plan.sienna == "refused":
+        if refused is None:
+            return Check(
+                **base,
+                reference="the reference file (cross_engine.sienna = refused)",
+                tolerance="a refusal",
+                result="the case ran and agreed with ANDES: update the reference to sienna = pass",
+                passed=False,
+            )
+        result = f"refused: {refused}"
+        passed = True
+        if plan.refusal_stage is not None:
+            if actual_stage == plan.refusal_stage:
+                result += f", stage {actual_stage}"
+            else:
+                result += f", expected stage {plan.refusal_stage}, got {actual_stage or 'none'}"
+                passed = False
+        return Check(
+            **base,
+            reference="the reference file (cross_engine.sienna = refused)",
+            tolerance="a refusal",
+            result=result,
+            passed=passed,
+        )
+    assert refused is not None
+    return Check(
+        **base,
+        reference="the reference file (cross_engine.sienna is not refused)",
+        tolerance="a run, not a refusal",
+        result=f"expected a run, got a refusal: {refused}",
+        passed=False,
+    )
+
+
+def known_difference_summary(difference_id: str) -> str:
+    """The summary of one entry of the known-differences register."""
+    try:
+        entries = json.loads(KNOWN_DIFFERENCES.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ReferenceFileError(
+            f"known difference {difference_id!r}: {KNOWN_DIFFERENCES.name} is not present"
+        ) from exc
+    except OSError as exc:
+        raise ReferenceFileError(f"cannot read {KNOWN_DIFFERENCES.name}: {exc}") from exc
+    items = entries if isinstance(entries, list) else entries.get("known_differences", [])
+    entry = next((e for e in items if e.get("id") == difference_id), None)
+    if entry is None:
+        raise ReferenceFileError(
+            f"known difference {difference_id!r} is not in {KNOWN_DIFFERENCES.name}"
+        )
+    return str(entry.get("summary", ""))
 
 
 def _evaluate_map(check: ReferenceCheck, m: Measured, base: dict[str, str]) -> Check:
@@ -696,11 +886,16 @@ def running_server(workspace: Path) -> Iterator[str]:
 class Session:
     """A session of the server with one case loaded, and what the runs of it need."""
 
-    def __init__(self, api: Api, primary: str, addfiles: list[str]) -> None:
+    def __init__(
+        self, api: Api, primary: str, addfiles: list[str], engine: str = "andes"
+    ) -> None:
         self.api = api
         self.primary = primary
         self.addfiles = addfiles
-        self.id = api.post("/sessions")["session_id"]
+        self.engine = engine
+        # No body still means ANDES (spec section 9), so the single-engine path is unchanged.
+        body = {"engine": engine} if engine != "andes" else None
+        self.id = api.post("/sessions", body)["session_id"]
         try:
             self.topology = api.post(
                 f"/sessions/{self.id}/case",
@@ -734,11 +929,25 @@ class Session:
     def pflow(self, settings: dict[str, Any] | None = None) -> dict[str, Any]:
         return dict(self.api.post(f"/sessions/{self.id}/pflow", settings))
 
-    def tds(self, tf: float, names: Sequence[str], h: float | None = None) -> dict[str, Any]:
-        body: dict[str, Any] = {"tf": tf, "dae_vars": list(names)}
+    def tds(
+        self,
+        tf: float,
+        names: Sequence[str] | None = None,
+        h: float | None = None,
+        neutral: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"tf": tf}
+        if names is not None:
+            body["dae_vars"] = list(names)
         if h is not None:
             body["h"] = h
+        if neutral:
+            body["names"] = "neutral"
         return dict(self.api.post(f"/sessions/{self.id}/tds", body))
+
+    def keys(self) -> list[dict[str, Any]]:
+        """The session's keys as ``GET /sessions/{id}/keys`` lists them."""
+        return list(self.api.get(f"/sessions/{self.id}/keys")["keys"])
 
     def eig(self) -> dict[str, Any]:
         return dict(self.api.post(f"/sessions/{self.id}/eig"))
@@ -806,6 +1015,9 @@ def verify_case(
     reference: ExampleReference | None,
     *,
     replace_file: bool,
+    engines: Sequence[str] = ("andes",),
+    sienna_available: bool = False,
+    sienna_reason: str | None = None,
     log: Log = lambda text: None,
 ) -> tuple[CaseResult, Measured]:
     """Run every analysis of one case and check it. Never raises: a failure is in the result."""
@@ -819,7 +1031,18 @@ def verify_case(
     measured = Measured()
     started = time.monotonic()
     try:
-        _verify(api, example, reference, replace_file, result, measured, log)
+        _verify(
+            api,
+            example,
+            reference,
+            replace_file,
+            result,
+            measured,
+            log,
+            engines=engines,
+            sienna_available=sienna_available,
+            sienna_reason=sienna_reason,
+        )
     except ApiError as exc:
         result.error = str(exc)
     except Exception as exc:  # a harness fault must not stop the other cases
@@ -869,6 +1092,10 @@ def _verify(
     result: CaseResult,
     measured: Measured,
     log: Log,
+    *,
+    engines: Sequence[str] = ("andes",),
+    sienna_available: bool = False,
+    sienna_reason: str | None = None,
 ) -> None:
     session: Session | None = None
     try:
@@ -915,14 +1142,35 @@ def _verify(
             f"mismatch {float(pf.get('mismatch', math.nan)):.2g}",
             bool(pf["converged"]),
         )
+        andes_traces: dict[str, dict[str, Any]] = {}
         if "tds" in example.analyses and pf["converged"]:
-            _dynamic(session, example, reference, result, measured, log, replace_file)
+            _dynamic(
+                session, example, reference, result, measured, log, replace_file, andes_traces
+            )
         elif "tds" in example.analyses:
             result.notes.append(
                 "The power flow did not converge, so the time-domain and eigenvalue runs were skipped."
             )
         _pflow_variants(api, reference, primary, extra, result, measured, log)
         _reference_checks(reference, result, measured)
+        if "sienna" in engines and reference is not None and reference.cross_engine is not None:
+            if sienna_available:
+                _cross_engine(
+                    api,
+                    example,
+                    reference,
+                    primary,
+                    extra,
+                    measured,
+                    andes_traces,
+                    result,
+                    log,
+                )
+            else:
+                result.notes.append(
+                    "Cross-engine checks not run: Sienna is not available on this server "
+                    f"({sienna_reason})."
+                )
     finally:
         if session is not None:
             session.close()
@@ -973,6 +1221,7 @@ def _dynamic(
     measured: Measured,
     log: Log,
     replace_file: bool = False,
+    andes_traces: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     api = session.api
     remove = reference.remove_events if reference else []
@@ -1001,6 +1250,8 @@ def _dynamic(
         )
     session.pflow()
     run = session.tds(UNDISTURBED_TF, names.flat)
+    if andes_traces is not None and run.get("traces"):
+        andes_traces["undisturbed"] = run["traces"]
     ok, text = completes(run, UNDISTURBED_TF)
     result.sanity(
         "Undisturbed 10 s run completes",
@@ -1068,6 +1319,8 @@ def _dynamic(
             f"(the API records at most {MAX_DAE_VARS} variables)."
         )
     run = session.tds(plan.tf, wanted, plan.h)
+    if andes_traces is not None and run.get("traces"):
+        andes_traces["disturbance"] = run["traces"]
     ok, text = completes(run, plan.tf)
     what = plan.description + (f", at a step of {plan.h:.6g} s" if plan.h is not None else "")
     result.sanity(
@@ -1369,6 +1622,324 @@ def _reference_checks(
 
 
 # ----------------------------------------------------------------------------------------
+# The cross-engine run: the same case under Sienna, held to the ANDES run
+# ----------------------------------------------------------------------------------------
+
+
+def _pf_reference_text(plan: CrossEnginePlan, health_version: str | None) -> str:
+    version = f" {health_version}" if health_version else ""
+    return (
+        f"ANDES{version} run of the same case in the same verification run; the engines are "
+        f"held to each other at {plan.pf_voltage_pu:g} pu and {plan.pf_angle_rad:g} rad on "
+        "the power flow (decision 30)"
+    )
+
+
+def _cross_engine_pf(
+    andes_pf: dict[str, Any],
+    sienna_pf: dict[str, Any],
+    plan: CrossEnginePlan,
+    result: CaseResult,
+    health_version: str | None,
+) -> bool:
+    """The power flow comparison, always first (spec section 10). Returns agreement."""
+    reference = _pf_reference_text(plan, health_version)
+    groups = compare_power_flow(andes_pf, sienna_pf, plan)
+    magnitudes, angles, powers = groups
+    text = f"largest difference {magnitudes['worst']:.3g} pu (bus {magnitudes['key']}) over {magnitudes['n']} buses"
+    if magnitudes["unmatched"]:
+        text += "; unmatched keys: " + ", ".join(magnitudes["unmatched"][:5])
+    result.add(
+        Check(
+            "Sienna bus voltage magnitudes against ANDES",
+            "pf",
+            "cross-engine",
+            reference,
+            f"{plan.pf_voltage_pu:g} pu",
+            text,
+            bool(magnitudes["passed"]),
+            measured=float(magnitudes["worst"]),
+        )
+    )
+    worst_deg = math.degrees(float(angles["worst"]))
+    text = (
+        f"largest difference {worst_deg:.3g} deg (bus {angles['key']}) "
+        f"over {angles['n']} buses"
+    )
+    if angles["unmatched"]:
+        text += "; unmatched keys: " + ", ".join(angles["unmatched"][:5])
+    result.add(
+        Check(
+            "Sienna bus voltage angles against ANDES",
+            "pf",
+            "cross-engine",
+            reference,
+            f"{plan.pf_angle_rad:g} rad",
+            text,
+            bool(angles["passed"]),
+            measured=float(angles["worst"]),
+        )
+    )
+    worst_power = powers["worst"]
+    text = (
+        f"largest difference {worst_power:.3g} MW over {powers['n']} values"
+        if worst_power is not None
+        else "the runs did not give losses and slack power"
+    )
+    result.add(
+        Check(
+            "Sienna network losses and slack power against ANDES",
+            "pf",
+            "cross-engine",
+            reference,
+            f"{plan.pf_power_mw:g} MW",
+            text,
+            bool(powers["passed"]),
+            measured=None if worst_power is None else float(worst_power),
+        )
+    )
+    return all(bool(g["passed"]) for g in groups)
+
+
+def _results_document(
+    api: Api, engine: str, traces: dict[str, Any], keys: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """One run's traces as a neutral results document, through ``POST /results/convert``."""
+    converted = api.post(
+        "/results/convert",
+        {"kind": "tds", "engine": engine, "result": traces, "keys": keys},
+    )
+    return dict(converted["document"])
+
+
+def _cross_engine_series(
+    api: Api,
+    name: str,
+    andes_doc: dict[str, Any],
+    sienna_doc: dict[str, Any],
+    plan: CrossEnginePlan,
+    result: CaseResult,
+) -> None:
+    """Compare two runs' documents through ``POST /compare`` and record one check."""
+    comparison = api.post(
+        "/compare",
+        {
+            "reference": andes_doc,
+            "comparison": sienna_doc,
+            "tolerances": {
+                "quantities": {
+                    "voltage": plan.series_max_pu,
+                    "angle_rel": plan.series_max_pu,
+                    "rotor_speed": plan.series_max_pu,
+                    "rotor_angle_rel": plan.series_max_pu,
+                }
+            },
+        },
+    )
+    outcome = evaluate_compare_rows(comparison, plan.series_rms_pu, plan.series_max_pu)
+    tolerance = f"{plan.series_rms_pu:g} RMS and {plan.series_max_pu:g} largest, pu"
+    reference = "POST /compare of the two runs of the same case in the same verification run"
+    if plan.sienna.startswith("differ:") and plan.known_difference:
+        summary = known_difference_summary(plan.known_difference)
+        reference = f"known difference {plan.known_difference}: {summary}"
+        tolerance += f" (allows known difference {plan.known_difference})"
+    if outcome["n"] == 0:
+        text = "no series compared"
+    else:
+        rms_row = outcome["worst_rms_row"] or {}
+        max_row = outcome["worst_max_row"] or {}
+        text = (
+            f"worst RMS {outcome['worst_rms']:.3g} ({rms_row.get('quantity')}|{rms_row.get('key')}), "
+            f"worst single difference {outcome['worst_max']:.3g} at "
+            f"{float(max_row.get('max_diff_t', math.nan)):.3g} s over {outcome['n']} series"
+        )
+    if outcome["unmatched"]:
+        text += "; unmatched: " + ", ".join(outcome["unmatched"][:5])
+    result.add(
+        Check(
+            name,
+            "tds",
+            "cross-engine",
+            reference,
+            tolerance,
+            text,
+            bool(outcome["passed"]),
+            measured=outcome["worst_rms"],
+        )
+    )
+
+
+def _cross_engine_eig(
+    andes_modes: list[tuple[float, float]] | None,
+    sienna_eig: dict[str, Any],
+    result: CaseResult,
+) -> None:
+    """Hold each oscillatory Sienna mode to the nearest ANDES mode, as ``match_poles`` does."""
+    name = "Sienna eigenvalues against ANDES"
+    reference = (
+        "the eigenvalues of the ANDES run of the same case, matched by the nearest mode; "
+        "PSID's own docs call the validation of its small-signal results work in progress"
+    )
+    tolerance = f"{EIG_CROSS_TOLERANCE_HZ:g} Hz and {EIG_CROSS_TOLERANCE_DAMPING:g} in damping ratio"
+    sienna_modes = oscillatory_modes(sienna_eig)
+    if not andes_modes or not sienna_modes:
+        result.add(
+            Check(
+                name,
+                "eig",
+                "cross-engine",
+                reference,
+                tolerance,
+                "one engine returned no oscillatory mode",
+                False,
+            )
+        )
+        return
+    poles = [Pole(f, z, 1.0) for f, z in sienna_modes]
+    matches = match_poles(
+        poles, andes_modes, EIG_CROSS_TOLERANCE_HZ, EIG_CROSS_TOLERANCE_DAMPING
+    )
+    worst = max(matches, key=lambda m: max(m["gap_hz"], m["gap_damping"]))
+    text = (
+        f"worst match {worst['ring_down_hz']:.6g} Hz: {worst['gap_hz']:.3g} Hz and "
+        f"{worst['gap_damping']:.3g} apart over {len(matches)} modes"
+    )
+    result.add(
+        Check(
+            name,
+            "eig",
+            "cross-engine",
+            reference,
+            tolerance,
+            text,
+            all(m["matched"] for m in matches),
+            measured=float(worst["gap_hz"]),
+        )
+    )
+
+
+def _cross_engine(
+    api: Api,
+    example: Example,
+    reference: ExampleReference,
+    primary: str,
+    extra: list[str],
+    andes: Measured,
+    andes_traces: dict[str, dict[str, Any]],
+    result: CaseResult,
+    log: Log,
+    health_version: str | None = None,
+) -> None:
+    """Run the case under Sienna and hold it to the ANDES run, as the reference's plan says."""
+    plan = reference.cross_engine
+    assert plan is not None
+    run = EngineRun(engine="sienna")
+    session: Session | None = None
+    try:
+        session = Session(api, primary, extra, engine="sienna")
+    except ApiError as exc:
+        if exc.status in (409, 422):
+            run.refused = str(exc)
+            run.refusal_stage = refusal_stage_of(exc.detail)
+        else:
+            raise
+    if run.refused is None and session is not None:
+        try:
+            log("sienna power flow")
+            run.pf = session.pflow()
+        except ApiError as exc:
+            if exc.status in (409, 422):
+                run.refused = str(exc)
+                run.refusal_stage = refusal_stage_of(exc.detail)
+            else:
+                raise
+    agreed = False
+    if run.refused is not None:
+        result.add(refusal_check(plan, run.refused, run.refusal_stage))
+    else:
+        assert session is not None and run.pf is not None
+        if not run.pf["converged"]:
+            result.add(
+                Check(
+                    "Sienna power flow converges",
+                    "pf",
+                    "cross-engine",
+                    _pf_reference_text(plan, health_version),
+                    "converged within the iteration limit",
+                    f"converged {run.pf['converged']}: a dynamic comparison from a different "
+                    "operating point is meaningless",
+                    False,
+                )
+            )
+        else:
+            assert andes.pf is not None
+            agreed = _cross_engine_pf(andes.pf, run.pf, plan, result, health_version)
+    if agreed and session is not None and "tds" in example.analyses:
+        remove = reference.remove_events
+        plan_d = reference.disturbance
+        andes_keys = andes.pf.get("keys") if andes.pf else None
+        try:
+            log("sienna undisturbed run")
+            session.fresh(remove, keep_events=False)
+            session.pflow()
+            sienna_run = session.tds(UNDISTURBED_TF, neutral=True)
+            run.tds_undisturbed = sienna_run.get("traces")
+            if run.tds_undisturbed and andes_traces.get("undisturbed"):
+                sienna_keys = session.keys()
+                andes_doc = _results_document(
+                    api, "andes", andes_traces["undisturbed"], andes_keys or []
+                )
+                sienna_doc = _results_document(api, "sienna", run.tds_undisturbed, sienna_keys)
+                _cross_engine_series(
+                    api,
+                    "Sienna undisturbed 10 s run against ANDES",
+                    andes_doc,
+                    sienna_doc,
+                    plan,
+                    result,
+                )
+        except ApiError as exc:
+            if exc.status in (409, 422):
+                run.refused = str(exc)
+                run.refusal_stage = refusal_stage_of(exc.detail)
+                result.add(refusal_check(plan, run.refused, run.refusal_stage))
+                session.close()
+                return
+            raise
+        if plan_d is not None:
+            log("sienna disturbance run")
+            session.fresh(remove, keep_events=True)
+            session.disturb(plan_d.specs)
+            session.pflow()
+            sienna_run = session.tds(plan_d.tf, neutral=True, h=plan_d.h)
+            run.tds_disturbance = sienna_run.get("traces")
+            if run.tds_disturbance and andes_traces.get("disturbance"):
+                sienna_keys = session.keys()
+                andes_doc = _results_document(
+                    api, "andes", andes_traces["disturbance"], andes_keys or []
+                )
+                sienna_doc = _results_document(api, "sienna", run.tds_disturbance, sienna_keys)
+                _cross_engine_series(
+                    api,
+                    "Sienna disturbance run against ANDES",
+                    andes_doc,
+                    sienna_doc,
+                    plan,
+                    result,
+                )
+        if "eig" in example.analyses:
+            log("sienna eigenvalues")
+            session.fresh(remove, keep_events=False)
+            session.pflow()
+            run.eig = session.eig()
+            _cross_engine_eig(andes.modes, run.eig, result)
+        if plan.sienna == "refused":
+            result.add(refusal_check(plan, None, None))
+    if session is not None:
+        session.close()
+
+
+# ----------------------------------------------------------------------------------------
 # Reports
 # ----------------------------------------------------------------------------------------
 
@@ -1379,9 +1950,28 @@ def build_report(
     url: str,
     own_server: bool,
     seconds: float,
+    engines: Sequence[str] = ("andes",),
+    sienna_available: bool = False,
+    sienna_reason: str | None = None,
 ) -> dict[str, Any]:
     checks = [c for r in results for c in r.checks]
     verified = [c for c in checks if c.kind not in ("sanity", "regression-baseline")]
+    cross_engine = None
+    if "sienna" in engines:
+        cross_engine = {
+            "sienna_available": sienna_available,
+            "unavailable_reason": None if sienna_available else sienna_reason,
+            "cases": {
+                r.id: (
+                    "compared"
+                    if any(c.kind == "cross-engine" for c in r.checks)
+                    else "skipped"
+                    if r.reference_file
+                    else "no cross-engine block"
+                )
+                for r in results
+            },
+        }
     return {
         "generated": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
         "tensa": health.get("version"),
@@ -1401,6 +1991,7 @@ def build_report(
             "sanity": sum(c.kind == "sanity" for c in checks),
         },
         "cases": [{**asdict(r), "passed": r.passed} for r in results],
+        **({"cross_engine": cross_engine} if cross_engine is not None else {}),
     }
 
 
@@ -1430,6 +2021,27 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"{counts['regression_baselines']} are regression baselines, TENSA's own earlier output: "
         f"they catch a change and verify nothing. {counts['sanity']} are sanity checks that "
         "need no reference.",
+    ]
+    if any(c["kind"] == "cross-engine" for case in report["cases"] for c in case["checks"]):
+        lines.append(
+            '"cross-engine" checks compare the two engines of this server with each other; '
+            "they verify the Sienna engine against ANDES, which is TENSA's reference engine."
+        )
+    cross = report.get("cross_engine")
+    if cross is not None:
+        compared = sum(v == "compared" for v in cross["cases"].values())
+        skipped = sum(v == "skipped" for v in cross["cases"].values())
+        available = "yes" if cross["sienna_available"] else f"no ({cross['unavailable_reason']})"
+        lines += [
+            "",
+            "## Cross-engine (ANDES against Sienna)",
+            "",
+            f"Sienna available: {available}. {compared} cases compared, {skipped} skipped "
+            "(no cross-engine block in the reference, or Sienna not available). The power "
+            "flow is compared first; a dynamic difference that starts from a different "
+            "operating point is reported as that.",
+        ]
+    lines += [
         "",
         "| Case | Result | Checks | Seconds |",
         "| --- | --- | --- | --- |",
@@ -1481,6 +2093,9 @@ def record_baselines(
         document = json.loads(path.read_text(encoding="utf-8"))
         changed = False
         for check in document.get("checks", []):
+            # Cross-engine checks are not baselines: their expected is computed each run.
+            if check.get("kind") == "cross-engine":
+                continue
             if check.get("kind") != "regression-baseline" or check["quantity"] in MAP_QUANTITIES:
                 continue
             ref = ReferenceCheck.model_validate(check)
@@ -1583,7 +2198,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write the checks of the cases that passed into their catalog entries",
     )
+    parser.add_argument(
+        "--engines",
+        default="andes",
+        metavar="LIST",
+        help="comma-separated engines to run each case under (default: andes; "
+        "andes,sienna runs the cross-engine checks of the reference files)",
+    )
     return parser
+
+
+def parse_engines(text: str) -> list[str]:
+    """The ``--engines`` list, checked: known engines, ANDES first (it is the reference)."""
+    engines = [part.strip() for part in text.split(",") if part.strip()]
+    for name in engines:
+        if name not in KNOWN_ENGINES:
+            raise ValueError(f"unknown engine {name!r} in --engines")
+    if not engines or engines[0] != "andes":
+        raise ValueError("--engines must start with andes")
+    return engines
 
 
 def select_examples(ids: Sequence[str], defaults: bool) -> list[Example]:
@@ -1610,6 +2243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     with contextlib.suppress(ValueError):  # not the main thread
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
+        engines = parse_engines(args.engines)
         examples = select_examples(args.ids, args.defaults)
         references = {e.id: load_reference(e.id) for e in examples}
     except (ValueError, ReferenceFileError) as exc:
@@ -1636,6 +2270,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 url, own = stack.enter_context(running_server(workspace)), True
             health = Api(url).get("/health")
+            sienna_available, sienna_reason = False, None
+            if "sienna" in engines:
+                engines_info = Api(url).get("/engines")
+                sienna = next(
+                    (e for e in engines_info["engines"] if e["name"] == "sienna"), None
+                )
+                sienna_available = bool(sienna and sienna.get("available"))
+                sienna_reason = (
+                    None
+                    if sienna_available
+                    else (sienna or {}).get("unavailable_reason")
+                    or "not listed by GET /engines"
+                )
         except (RuntimeError, ApiError, OSError) as exc:
             print(f"verify_example_cases: {exc}", file=sys.stderr)
             return 2
@@ -1647,6 +2294,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 example,
                 references[example.id],
                 replace_file=own,
+                engines=engines,
+                sienna_available=sienna_available,
+                sienna_reason=sienna_reason,
                 log=log_for(example.id),
             )
             results.append(result)
@@ -1656,7 +2306,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-    report = build_report(results, health, url, own, time.monotonic() - started)
+    report = build_report(
+        results,
+        health,
+        url,
+        own,
+        time.monotonic() - started,
+        engines=engines,
+        sienna_available=sienna_available,
+        sienna_reason=sienna_reason,
+    )
     if args.json:
         args.json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     page = render_markdown(report)

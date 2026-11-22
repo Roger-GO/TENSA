@@ -6,15 +6,19 @@
  * helper. (The panel-picker field ``activeRightDockTopPanel`` was
  * retired in v3 Unit 15 — the layout slice now owns dock state.)
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TDS_CONFIG,
+  DEFAULT_TDS_INTEGRATOR,
+  DEFAULT_TDS_TOLERANCE_OVERRIDES,
   MAX_TDS_DAE_VARS,
+  TDS_INTEGRATORS,
   TDS_VAR_GROUPS,
   useUiStore,
   validateTdsConfig,
+  validateTdsToleranceOverrides,
 } from '@/store/ui';
-import type { TdsConfig } from '@/store/ui';
+import type { TdsConfig, TdsToleranceOverrides } from '@/store/ui';
 
 function resetUiStore() {
   useUiStore.setState({
@@ -176,5 +180,104 @@ describe('validateTdsConfig', () => {
     expect(errors).toHaveProperty('tf');
     expect(errors).toHaveProperty('vars');
     expect(errors).toHaveProperty('maxRateHz');
+  });
+});
+
+describe('validateTdsToleranceOverrides (min_step)', () => {
+  const draft = (overrides: Partial<TdsToleranceOverrides> = {}): TdsToleranceOverrides => ({
+    ...DEFAULT_TDS_TOLERANCE_OVERRIDES,
+    ...overrides,
+  });
+
+  it('accepts the defaults, min_step 0 among them', () => {
+    expect(validateTdsToleranceOverrides(draft())).toEqual({});
+  });
+
+  it('refuses a negative or non-finite min_step', () => {
+    expect(validateTdsToleranceOverrides(draft({ minStep: -1e-6 })).minStep).toBe('Must be >= 0');
+    expect(validateTdsToleranceOverrides(draft({ minStep: Number.NaN })).minStep).toBe(
+      'Enter a finite number',
+    );
+    expect(
+      validateTdsToleranceOverrides(draft({ minStep: Number.POSITIVE_INFINITY })).minStep,
+    ).toBe('Enter a finite number');
+  });
+
+  it('refuses a min_step above max_step, and allows one equal to it', () => {
+    expect(validateTdsToleranceOverrides(draft({ minStep: 0.1, maxStep: 0.05 })).minStep).toBe(
+      'Must be <= max_step',
+    );
+    expect(validateTdsToleranceOverrides(draft({ minStep: 0.05, maxStep: 0.05 }))).toEqual({});
+  });
+
+  it('leaves the pair to max_step when max_step is itself refused', () => {
+    const errors = validateTdsToleranceOverrides(draft({ minStep: 0.1, maxStep: -1 }));
+    expect(errors.maxStep).toBe('Must be > 0');
+    expect(errors).not.toHaveProperty('minStep');
+  });
+});
+
+describe('useUiStore: the persisted integrator choice', () => {
+  const KEY = 'andes-ui-tds-integrator';
+  const seed = (state: Record<string, unknown>, version = 0) =>
+    window.sessionStorage.setItem(KEY, JSON.stringify({ state, version }));
+
+  afterEach(() => {
+    window.sessionStorage.removeItem(KEY);
+    useUiStore.setState({
+      tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
+      tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },
+    });
+  });
+
+  it('a payload from before min_step loads with min_step 0 and keeps the rest', async () => {
+    seed({
+      tdsIntegrator: 'qndf-manual',
+      tdsToleranceOverrides: { rtol: 5e-4, atol: 2e-6, maxStep: 0.02 },
+    });
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().tdsIntegrator).toBe('qndf-manual');
+    expect(useUiStore.getState().tdsToleranceOverrides).toEqual({
+      rtol: 5e-4,
+      atol: 2e-6,
+      maxStep: 0.02,
+      minStep: 0,
+    });
+  });
+
+  it('keeps each of the six choices and a min_step that was stored', async () => {
+    for (const choice of TDS_INTEGRATORS) {
+      seed({
+        tdsIntegrator: choice,
+        tdsToleranceOverrides: { rtol: 1e-3, atol: 1e-6, maxStep: 0.05, minStep: 1e-5 },
+      });
+      await useUiStore.persist.rehydrate();
+      expect(useUiStore.getState().tdsIntegrator).toBe(choice);
+      expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(1e-5);
+    }
+  });
+
+  it('an integrator that is not one of the six falls back to the default, at any version', async () => {
+    for (const version of [0, 1]) {
+      useUiStore.setState({ tdsIntegrator: 'qndf-manual' });
+      seed({ tdsIntegrator: 'dopri-auto', tdsToleranceOverrides: { rtol: 1e-3 } }, version);
+      await useUiStore.persist.rehydrate();
+      expect(useUiStore.getState().tdsIntegrator).toBe(DEFAULT_TDS_INTEGRATOR);
+    }
+  });
+
+  it('a store created over a payload from before min_step has it from the start', async () => {
+    seed({
+      tdsIntegrator: 'trapezoidal',
+      tdsToleranceOverrides: { rtol: 2e-3, atol: 1e-6, maxStep: 0.05 },
+    });
+    vi.resetModules();
+    const fresh = await import('@/store/ui');
+    expect(fresh.useUiStore.getState().tdsToleranceOverrides).toEqual({
+      rtol: 2e-3,
+      atol: 1e-6,
+      maxStep: 0.05,
+      minStep: 0,
+    });
   });
 });

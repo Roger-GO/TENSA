@@ -11,6 +11,7 @@ import type {
   CpfResult,
   EigParticipationResponse,
   EigResult,
+  EigSweepResponse,
   SeMeasurementsGeneratedResponse,
   SeResult,
   SessionId,
@@ -40,19 +41,114 @@ import { failJob, reconcileJobSuccess, registerJob } from './jobGlue';
  * - 422 ``EigComputationError`` — ANDES routine raised (singular
  *   Jacobian after regularization, etc.); surfaced as a banner.
  */
-export function useEigRun(): UseMutationResult<EigResult, Error, SessionId> {
+/**
+ * What an eigenvalue run is started with: the session, and for an engine that
+ * takes one (Sienna) the load model (`load_model` in the body; left out, the
+ * server's default, `impedance`). A bare session id is the run with no
+ * choice, which is how most callers start it.
+ */
+export interface EigRunVars {
+  sessionId: SessionId;
+  loadModel?: string;
+}
+
+function eigRunVars(vars: SessionId | EigRunVars): EigRunVars {
+  return typeof vars === 'string' ? { sessionId: vars } : vars;
+}
+
+export function useEigRun(): UseMutationResult<EigResult, Error, SessionId | EigRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sessionId: SessionId) => {
+    mutationFn: async (vars: SessionId | EigRunVars) => {
+      const { sessionId, loadModel } = eigRunVars(vars);
       return await andesClient.post<EigResult>(`/sessions/${encodeURIComponent(sessionId)}/eig`, {
-        body: {},
+        body: loadModel === undefined ? {} : { load_model: loadModel },
         timeoutMs: TIMEOUTS.pflowRun,
       });
     },
     onMutate: () => ({ jobId: registerJob('eig') }),
-    onSuccess: (data, sessionId, ctx) => {
+    onSuccess: (data, vars, ctx) => {
       useAnalyzeStore.getState().setEigResult(data);
-      queryClient.setQueryData(queryKeys.eig(sessionId), data);
+      queryClient.setQueryData(queryKeys.eig(eigRunVars(vars).sessionId), data);
+      if (ctx) reconcileJobSuccess(ctx.jobId, data);
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx) failJob(ctx.jobId, err);
+    },
+  });
+}
+
+/**
+ * Request body of ``POST /api/sessions/{id}/eig/sweep``, with the session it
+ * goes to. All four fields are required by the server.
+ */
+export interface EigSweepVars {
+  sessionId: SessionId;
+  /** ANDES model name, e.g. 'GENROU'. */
+  model: string;
+  /**
+   * idx of the device within the model, as text, e.g. '1'. The server types
+   * it as a string and matches it to a numeric idx by its text.
+   */
+  idx: string;
+  /** Parameter name as ANDES names it, e.g. 'M'. */
+  param: string;
+  /** The values to take the eigenvalues at, in order: 1 to 200 finite numbers. */
+  values: number[];
+}
+
+/**
+ * ``POST /api/sessions/{id}/eig/sweep``: the eigenvalues at each of a list of
+ * values of one parameter of one device (root locus data). Synchronous, like
+ * ``POST /eig``. Each value costs a read, a setup, a power flow and an
+ * eigenvalue analysis of the case, so the time grows with the number of
+ * values and so does the timeout (``TIMEOUTS.eigSweepPoint`` for each value).
+ *
+ * ``points[i]`` of the answer is at ``values[i]`` of the request. No mode is
+ * followed through the sweep, so a client drawing root loci matches the modes
+ * itself. ``tds_initialized`` is not changed by the sweep, and a sweep whose
+ * points differ in ``mode_count`` is refused (422), not answered with lists of
+ * different lengths. The server runs it as a job of kind ``eig``, as it does
+ * the single run, and so does the client's mirror of it.
+ *
+ * On success: writes through to ``useAnalyzeStore.setEigSweepResult`` so the
+ * sweep panel reads it synchronously, and seeds the TanStack Query cache at
+ * ``queryKeys.eigSweep(sessionId)``.
+ *
+ * Errors:
+ *
+ * - 404: session not found or already closed, OR the case has no such model,
+ *   device or parameter.
+ * - 409: no case loaded OR the session has no converged power flow. Run
+ *   /pflow first: the sweep solves each point's power flow with that run's
+ *   settings.
+ * - 422: the values are not 1 to 200 finite numbers, OR a point failed: its
+ *   system did not set up, its power flow did not converge, the eigenvalue
+ *   routine failed, or it has another number of eigenvalues than the first
+ *   point. The detail names the value. A failed point fails the whole sweep:
+ *   no answer carries a point without its eigenvalues.
+ */
+export function useEigSweepRun(): UseMutationResult<EigSweepResponse, Error, EigSweepVars> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sessionId, model, idx, param, values }: EigSweepVars) => {
+      return await andesClient.post<EigSweepResponse>(
+        `/sessions/${encodeURIComponent(sessionId)}/eig/sweep`,
+        {
+          body: { model, idx, param, values },
+          // A power flow's time, and a point's for each value.
+          timeoutMs: TIMEOUTS.pflowRun + values.length * TIMEOUTS.eigSweepPoint,
+        },
+      );
+    },
+    // The job keeps the body it was sent, under the server's names, as the
+    // server's own record of the job does (kind "eig", like the single run).
+    onMutate: ({ model, idx, param, values }) => ({
+      jobId: registerJob('eig', { model, idx, param, values }),
+    }),
+    onSuccess: (data, { sessionId }, ctx) => {
+      useAnalyzeStore.getState().setEigSweepResult(data);
+      queryClient.setQueryData(queryKeys.eigSweep(sessionId), data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);
     },
     onError: (err, _vars, ctx) => {
@@ -267,6 +363,29 @@ export function useSeGenerateMeasurements(): UseMutationResult<
   });
 }
 
+/** Request body shape for ``POST /api/sessions/{id}/se``. */
+export interface SeRunVars {
+  sessionId: SessionId;
+  /** The estimator; omitted → the server runs WLS. */
+  algorithm?: 'wls' | 'lav';
+  /** Convergence tolerance for this run only; omitted → the case's SE.config.tol. */
+  tol?: number;
+  /** Iteration limit for this run only; omitted → the case's SE.config.max_iter. */
+  maxIter?: number;
+  /** Seed for this run's measurement noise only; omitted → the cached values are used. */
+  noiseSeed?: number;
+}
+
+/** The body of one SE run: only the options that were given, under the server's names. */
+function seRunBody({ algorithm, tol, maxIter, noiseSeed }: SeRunVars): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (algorithm !== undefined) body.algorithm = algorithm;
+  if (tol !== undefined) body.tol = tol;
+  if (maxIter !== undefined) body.max_iter = maxIter;
+  if (noiseSeed !== undefined) body.noise_seed = noiseSeed;
+  return body;
+}
+
 /**
  * ``POST /api/sessions/{id}/se`` — runs static state estimation
  * against the substrate's cached measurement set.
@@ -283,20 +402,26 @@ export function useSeGenerateMeasurements(): UseMutationResult<
  *   appropriate empty-state CTA.
  * - 422 ``SeUnderDeterminedError`` — measurement set has insufficient
  *   redundancy (gain matrix singular).
- * - 422 ``SeNonConvergentError`` — WLS Gauss-Newton hit max_iter.
+ * - 422 ``SeNonConvergentError`` — the estimator hit max_iter.
+ * - 422 ``SeOptionError`` — an option the route cannot take (an
+ *   unknown algorithm, a tol at or under 0, a max_iter under 1, a
+ *   negative noise_seed).
  */
-export function useSeRun(): UseMutationResult<SeResult, Error, SessionId> {
+export function useSeRun(): UseMutationResult<SeResult, Error, SeRunVars> {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (sessionId: SessionId) => {
+    mutationFn: async (vars: SeRunVars) => {
       return await andesClient.post<SeResult>(
-        `/sessions/${encodeURIComponent(sessionId)}/se`,
+        `/sessions/${encodeURIComponent(vars.sessionId)}/se`,
         // SE iteration cost is comparable to PF; reuse the PF-run timeout.
-        { body: {}, timeoutMs: TIMEOUTS.pflowRun },
+        { body: seRunBody(vars), timeoutMs: TIMEOUTS.pflowRun },
       );
     },
-    onMutate: () => ({ jobId: registerJob('se') }),
-    onSuccess: (data, sessionId, ctx) => {
+    // The job keeps the body it was sent, under the server's names, as the
+    // server's own record of the job does: the Activity panel's Retry reads
+    // the options back from it, so a retried LAV run is a LAV run again.
+    onMutate: (vars) => ({ jobId: registerJob('se', seRunBody(vars)) }),
+    onSuccess: (data, { sessionId }, ctx) => {
       useAnalyzeStore.getState().setSeResult(data);
       queryClient.setQueryData(queryKeys.se(sessionId), data);
       if (ctx) reconcileJobSuccess(ctx.jobId, data);

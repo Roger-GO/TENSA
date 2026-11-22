@@ -202,21 +202,29 @@ jobs:
         run: >
           bash ./scripts/ci-matrix.sh full
           --cov --cov-report=term:skip-covered --cov-report=xml --cov-report=html
+          -o junit_logging=system-err --junitxml="$RUNNER_TEMP/junit-full.xml"
 
       - name: Full suite
         if: runner.os == 'Linux' && !matrix.coverage
-        run: bash ./scripts/ci-matrix.sh full
+        run: bash ./scripts/ci-matrix.sh full -o junit_logging=system-err --junitxml="$RUNNER_TEMP/junit-full.xml"
 
       - name: Unit tests
         if: runner.os != 'Linux'
-        run: bash ./scripts/ci-matrix.sh unit
+        run: bash ./scripts/ci-matrix.sh unit -o junit_logging=system-err --junitxml="$RUNNER_TEMP/junit-unit.xml"
 
       # `!cancelled()` keeps this step from inheriting the implicit success()
       # check: a failing unit test must not hide whether the real server, worker
       # and simulation path works on this operating system.
       - name: Smoke test
         if: runner.os != 'Linux' && !cancelled()
-        run: bash ./scripts/ci-matrix.sh smoke
+        run: bash ./scripts/ci-matrix.sh smoke -o junit_logging=system-err --junitxml="$RUNNER_TEMP/junit-smoke.xml"
+
+      # The log of a job cannot be read without signing in, but its annotations
+      # can: after a failed test step, each failed test is written as an error
+      # annotation with its assertion and the end of its traceback.
+      - name: Failed tests as annotations
+        if: failure()
+        run: python scripts/junit_annotations.py "$RUNNER_TEMP"/junit-*.xml
 
       - name: Coverage summary
         if: matrix.coverage
@@ -287,4 +295,8 @@ jobs:
         run: tensa warm-cache --quick --incremental
 
       - name: Acceptance tests
-        run: bash ./scripts/ci-matrix.sh acceptance
+        run: bash ./scripts/ci-matrix.sh acceptance -o junit_logging=system-err --junitxml="$RUNNER_TEMP/junit-acceptance.xml"
+
+      - name: Failed tests as annotations
+        if: failure()
+        run: python scripts/junit_annotations.py "$RUNNER_TEMP"/junit-acceptance.xml

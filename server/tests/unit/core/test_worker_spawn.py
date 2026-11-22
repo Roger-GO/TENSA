@@ -239,9 +239,10 @@ def test_a_new_worker_is_started_with_the_caps_and_the_server_pid(
         proc = mgr._sessions[sid].process
         assert proc.env_at_start is not None
         assert {name: proc.env_at_start[name] for name in THREAD_ENV_VARS} == _caps(4)
-        # args: (ctrl, data, abort_event, workspace, session_id, owner_pid). The
-        # last is the SERVER's pid, which the worker records as its dirs' owner.
-        assert proc.kwargs["args"][3:] == ("/ws", sid, os.getpid())
+        # args: (ctrl, data, abort_event, workspace, session_id, owner_pid, engine).
+        # The pid is the SERVER's, which the worker records as its dirs' owner; the
+        # engine is the default one, since the session was created without naming one.
+        assert proc.kwargs["args"][3:] == ("/ws", sid, os.getpid(), "andes")
         assert attached == [31337]
         # ... and the server's own environment was not left capped.
         assert not any(name in os.environ for name in THREAD_ENV_VARS)

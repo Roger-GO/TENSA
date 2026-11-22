@@ -136,6 +136,63 @@ describe('<ToggleSpecForm />', () => {
   });
 });
 
+describe('<ToggleSpecForm /> with restricted targets', () => {
+  it('a lines-only target list offers only Line, and its devices', () => {
+    render(
+      withQueryClient(
+        <ToggleSpecForm
+          spec={{ ...blankToggleSpec(), model: 'Line' }}
+          onChange={() => {}}
+          allowedTargets={new Set(['branch'])}
+        />,
+      ),
+    );
+    const models = Array.from(
+      (screen.getByTestId('toggle-model') as HTMLSelectElement).querySelectorAll('option'),
+    ).map((o) => o.value);
+    expect(models).toEqual(['Line']);
+    const dev = screen.getByTestId('toggle-dev-idx') as HTMLSelectElement;
+    const options = Array.from(dev.querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(options).toEqual(['7', '8']);
+  });
+
+  it('a generators-only target list offers the generator models and no load', () => {
+    render(
+      withQueryClient(
+        <ToggleSpecForm
+          spec={{ ...blankToggleSpec(), model: 'GENROU' }}
+          onChange={() => {}}
+          allowedTargets={new Set(['generator'])}
+        />,
+      ),
+    );
+    const models = Array.from(
+      (screen.getByTestId('toggle-model') as HTMLSelectElement).querySelectorAll('option'),
+    ).map((o) => o.value);
+    expect(models).toEqual(['PV', 'Slack', 'GENROU', 'GENCLS']);
+    expect(models).not.toContain('PQ');
+    expect(models).not.toContain('Line');
+  });
+
+  it('both targets offer lines and the generator models, and nothing else', () => {
+    render(
+      withQueryClient(
+        <ToggleSpecForm
+          spec={{ ...blankToggleSpec(), model: 'Line' }}
+          onChange={() => {}}
+          allowedTargets={new Set(['branch', 'generator'])}
+        />,
+      ),
+    );
+    const models = Array.from(
+      (screen.getByTestId('toggle-model') as HTMLSelectElement).querySelectorAll('option'),
+    ).map((o) => o.value);
+    expect(models).toEqual(['Line', 'PV', 'Slack', 'GENROU', 'GENCLS']);
+  });
+});
+
 describe('<ToggleSpecForm /> typing', () => {
   it('lets the time be cleared and typed again, instead of filling the field with NaN', async () => {
     const user = userEvent.setup();

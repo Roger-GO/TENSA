@@ -36,6 +36,8 @@ import { useSessionStore } from '@/store/session';
 import { useCaseStore } from '@/store/case';
 import { useCommandPaletteStore } from '@/store/commandPalette';
 import { useExampleCasesStore } from '@/store/exampleCases';
+import { useYbusDialogStore } from '@/store/ybusDialog';
+import { useModelDocStore } from '@/store/modelDoc';
 import { useRunsStore } from '@/store/runs';
 import { useHistoryStore } from '@/store/history';
 import { subscribeSldCommand, useSldStore } from '@/store/sld';
@@ -750,6 +752,70 @@ describe('useCommandRegistry: Example cases command', () => {
     useCaseStore.setState({ selection: null, topology: null });
     const { result } = renderHook(() => useCommandRegistry(), { wrapper });
     expect(result.current.map((c) => c.id)).toContain('workspace.example-cases');
+  });
+});
+
+describe('useCommandRegistry: Admittance matrix (Ybus) command', () => {
+  afterEach(() => useYbusDialogStore.setState({ open: false }));
+
+  it('is an export command, found by what a user would type, that opens the dialog', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'export.ybus');
+    expect(cmd?.group).toBe('export');
+    expect(cmd?.label).toBe('Admittance matrix (Ybus)…');
+    expect(cmd?.keywords).toEqual(expect.arrayContaining(['ybus', 'admittance', 'matlab', 'csv']));
+    expect(cmd?.description).toMatch(/sparse triplets/);
+    expect(useYbusDialogStore.getState().open).toBe(false);
+    cmd?.action();
+    expect(useYbusDialogStore.getState().open).toBe(true);
+  });
+
+  it('is kept in the menu with the reason until a case is open, and left out of the palette', () => {
+    MOCK_TOPOLOGY = null;
+    const palette = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(palette.result.current.find((c) => c.id === 'export.ybus')).toBeUndefined();
+    palette.unmount();
+    const menu = renderHook(() => useMenuCommands(), { wrapper });
+    expect(menu.result.current.find((c) => c.id === 'export.ybus')?.unavailable).toBe(
+      'Open a case first: the matrix is of the loaded case.',
+    );
+    menu.unmount();
+
+    // With no case open at all it is not listed: there is nothing to say to do first.
+    useCaseStore.setState({ selection: null });
+    const closed = renderHook(() => useMenuCommands(), { wrapper });
+    expect(closed.result.current.find((c) => c.id === 'export.ybus')).toBeUndefined();
+  });
+});
+
+describe('useCommandRegistry: Model documentation command', () => {
+  afterEach(() => useModelDocStore.setState({ dialogOpen: false, model: null }));
+
+  it('is a help command labelled with three dots, found by what a user would type', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    const cmd = result.current.find((c) => c.id === 'help.model-doc');
+    expect(cmd?.group).toBe('help');
+    expect(cmd?.label).toBe('Model documentation...');
+    expect(cmd?.shortcut).toBeUndefined();
+    expect(cmd?.description).toMatch(/Every model ANDES ships, by group/);
+    expect(cmd?.keywords).toEqual(
+      expect.arrayContaining(['model', 'documentation', 'docs', 'parameters', 'equations']),
+    );
+  });
+
+  it('opens the dialog in browse mode, with no model', () => {
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(useModelDocStore.getState()).toMatchObject({ dialogOpen: false, model: null });
+    act(() => result.current.find((c) => c.id === 'help.model-doc')?.action());
+    expect(useModelDocStore.getState()).toMatchObject({ dialogOpen: true, model: null });
+  });
+
+  it('is not offered without a session', () => {
+    act(() => {
+      useSessionStore.setState({ sessionId: null });
+    });
+    const { result } = renderHook(() => useCommandRegistry(), { wrapper });
+    expect(result.current.map((c) => c.id)).not.toContain('help.model-doc');
   });
 });
 

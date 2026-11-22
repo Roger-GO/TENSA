@@ -99,3 +99,40 @@ describe('toggleQuantity', () => {
     expect([...toggleQuantity(['Bus_1_v'], new Set(['Bus_1_v']), GEN_W)]).toEqual(['Bus_1_v']);
   });
 });
+
+describe('neutral quantities', () => {
+  // A Sienna run's names; each parses to the group and field of the ANDES
+  // column of its quantity, so the ANDES quantities serve it.
+  const NEUTRAL_COLUMNS = [
+    'voltage|bus:7',
+    'angle|bus:7',
+    'voltage|bus:8',
+    'angle|bus:8',
+    'rotor_speed|gen:2-1',
+    'rotor_angle|gen:2-1',
+  ];
+  const BUS_A = QUANTITIES.find((q) => q.group === 'bus_v' && q.field === 'a')!;
+  const GEN_D = QUANTITIES.find((q) => q.group === 'gen_state' && q.field === 'delta')!;
+
+  it('seriesOf lists the neutral series of one quantity under its ANDES field', () => {
+    expect(seriesOf(NEUTRAL_COLUMNS, 'bus_v', 'v').map((s) => s.name)).toEqual([
+      'voltage|bus:7',
+      'voltage|bus:8',
+    ]);
+    expect(seriesOf(NEUTRAL_COLUMNS, 'gen_state', 'omega').map((s) => s.name)).toEqual([
+      'rotor_speed|gen:2-1',
+    ]);
+  });
+
+  it('a neutral quantity turned on follows the elements of its partner', () => {
+    const next = toggleQuantity(NEUTRAL_COLUMNS, new Set(['voltage|bus:8']), BUS_A);
+    expect([...next].sort()).toEqual(['angle|bus:8', 'voltage|bus:8']);
+  });
+
+  it('a neutral rotor angle follows the selected rotor speeds, and takes the first elements with none', () => {
+    const followed = toggleQuantity(NEUTRAL_COLUMNS, new Set(['rotor_speed|gen:2-1']), GEN_D);
+    expect([...followed].sort()).toEqual(['rotor_angle|gen:2-1', 'rotor_speed|gen:2-1']);
+    const first = toggleQuantity(NEUTRAL_COLUMNS, new Set(), GEN_D);
+    expect([...first]).toEqual(['rotor_angle|gen:2-1']);
+  });
+});

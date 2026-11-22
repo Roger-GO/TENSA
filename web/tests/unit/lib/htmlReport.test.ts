@@ -286,6 +286,47 @@ describe('buildHtmlReport: the power flow', () => {
     expect(text).toContain('It ran with tolerance 1e-6, up to 25 iterations');
   });
 
+  it('names Newton-Krylov, and no iteration count or tolerance, for a run of that method', () => {
+    const settings = {
+      tolerance: 1e-6,
+      max_iterations: 25,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'NK',
+      n_factorize: 4,
+      linesearch: true,
+    };
+    const converged = parse(
+      buildHtmlReport(
+        data({
+          pflow: { result: pf({ iterations: 0, settings }), names: NAMES, violations: null },
+        }),
+      ),
+    ).querySelector('#power-flow')?.textContent;
+    expect(converged).toContain('Converged by Newton-Krylov, final mismatch 3.20e-9.');
+    expect(converged).toContain("It ran with Newton-Krylov (SciPy's own stopping rule).");
+    expect(converged).not.toMatch(/0 iterations|tolerance/);
+
+    const failed = parse(
+      buildHtmlReport(
+        data({
+          pflow: {
+            result: pf({
+              converged: false,
+              iterations: 0,
+              mismatch: 0.42,
+              summary: null,
+              settings,
+            }),
+            names: NAMES,
+            violations: null,
+          },
+        }),
+      ),
+    ).querySelector('#power-flow')?.textContent;
+    expect(failed).toContain('did not converge by Newton-Krylov');
+  });
+
   it('gives the system totals, as the summary panel does', () => {
     const table = tableAfter(report(), 'System totals');
     expect(headersOf(table)).toEqual(['quantity', 'P (MW)', 'Q (MVAr)']);

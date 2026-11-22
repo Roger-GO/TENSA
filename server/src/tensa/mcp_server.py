@@ -74,13 +74,16 @@ def _api(method: str, path: str, body: dict[str, Any] | None = None) -> Any:
 
 
 _INSTRUCTIONS = (
-    "Tools for the ANDES power-system simulator. Typical flow: "
+    "Tools for the TENSA power-system simulators (ANDES and Sienna). Typical flow: "
     "list_workspace_files (list_examples and add_example put a ready-made case "
     "in the workspace first) -> create_session -> load_case -> "
     "add_fault/add_toggle/add_alter (optional, pre-setup only) -> run_pflow "
     "-> run_tds -> get_operating_point -> close_session. After the first "
     "run the session is 'setup'; call reload_case before adding more "
-    "disturbances or elements."
+    "disturbances or elements. A session has one engine, chosen at "
+    "create_session (default andes); list_engines says what each engine can "
+    "do, and each tool's description says which engines have it. An op an "
+    "engine lacks answers with the engines that have it."
 )
 
 
@@ -177,39 +180,64 @@ def add_example(example_id: str, overwrite: bool = False) -> Any:
 
 
 @mcp.tool()
-def create_session() -> Any:
-    """Create a simulation session (an isolated ANDES System). Returns session_id."""
-    return _api("POST", "/sessions")
+def create_session(engine: str | None = None) -> Any:
+    """Create a simulation session (an isolated engine worker). Returns session_id.
+
+    engine is 'andes' (the default when it is left out) or 'sienna';
+    list_engines says what each can do and whether it is available on this
+    server. A session keeps its engine for its whole life. An op the
+    session's engine lacks is refused with 409, and the message names the
+    engines that have it. Engines: andes, sienna.
+    """
+    if engine is None:
+        return _api("POST", "/sessions")
+    return _api("POST", "/sessions", {"engine": engine})
 
 
 @mcp.tool()
 def close_session(session_id: str) -> Any:
-    """Close a session and free its worker process."""
+    """Close a session and free its worker process. Engines: andes, sienna."""
     return _api("DELETE", f"/sessions/{session_id}")
 
 
 @mcp.tool()
-def load_case(session_id: str, primary_path: str, addfiles: list[str] | None = None) -> Any:
+def load_case(
+    session_id: str,
+    primary_path: str,
+    addfiles: list[str] | None = None,
+    on_unsupported: str | None = None,
+) -> Any:
     """Load a case file (path relative to the server workspace; e.g. 'ieee14_full.xlsx').
 
     Optional addfiles attach dynamic data (e.g. a .dyr next to a .raw).
     Returns the topology summary (buses, lines, generators, ...).
+    A Sienna session reads .raw (+ one .dyr) and .m; a .dyr with records
+    PowerSystems does not support is refused 422 unless on_unsupported is
+    'drop', which loads without them (an ANDES session ignores it).
+    Engines: andes, sienna.
     """
     body: dict[str, Any] = {"primary_path": primary_path}
     if addfiles:
         body["addfiles"] = addfiles
+    if on_unsupported is not None:
+        body["on_unsupported"] = on_unsupported
     return _api("POST", f"/sessions/{session_id}/case", body)
 
 
 @mcp.tool()
 def reload_case(session_id: str) -> Any:
-    """Reload the current case to pre-setup state (required before adding more disturbances after a run)."""
+    """Read the case file again (required under ANDES before adding more disturbances after a run).
+
+    Under ANDES the session's element edits are dropped; under Sienna they are
+    applied again, since a Sienna session is always the case file with its
+    edits. Pending disturbances are dropped under both. Engines: andes, sienna.
+    """
     return _api("POST", f"/sessions/{session_id}/reload", {})
 
 
 @mcp.tool()
 def get_topology(session_id: str) -> Any:
-    """Get the current system topology: buses, lines, transformers, generators, loads, shunts, controllers."""
+    """Get the current system topology: buses, lines, transformers, generators, loads, shunts, controllers. Engines: andes, sienna."""
     return _api("GET", f"/sessions/{session_id}/topology")
 
 
@@ -220,6 +248,7 @@ def add_fault(
     """Register a three-phase bus fault applied from t=tf to t=tc seconds (pre-setup only).
 
     xf/rf are the fault reactance/resistance in pu.
+    Under Sienna a Fault on a bus and a Toggle on a Line or a generator; anything else is 422. Engines: andes, sienna.
     """
     spec = {"kind": "fault", "bus_idx": bus_idx, "tf": tf, "tc": tc, "xf": xf, "rf": rf}
     return _api("POST", f"/sessions/{session_id}/disturbances", {"disturbances": [spec]})
@@ -227,7 +256,10 @@ def add_fault(
 
 @mcp.tool()
 def add_toggle(session_id: str, model: str, dev_idx: str, t: float) -> Any:
-    """Register a connect/disconnect event for a device (e.g. model='Line', dev_idx='Line_6') at time t (pre-setup only)."""
+    """Register a connect/disconnect event for a device (e.g. model='Line', dev_idx='Line_6') at time t (pre-setup only).
+
+    Under Sienna a Fault on a bus and a Toggle on a Line or a generator; anything else is 422. Engines: andes, sienna.
+    """
     spec = {"kind": "toggle", "model": model, "dev_idx": dev_idx, "t": t}
     return _api("POST", f"/sessions/{session_id}/disturbances", {"disturbances": [spec]})
 
@@ -240,7 +272,7 @@ def add_alter(
 
     method is one of '+', '-', '*', '/', '=' (e.g. model='PQ', dev_idx='PQ_1',
     src='p0', method='*', amount=1.2 raises that load 20% at t). Use
-    get_alterable_params to discover valid src names for a model.
+    get_alterable_params to discover valid src names for a model. Engines: andes.
     """
     spec = {
         "kind": "alter", "model": model, "dev_idx": dev_idx,
@@ -251,7 +283,7 @@ def add_alter(
 
 @mcp.tool()
 def get_alterable_params(session_id: str, model: str) -> Any:
-    """List parameter names ANDES accepts for Alter disturbances on a model (e.g. 'PQ')."""
+    """List parameter names ANDES accepts for Alter disturbances on a model (e.g. 'PQ'). Engines: andes."""
     return _api("GET", f"/sessions/{session_id}/topology/models/{model}/alterable_params")
 
 
@@ -262,6 +294,7 @@ def run_pflow(
     max_iterations: int | None = None,
     flat_start: bool | None = None,
     enforce_q_limits: bool | None = None,
+    method: str | None = None,
 ) -> Any:
     """Solve the power flow. Returns convergence flag and solution summary.
 
@@ -273,6 +306,11 @@ def run_pflow(
     does not converge, retry with a higher max_iterations, flat_start, or a
     looser tolerance. A converged result has a summary of generation, load,
     losses and slack output.
+    method is the solver: an ANDES session takes NR (the default), dishonest
+    or NK; a Sienna session takes ac (the default), or dc and ptdf-dc for a
+    DC power flow, whose reactive power fields are null. Under Sienna the AC
+    power flow takes tolerance and max_iterations only, and a DC one neither;
+    the others are refused 422. Engines: andes, sienna.
     """
     body = {
         key: value
@@ -281,6 +319,7 @@ def run_pflow(
             ("max_iterations", max_iterations),
             ("flat_start", flat_start),
             ("enforce_q_limits", enforce_q_limits),
+            ("method", method),
         )
         if value is not None
     }
@@ -293,6 +332,7 @@ def run_tds(
     tf: float,
     dae_vars: list[str] | None = None,
     controllers: list[dict[str, Any]] | None = None,
+    load_model: str | None = None,
 ) -> Any:
     """Run a time-domain simulation from t=0 to t=tf seconds (batch; registered disturbances apply).
 
@@ -310,12 +350,18 @@ def run_tds(
     run with the same controllers and a larger tf keeps their state (an ffr
     that has fired does not fire again); after a reload or a restored snapshot
     they start afresh.
+    load_model ('impedance', 'power' or 'as-case') says how the loads behave
+    in the run; a Sienna session takes all three (default impedance), an
+    ANDES session impedance only. Under Sienna dae_vars and controllers are
+    422, and traces are named quantity|key. Engines: andes, sienna.
     """
     body: dict[str, Any] = {"tf": tf}
     if dae_vars:
         body["dae_vars"] = dae_vars
     if controllers:
         body["controllers"] = controllers
+    if load_model is not None:
+        body["load_model"] = load_model
     return _api("POST", f"/sessions/{session_id}/tds", body)
 
 
@@ -328,7 +374,7 @@ def list_tds_controllers(session_id: str) -> Any:
     limit in MW ("p_limit") and the ANDES variables that show a controller at work
     on it ("variables": pass them as dae_vars). "coi_available" says whether the
     case has the synchronous machines the default frequency reading needs.
-    Needs no run, and does not close the case to disturbances.
+    Needs no run, and does not close the case to disturbances. Engines: andes.
     """
     return _api("GET", f"/sessions/{session_id}/tds/controllers")
 
@@ -347,7 +393,7 @@ def list_dae_variables(
     them as dae_vars. q is words that must all appear in the name, whatever
     their case; kind is 'x' (state) or 'y' (algebraic); model narrows to one
     ANDES model ('GENROU'). Needs no run, and does not close the case to
-    disturbances.
+    disturbances. Engines: andes.
     """
     params = {
         key: value
@@ -375,7 +421,7 @@ def get_response_metrics(
     The values are in ANDES's units (per unit for speed and voltage). The
     traces themselves are not returned; use run_tds for them. Takes 1 to 64
     variables. A run with more samples than the metrics take is read at every
-    second or third sample, and the answer says so ("every_nth_sample").
+    second or third sample, and the answer says so ("every_nth_sample"). Engines: andes.
     """
     # What POST /response-metrics takes in one request. Read here and not at the
     # top of the module: this is a client of the HTTP API, and the module that
@@ -444,7 +490,7 @@ def _thinned(samples: int, every: int) -> range | list[int]:
 def get_operating_point(session_id: str) -> Any:
     """Read the current operating point: bus voltages/angles, line flows, generator outputs, load consumption.
 
-    After a TDS this reflects the final simulated state.
+    After a TDS this reflects the final simulated state. Engines: andes, sienna.
     """
     return _api("GET", f"/sessions/{session_id}/operating-point")
 
@@ -461,7 +507,7 @@ def get_messages(session_id: str, level: str = "warning", after: int = 0) -> Any
     the ANDES logger and the text. A message ANDES repeated is listed once, with
     its repeat count; if the count grew after you read it, it comes back under a
     new number with the larger count. Pass next_after back as after to read only
-    what came since. Needs no run and does not wait for one in progress.
+    what came since. Needs no run and does not wait for one in progress. Engines: andes, sienna.
     """
     query = urllib.parse.urlencode({"level": level, "after": after})
     return _api("GET", f"/sessions/{session_id}/messages?{query}")
@@ -469,8 +515,186 @@ def get_messages(session_id: str, level: str = "warning", after: int = 0) -> Any
 
 @mcp.tool()
 def run_eig(session_id: str) -> Any:
-    """Run small-signal eigenvalue analysis (requires a converged power flow)."""
+    """Run small-signal eigenvalue analysis (requires a converged power flow). Engines: andes, sienna."""
     return _api("POST", f"/sessions/{session_id}/eig", {})
+
+
+@mcp.tool()
+def list_engines() -> Any:
+    """List the engines this server can start a session for, with what each can do.
+
+    Each entry has name, available (with unavailable_reason when false),
+    versions, the formats it reads and writes, its routines with their
+    options, its ops, and whether it edits. Needs no session.
+    """
+    return _api("GET", "/engines")
+
+
+@mcp.tool()
+def get_keys(session_id: str) -> Any:
+    """List every element's key in the loaded case, each with bucket, model, idx and source, plus any problems.
+
+    A key names an element the same way in every engine (bus:7,
+    branch:7-8-1, gen:1-1, gen:1-1/exciter); use it to match elements
+    across engines and to read neutral results. Empty lists when no case
+    is loaded. Engines: andes, sienna.
+    """
+    return _api("GET", f"/sessions/{session_id}/keys")
+
+
+@mcp.tool()
+def network_matrix(session_id: str, kind: str = "ptdf") -> Any:
+    """Read a network matrix PowerNetworkMatrices builds from the loaded case (Sienna only).
+
+    kind is ptdf (the default), lodf, ybus or incidence. The answer is per
+    unit on the case's base_mva: rows and cols name each axis (an arc
+    {from, to, keys} or a bus {bus, key}), values holds a dense matrix row
+    by row, entries the nonzeros of a ybus. An ANDES session has no such
+    route; its ybus is part of get_topology's sibling routes and this tool
+    answers 409 naming sienna. Engines: sienna.
+    """
+    query = urllib.parse.urlencode({"kind": kind})
+    return _api("GET", f"/sessions/{session_id}/network-matrix?{query}")
+
+
+@mcp.tool()
+def run_dispatch(
+    session_id: str,
+    network_model: str = "copper_plate",
+    duals: bool = False,
+) -> Any:
+    """Run the one-period economic dispatch of the loaded case (Sienna only).
+
+    network_model is copper_plate (the default), dc, ptdf or ac (the full
+    AC equations, solved with Ipopt). The answer holds objective_check_per_h
+    (the cost as MATPOWER counts it, recomputed from the dispatch and the
+    file's gencost, the constant terms included), objective_per_h (the
+    solver's objective in $/h, which leaves the constant terms out) and
+    fixed_per_h (their sum, the difference between the two), generators keyed by neutral key
+    (gen:<bus>-<id>) each with p_mw, bus, id and idx, slacks (every slack
+    variable past 1e-6 MW), and duals only when duals is true. The case
+    needs generator cost data: a PSS/E .raw carries none (422); a MATPOWER
+    .m case does. Engines: sienna.
+    """
+    body: dict[str, Any] = {"network_model": network_model}
+    if duals:
+        body["duals"] = True
+    return _api("POST", f"/sessions/{session_id}/dispatch", body)
+
+
+@mcp.tool()
+def convert_result(
+    kind: str,
+    engine: str,
+    result: dict[str, Any],
+    versions: dict[str, str] | None = None,
+    study: dict[str, Any] | None = None,
+    keys: list[dict[str, Any]] | None = None,
+    status: str = "completed",
+) -> Any:
+    """Turn one engine result into a neutral results document (tensa_results: 1). Needs no session.
+
+    kind is pflow, tds or eig. result is the engine's own result as its
+    API answered it: for pflow the POST /pflow response, for tds the
+    "traces" object of a batch run ({t, variables, truncated}), for eig
+    the POST /eig response. engine is the engine that produced it. For an
+    ANDES tds result, keys is the session's keys lookup as get_keys lists
+    it (a Sienna result names its columns neutrally already). The answer
+    holds "document" (the neutral document), "skipped" (each column left
+    out and why) and "notes". Feed "document" to compare_results.
+    """
+    body: dict[str, Any] = {"kind": kind, "engine": engine, "result": result, "status": status}
+    if versions is not None:
+        body["versions"] = versions
+    if study is not None:
+        body["study"] = study
+    if keys is not None:
+        body["keys"] = keys
+    return _api("POST", "/results/convert", body)
+
+
+@mcp.tool()
+def compare_results(
+    reference: dict[str, Any],
+    comparison: dict[str, Any],
+    tolerances: dict[str, Any] | None = None,
+) -> Any:
+    """Compare two neutral results documents (as convert_result answers them). Needs no session.
+
+    reference is the document the comparison is read against; differences
+    are comparison minus reference, and radian differences are wrapped to
+    [-pi, pi). The answer compares the power flow first (rows per key,
+    "operating_point_differs" when a row is outside its tolerance), then
+    per series the largest and time-weighted RMS difference over the
+    overlap of the time ranges with the swing of the reference, then the
+    eigenvalues matched as modes. Unmatched keys and modes are listed,
+    never ignored; "not_comparable" holds the pairs that cannot be
+    compared with the reason. tolerances overrides the defaults per
+    quantity plus frequency_hz, damping_ratio and max_mode_distance.
+    """
+    body: dict[str, Any] = {"reference": reference, "comparison": comparison}
+    if tolerances is not None:
+        body["tolerances"] = tolerances
+    return _api("POST", "/compare", body)
+
+
+@mcp.tool()
+def add_element(session_id: str, model: str, params: dict[str, Any]) -> Any:
+    """Add an element to the loaded case (pre-setup only).
+
+    model is a TENSA kind (Bus, Line, PQ, PV, Slack, Shunt, GENROU, ...);
+    params are its parameters (a reference to another device, "bus", "gen",
+    "syn", may be sent as "5" or 5). Under Sienna the subset is: a PQ or a
+    Shunt on a bus. The answer names the element created (model and idx)
+    and the job that added it; read the topology for the case after it. Engines:
+    andes, sienna.
+    """
+    return _api("POST", f"/sessions/{session_id}/elements", {"model": model, "params": params})
+
+
+@mcp.tool()
+def edit_element(session_id: str, model: str, idx: str, params: dict[str, Any]) -> Any:
+    """Edit parameters of one element (pre-setup only): params maps each name to its new value.
+
+    Under Sienna the editable set is: a load (PQ: p0, q0, u), a generator
+    (PV or Slack: p0, v0, u), a line or transformer (Line: u) and a shunt
+    (Shunt: g, b, u), one param per edit. Engines: andes, sienna.
+    """
+    quoted_model = urllib.parse.quote(model, safe="")
+    quoted_idx = urllib.parse.quote(idx, safe="")
+    return _api(
+        "PUT",
+        f"/sessions/{session_id}/elements/{quoted_model}/{quoted_idx}",
+        {"params": params},
+    )
+
+
+@mcp.tool()
+def delete_element(session_id: str, model: str, idx: str, cascade: bool = False) -> Any:
+    """Delete an element (pre-setup only).
+
+    422 with "dependents" and "disturbances" when other elements name it
+    or disturbances act on it: delete those first, or send cascade=true to
+    delete them with it. Under Sienna only a load or a shunt can be
+    deleted and cascade is refused. The answer is the topology plus
+    "deleted" and "disturbances", what went. Engines: andes, sienna.
+    """
+    quoted_model = urllib.parse.quote(model, safe="")
+    quoted_idx = urllib.parse.quote(idx, safe="")
+    query = urllib.parse.urlencode({"cascade": "true" if cascade else "false"})
+    return _api("DELETE", f"/sessions/{session_id}/elements/{quoted_model}/{quoted_idx}?{query}")
+
+
+@mcp.tool()
+def undo_last_edit(session_id: str) -> Any:
+    """Take back the last add, edit or delete. The topology's "undo" names the edit it acts on, null when there is none. Engines: andes, sienna."""
+    return _api("POST", f"/sessions/{session_id}/undo-last-edit", {})
+
+
+@mcp.tool()
+def redo_edit(session_id: str) -> Any:
+    """Put back the edit undo_last_edit took back. A delete put back is refused with 422 and the list if anything else has come to depend on the element. Engines: andes, sienna."""
+    return _api("POST", f"/sessions/{session_id}/redo-edit", {})
 
 
 def _free_port() -> int:

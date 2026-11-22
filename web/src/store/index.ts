@@ -49,6 +49,7 @@ import { useMessagesStore } from './messages';
 import { useAnalyzeStore } from './analyze';
 import { useUiStore } from './ui';
 import { useReloadedCaseStore } from './reloadedCase';
+import { useExternalOverlaysStore } from './externalOverlays';
 
 // Re-export slices so consumers have one import surface.
 export { useSessionStore } from './session';
@@ -63,6 +64,8 @@ export type { CaseState, CaseSelection } from './case';
 export type { PflowState } from './pflow';
 export type { RunsState, RunRecord, RunState, RunConnectionStatus } from './runs';
 export type { LayoutState, BottomDrawerTab, AnalysisSubTab } from './layout';
+export { useExternalOverlaysStore } from './externalOverlays';
+export type { ExternalOverlayTrace, ExternalOverlaysState } from './externalOverlays';
 
 // ---- cascade wiring -------------------------------------------------------
 
@@ -148,6 +151,9 @@ export function wireStoreCascade(): void {
       // The ANDES variables picked for the next run, and the devices its
       // frequency controllers command, are the old case's.
       useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
+      // The external traces imported to overlay on the plot were drawn against
+      // this case's runs; they do not carry to another case.
+      useExternalOverlaysStore.getState().clear();
       // The tab's mark of the case file it has open, which is what a reload
       // of the page reads to say which case it closed.
       useReloadedCaseStore.getState().follow(next);
@@ -164,10 +170,15 @@ export function wireStoreCascade(): void {
   });
 }
 
-/** Drop the EIG, CPF and SE results (and the SE measurement count). */
+/**
+ * Drop the EIG, EIG sweep, CPF and SE results (and the SE measurement count).
+ * A sweep's points each solve a power flow with the settings of the session's
+ * last one, so the sweep goes with that power flow too.
+ */
 function clearAnalysisResults(): void {
   const analyze = useAnalyzeStore.getState();
   analyze.clearEigResult();
+  analyze.clearEigSweepResult();
   analyze.clearCpfResult();
   analyze.clearSeResult();
 }
@@ -197,6 +208,7 @@ export function __resetCascadeForTests(): void {
   usePflowOptionsStore.getState().resetForNewCase();
   useAnalyzeStore.setState({
     eigResult: null,
+    eigSweepResult: null,
     selectedModeId: null,
     cpfResult: null,
     seResult: null,
@@ -219,6 +231,7 @@ export function __resetCascadeForTests(): void {
   useUiStore.getState().setTdsConfig({ daeVars: [], controllers: [] });
   useSweepStore.setState({ sweeps: {}, activeSweepId: null });
   useJobsStore.setState({ jobs: {} });
+  useExternalOverlaysStore.setState({ traces: [], dialogOpen: false });
 }
 
 // Side-effect: defensive auto-wire on first import. `wireStoreCascade` is

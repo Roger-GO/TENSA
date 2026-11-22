@@ -110,6 +110,22 @@ describe('<PflowSummary />', () => {
     );
   });
 
+  it('names Newton-Krylov in place of an iteration count it does not keep', () => {
+    usePflowStore.setState({
+      lastRun: result({
+        iterations: 0,
+        settings: { ...SETTINGS, method: 'NK', n_factorize: 4, linesearch: true },
+      }),
+    });
+    render(<PflowSummary />);
+    const status = screen.getByTestId('pflow-summary-status');
+    expect(status).toHaveTextContent('Converged by Newton-Krylov, final mismatch 6.96e-12.');
+    expect(status).not.toHaveTextContent(/0 iterations|tolerance/);
+    expect(screen.getByTestId('pflow-summary-settings')).toHaveTextContent(
+      "Ran with Newton-Krylov (SciPy's own stopping rule).",
+    );
+  });
+
   it('states the share the lines lose, and how the figures add up', () => {
     usePflowStore.setState({ lastRun: result() });
     render(<PflowSummary />);
@@ -119,6 +135,59 @@ describe('<PflowSummary />', () => {
     expect(screen.getByTestId('pflow-summary')).toHaveTextContent(
       /generation equals load plus bus shunts plus line losses/i,
     );
+  });
+
+  it('shows a dash for the reactive totals of a DC power flow, and names the method', () => {
+    const dcSummary: Summary = {
+      generation_p: 226.43,
+      generation_q: null,
+      load_p: 223.7,
+      load_q: null,
+      shunt_p: 0,
+      shunt_q: null,
+      loss_p: 2.73,
+      loss_q: null,
+      slack_p: 81.43,
+      slack_q: null,
+    };
+    const dcSettings: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    usePflowStore.setState({
+      lastRun: result({ iterations: 0, settings: dcSettings, summary: dcSummary }),
+    });
+    render(<PflowSummary />);
+
+    // Every Q cell is the dash, never 0.00; the P cells are numbers.
+    for (const row of ['generation', 'load', 'shunt', 'loss', 'slack']) {
+      expect(cell(row, 1)).toBe('—');
+      expect(cell(row, 1)).not.toBe('0.00');
+    }
+    expect(cell('generation', 0)).toBe('226.43');
+    expect(screen.getByTestId('pflow-summary-status')).toHaveTextContent(
+      'Converged by direct solve,',
+    );
+    expect(screen.getByTestId('pflow-summary-settings')).toHaveTextContent(
+      'Ran with DC power flow (direct solve).',
+    );
+    expect(screen.getByTestId('pflow-summary')).toHaveTextContent(
+      /Reactive power is not computed by a DC power flow\./,
+    );
+  });
+
+  it('says nothing of DC for an AC run', () => {
+    usePflowStore.setState({ lastRun: result() });
+    render(<PflowSummary />);
+    expect(screen.getByTestId('pflow-summary')).not.toHaveTextContent(
+      /Reactive power is not computed by a DC power flow/,
+    );
+    expect(cell('generation', 1)).toBe('49.80');
   });
 
   it('leaves a dash where the case has no slack in service', () => {
@@ -196,6 +265,35 @@ describe('<PflowSummary />', () => {
       downloads = captureDownloads();
     });
     afterEach(() => downloads.restore());
+
+    it('writes the dash for the reactive totals of a DC power flow, never 0', async () => {
+      const user = userEvent.setup();
+      useCaseStore.setState({
+        selection: { primaryPath: parseWorkspacePath('cases/ieee14.raw'), addfiles: [] },
+      });
+      const dcSummary: Summary = { ...SUMMARY, generation_q: null, load_q: null };
+      const dcSettings: PflowSettings = {
+        tolerance: 0,
+        max_iterations: 0,
+        flat_start: false,
+        enforce_q_limits: false,
+        method: 'dc',
+        n_factorize: 1,
+        linesearch: false,
+      };
+      usePflowStore.setState({
+        lastRun: result({ iterations: 0, settings: dcSettings, summary: dcSummary }),
+      });
+      render(<PflowSummary />);
+
+      await exportAs(user, 'csv');
+
+      const csv = await readBlob(downloads.blobs[0]!);
+      expect(csv).toContain('# Settings: DC power flow (direct solve)');
+      expect(csv).toContain('Generation,226.43,—');
+      expect(csv).toContain('Load,223.7,—');
+      expect(csv).not.toContain('Generation,226.43,0');
+    });
 
     it('writes the table as a CSV with the settings in a comment', async () => {
       const user = userEvent.setup();

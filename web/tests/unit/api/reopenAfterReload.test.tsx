@@ -107,11 +107,18 @@ describe('useReopenAfterReload', () => {
   let warning: MockInstance<typeof toast.warning>;
   let error: MockInstance<typeof toast.error>;
 
-  /** The page as it starts after a reload that interrupted `mark`. */
-  function reloaded(mark: OpenCaseMark | null, session: string | null = 's-new'): void {
+  /** The page as it starts after a reload that interrupted `mark`, on a session of `engine`. */
+  function reloaded(
+    mark: OpenCaseMark | null,
+    session: string | null = 's-new',
+    engine: string | null = null,
+  ): void {
     window.sessionStorage.setItem(OPEN_CASE_STORAGE_KEY, JSON.stringify(mark));
     useReloadedCaseStore.setState({ closed: mark });
-    useSessionStore.setState({ sessionId: session === null ? null : parseSessionId(session) });
+    useSessionStore.setState({
+      sessionId: session === null ? null : parseSessionId(session),
+      engine,
+    });
     const client = makeQueryClient();
     function Wrapper({ children }: { children: ReactNode }) {
       return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
@@ -462,5 +469,88 @@ describe('useReopenAfterReload', () => {
     await Promise.resolve();
     expect(calls).toEqual([]);
     expect(useCaseStore.getState().loadingPath).toBeNull();
+  });
+
+  describe('the engine of the session the case was open in', () => {
+    it('reopens a case whose engine is the session’s, as today', async () => {
+      reloaded({ ...ON_FILE, engine: 'sienna' }, 's-new', 'sienna');
+      await waitFor(() =>
+        expect(useCaseStore.getState().selection).toEqual({
+          primaryPath: 'ieee14.raw',
+          addfiles: ['ieee14.dyr'],
+        }),
+      );
+      expect(sent()).toEqual(['POST /api/sessions/s-new/case']);
+      expect(bodies['POST /api/sessions/s-new/case']).toEqual({
+        primary_path: 'ieee14.raw',
+        addfiles: ['ieee14.dyr'],
+      });
+      expect(success).not.toHaveBeenCalled();
+      expect(warning).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+      expect(useReloadedCaseStore.getState().closed).toBeNull();
+    });
+
+    it('does not reopen a case whose engine is not the session’s, and drops what the tab kept for it', async () => {
+      kept.journal = journal(BUILD);
+      window.sessionStorage.setItem(JOURNAL_STORAGE_KEY, JSON.stringify(kept.journal));
+      reloaded({ ...ON_FILE, engine: 'sienna' }, 's-new', 'andes');
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(sent()).toEqual([]);
+      expect(error).toHaveBeenCalledWith(
+        'ieee14.raw was not reopened',
+        expect.objectContaining({
+          description: expect.stringMatching(
+            /^The page was reloaded\. It was open under Sienna, and this session is ANDES\./,
+          ),
+        }),
+      );
+      expect(readOpenCaseMark()).toBeNull();
+      expect(readKeptJournal()).toBeNull();
+      expect(useReloadedCaseStore.getState().closed).toBeNull();
+      expect(useCaseStore.getState().loadingPath).toBeNull();
+    });
+
+    it('does not rebuild a system built from scratch under another engine', async () => {
+      reloaded({ ...FROM_SCRATCH, engine: 'sienna' }, 's-new', 'andes');
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(sent()).toEqual([]);
+      expect(error).toHaveBeenCalledWith(
+        'The system you were building was not reopened',
+        expect.objectContaining({
+          description: expect.stringMatching(
+            /^The page was reloaded\. It was open under Sienna, and this session is ANDES\./,
+          ),
+        }),
+      );
+      expect(readOpenCaseMark()).toBeNull();
+      expect(useCaseStore.getState().selection).toBeNull();
+    });
+
+    it('a mark without an engine under a default-engine session reopens exactly as today', async () => {
+      reloaded(ON_FILE, 's-new', null);
+      await waitFor(() => expect(useCaseStore.getState().selection).not.toBeNull());
+      expect(sent()).toEqual(['POST /api/sessions/s-new/case']);
+      expect(bodies['POST /api/sessions/s-new/case']).toEqual({
+        primary_path: 'ieee14.raw',
+        addfiles: ['ieee14.dyr'],
+      });
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it('a mark without an engine under a session of another engine is not reopened', async () => {
+      reloaded(ON_FILE, 's-new', 'sienna');
+      await waitFor(() => expect(error).toHaveBeenCalled());
+      expect(sent()).toEqual([]);
+      expect(error).toHaveBeenCalledWith(
+        'ieee14.raw was not reopened',
+        expect.objectContaining({
+          description: expect.stringMatching(
+            /^The page was reloaded\. It was open under ANDES, and this session is Sienna\./,
+          ),
+        }),
+      );
+      expect(readOpenCaseMark()).toBeNull();
+    });
   });
 });

@@ -1,12 +1,16 @@
 """Eigenvalue analysis endpoints (Unit 6 of the v2.0 plan).
 
-Three routes:
+Four routes:
 
 - ``POST /sessions/{id}/eig`` — runs ``ss.EIG.run()`` synchronously and
   returns the eigenvalues / damping ratios / mode metadata. Substrate
   gates on ``ss.PFlow.converged is True`` independently because
   ANDES's own ``EIG._pre_check`` only logs a warning before falling
   through to a crash (verified in Unit 1a spike).
+- ``POST /sessions/{id}/eig/sweep``: the eigenvalues at each of a list of
+  values of one parameter of one device (root loci data), each from a
+  System of its own, so the session's System is left as it was
+  (``Wrapper.run_eig_sweep``).
 - ``GET /sessions/{id}/eig/modes/{mode_idx}/participation`` — slices
   ``EIG.pfactors[mode_idx]`` and returns the per-state participation
   factor row (substrate-side slice; no per-mode lazy API in ANDES).
@@ -22,11 +26,11 @@ plan's Approach addendum.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from tensa.api._run_as_job import _run_as_job
 from tensa.api.error_mapping import map_worker_error
@@ -53,6 +57,50 @@ class EigRunRequest(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    load_model: Literal["impedance", "power", "as-case"] | None = Field(
+        default=None,
+        description=(
+            "How loads behave in the analysis: ``impedance`` (the default), "
+            "``power`` or ``as-case``. A Sienna session takes all three; an "
+            "ANDES session takes it left out or ``impedance``, which is what "
+            "ANDES does, and refuses the other two with 422."
+        ),
+    )
+
+
+class EigSweepRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/eig/sweep``: one parameter of
+    one device and the values to take the eigenvalues at."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(..., description="ANDES model name, e.g. 'GENROU'.")
+    idx: str = Field(
+        ...,
+        description="idx of the device within the model, as a string, e.g. '1'.",
+    )
+    param: str = Field(
+        ...,
+        description=(
+            "Parameter name as ANDES names it, e.g. 'M': a numeric parameter "
+            "of the model that is not copied from another model, the ones "
+            "GET /sessions/{id}/topology/models/{model}/alterable_params "
+            "lists before its services."
+        ),
+    )
+    values: list[FiniteFloat] = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description=(
+            "The values to take the eigenvalues at, in order: 1 to 200 "
+            "finite numbers. A value is on the base the case file and an "
+            "edit of the element use, which for a per-unit parameter is the "
+            "device's own base (ANDES's ``vin``). Each value costs a read, a "
+            "setup, a power flow and an eigenvalue analysis of the case."
+        ),
+    )
 
 
 class ComplexNumberModel(BaseModel):
@@ -136,12 +184,113 @@ class EigResultResponse(BaseModel):
             "from this initialised dae."
         ),
     )
+    load_model: str | None = Field(
+        default=None,
+        description=(
+            "The load model the analysis used (``impedance``, ``power`` or "
+            "``as-case``). Set by the Sienna engine; ``null`` for ANDES, "
+            "whose loads behave as the case and its own defaults leave them."
+        ),
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Standing notes on the result. A Sienna result carries the note "
+            "that PSID's small-signal results are work in progress in "
+            "validation, by PSID's own documentation (spec section 13). "
+            "Empty for ANDES."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
             "Job-registry id mirroring this EIG routine (kind "
             "``eig``). ``GET /sessions/{id}/jobs/{job_id}`` returns the "
             "matching record; ``null`` on legacy responses."
+        ),
+    )
+
+
+class EigSweepPointModel(BaseModel):
+    """The eigenvalues at one value of the swept parameter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: float = Field(
+        ...,
+        description=(
+            "The parameter value of this point: ``points[i]`` is at "
+            "``values[i]`` of the request."
+        ),
+    )
+    eigenvalues: list[ComplexNumberModel] = Field(
+        ...,
+        description=(
+            "Eigenvalues of the reduced state matrix at this value, each "
+            "``{real, imag}``, as ``POST /sessions/{id}/eig`` gives them for a "
+            "case opened with the value (an eigenvalue ANDES counts as zero "
+            "is exactly ``{0, 0}``). The order is not comparable across "
+            "points, since ANDES does not keep one: each point is a list of "
+            "its own and no mode is followed through the sweep, so a client "
+            "drawing root loci matches the modes itself."
+        ),
+    )
+    damping_ratios: list[float] = Field(
+        ...,
+        description=(
+            "Per-mode damping ratio ``-Re(z) / |z|`` at this value, "
+            "index-aligned with ``eigenvalues``; 1.0 for a zero eigenvalue."
+        ),
+    )
+    frequencies_hz: list[float] = Field(
+        ...,
+        description=(
+            "Per-mode oscillation frequency ``|Im(z)| / (2*pi)`` in Hz at "
+            "this value, index-aligned with ``eigenvalues``."
+        ),
+    )
+
+
+class EigSweepResponse(BaseModel):
+    """Wire shape of ``POST /sessions/{id}/eig/sweep``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(..., description="The model of the swept parameter, as requested.")
+    idx: str = Field(..., description="The device of the swept parameter, as requested.")
+    param: str = Field(..., description="The swept parameter, as requested.")
+    points: list[EigSweepPointModel] = Field(
+        ...,
+        description=(
+            "One point per requested value, in the request's order. Each is "
+            "an eigenvalue analysis of a system of its own: the case with the "
+            "session's edits and the parameter at the value, its power flow "
+            "solved with the settings of the session's last one. The "
+            "session's own system is not changed by the sweep."
+        ),
+    )
+    mode_count: int = Field(
+        ...,
+        description=(
+            "Number of eigenvalues at every point. A sweep whose points "
+            "differ in it is refused (422), not answered with lists of "
+            "different lengths."
+        ),
+    )
+    tds_initialized: bool = Field(
+        ...,
+        description=(
+            "Whether the session's dynamic state is initialised, which the "
+            "sweep does not change: ``false`` unless an eigenvalue analysis "
+            "or a time-domain run of the session initialised it, so a power "
+            "flow can still run after a sweep that followed one."
+        ),
+    )
+    job_id: str | None = Field(
+        default=None,
+        description=(
+            "Job-registry id mirroring this sweep (kind ``eig``). "
+            "``GET /sessions/{id}/jobs/{job_id}`` returns the matching record."
         ),
     )
 
@@ -253,7 +402,10 @@ async def run_eig(
         async with _run_as_job(
             mgr, session_id, "eig", request_summary=body.model_dump()
         ) as job_id:
-            payload = await mgr.invoke(session_id, "run_eig", {})
+            args: dict[str, Any] = {}
+            if body.load_model is not None:
+                args["load_model"] = body.load_model
+            payload = await mgr.invoke(session_id, "run_eig", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -281,6 +433,112 @@ async def run_eig(
         mode_count=int(payload.get("mode_count", 0)),
         state_count=int(payload.get("state_count", 0)),
         state_names=[str(n) for n in payload.get("state_names") or []],
+        tds_initialized=bool(payload.get("tds_initialized", False)),
+        load_model=(
+            None if payload.get("load_model") is None else str(payload.get("load_model"))
+        ),
+        notes=[str(n) for n in payload.get("notes") or []],
+        job_id=job_id,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/eig/sweep",
+    openapi_extra={"x-tensa-gui-location": "analysis-panel"},
+    operation_id="runEigSweep",
+    summary=(
+        "Eigenvalues at each of a list of values of one parameter of one device "
+        "(root loci data)."
+    ),
+    response_model=EigSweepResponse,
+    responses={
+        404: {
+            "model": ProblemDetails,
+            "description": (
+                "Session not found or already closed, OR the case has no such "
+                "model, device or parameter."
+            ),
+        },
+        409: {
+            "model": ProblemDetails,
+            "description": (
+                "No case loaded OR the session has no converged power flow. "
+                "Run /pflow first: the sweep solves each point's power flow "
+                "with that run's settings."
+            ),
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "The values are not 1 to 200 finite numbers, OR a point failed: "
+                "its system did not set up, its power flow did not converge, the "
+                "eigenvalue routine failed, or it has another number of "
+                "eigenvalues than the first point. The detail names the value."
+            ),
+        },
+    },
+)
+async def run_eig_sweep(
+    session_id: str,
+    body: EigSweepRequest,
+    request: Request,
+) -> EigSweepResponse:
+    """Take the eigenvalues at each value of one parameter of one device.
+
+    Synchronous, like ``POST /eig``, and run as a job of kind ``eig``. Each
+    value is a read, a setup, a power flow and an eigenvalue analysis of the
+    case, so the time grows with the number of values; the session's own
+    System is not touched.
+    """
+    mgr = _manager(request)
+    try:
+        async with _run_as_job(
+            mgr, session_id, "eig", request_summary=body.model_dump()
+        ) as job_id:
+            payload = await mgr.invoke(
+                session_id,
+                "run_eig_sweep",
+                {
+                    "model": body.model,
+                    "idx": body.idx,
+                    "param": body.param,
+                    "values": list(body.values),
+                },
+            )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _to_http_error(exc) from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "worker returned a non-dict payload for run_eig_sweep: "
+                f"{type(payload).__name__}"
+            ),
+        )
+    points = [
+        EigSweepPointModel(
+            value=float(point["value"]),
+            eigenvalues=[
+                ComplexNumberModel(real=float(z["real"]), imag=float(z["imag"]))
+                for z in point.get("eigenvalues") or []
+            ],
+            damping_ratios=[float(d) for d in point.get("damping_ratios") or []],
+            frequencies_hz=[float(f) for f in point.get("frequencies_hz") or []],
+        )
+        for point in payload.get("points") or []
+    ]
+    return EigSweepResponse(
+        model=str(payload.get("model", body.model)),
+        idx=str(payload.get("idx", body.idx)),
+        param=str(payload.get("param", body.param)),
+        points=points,
+        mode_count=int(payload.get("mode_count", 0)),
         tds_initialized=bool(payload.get("tds_initialized", False)),
         job_id=job_id,
     )

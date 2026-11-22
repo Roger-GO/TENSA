@@ -37,7 +37,16 @@ import { useReloadCase } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
 import { useMenuCommands, subscribePaletteDialog } from '@/lib/commands';
 import { ProblemDetailsError } from '@/api/client';
-import { SaveAsCustomCaseDialog } from '@/components/case/SaveAsCustomCaseDialog';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
+
+// Fetched the first time the ``clone.save-as`` command opens it: the menu is
+// on the first screen, the dialog is not.
+const SaveAsCustomCaseDialog = lazyNamed(
+  () => import('@/components/case/SaveAsCustomCaseDialog'),
+  'SaveAsCustomCaseDialog',
+  'overlay',
+);
 
 const TESTID_BY_ID: Record<string, string> = {
   'edit.undo': 'topbar-menu-edit-undo',
@@ -55,11 +64,15 @@ export function EditMenu() {
   const sessionId = useSessionStore((s) => s.sessionId);
   const reload = useReloadCase();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // The save-as dialog's open state is held here, not by the dialog, so the
+  // palette bridge is heard before its chunk has been fetched.
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribePaletteDialog((key) => {
       if (key === 'reload-confirm') setConfirmOpen(true);
+      else if (key === 'save-as-custom') setSaveAsOpen(true);
     });
   }, []);
 
@@ -150,10 +163,12 @@ export function EditMenu() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Save-as-custom-case dialog (Unit 22). Uncontrolled — it subscribes to
-          the ``save-as-custom`` palette bridge so the ``clone.save-as`` command
-          (menu click + ⌘⇧S) opens it. */}
-      <SaveAsCustomCaseDialog />
+      {/* Save-as-custom-case dialog (Unit 22), opened by the ``save-as-custom``
+          palette bridge that the ``clone.save-as`` command (menu click and
+          its shortcut) posts. */}
+      <LazyMount when={saveAsOpen} onLoadFailed={() => setSaveAsOpen(false)}>
+        <SaveAsCustomCaseDialog open={saveAsOpen} onOpenChange={setSaveAsOpen} />
+      </LazyMount>
     </>
   );
 }

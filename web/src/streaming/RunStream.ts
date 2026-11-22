@@ -56,6 +56,8 @@ import {
   shouldGiveUp,
 } from './reconnect';
 import { useRunsStore } from '@/store/runs';
+import { useSessionStore } from '@/store/session';
+import { fetchKeyListing } from '@/api/queries/compare';
 import type { TdsControllerResult } from '@/api/types';
 import type { TdsControllerSpec } from '@/lib/tdsControllers';
 import type { UnitBases } from '@/lib/units';
@@ -97,7 +99,7 @@ export function loadArrowDecoder(): Promise<ArrowDecoder> {
 export type VarGroup = 'bus_v' | 'gen_state' | 'gen_power' | 'line_flow' | 'load_pq';
 
 /** Wire-side integrator value forwarded to the substrate. */
-export type TdsIntegratorWire = 'trapezoidal' | 'qndf';
+export type TdsIntegratorWire = 'trapezoidal' | 'backeuler' | 'trap_adapt' | 'qndf';
 
 /** Args for the ``start_tds`` message; the UI clamps ``max_rate_hz`` to 30. */
 export interface TdsArgs {
@@ -121,20 +123,26 @@ export interface TdsArgs {
   controllers?: readonly TdsControllerSpec[];
   /**
    * Unit 16 integrator selection. Optional — defaults to ``trapezoidal``
-   * on the substrate. ``qndf`` enables the variable-step NDF method
-   * (``ss.TDS.config.method = "qndf"``).
+   * on the substrate. ``trapezoidal`` and ``backeuler`` step at ``h``;
+   * ``trap_adapt`` and ``qndf`` choose their own steps and ignore it.
    */
   integrator?: TdsIntegratorWire;
   /**
    * Unit 16 adaptive tolerance / max-step overrides, plus the Unit 14
    * free-form ``tds_config_overrides`` keyspace. Forwarded verbatim as
    * ``tds_config_overrides`` on the wire. The wrapper-canonical
-   * ``rtol`` / ``atol`` / ``max_step`` keys map to ANDES's
-   * ``reltol`` / ``abstol`` / ``dtmax``; any additional keys the user
+   * ``rtol`` / ``atol`` / ``max_step`` / ``min_step`` keys map to ANDES's
+   * ``reltol`` / ``abstol`` / ``dtmax`` / ``dtmin_adapt``; any additional keys the user
    * supplies in the TDS Advanced editor pass through to ANDES's TDS
    * config namespace (unknown keys are rejected substrate-side).
    */
   tdsConfigOverrides?: Record<string, number>;
+  /**
+   * The load model a dynamic run applies (`load_model` on the wire), for an
+   * engine that takes one. Left out when unset, which leaves the choice to
+   * the server.
+   */
+  loadModel?: string;
 }
 
 /** Connection-status events surfaced to the UI status badge. */
@@ -555,7 +563,7 @@ export class RunStream {
       }
       this.send({ type: 'resume', run_id: this.runId, last_seq: this.rowCount });
     } else {
-      const { tf, h, vars, daeVars, controllers, integrator, tdsConfigOverrides } =
+      const { tf, h, vars, daeVars, controllers, integrator, tdsConfigOverrides, loadModel } =
         this.opts.tdsArgs;
       const payload: Record<string, unknown> = {
         type: 'start_tds',
@@ -574,6 +582,7 @@ export class RunStream {
       if (tdsConfigOverrides !== undefined) {
         payload.tds_config_overrides = tdsConfigOverrides;
       }
+      if (loadModel !== undefined) payload.load_model = loadModel;
       this.send(payload);
     }
     this.phase = 'awaiting-stream-start';
@@ -613,6 +622,20 @@ export class RunStream {
         ...(this.opts.disturbedAt === undefined ? {} : { disturbedAt: this.opts.disturbedAt }),
         ...(this.opts.caseName === undefined ? {} : { caseName: this.opts.caseName }),
       });
+      // Record the engine and the session's key listing on the run, so a later
+      // comparison can build its results document. A failed fetch leaves both
+      // unset and is only logged: the run itself does not depend on it.
+      const engine = useSessionStore.getState().engine ?? 'andes';
+      fetchKeyListing(this.opts.sessionId).then(
+        (keys) => {
+          // The record outlives the stream; the store ignores a run it no
+          // longer holds.
+          useRunsStore.getState().setRunIdentity(runId, engine, keys);
+        },
+        (err: unknown) => {
+          log.warn('[RunStream] could not fetch the key listing for the run', err);
+        },
+      );
       this.opts.onStart?.({ runId, metadata });
     } else {
       // Resume: clear "reconnecting" status now that we have a fresh

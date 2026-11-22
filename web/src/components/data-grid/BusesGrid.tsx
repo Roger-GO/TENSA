@@ -72,7 +72,8 @@ interface BusRow {
 
 interface BusInjection {
   p: number;
-  q: number;
+  /** ``null`` when a device on the bus has none: a DC power flow computes no reactive power. */
+  q: number | null;
 }
 
 /**
@@ -85,10 +86,13 @@ interface BusInjection {
 export function computeBusInjections(pflow: PflowResult | null): Map<string, BusInjection> {
   const map = new Map<string, BusInjection>();
   if (!pflow?.converged) return map;
-  const accumulate = (bus: string | number, p: number, q: number, sign: 1 | -1) => {
+  const accumulate = (bus: string | number, p: number, q: number | null, sign: 1 | -1) => {
     const key = String(bus);
     const cur = map.get(key) ?? { p: 0, q: 0 };
-    map.set(key, { p: cur.p + sign * p, q: cur.q + sign * q });
+    map.set(key, {
+      p: cur.p + sign * p,
+      q: cur.q === null || q === null ? null : cur.q + sign * q,
+    });
   };
   for (const gen of Object.values(pflow.generator_outputs ?? {})) {
     accumulate(gen.bus, gen.p, gen.q, 1);

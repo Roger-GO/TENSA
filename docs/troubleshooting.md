@@ -95,6 +95,30 @@ The page lost its session. `Reconnecting...` goes away on its own. `Cannot reach
 
 The status 429 means the server holds its limit of sessions, four by default. Every open browser tab holds one. Close tabs you no longer use, wait for idle sessions to be closed (180 s), or start the server with a higher `--max-sessions`.
 
+## The Sienna engine
+
+### The Sienna engine is not available
+
+`GET /engines` reports Sienna with `available: false` and an `unavailable_reason`, and creating a Sienna session answers 409 with the same reason. The reasons, in the order they are checked:
+
+- **`juliacall is not installed (pip install "tensa[sienna]")`.** The `sienna` extra is not installed in the environment the server runs from. Install it with `pip install "tensa[sienna]"`.
+- **`Julia was not found (set TENSA_JULIA or put julia on PATH)`.** No Julia executable. Install Julia from [julialang.org](https://julialang.org/install/) (the environment was resolved for Julia 1.13), or point `TENSA_JULIA` at the executable. A `TENSA_JULIA` that names no existing file gives this reason too.
+- **`the Sienna Julia environment is not set up at <name>; run: tensa warm-cache --engine sienna`.** The project folder holds no `Manifest.toml`: the setup was never run, or `TENSA_SIENNA_PROJECT` points at another folder. Run `tensa warm-cache --engine sienna`.
+- **`the Sienna Julia environment at <name> was not set up by this version of TENSA; run: tensa warm-cache --engine sienna`.** The folder's stamp does not match the Manifest this TENSA ships: the setup was run by another version of TENSA, or the folder was filled by hand. Run `tensa warm-cache --engine sienna` again.
+- **`the Sienna engine's Julia module is missing from this installation`.** The installed package does not carry the engine's Julia files. Reinstall TENSA.
+
+### `tensa warm-cache --engine sienna` fails
+
+The command exits with status 1 and its message names the step. A missing `juliacall` or Julia is reported before anything is written. A Julia of another major.minor version than the Manifest's is refused unless you run again with `--allow-julia-mismatch`. A failure of the install step prints Julia's own output above the error, and a failure of the module check quotes the first line of Julia's error. A failed run leaves no stamp, so the engine stays unavailable until a run succeeds.
+
+### The first request of a Sienna session takes a minute or two
+
+Julia starts when the session's worker first needs it, and the first use of each Julia function compiles it: on a Windows laptop the first case load took 56 to 84 seconds and the first power flow 40 to 47 seconds. Later loads and power flows take under a second. This is expected and needs no action.
+
+### A dispatch or unit commitment answers 422 on a PSS/E case
+
+A PSS/E `.raw` file carries no generator cost data, so the economic dispatch, the optimal power flow and the unit commitment take a MATPOWER `.m` case with `gencost` rows.
+
 ## Scripts and agents
 
 ### A request answers 422

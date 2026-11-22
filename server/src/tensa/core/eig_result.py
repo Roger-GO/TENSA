@@ -78,4 +78,43 @@ class EigResult:
     tds_initialized: bool
 
 
-__all__ = ["ComplexNumber", "EigResult"]
+@dataclasses.dataclass(frozen=True)
+class EigSweepPoint:
+    """The eigenvalues at one value of a swept parameter.
+
+    ``value`` is the parameter value the point was computed at (the
+    ``values[i]`` of the request). ``eigenvalues``, ``damping_ratios``
+    and ``frequencies_hz`` are index-aligned, cleaned the same way as
+    ``EigResult``. Eigenvalue order is not comparable across points:
+    ANDES does not guarantee it, so no mode is tracked across the sweep.
+    """
+
+    value: float
+    eigenvalues: list[ComplexNumber]
+    damping_ratios: list[float]
+    frequencies_hz: list[float]
+
+
+@dataclasses.dataclass(frozen=True)
+class EigSweepResult:
+    """Result of ``Wrapper.run_eig_sweep``: one point per requested value.
+
+    - ``model`` / ``idx`` / ``param``: the swept parameter, echoed.
+    - ``points``: one :class:`EigSweepPoint` per requested value, in the
+      request's order; every point has ``mode_count`` eigenvalues.
+    - ``mode_count``: the eigenvalue count at every point (a sweep whose
+      points disagree is refused rather than shipped ragged).
+    - ``tds_initialized``: whether the session's dynamic state is
+      initialised. The sweep computes each point on a System of its own
+      and leaves the session's as it was, so this is what it was before.
+    """
+
+    model: str
+    idx: str
+    param: str
+    points: list[EigSweepPoint]
+    mode_count: int
+    tds_initialized: bool
+
+
+__all__ = ["ComplexNumber", "EigResult", "EigSweepPoint", "EigSweepResult"]

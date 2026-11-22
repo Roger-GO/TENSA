@@ -28,12 +28,16 @@ export const queryKeys = {
   sidecars: ['sidecar'] as const,
   topologySchema: ['topology-schema'] as const,
   version: ['version'] as const,
+  /** The engines the server can start a session for, with their capabilities. */
+  engines: ['engines'] as const,
   /** Alterable-params lookup, scoped per (session, model). */
   alterableParams: (id: SessionId, model: string) => ['alterable-params', id, model] as const,
   /** Report payload, scoped per (session, routine). */
   report: (id: SessionId, routine: ReportRoutine) => ['report', id, routine] as const,
   /** EIG result, scoped per session (Unit 6). */
   eig: (id: SessionId) => ['eig', id] as const,
+  /** EIG parameter-sweep (root locus) result, scoped per session. */
+  eigSweep: (id: SessionId) => ['eig-sweep', id] as const,
   /** Per-mode participation factor row (Unit 6). */
   eigParticipation: (id: SessionId, modeIdx: number) => ['eig-participation', id, modeIdx] as const,
   /** CPF result, scoped per session (Unit 12). */
@@ -44,6 +48,8 @@ export const queryKeys = {
   seMeasurements: (id: SessionId) => ['se-measurements', id] as const,
   /** Connectivity / island-detection result, scoped per session (Unit 17). */
   connectivity: (id: SessionId) => ['connectivity', id] as const,
+  /** The bus admittance matrix, scoped per session. */
+  ybus: (id: SessionId) => ['ybus', id] as const,
   /** PMU placements list, scoped per session (Unit 14). */
   pmus: (id: SessionId) => ['pmus', id] as const,
   /** TimeSeries profile assignments, scoped per session (Unit 15). */
@@ -64,6 +70,10 @@ export const queryKeys = {
     ['tds-controllers', id, casePath, devices] as const,
   /** Clone-vs-original param diff, scoped per (session, model, idx) (Unit 23). */
   cloneDiff: (id: SessionId, model: string, idx: string) => ['clone-diff', id, model, idx] as const,
+  /** The models ANDES ships, grouped as ANDES groups them, scoped per session. */
+  models: (id: SessionId) => ['models', id] as const,
+  /** ANDES's documentation of one model, scoped per (session, model). */
+  modelDoc: (id: SessionId, model: string) => ['models', id, 'doc', model] as const,
 } as const;
 
 /** Query-key factory for the snapshot listing. Exported so the snapshot mutations

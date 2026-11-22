@@ -199,6 +199,25 @@ describe('<EditMenu />', () => {
     expect(toggle.getAttribute('aria-description')).toMatch(/copy of the case/);
   });
 
+  it('opens Save parameter edits as case from its menu item, though the dialog loads late', async () => {
+    useCaseStore.setState({ cloneInitialized: true, cloneUndoDepth: 1, cloneRedoDepth: 0 });
+    const user = userEvent.setup();
+    render(withProviders(<EditMenu />));
+    // Not fetched before it is asked for.
+    expect(screen.queryByTestId('save-as-custom-case-dialog')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-edit-clone-save-as'));
+    expect(await screen.findByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
+    // Closed, it opens again from the menu.
+    await user.keyboard('{Escape}');
+    await waitFor(() =>
+      expect(screen.queryByTestId('save-as-custom-case-dialog')).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId('topbar-menu-edit-trigger'));
+    await user.click(await screen.findByTestId('topbar-menu-edit-clone-save-as'));
+    expect(await screen.findByTestId('save-as-custom-case-dialog')).toBeInTheDocument();
+  });
+
   it('Escape closes the menu', async () => {
     const user = userEvent.setup();
     render(withProviders(<EditMenu />));

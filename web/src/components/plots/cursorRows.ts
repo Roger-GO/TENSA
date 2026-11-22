@@ -38,7 +38,7 @@ export function buildCursorRows(
     const x = chart.data[0] as ArrayLike<number>;
     const series = chart.options.series ?? [];
     for (let i = 1; i < series.length; i += 1) {
-      const y = chart.data[i] as ArrayLike<number> | undefined;
+      const y = chart.data[i] as ArrayLike<number | null | undefined> | undefined;
       if (y === undefined) continue;
       const entry = series[i]!;
       const axis = chart.axes.find((candidate) => candidate.scale === entry.scale);
@@ -46,12 +46,37 @@ export function buildCursorRows(
         key: `${chart.key}:${i}`,
         label: typeof entry.label === 'string' ? entry.label : `${chart.key} ${i}`,
         axis: axis?.label ?? '',
-        a: cursors.a === null ? null : valueAt(x, y, cursors.a),
-        b: cursors.b === null ? null : valueAt(x, y, cursors.b),
+        a: cursors.a === null ? null : sampleValueAt(x, y, cursors.a),
+        b: cursors.b === null ? null : sampleValueAt(x, y, cursors.b),
       });
     }
   }
   return rows;
+}
+
+/**
+ * ``valueAt`` for a column of a chart. A column that shares its time axis with
+ * an imported trace is a plain array that is ``undefined`` at the times only
+ * the other series have (``placeOnAxis`` in ``TimeSeriesPlot.tsx``); it is read
+ * on its own samples, as it is drawn, and a ``null`` among them (a gap) reads
+ * as no value.
+ */
+function sampleValueAt(
+  x: ArrayLike<number>,
+  y: ArrayLike<number | null | undefined>,
+  target: number,
+): number | null {
+  if (!Array.isArray(y)) return valueAt(x, y as ArrayLike<number>, target);
+  const times: number[] = [];
+  const values: number[] = [];
+  const length = Math.min(x.length, y.length);
+  for (let i = 0; i < length; i += 1) {
+    const value = y[i] as number | null | undefined;
+    if (value === undefined) continue;
+    times.push(x[i]!);
+    values.push(value === null ? NaN : value);
+  }
+  return valueAt(times, values, target);
 }
 
 /** What the next click on the plot does, from where the cursors stand. */

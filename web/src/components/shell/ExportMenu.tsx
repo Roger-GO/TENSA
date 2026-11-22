@@ -9,7 +9,8 @@
  * Export bundle and Save snapshot open their dialogs; Export HTML report
  * saves a file straight away (`lib/saveHtmlReport.ts`); Figure for a paper
  * opens the figure dialog of the canvas (`SldFigureDialog`), and says under its
- * name that it is the publication look (`lib/figureWording.ts`). Reports, which opens
+ * name that it is the publication look (`lib/figureWording.ts`). Admittance matrix
+ * (Ybus) opens the dialog that reads the matrix and downloads it. Reports, which opens
  * the dialog with ANDES's plain-text reports, is a Workspace command and is
  * listed here as well, under the HTML report: a report is something to take
  * out of the app, and this is the menu a first-time user opens to find one.
@@ -28,6 +29,7 @@ const TESTID_BY_ID: Record<string, string> = {
   'export.snapshot': 'topbar-menu-export-snapshot',
   'export.html-report': 'topbar-menu-export-html-report',
   'export.figure': 'topbar-menu-export-figure',
+  'export.ybus': 'topbar-menu-export-ybus',
   'workspace.report': 'topbar-menu-export-reports',
 };
 

@@ -1,6 +1,6 @@
 /**
- * CSV for the Analyze panel's results: the eigenvalues, a mode's participation
- * factors, a CPF curve and the SE residuals. Pure functions of the result, so
+ * CSV for the Analyze panel's results: the eigenvalues, a parameter sweep's
+ * eigenvalues, a mode's participation factors, a CPF curve and the SE residuals. Pure functions of the result, so
  * each one is tested without mounting a chart; the charts wire them to their
  * `<ExportMenu>`.
  *
@@ -16,8 +16,17 @@ import {
   hasLowerBranch,
   lambdaMeaning,
   limitName,
+  noseBeforeTarget,
+  reachedTarget,
+  targetLambda,
 } from '@/lib/cpfOptions';
-import type { CpfResult, EigResult, ParticipationFactor, SeResult } from '@/api/types';
+import type {
+  CpfResult,
+  EigResult,
+  EigSweepResponse,
+  ParticipationFactor,
+  SeResult,
+} from '@/api/types';
 
 /**
  * Every computed eigenvalue, whatever the scatter's display filter hides. The
@@ -35,6 +44,38 @@ export function eigResultToCsv(result: EigResult): Blob {
     columns: ['mode', 'real', 'imag', 'damping_ratio', 'frequency_hz'],
     rows,
     comments: [`${result.mode_count} modes, ${result.state_count} states`],
+  });
+}
+
+/**
+ * Every eigenvalue of every point of a parameter sweep, one row per (point,
+ * mode), in the request's order. `point` is the index into the response's
+ * `points` and `value` the parameter's value there; `mode` is the index into
+ * the point's `eigenvalues` (no mode is followed through the sweep, so it is
+ * not comparable across points).
+ */
+export function eigSweepResultToCsv(result: EigSweepResponse): Blob {
+  const rows: (string | number | boolean | undefined)[][] = [];
+  result.points.forEach((point, pointIdx) => {
+    point.eigenvalues.forEach((z, modeIdx) => {
+      rows.push([
+        pointIdx,
+        point.value,
+        modeIdx,
+        z.real,
+        z.imag,
+        point.damping_ratios[modeIdx],
+        point.frequencies_hz[modeIdx],
+      ]);
+    });
+  });
+  return recordsToCsv({
+    columns: ['point', 'value', 'mode', 'real', 'imag', 'damping_ratio', 'frequency_hz'],
+    rows,
+    comments: [
+      `sweep of ${result.param} of ${result.model} ${result.idx}, ` +
+        `${result.points.length} points, ${result.mode_count} modes per point`,
+    ],
   });
 }
 
@@ -99,7 +140,16 @@ function cpfComments(result: CpfResult): string[] {
       `full curve: steps 0 to ${result.nose_idx} are the upper branch, the rest the lower branch`,
     );
   }
-  if (!result.truncated && result.complete === false) {
+  const target = targetLambda(result);
+  if (target !== null) {
+    if (reachedTarget(result)) {
+      comments.push(`stopped at the target lambda = ${target}, as asked, before any nose`);
+    } else if (noseBeforeTarget(result)) {
+      comments.push(`the nose came before the target lambda = ${target}, and the run ended there`);
+    } else {
+      comments.push(`target lambda = ${target}, not reached`);
+    }
+  } else if (!result.truncated && result.complete === false) {
     comments.push('the lower branch stops before it is back at the base load');
   }
   return comments;
@@ -125,7 +175,9 @@ export function cpfResultToCsv(result: CpfResult): Blob {
       (generators.length > 0 ? ', generator reactive power in MVAr' : ''),
     `max ${isQv ? 'Q' : 'lambda'} = ${result.max_lam}`,
   ];
-  if (result.truncated) comments.push('truncated: no nose point was reached');
+  if (result.truncated && !reachedTarget(result)) {
+    comments.push('truncated: no nose point was reached');
+  }
   if (result.done_msg) comments.push(result.done_msg);
   comments.push(...cpfComments(result));
   return recordsToCsv({
@@ -179,6 +231,33 @@ export function seResidualsToCsv(result: SeResult): Blob {
     comments: [
       `SE ${result.converged ? 'converged' : 'did not converge'} in ${result.iterations} iterations, ` +
         `J = ${result.mismatch}`,
+      ...seRunComments(result),
     ],
   });
+}
+
+/**
+ * What a residuals file says of the run besides the residuals: the estimator,
+ * the settings it ran with and the chi-squared bad-data test. A result from
+ * before the server sent these has none of them, and the file says nothing.
+ */
+function seRunComments(result: SeResult): string[] {
+  if (result.algorithm == null) return [];
+  const settings = result.settings;
+  const lines = [
+    `Estimator: ${result.algorithm.toUpperCase()}` +
+      (settings != null ? `, tol = ${settings.tol}, max_iter = ${settings.max_iter}` : '') +
+      (settings?.noise_seed != null
+        ? `, noise drawn for this run with seed ${settings.noise_seed}`
+        : ''),
+  ];
+  const test = result.chi_squared;
+  lines.push(
+    test != null
+      ? `Bad-data test (chi-squared, confidence ${test.confidence}): ` +
+          `${test.passed ? 'passed' : 'failed'}, J = ${test.J}, threshold = ${test.threshold}, ` +
+          `${test.dof} degrees of freedom`
+      : 'No bad-data test: it needs weighted least squares and more measurements than states.',
+  );
+  return lines;
 }

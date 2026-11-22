@@ -473,7 +473,7 @@
           },
           "dyr": {
             "field": "TB",
-            "field_index": 7
+            "field_index": 8
           }
         },
         "TC": {
@@ -482,7 +482,7 @@
           },
           "dyr": {
             "field": "TC",
-            "field_index": 8
+            "field_index": 7
           }
         },
         "TB1": {
@@ -491,7 +491,7 @@
           },
           "dyr": {
             "field": "TB1",
-            "field_index": 9
+            "field_index": 10
           }
         },
         "TC1": {
@@ -500,7 +500,7 @@
           },
           "dyr": {
             "field": "TC1",
-            "field_index": 10
+            "field_index": 9
           }
         },
         "VAMAX": {
@@ -509,7 +509,7 @@
           },
           "dyr": {
             "field": "VAMAX",
-            "field_index": 11
+            "field_index": 13
           }
         },
         "VAMIN": {
@@ -518,7 +518,7 @@
           },
           "dyr": {
             "field": "VAMIN",
-            "field_index": 12
+            "field_index": 14
           }
         },
         "KA": {
@@ -527,7 +527,7 @@
           },
           "dyr": {
             "field": "KA",
-            "field_index": 13
+            "field_index": 11
           }
         },
         "TA": {
@@ -536,7 +536,7 @@
           },
           "dyr": {
             "field": "TA",
-            "field_index": 14
+            "field_index": 12
           }
         },
         "ILR": {
@@ -545,7 +545,7 @@
           },
           "dyr": {
             "field": "ILR",
-            "field_index": 15
+            "field_index": 21
           }
         },
         "KLR": {
@@ -554,7 +554,7 @@
           },
           "dyr": {
             "field": "KLR",
-            "field_index": 16
+            "field_index": 20
           }
         },
         "VRMAX": {
@@ -563,7 +563,7 @@
           },
           "dyr": {
             "field": "VRMAX",
-            "field_index": 17
+            "field_index": 15
           }
         },
         "VRMIN": {
@@ -572,7 +572,7 @@
           },
           "dyr": {
             "field": "VRMIN",
-            "field_index": 18
+            "field_index": 16
           }
         },
         "KF": {
@@ -581,7 +581,7 @@
           },
           "dyr": {
             "field": "KF",
-            "field_index": 19
+            "field_index": 18
           }
         },
         "TF": {
@@ -590,7 +590,7 @@
           },
           "dyr": {
             "field": "TF",
-            "field_index": 20
+            "field_index": 19
           }
         },
         "KC": {
@@ -599,7 +599,7 @@
           },
           "dyr": {
             "field": "KC",
-            "field_index": 21
+            "field_index": 17
           }
         },
         "UELc": {

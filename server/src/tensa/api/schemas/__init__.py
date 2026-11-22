@@ -7,7 +7,8 @@ response is shaped as ``ProblemDetails`` per RFC 7807.
 The models live in one module per domain, beside this file and named for the
 routes that use them where there is one: ``errors``, ``jobs``, ``messages``,
 ``sessions``, ``topology``, ``cases``, ``elements``, ``pflow``, ``disturbances``,
-``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``workspace`` and ``version``. A model
+``clone``, ``tds``, ``metrics``, ``comtrade``, ``examples``, ``external_results``,
+``workspace``, ``ybus``, ``network_matrix``, ``models`` and ``version``. A model
 that another domain builds on (``TopologySummary``, ``ProblemDetails``) is imported
 from the module that defines it. Every name the single-file module defined is
 importable from here.
@@ -32,10 +33,35 @@ from tensa.api.schemas.clone import (
     CloneSaveAsRequest,
     CloneSaveAsResponse,
 )
+from tensa.api.schemas.compare import (
+    MAX_COMPARE_SAMPLES,
+    MAX_COMPARE_SAMPLES_TOTAL,
+    MAX_COMPARE_SERIES,
+    MAX_COMPARE_TABLE_ROWS,
+    CompareRequest,
+    CompareResponse,
+    EigenvaluePairOut,
+    NotComparableOut,
+    PflowComparisonOut,
+    SeriesDifferenceOut,
+    TableRowDifferenceOut,
+    Tolerances,
+    UnmatchedKeysOut,
+)
 from tensa.api.schemas.comtrade import (
     MAX_COMTRADE_VALUES,
     ComtradeChannelSeries,
     ComtradeExportRequest,
+)
+from tensa.api.schemas.dispatch import (
+    DispatchBranchSchema,
+    DispatchBusSchema,
+    DispatchDualRowSchema,
+    DispatchDualSchema,
+    DispatchGeneratorSchema,
+    DispatchRequest,
+    DispatchResponse,
+    DispatchSlackSchema,
 )
 from tensa.api.schemas.disturbances import (
     AddDisturbancesRequest,
@@ -52,6 +78,11 @@ from tensa.api.schemas.elements import (
     TopologyParamMeta,
     TopologySchema,
 )
+from tensa.api.schemas.engines import (
+    EngineCapabilities,
+    EngineFormats,
+    EngineList,
+)
 from tensa.api.schemas.errors import (
     RECOVERY_DEFAULT_LABELS,
     ProblemDetails,
@@ -64,10 +95,22 @@ from tensa.api.schemas.examples import (
     ExampleList,
     ExampleListEntry,
 )
+from tensa.api.schemas.external_results import (
+    ExternalResultsResponse,
+    ExternalSeries,
+)
+from tensa.api.schemas.fidelity import (
+    FidelityEntry,
+    FidelityReport,
+)
 from tensa.api.schemas.jobs import (
     JobKindSchema,
     JobRecordSchema,
     JobStatusSchema,
+)
+from tensa.api.schemas.keys import (
+    KeyEntrySchema,
+    KeyList,
 )
 from tensa.api.schemas.messages import (
     MessageLevelSchema,
@@ -85,6 +128,16 @@ from tensa.api.schemas.metrics import (
     ResponseMetricsResponse,
     SeriesMetrics,
 )
+from tensa.api.schemas.models import (
+    ModelDoc,
+    SupportedModels,
+)
+from tensa.api.schemas.network_matrix import (
+    NetworkMatrixArcSchema,
+    NetworkMatrixBusSchema,
+    NetworkMatrixEntrySchema,
+    NetworkMatrixResponse,
+)
 from tensa.api.schemas.pflow import (
     GeneratorOutput,
     LineFlow,
@@ -94,10 +147,39 @@ from tensa.api.schemas.pflow import (
     PflowSettings,
     PflowSummary,
 )
+from tensa.api.schemas.results_doc import (
+    ConvertResultRequest,
+    ConvertResultResponse,
+    EigenvalueRow,
+    EigenvalueTable,
+    EngineBlock,
+    PflowBranchRow,
+    PflowBusRow,
+    PflowGeneratorRow,
+    PflowLoadRow,
+    PflowTable,
+    ResultsDocument,
+    Series,
+    SkippedSeries,
+)
 from tensa.api.schemas.sessions import (
     CreateSessionRequest,
     SessionDescriptor,
     SessionList,
+)
+from tensa.api.schemas.sim import (
+    SimGeneratorSeriesSchema,
+    SimRequest,
+    SimResponse,
+    SimSlackSchema,
+    SimStageSchema,
+)
+from tensa.api.schemas.studies import (
+    EngineStudyOutcome,
+    StudyCaseRef,
+    StudyRequest,
+    StudyResponse,
+    StudyTolerances,
 )
 from tensa.api.schemas.tds import (
     AbortResponse,
@@ -109,6 +191,10 @@ from tensa.api.schemas.tds import (
     TdsControllerTarget,
     TdsControllerTrace,
     TdsControllerVariables,
+    TdsInitClamp,
+    TdsInitRequest,
+    TdsInitResidual,
+    TdsInitResult,
     TdsRunRequest,
     TdsTraces,
     TdsTraceSeries,
@@ -118,6 +204,14 @@ from tensa.api.schemas.topology import (
     EditStep,
     TopologyEntry,
     TopologySummary,
+)
+from tensa.api.schemas.uc import (
+    UcCostSchema,
+    UcGeneratorSchema,
+    UcOverrideSchema,
+    UcRequest,
+    UcResponse,
+    UcSlackSchema,
 )
 from tensa.api.schemas.version import (
     VersionInfo,
@@ -129,7 +223,23 @@ from tensa.api.schemas.workspace import (
     WorkspaceFile,
     WorkspaceFileList,
 )
+from tensa.api.schemas.ybus import (
+    YbusEntrySchema,
+    YbusResponse,
+)
 from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
+from tensa.engines.case_doc import (
+    BusRecord,
+    CaseDocument,
+    CaseSource,
+    DynamicRecord,
+    GeneratorRecord,
+    LineRecord,
+    LoadRecord,
+    ShuntRecord,
+    TransformerRecord,
+    ZipFractions,
+)
 
 # Every name the single-file module defined, kept importable from here (the three
 # disturbance specs were re-exported by it, for the request bodies built on them).
@@ -144,7 +254,10 @@ __all__ = [
     "AlterableParamsResponse",
     "BlankSystemResponse",
     "BusCoord",
+    "BusRecord",
+    "CaseDocument",
     "CaseEvent",
+    "CaseSource",
     "CloneDiffPair",
     "CloneDiffResponse",
     "CloneEditRequest",
@@ -153,8 +266,12 @@ __all__ = [
     "CloneResetResponse",
     "CloneSaveAsRequest",
     "CloneSaveAsResponse",
+    "CompareRequest",
+    "CompareResponse",
     "ComtradeChannelSeries",
     "ComtradeExportRequest",
+    "ConvertResultRequest",
+    "ConvertResultResponse",
     "CreateSessionRequest",
     "DaeVariableInfo",
     "DaeVariableList",
@@ -162,20 +279,50 @@ __all__ = [
     "DeleteBlockedResponse",
     "DeleteElementResponse",
     "DeletedDisturbance",
+    "DispatchBranchSchema",
+    "DispatchBusSchema",
+    "DispatchDualRowSchema",
+    "DispatchDualSchema",
+    "DispatchGeneratorSchema",
+    "DispatchRequest",
+    "DispatchResponse",
+    "DispatchSlackSchema",
     "DisturbanceAck",
+    "DynamicRecord",
     "EditElementRequest",
     "EditStep",
+    "EigenvaluePairOut",
+    "EigenvalueRow",
+    "EigenvalueTable",
     "ElementCreated",
+    "EngineBlock",
+    "EngineCapabilities",
+    "EngineFormats",
+    "EngineList",
+    "EngineStudyOutcome",
     "ExampleList",
     "ExampleListEntry",
+    "ExternalResultsResponse",
+    "ExternalSeries",
     "FaultSpec",
+    "FidelityEntry",
+    "FidelityReport",
     "GeneratorOutput",
+    "GeneratorRecord",
     "JobKindSchema",
     "JobRecordSchema",
     "JobStatusSchema",
+    "KeyEntrySchema",
+    "KeyList",
     "LineFlow",
+    "LineRecord",
     "LoadCaseRequest",
     "LoadConsumption",
+    "LoadRecord",
+    "MAX_COMPARE_SAMPLES",
+    "MAX_COMPARE_SAMPLES_TOTAL",
+    "MAX_COMPARE_SERIES",
+    "MAX_COMPARE_TABLE_ROWS",
     "MAX_COMTRADE_VALUES",
     "MAX_METRIC_SAMPLES",
     "MAX_METRIC_SAMPLES_TOTAL",
@@ -183,40 +330,84 @@ __all__ = [
     "MessageLevelSchema",
     "MetricExtremum",
     "MetricsSeries",
+    "ModelDoc",
+    "NetworkMatrixArcSchema",
+    "NetworkMatrixBusSchema",
+    "NetworkMatrixEntrySchema",
+    "NetworkMatrixResponse",
+    "NotComparableOut",
+    "PflowBranchRow",
+    "PflowBusRow",
+    "PflowComparisonOut",
+    "PflowGeneratorRow",
+    "PflowLoadRow",
     "PflowResult",
     "PflowRunRequest",
     "PflowSettings",
     "PflowSummary",
+    "PflowTable",
     "ProblemDetails",
     "RECOVERY_DEFAULT_LABELS",
     "RecoveryDescriptor",
     "RecoveryKind",
     "ResponseMetricsRequest",
     "ResponseMetricsResponse",
+    "ResultsDocument",
     "SaveCaseRequest",
     "SaveCaseResponse",
+    "Series",
+    "SeriesDifferenceOut",
     "SeriesMetrics",
     "SessionDescriptor",
+    "ShuntRecord",
     "SessionList",
     "SessionMessageSchema",
     "SessionMessages",
     "SidecarLayout",
+    "SimGeneratorSeriesSchema",
+    "SimRequest",
+    "SimResponse",
+    "SimSlackSchema",
+    "SimStageSchema",
+    "SkippedSeries",
+    "StudyCaseRef",
+    "StudyRequest",
+    "StudyResponse",
+    "StudyTolerances",
+    "SupportedModels",
+    "TableRowDifferenceOut",
     "TdsBatchResult",
     "TdsControllerCatalogue",
     "TdsControllerResult",
     "TdsControllerTarget",
     "TdsControllerTrace",
     "TdsControllerVariables",
+    "TdsInitClamp",
+    "TdsInitRequest",
+    "TdsInitResidual",
+    "TdsInitResult",
     "TdsRunRequest",
     "TdsTraceSeries",
     "TdsTraces",
     "ToggleSpec",
+    "Tolerances",
     "TopologyEntry",
+    "UcCostSchema",
+    "UcGeneratorSchema",
+    "UcOverrideSchema",
+    "UcRequest",
+    "UcResponse",
+    "UcSlackSchema",
     "TopologyParamMeta",
     "TopologySchema",
     "TopologySummary",
+    "TransformerRecord",
+    "UnmatchedKeysOut",
     "UploadedWorkspaceFile",
     "VersionInfo",
     "WorkspaceFile",
     "WorkspaceFileList",
+    "YbusEntrySchema",
+    "YbusResponse",
+    "ZipFractions",
 ]

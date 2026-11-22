@@ -55,6 +55,12 @@ export interface ToggleSpecFormProps {
   spec: ToggleSpec;
   onChange: (next: ToggleSpec) => void;
   onValidityChange?: (errors: Record<string, string>) => void;
+  /**
+   * The device kinds the session's engine takes a toggle on: branches (a line
+   * trip) and generators (a generator trip). Unset offers every model, as an
+   * ANDES session does.
+   */
+  allowedTargets?: ReadonlySet<'branch' | 'generator'>;
   className?: string;
 }
 
@@ -83,15 +89,31 @@ function devicesForModel(
   return bucket.map((e) => ({ idx: String(e.idx), name: e.name }));
 }
 
+const GENERATOR_MODELS: ReadonlySet<string> = new Set(['PV', 'Slack', 'GENROU', 'GENCLS']);
+
+/** The models of `TOGGLEABLE_MODELS` the allowed targets keep, in list order. */
+function modelsForTargets(
+  targets: ReadonlySet<'branch' | 'generator'> | undefined,
+): ReadonlyArray<{ value: string; label: string }> {
+  if (targets === undefined) return TOGGLEABLE_MODELS;
+  return TOGGLEABLE_MODELS.filter((m) =>
+    m.value === 'Line'
+      ? targets.has('branch')
+      : GENERATOR_MODELS.has(m.value) && targets.has('generator'),
+  );
+}
+
 export function ToggleSpecForm({
   spec,
   onChange,
   onValidityChange,
+  allowedTargets,
   className,
 }: ToggleSpecFormProps) {
   const topology = useCurrentTopology();
   const devices = useMemo(() => devicesForModel(topology, spec.model), [topology, spec.model]);
   const [tText, setTText] = useNumberText(spec.t);
+  const models = modelsForTargets(allowedTargets);
 
   const errors = useMemo(() => {
     const out: Record<string, string> = {};
@@ -131,7 +153,7 @@ export function ToggleSpecForm({
           onChange={(e) => onChange({ ...spec, model: e.target.value, dev_idx: '' })}
           className="bg-background border-border h-7 rounded border px-2 text-xs"
         >
-          {TOGGLEABLE_MODELS.map((m) => (
+          {models.map((m) => (
             <option key={m.value} value={m.value}>
               {m.label}
             </option>

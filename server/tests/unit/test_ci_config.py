@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -565,6 +568,15 @@ def test_dependabot_leaves_andes_minor_and_major_upgrades_to_a_person() -> None:
     }
 
 
+def test_dependabot_leaves_juliacall_to_a_person() -> None:
+    """The sienna extra pins the juliacall whose PythonCall the shipped Julia Manifest
+    holds; a new one needs a new Manifest, which no pull request of Dependabot makes."""
+    updates = _load_required(_DEPENDABOT)["updates"]
+    (pip,) = [u for u in updates if u["package-ecosystem"] == "pip"]
+    (juliacall,) = [i for i in pip["ignore"] if i["dependency-name"] == "juliacall"]
+    assert "update-types" not in juliacall and "versions" not in juliacall
+
+
 def test_the_node_types_stay_on_the_major_of_the_oldest_supported_node() -> None:
     """``@types/node`` describes one major of Node's API. On a newer one than the oldest
     Node the UI supports (``engines``, the one CI runs), a configuration or a test that
@@ -622,6 +634,186 @@ def test_every_test_id_fits_in_a_windows_environment_variable(
     assert too_long == []
 
 
+_SIENNA_WORKFLOW = _WORKFLOWS / "sienna.yml"
+_SIENNA_MANIFEST = (
+    REPO_ROOT / "server" / "src" / "tensa" / "engines" / "sienna" / "envs" / "dyn" / "Manifest.toml"
+)
+
+
+def _sienna_workflow() -> dict[str, Any]:
+    return _load_required(_SIENNA_WORKFLOW)
+
+
+def _sienna_step_using(action: str) -> dict[str, Any]:
+    steps = _sienna_workflow()["jobs"]["sienna"]["steps"]
+    (step,) = [step for step in steps if str(step.get("uses", "")).startswith(action + "@")]
+    return step
+
+
+def test_the_sienna_workflow_exists_parses_and_triggers_on_the_server_push_branches() -> None:
+    """The engine's tests skip in every other job, so this workflow is what holds
+    Sienna on CI. Its push branches are server.yml's exactly, the temporary
+    branch included, so an engine change on such a branch is tested there."""
+    workflow = _sienna_workflow()
+    assert workflow["name"] == "sienna"
+    assert "sienna" in workflow["jobs"]
+    triggers = _triggers(workflow)
+    server_branches = _triggers(_workflow())["push"]["branches"]
+    assert triggers["push"]["branches"] == server_branches
+    assert "pull_request" in triggers
+    assert "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "read"}
+
+
+def test_the_sienna_workflow_installs_the_julia_the_packaged_manifest_was_resolved_for() -> None:
+    """The setup refuses a Julia whose major.minor is not the Manifest's, so the
+    workflow's Julia must be the Manifest's. The test reads ``julia_version`` from
+    the Manifest itself, so a re-resolved Manifest cannot leave CI on another
+    Julia, and the depot's cache key names the Julia the job installs."""
+    manifest = tomllib.loads(_read_required(_SIENNA_MANIFEST))
+    major_minor = ".".join(str(manifest["julia_version"]).split(".")[:2])
+    version = str(_sienna_step_using("julia-actions/setup-julia")["with"]["version"])
+    assert version.startswith(major_minor + "."), (version, manifest["julia_version"])
+    assert f"julia-{version}-" in _sienna_step_using("actions/cache")["with"]["key"]
+
+
+def test_the_sienna_depot_cache_key_hashes_the_manifest_and_names_a_real_path() -> None:
+    """The depot is only wanted for the Manifest it was built from, so the key
+    hashes it and has no restore-keys. A key that named a moved file would hash
+    nothing and silently share one depot across Manifests."""
+    options = _sienna_step_using("actions/cache")["with"]
+    assert options["path"] == "~/.julia"
+    assert "restore-keys" not in options
+    hashed = re.search(r"hashFiles\('([^']+)'\)", options["key"])
+    assert hashed is not None, options["key"]
+    assert hashed.group(1) == _SIENNA_MANIFEST.relative_to(REPO_ROOT).as_posix()
+    assert _SIENNA_MANIFEST.is_file()
+
+
+def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> None:
+    """The project's own command sets the environment up before any test runs,
+    the Julia module's own test file runs against it, and pytest selects the
+    tests marked sienna with the project named. The job must not set
+    TENSA_SIENNA_SKIP_STAMP, which would let a half-set-up project pass for
+    ready, and a test that skips fails the job (the JUnit report is read)."""
+    job = _sienna_workflow()["jobs"]["sienna"]
+    steps = job["steps"]
+    warm = _step_index(steps, "tensa warm-cache --engine sienna")
+    julia_tests = _step_index(steps, "server/tests/julia/$file")
+    pytest_tests = _step_index(steps, "pytest -m sienna")
+    assert warm < julia_tests < pytest_tests
+    # Every Julia test file of the folder runs, so a module's new file cannot
+    # be left out of CI.
+    julia_files = sorted(
+        path.name for path in (REPO_ROOT / "server" / "tests" / "julia").glob("runtests*.jl")
+    )
+    assert julia_files == [
+        "runtests.jl",
+        "runtests_dcpf.jl",
+        "runtests_dyn.jl",
+        "runtests_edit.jl",
+        "runtests_net.jl",
+        "runtests_ops.jl",
+    ]
+    loop = re.search(r"for file in ([^;]+);", steps[julia_tests]["run"])
+    assert loop is not None
+    assert sorted(loop.group(1).split()) == julia_files
+    assert "TENSA_SIENNA_PROJECT" in steps[pytest_tests]["env"]
+    assert "--junitxml" in steps[pytest_tests]["run"]
+    assert '.find("skipped")' in steps[pytest_tests]["run"]
+    # The steps pipe into tee, which hides a failure unless bash runs with
+    # pipefail, and GitHub gives it that only when the shell is named.
+    assert job["defaults"]["run"]["shell"] == "bash"
+    assert "TENSA_SIENNA_SKIP_STAMP" not in _read_required(_SIENNA_WORKFLOW)
+
+
+def test_every_test_marked_sienna_is_in_exactly_one_part_of_the_sienna_matrix() -> None:
+    """The Sienna tests run as parts side by side. A file left out of every
+    part never runs on CI, and one in two parts runs twice; the audits are
+    split by test id, and the two halves must cover every audit once."""
+    include = _sienna_workflow()["jobs"]["sienna"]["strategy"]["matrix"]["include"]
+    parts = [entry for entry in include if entry["part"] != "julia"]
+    assert [entry["part"] for entry in include].count("julia") == 1
+    marked = sorted(
+        path.relative_to(REPO_ROOT / "server").as_posix()
+        for path in (REPO_ROOT / "server" / "tests" / "integration").glob("test_*.py")
+        if "pytest.mark.sienna" in path.read_text(encoding="utf-8")
+    )
+    named: dict[str, int] = {}
+    catch_all = None
+    for entry in parts:
+        words = str(entry["tests"]).split()
+        files = [w for w in words if w.startswith("tests/integration/") and w.endswith(".py")]
+        if "tests/integration" in words:
+            catch_all = entry
+        for name in files:
+            named[name] = named.get(name, 0) + 1
+    assert catch_all is not None
+    ignored = {w.removeprefix("--ignore=") for w in str(catch_all["tests"]).split() if w.startswith("--ignore=")}
+    for name in marked:
+        explicit = named.get(name, 0)
+        if name in ignored:
+            assert explicit >= 1, name
+        else:
+            assert explicit == 0, name
+    # The audits are the one file split in two, by complementary -k filters.
+    audits = [entry["tests"] for entry in parts if str(entry["tests"]).startswith("tests/integration/test_model_audits.py")]
+    assert len(audits) == 2
+    filters = [re.search(r'-k "(.+)"', str(a)).group(1) for a in audits]  # type: ignore[union-attr]
+    assert filters[1] == f"not ({filters[0]})"
+    for name, count in named.items():
+        assert count == (2 if name.endswith("test_model_audits.py") else 1), name
+
+
+def test_the_sienna_job_passes_pytest_no_option_of_a_plugin_the_dev_extra_lacks() -> None:
+    """``--timeout`` is pytest-timeout's, which is not a dependency of the
+    project: on a runner pytest would stop on the unknown option."""
+    run = _run_text(_sienna_workflow()["jobs"]["sienna"])
+    dev = " ".join(pyproject()["project"]["optional-dependencies"]["dev"])
+    if "pytest-timeout" not in dev:
+        assert "--timeout" not in run
+
+
+def _matches_a_file(pattern: str) -> bool:
+    """Whether a workflow ``paths`` pattern matches a file of the checkout. A
+    pattern ending in ``/**`` matches every file under its folder."""
+    if pattern.endswith("/**"):
+        folder = REPO_ROOT / pattern.removesuffix("/**")
+        return folder.is_dir() and any(path.is_file() for path in folder.rglob("*"))
+    return any(path.is_file() for path in REPO_ROOT.glob(pattern))
+
+
+def test_every_path_filter_of_the_sienna_workflow_matches_an_existing_file() -> None:
+    """A paths filter that names a moved file matches nothing, and the job then
+    never runs for the change it was written for, with no error anywhere. Each
+    filter must match at least one file that is in the repository, and the push
+    and pull request filters are the same list."""
+    triggers = _triggers(_sienna_workflow())
+    filters = triggers["push"]["paths"]
+    assert filters == triggers["pull_request"]["paths"]
+    assert filters, "the sienna workflow has no paths filters"
+    for pattern in filters:
+        assert _matches_a_file(pattern), f"paths filter {pattern!r} matches no file"
+
+
+def test_every_test_marked_sienna_is_under_a_paths_filter_of_the_sienna_workflow() -> None:
+    """A test marked ``sienna`` skips in the server workflow, where Julia is not
+    set up, so the sienna workflow is the only place it runs: a change to its
+    file must start that workflow."""
+    import fnmatch
+
+    filters = _triggers(_sienna_workflow())["push"]["paths"]
+    tests = REPO_ROOT / "server" / "tests"
+    marked = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in tests.rglob("test_*.py")
+        if path.name != Path(__file__).name and "pytest.mark.sienna" in path.read_text(encoding="utf-8")
+    ]
+    assert marked, "no test is marked sienna"
+    for path in marked:
+        assert any(fnmatch.fnmatch(path, pattern) for pattern in filters), path
+
+
 def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_artifact() -> None:
     """The submission form asks the author to confirm that the paper compiles. This is the
     check that it does: the journal's own action, on a push that changes ``paper/``."""
@@ -655,3 +847,202 @@ def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_a
     # The action writes the PDF beside the paper, and the upload must read it from there.
     assert steps[upload]["with"]["path"] == "paper/paper.pdf"
     assert steps[upload]["with"]["if-no-files-found"] == "error"
+
+
+def _sienna_step_running(needle: str) -> str:
+    steps = _sienna_workflow()["jobs"]["sienna"]["steps"]
+    return str(steps[_step_index(steps, needle)]["run"])
+
+
+def _heredoc_after(run: str, opener: str) -> str:
+    """The Python a step feeds to ``python -`` through the heredoc that starts on
+    the line holding ``opener``. YAML has already taken the block's indentation
+    off, so the script is as the runner's python reads it."""
+    lines = run.splitlines()
+    (start,) = [i for i, line in enumerate(lines) if opener in line]
+    end = lines.index("EOF", start + 1)
+    return "\n".join(lines[start + 1 : end]) + "\n"
+
+
+def _run_script(script: str, *args: str) -> tuple[int, list[str]]:
+    done = subprocess.run(
+        [sys.executable, "-c", script, *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    return done.returncode, done.stdout.splitlines()
+
+
+def _read_sienna_report(tmp_path: Path, report: str | None, status: int) -> tuple[int, list[str]]:
+    script = _heredoc_after(_sienna_step_running("pytest -m sienna"), "<<'EOF' || report=$?")
+    path = tmp_path / "junit.xml"
+    if report is not None:
+        path.write_text(report, encoding="utf-8")
+    return _run_script(script, str(path), str(status))
+
+
+def _junit(case: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest">'
+        f"{case}</testsuite></testsuites>"
+    )
+
+
+def test_the_sienna_test_step_reads_the_report_whatever_pytest_returned() -> None:
+    """The job runs bash with -e, so a pytest that fails would end the step before
+    the report is read, and the job's only public output, its annotations, would
+    say nothing but the exit code. The step keeps pytest's status, reads the
+    report, and still ends with pytest's status when that failed."""
+    lines = _sienna_step_running("pytest -m sienna").splitlines()
+    (pytest_line,) = [line for line in lines if "python -m pytest -m sienna" in line]
+    assert pytest_line.rstrip().endswith("|| status=$?")
+    assert "junit_logging=system-err" in pytest_line
+    reader = next(i for i, line in enumerate(lines) if "<<'EOF' || report=$?" in line)
+    assert lines.index(pytest_line) < reader
+    assert '"$status"' in lines[reader]
+    assert lines[-4:] == [
+        'if [ "$status" -ne 0 ]; then',
+        '  exit "$status"',
+        "fi",
+        'exit "$report"',
+    ]
+
+
+def test_the_sienna_report_reader_passes_a_clean_run(tmp_path: Path) -> None:
+    passed = _junit('<testcase classname="tests.integration.test_x" name="test_ok" time="1"/>')
+    assert _read_sienna_report(tmp_path, passed, 0) == (
+        0,
+        ["1 Sienna tests in the report, 0 failed, 0 skipped"],
+    )
+
+
+def test_the_sienna_report_reader_writes_a_failure_as_an_escaped_error_annotation(
+    tmp_path: Path,
+) -> None:
+    """A failure becomes one ``::error`` line: the title is the test id with ``:``
+    and ``,`` escaped as a property, and the message is the failure's message,
+    the lines pytest marks with E, the end of the traceback and the end of the
+    test's stderr, with ``%`` and the line breaks escaped as data."""
+    traceback = (
+        "def test_bad():\n"
+        ">       assert ratio == '100%'\n"
+        "E       AssertionError: a: b, c\n"
+        "E       assert '50%' == '100%'\n"
+        "\n"
+        "tests/integration/test_x.py:3: AssertionError"
+    )
+    failed = _junit(
+        '<testcase classname="tests.integration.test_x" name="test_bad[a,b:c]" time="1">'
+        f'<failure message="AssertionError: a: b, c">{traceback}</failure>'
+        "<system-err>julia: one\njulia: two</system-err>"
+        "</testcase>"
+    )
+    message = "%0A".join(
+        [
+            "AssertionError: a: b, c",
+            "",
+            "E       AssertionError: a: b, c",
+            "E       assert '50%25' == '100%25'",
+            "",
+            "def test_bad():",
+            ">       assert ratio == '100%25'",
+            "E       AssertionError: a: b, c",
+            "E       assert '50%25' == '100%25'",
+            "",
+            "tests/integration/test_x.py:3: AssertionError",
+            "",
+            "stderr:",
+            "julia: one",
+            "julia: two",
+        ]
+    )
+    assert _read_sienna_report(tmp_path, failed, 1) == (
+        1,
+        [
+            f"::error title=tests.integration.test_x.test_bad[a%2Cb%3Ac]::{message}",
+            "1 Sienna tests in the report, 1 failed, 0 skipped",
+        ],
+    )
+
+
+def test_the_sienna_report_reader_fails_a_skip_and_warns_of_it(tmp_path: Path) -> None:
+    skipped = _junit(
+        '<testcase classname="tests.integration.test_x" name="test_skip" time="0">'
+        '<skipped type="pytest.skip" message="no julia: at 100%">reason</skipped>'
+        "</testcase>"
+    )
+    assert _read_sienna_report(tmp_path, skipped, 0) == (
+        1,
+        [
+            "::warning title=tests.integration.test_x.test_skip::skipped: no julia: at 100%25",
+            "1 Sienna tests in the report, 0 failed, 1 skipped",
+        ],
+    )
+
+
+def test_the_sienna_report_reader_fails_a_pytest_failure_the_report_does_not_name(
+    tmp_path: Path,
+) -> None:
+    """pytest can fail with every test case passed (an error at the end of the
+    session) or write no report at all; either is an error the annotations say."""
+    passed = _junit('<testcase classname="tests.integration.test_x" name="test_ok" time="1"/>')
+    assert _read_sienna_report(tmp_path, passed, 3) == (
+        1,
+        [
+            "::error title=pytest::pytest exited with status 3 and the report names no failed test",
+            "1 Sienna tests in the report, 0 failed, 0 skipped",
+        ],
+    )
+    (tmp_path / "none").mkdir()
+    assert _read_sienna_report(tmp_path / "none", None, 4) == (
+        1,
+        ["::error title=pytest::pytest exited with status 4 and wrote no report"],
+    )
+
+
+def test_the_sienna_report_reader_keeps_an_annotation_short(tmp_path: Path) -> None:
+    long = _junit(
+        '<testcase classname="t" name="test_long" time="1">'
+        f'<failure message="{"x" * 4000}">tb</failure></testcase>'
+    )
+    status, out = _read_sienna_report(tmp_path, long, 1)
+    assert status == 1
+    (error,) = [line for line in out if line.startswith("::error")]
+    message = error.split("::", 2)[2]
+    assert len(message.replace("%0A", "\n")) == 1500
+    assert message.endswith("%0A...")
+
+
+def test_the_julia_test_step_writes_a_failure_as_an_error_annotation(tmp_path: Path) -> None:
+    """The Julia step keeps each julia's status (the first failure's is the
+    step's), and a failure or a SKIP line becomes an ``::error`` that carries
+    the end of the log."""
+    run = _sienna_step_running("server/tests/julia/$file")
+    (julia_line,) = [line for line in run.splitlines() if "server/tests/julia/$file" in line]
+    assert "2>&1 | tee -a" in julia_line
+    assert julia_line.rstrip().endswith("|| one=$?")
+    assert 'if [ "$status" -eq 0 ] && [ "$one" -ne 0 ]; then status=$one; fi' in run
+    script = _heredoc_after(run, "\"$status\" <<'EOF'")
+    log = tmp_path / "julia.log"
+
+    def read(text: str, status: int) -> tuple[int, list[str]]:
+        log.write_text(text, encoding="utf-8")
+        return _run_script(script, str(log), str(status))
+
+    assert read("Test Summary: | Pass\nall: 3\n", 0) == (0, [])
+    assert read("one\nTest Failed at x.jl:3\n", 1) == (
+        1,
+        [
+            "::error title=Julia module tests::julia exited with status 1%0A...%0A"
+            "one%0ATest Failed at x.jl:3"
+        ],
+    )
+    assert read("SKIP case.raw\nok\n", 0) == (
+        1,
+        [
+            "::error title=Julia module tests::the Julia tests skipped checks%0A"
+            "SKIP case.raw%0A...%0ASKIP case.raw%0Aok"
+        ],
+    )

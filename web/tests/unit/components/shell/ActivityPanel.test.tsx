@@ -193,6 +193,43 @@ describe('<ActivityPanel />', () => {
     expect(pflowMutate).toHaveBeenCalledWith(SID);
   });
 
+  it('Retry of a failed SE run repeats its options', async () => {
+    const user = userEvent.setup();
+    // The server's record of the job: every option named, null where none was given.
+    seedJob({
+      id: 'jse',
+      kind: 'se',
+      status: 'failed',
+      ended_at: Date.now() / 1000,
+      problem: {
+        title: 'SE did not converge',
+        detail: 'LAV did not converge after 100 iterations',
+      },
+      request_summary: { algorithm: 'lav', tol: null, max_iter: 400, noise_seed: 0 },
+    });
+    // The client's placeholder: only what was sent, here nothing.
+    seedJob({
+      id: 'jse-default',
+      kind: 'se',
+      status: 'failed',
+      ended_at: Date.now() / 1000,
+      problem: { title: 'SE failed', detail: 'Under-determined' },
+    });
+    useLayoutStore.setState({ activityPanelTab: 'history' });
+    render(<ActivityPanel />);
+
+    await user.click(screen.getByTestId('activity-row-retry-jse'));
+    expect(seMutate).toHaveBeenLastCalledWith({
+      sessionId: SID,
+      algorithm: 'lav',
+      maxIter: 400,
+      noiseSeed: 0,
+    });
+    await user.click(screen.getByTestId('activity-row-retry-jse-default'));
+    expect(seMutate).toHaveBeenLastCalledWith({ sessionId: SID });
+    expect(seMutate).toHaveBeenCalledTimes(2);
+  });
+
   it('View error opens the modal with the captured problem', async () => {
     const user = userEvent.setup();
     seedJob({

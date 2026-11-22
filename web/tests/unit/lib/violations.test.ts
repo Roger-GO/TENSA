@@ -15,6 +15,21 @@ function report(overrides: Parameters<typeof limitsPflow>[0] = {}): ViolationRep
 }
 
 describe('collectViolations', () => {
+  it('holds no generator to its reactive limits after a DC power flow, which computes no Q', () => {
+    const dc = collectViolations(
+      limitsPflow({
+        generator_outputs: {
+          '1': { p: 40, q: null, v: 1.0, bus: 1, q_min: -40, q_max: 15 },
+          '2': { p: 10, q: null, v: 1.0, bus: 2, q_min: -50, q_max: 15 },
+        },
+      }),
+      LIMITS_TOPOLOGY,
+    );
+    expect(dc).not.toBeNull();
+    expect(dc?.items.filter((i) => i.kind === 'generator-q')).toEqual([]);
+    expect(dc?.checked.generators).toBe(0);
+  });
+
   it('has nothing to check without a converged result or a topology', () => {
     expect(collectViolations(null, LIMITS_TOPOLOGY)).toBeNull();
     expect(collectViolations(limitsPflow({ converged: false }), LIMITS_TOPOLOGY)).toBeNull();

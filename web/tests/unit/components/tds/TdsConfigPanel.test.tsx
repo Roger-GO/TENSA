@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TdsConfigPanel } from '@/components/tds/TdsConfigPanel';
+import { useSessionStore } from '@/store/session';
+import type { EngineCapabilities, EngineList } from '@/api/types';
 import {
   DEFAULT_TDS_CONFIG,
   DEFAULT_TDS_CONFIG_OVERRIDES,
@@ -27,7 +29,47 @@ function resetUi() {
     tdsIntegrator: DEFAULT_TDS_INTEGRATOR,
     tdsToleranceOverrides: { ...DEFAULT_TDS_TOLERANCE_OVERRIDES },
     tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES },
+    tdsLoadModel: null,
   });
+  useSessionStore.setState({ engine: null, engines: null });
+}
+
+/** The capabilities block of a Sienna engine, as `GET /engines` carries it. */
+function siennaEngines(): EngineList {
+  const andes: EngineCapabilities = {
+    name: 'andes',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: [], write: [] },
+    routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+    ops: [],
+    editing: true,
+  };
+  const sienna = {
+    name: 'sienna',
+    available: true,
+    unavailable_reason: null,
+    versions: {},
+    formats: { read: ['psse-raw'], write: [] },
+    routines: ['matrices', 'pflow', 'eig', 'tds'],
+    ops: [],
+    editing: false,
+    routine_options: {
+      pflow: { methods: ['ac', 'dc', 'ptdf-dc'] },
+      tds: {
+        streaming: true,
+        abort: true,
+        disturbances: ['branch_trip', 'bus_fault', 'gen_trip'],
+        options: { load_model: ['impedance', 'power', 'as-case'] },
+      },
+    },
+  } as unknown as EngineCapabilities;
+  return { engines: [andes, sienna] };
+}
+
+function seedSienna() {
+  useSessionStore.setState({ engine: 'sienna', engines: siennaEngines() });
 }
 
 describe('<TdsConfigPanel />', () => {
@@ -215,9 +257,226 @@ describe('<TdsConfigPanel />', () => {
   it('default integrator is Trapezoidal and the Manual reveal is hidden', () => {
     render(<TdsConfigPanel />);
     expect(screen.getByTestId('tds-config-integrator-trapezoidal')).toBeChecked();
+    expect(screen.getByTestId('tds-config-integrator-backeuler')).not.toBeChecked();
+    expect(screen.getByTestId('tds-config-integrator-trap_adapt-auto')).not.toBeChecked();
+    expect(screen.getByTestId('tds-config-integrator-trap_adapt-manual')).not.toBeChecked();
     expect(screen.getByTestId('tds-config-integrator-qndf-auto')).not.toBeChecked();
     expect(screen.getByTestId('tds-config-integrator-qndf-manual')).not.toBeChecked();
     expect(screen.queryByTestId('tds-config-tolerance-overrides')).not.toBeInTheDocument();
+  });
+
+  it('renders six integrator radios, each with its one-line hint', () => {
+    render(<TdsConfigPanel />);
+    const group = screen.getByTestId('tds-config-integrator');
+    for (const value of [
+      'trapezoidal',
+      'backeuler',
+      'trap_adapt-auto',
+      'trap_adapt-manual',
+      'qndf-auto',
+      'qndf-manual',
+    ]) {
+      expect(within(group).getByTestId(`tds-config-integrator-${value}`)).toBeInTheDocument();
+    }
+    expect(
+      screen.getByText(
+        'First-order, more damped than trapezoidal. Uses h above; ignores rtol / atol.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Variable-step trapezoidal with sensible tolerances/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Variable-step trapezoidal with hand-tuned tolerances/),
+    ).toBeInTheDocument();
+  });
+
+  it('heads the fixed-step and the variable-step choices, all in one radio group', () => {
+    render(<TdsConfigPanel />);
+    const group = screen.getByTestId('tds-config-integrator');
+    const radios = within(group).getAllByRole('radio');
+    expect(radios.map((r) => r.id.replace('tds-config-integrator-', ''))).toEqual([
+      'trapezoidal',
+      'backeuler',
+      'trap_adapt-auto',
+      'trap_adapt-manual',
+      'qndf-auto',
+      'qndf-manual',
+    ]);
+    expect(new Set(radios.map((r) => r.getAttribute('name')))).toEqual(
+      new Set(['tds-config-integrator']),
+    );
+    const fixed = within(group).getByTestId('tds-config-integrator-group-fixed');
+    const variable = within(group).getByTestId('tds-config-integrator-group-variable');
+    // The heading of each group comes right before its first choice.
+    const follows = (a: Element, b: Element) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(fixed, radios[0]!)).toBe(true);
+    expect(follows(radios[1]!, variable)).toBe(true);
+    expect(follows(variable, radios[2]!)).toBe(true);
+  });
+
+  it('a min_step above max_step is refused inline in Manual', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-trap_adapt-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '0.1');
+    expect(screen.getByTestId('error-tds-config-min-step')).toHaveTextContent(
+      'Must be <= max_step',
+    );
+    const maxStep = screen.getByTestId('field-tds-config-max-step');
+    await user.clear(maxStep);
+    await user.type(maxStep, '0.2');
+    expect(screen.queryByTestId('error-tds-config-min-step')).toBeNull();
+  });
+
+  it('selecting Backward Euler writes through and keeps the reveal hidden', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-backeuler'));
+    expect(useUiStore.getState().tdsIntegrator).toBe('backeuler');
+    expect(screen.getByTestId('tds-config-integrator-backeuler')).toBeChecked();
+    expect(screen.queryByTestId('tds-config-tolerance-overrides')).not.toBeInTheDocument();
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+  });
+
+  it('h is visible for the fixed-step integrators and hidden for every variable-step choice', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+    await user.click(screen.getByTestId('tds-config-integrator-trap_adapt-auto'));
+    expect(screen.queryByTestId('field-tds-config-h')).toBeNull();
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    expect(screen.queryByTestId('field-tds-config-h')).toBeNull();
+    await user.click(screen.getByTestId('tds-config-integrator-backeuler'));
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+  });
+
+  it('selecting trap_adapt Manual reveals rtol / atol / max_step / min_step', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-trap_adapt-manual'));
+    expect(useUiStore.getState().tdsIntegrator).toBe('trap_adapt-manual');
+    expect(screen.getByTestId('tds-config-tolerance-overrides')).toBeInTheDocument();
+    expect(screen.getByTestId('field-tds-config-rtol')).toHaveValue('0.001');
+    expect(screen.getByTestId('field-tds-config-atol')).toHaveValue('0.000001');
+    expect(screen.getByTestId('field-tds-config-max-step')).toHaveValue('0.05');
+    expect(screen.getByTestId('field-tds-config-min-step')).toHaveValue('0');
+  });
+
+  it('selecting trap_adapt Auto keeps the reveal hidden', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-trap_adapt-auto'));
+    expect(useUiStore.getState().tdsIntegrator).toBe('trap_adapt-auto');
+    expect(screen.queryByTestId('tds-config-tolerance-overrides')).toBeNull();
+  });
+
+  it('editing min_step in Manual mode writes through to the store', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '0.0001');
+    expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(0.0001);
+  });
+
+  it('min_step accepts 0', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '0');
+    expect(screen.queryByTestId('error-tds-config-min-step')).toBeNull();
+    expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(0);
+  });
+
+  it('negative min_step is refused inline', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '-1');
+    expect(screen.getByTestId('error-tds-config-min-step')).toHaveTextContent('Must be >= 0');
+    expect(minStep).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('non-numeric min_step is refused inline', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    expect(screen.getByTestId('error-tds-config-min-step')).toHaveTextContent(
+      'Enter a finite number',
+    );
+  });
+
+  it('min_step error is hidden in Auto mode and the draft value is kept', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '-1');
+    expect(screen.getByTestId('error-tds-config-min-step')).toBeInTheDocument();
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-auto'));
+    expect(screen.queryByTestId('tds-config-tolerance-overrides')).toBeNull();
+    expect(screen.queryByTestId('error-tds-config-min-step')).toBeNull();
+    expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(-1);
+  });
+
+  it('switching fixed-step to variable-step and back preserves the h draft', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    const hInput = screen.getByTestId('field-tds-config-h');
+    await user.type(hInput, '0.01');
+    expect(useUiStore.getState().tdsConfig.h).toBe(0.01);
+    await user.click(screen.getByTestId('tds-config-integrator-trap_adapt-auto'));
+    expect(screen.queryByTestId('field-tds-config-h')).toBeNull();
+    await user.click(screen.getByTestId('tds-config-integrator-trapezoidal'));
+    expect(useUiStore.getState().tdsConfig.h).toBe(0.01);
+    expect(screen.getByTestId('field-tds-config-h')).toHaveValue('0.01');
+  });
+
+  it('Reset restores trapezoidal, shows h, and resets min_step', async () => {
+    const user = userEvent.setup();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    const minStep = screen.getByTestId('field-tds-config-min-step');
+    await user.clear(minStep);
+    await user.type(minStep, '0.5');
+    expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(0.5);
+    await user.click(screen.getByTestId('tds-config-reset'));
+    expect(useUiStore.getState().tdsIntegrator).toBe('trapezoidal');
+    expect(useUiStore.getState().tdsToleranceOverrides).toEqual(DEFAULT_TDS_TOLERANCE_OVERRIDES);
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+    await user.click(screen.getByTestId('tds-config-integrator-qndf-manual'));
+    expect(screen.getByTestId('field-tds-config-min-step')).toHaveValue('0');
+  });
+
+  it('a persisted legacy tolerance payload gains minStep on rehydrate', async () => {
+    sessionStorage.setItem(
+      'andes-ui-tds-integrator',
+      JSON.stringify({
+        state: {
+          tdsIntegrator: 'qndf-auto',
+          tdsToleranceOverrides: { rtol: 0.001, atol: 0.000001, maxStep: 0.05 },
+        },
+        version: 0,
+      }),
+    );
+    await useUiStore.persist.rehydrate();
+    expect(useUiStore.getState().tdsToleranceOverrides.minStep).toBe(0);
+    expect(useUiStore.getState().tdsToleranceOverrides.rtol).toBe(0.001);
+    expect(useUiStore.getState().tdsToleranceOverrides.atol).toBe(0.000001);
+    expect(useUiStore.getState().tdsToleranceOverrides.maxStep).toBe(0.05);
+    sessionStorage.removeItem('andes-ui-tds-integrator');
   });
 
   it('selecting QNDF Auto writes through to the store but keeps the reveal hidden', async () => {
@@ -240,6 +499,7 @@ describe('<TdsConfigPanel />', () => {
     expect(screen.getByTestId('field-tds-config-rtol')).toHaveValue('0.001');
     expect(screen.getByTestId('field-tds-config-atol')).toHaveValue('0.000001');
     expect(screen.getByTestId('field-tds-config-max-step')).toHaveValue('0.05');
+    expect(screen.getByTestId('field-tds-config-min-step')).toHaveValue('0');
   });
 
   it('editing rtol in Manual mode writes through to the store', async () => {
@@ -340,5 +600,56 @@ describe('<TdsConfigPanel />', () => {
     await user.click(screen.getByTestId('tds-config-reset'));
     expect(useUiStore.getState().tdsConfigOverrides).toEqual({});
     expect(screen.getByTestId('tds-config-overrides-empty')).toBeInTheDocument();
+  });
+
+  // ---- Sienna session: the engine refuses the ANDES-only options ----
+
+  it('an ANDES session shows the integrator, the var groups and the overrides, and no load model', () => {
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-integrator')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-config-vars')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-config-advanced')).toBeInTheDocument();
+    expect(screen.queryByTestId('tds-config-load-model')).toBeNull();
+  });
+
+  it('a Sienna session hides the ANDES-only options and offers the load model', () => {
+    seedSienna();
+    render(<TdsConfigPanel />);
+    expect(screen.queryByTestId('tds-config-integrator')).toBeNull();
+    expect(screen.queryByTestId('tds-config-vars')).toBeNull();
+    expect(screen.queryByTestId('tds-config-advanced')).toBeNull();
+    expect(screen.queryByTestId('tds-config-dae-vars')).toBeNull();
+    expect(screen.queryByTestId('tds-config-controllers')).toBeNull();
+    // tf and h keep their places.
+    expect(screen.getByTestId('field-tds-config-tf')).toBeInTheDocument();
+    expect(screen.getByTestId('field-tds-config-h')).toBeInTheDocument();
+    const group = screen.getByTestId('tds-config-load-model');
+    expect(within(group).getByTestId('tds-config-load-model-default')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-impedance')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-power')).toBeInTheDocument();
+    expect(within(group).getByTestId('tds-config-load-model-as-case')).toBeInTheDocument();
+  });
+
+  it('the load model defaults to the server default and follows the radios', async () => {
+    const user = userEvent.setup();
+    seedSienna();
+    render(<TdsConfigPanel />);
+    expect(screen.getByTestId('tds-config-load-model-default')).toBeChecked();
+    await user.click(screen.getByTestId('tds-config-load-model-power'));
+    expect(useUiStore.getState().tdsLoadModel).toBe('power');
+    expect(screen.getByTestId('tds-config-load-model-power')).toBeChecked();
+    await user.click(screen.getByTestId('tds-config-load-model-default'));
+    expect(useUiStore.getState().tdsLoadModel).toBeNull();
+  });
+
+  it('Reset returns the load model to the server default', async () => {
+    const user = userEvent.setup();
+    seedSienna();
+    render(<TdsConfigPanel />);
+    await user.click(screen.getByTestId('tds-config-load-model-power'));
+    expect(useUiStore.getState().tdsLoadModel).toBe('power');
+    await user.click(screen.getByTestId('tds-config-reset'));
+    expect(useUiStore.getState().tdsLoadModel).toBeNull();
+    expect(screen.getByTestId('tds-config-load-model-default')).toBeChecked();
   });
 });

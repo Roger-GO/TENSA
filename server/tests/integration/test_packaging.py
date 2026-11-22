@@ -68,6 +68,13 @@ def _repository(root: Path, *, built_ui: bool = True) -> Path:
     shutil.copytree(
         SERVER_DIR / "src" / "tensa" / "examples", server / "src" / "tensa" / "examples"
     )
+    # So are the Sienna engine's Julia environment and module, which are not Python
+    # files: the real ones, so that a pattern of the build that left them out shows.
+    for folder in ("envs", "julia"):
+        shutil.copytree(
+            SERVER_DIR / "src" / "tensa" / "engines" / "sienna" / folder,
+            server / "src" / "tensa" / "engines" / "sienna" / folder,
+        )
     # Hatchling reads the repository's .gitignore, and the sdist carries it into
     # the wheel build, so use the real one.
     if (REPO_ROOT / ".gitignore").is_file():

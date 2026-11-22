@@ -5,14 +5,19 @@ import { Button } from '@/components/ui/button';
 import { RunReadinessNote } from '@/components/analyze/RunReadinessNote';
 import { usePflowStore } from '@/store/pflow';
 import { usePflowOptionsStore } from '@/store/pflowOptions';
+import { useSessionStore } from '@/store/session';
 import { useRunReadiness } from '@/lib/useRunReadiness';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
+import { enginePflowMethods, engineTakesAndesPflowOptions } from '@/lib/engines';
 import {
   ANDES_PFLOW_DEFAULTS,
   PFLOW_LIMITS,
+  dcIgnores,
   formatTolerance,
   isDefaultPflowOptions,
+  nkIgnores,
   parseMaxIterations,
+  parseNFactorize,
   parseTolerance,
   shownSwitch,
   type ParsedField,
@@ -29,10 +34,20 @@ import {
  *   (a case can turn either on itself), and once touched they are sent either way,
  *   so a case that turns Q limits on can be run without. The box shows what the
  *   case sets once a run has shown it.
+ * - Solver method, Refactorize first N iterations and Line search: the same
+ *   "blank keeps the case's own" rule. The methods listed are the ones the
+ *   session's engine publishes (the ANDES list until the capabilities have
+ *   arrived). Under Newton-Krylov the tolerance, the iteration limit and the
+ *   line search do not apply; under a DC method the tolerance and the iteration
+ *   limit do not. The form says so and leaves them set for when the user
+ *   switches back; the request body leaves out what a DC method does not read.
+ *   The ANDES-only settings (refactorisation count, line search, flat start, Q
+ *   limits) are shown only for an ANDES session, which is the engine that reads
+ *   them.
  *
  * The values live in `usePflowOptionsStore`, which every control that starts a
  * power flow reads, and they reset when another case is opened. The text of the
- * two number fields is a draft kept here, shown while it still means what the
+ * number fields is a draft kept here, shown while it still means what the
  * store holds; once the store changes from elsewhere (a retry button on the
  * non-convergence banner, a case change) the field follows the store.
  */
@@ -63,22 +78,63 @@ function caseNote(choice: boolean | null, caseOwn: boolean | null): string | und
     : 'The case itself turns this on. Untick it to run without.';
 }
 
+/** The label of a method radio: a known name where one is known, the value itself otherwise. */
+function methodLabel(value: string): string {
+  switch (value) {
+    case 'NR':
+      return 'Newton-Raphson (NR)';
+    case 'dishonest':
+      return 'Dishonest Newton-Raphson';
+    case 'NK':
+      return 'Newton-Krylov (NK)';
+    case 'ac':
+      return 'AC power flow';
+    case 'dc':
+      return 'DC power flow';
+    case 'ptdf-dc':
+      return 'DC power flow from the PTDF matrix';
+    default:
+      return value;
+  }
+}
+
+/** The methods listed while the engine's capabilities have not arrived: the ANDES list. */
+const FALLBACK_METHODS: readonly string[] = ['NR', 'dishonest', 'NK'];
+
 export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
   const options = usePflowOptionsStore((s) => s.options);
   const caseSettings = usePflowOptionsStore((s) => s.caseSettings);
   const setOptions = usePflowOptionsStore((s) => s.setOptions);
   const resetOptions = usePflowOptionsStore((s) => s.resetOptions);
   const isRunning = usePflowStore((s) => s.isRunning);
+  const engine = useSessionStore((s) => s.engine);
+  const engines = useSessionStore((s) => s.engines);
   const readiness = useRunReadiness('pflow');
   const runPflow = usePflowRunAction();
 
   const [tolDraft, setTolDraft] = useState<string | null>(null);
   const [iterDraft, setIterDraft] = useState<string | null>(null);
+  const [nFactorizeDraft, setNFactorizeDraft] = useState<string | null>(null);
+
+  const method = options.method;
+  const methods = enginePflowMethods(engines ?? undefined, engine) ?? FALLBACK_METHODS;
+  const andesOptions = engineTakesAndesPflowOptions(engine);
 
   const tolText = shownText(tolDraft, options.tolerance, parseTolerance, formatTolerance);
   const iterText = shownText(iterDraft, options.maxIterations, parseMaxIterations, String);
+  const nFactorizeText = shownText(nFactorizeDraft, options.nFactorize, parseNFactorize, String);
   const tolParsed = parseTolerance(tolText);
   const iterParsed = parseMaxIterations(iterText);
+  const nFactorizeParsed = parseNFactorize(nFactorizeText);
+
+  const nk = nkIgnores(method);
+  const dc = dcIgnores(method);
+  const nkSuffix = ' Does not apply under Newton-Krylov.';
+  const dcSuffix = ' Does not apply under a DC method.';
+  const tolHint = `Stop when the largest mismatch is below this, from ${formatTolerance(PFLOW_LIMITS.toleranceMin)} to ${formatTolerance(PFLOW_LIMITS.toleranceMax)}. Blank keeps the case's own (ANDES: ${formatTolerance(ANDES_PFLOW_DEFAULTS.tolerance)}).`;
+  const iterHint = `Give up after this many, from ${PFLOW_LIMITS.maxIterationsMin} to ${PFLOW_LIMITS.maxIterationsMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.maxIterations}).`;
+  const linesearchHint =
+    "Shorten a Newton step whose residual would grow; can pull a run that overshoots back to convergence. Read by NR and dishonest only. Untouched, the case's own stands (ANDES: on).";
 
   const onTolerance = (text: string) => {
     setTolDraft(text);
@@ -90,10 +146,16 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
     const parsed = parseMaxIterations(text);
     setOptions({ maxIterations: parsed.ok ? parsed.value : null });
   };
+  const onNFactorize = (text: string) => {
+    setNFactorizeDraft(text);
+    const parsed = parseNFactorize(text);
+    setOptions({ nFactorize: parsed.ok ? parsed.value : null });
+  };
   const onReset = () => {
     resetOptions();
     setTolDraft(null);
     setIterDraft(null);
+    setNFactorizeDraft(null);
   };
 
   const runDisabled = !readiness.ready || isRunning;
@@ -111,7 +173,12 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
           variant="ghost"
           size="sm"
           onClick={onReset}
-          disabled={isDefaultPflowOptions(options) && tolDraft === null && iterDraft === null}
+          disabled={
+            isDefaultPflowOptions(options) &&
+            tolDraft === null &&
+            iterDraft === null &&
+            nFactorizeDraft === null
+          }
           data-testid="pflow-options-reset"
         >
           Reset
@@ -128,7 +195,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <FieldRow
           id="pflow-tolerance"
           label="Tolerance (pu)"
-          hint={`Stop when the largest mismatch is below this, from ${formatTolerance(PFLOW_LIMITS.toleranceMin)} to ${formatTolerance(PFLOW_LIMITS.toleranceMax)}. Blank keeps the case's own (ANDES: ${formatTolerance(ANDES_PFLOW_DEFAULTS.tolerance)}).`}
+          hint={nk ? `${tolHint}${nkSuffix}` : dc ? `${tolHint}${dcSuffix}` : tolHint}
           error={tolParsed.ok ? undefined : `${tolParsed.error} The case's own tolerance is used.`}
         >
           <TextInput
@@ -136,6 +203,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
             value={tolText}
             placeholder={formatTolerance(ANDES_PFLOW_DEFAULTS.tolerance)}
             invalid={!tolParsed.ok}
+            disabled={dc}
             onChange={onTolerance}
             onBlur={() => tolParsed.ok && setTolDraft(null)}
           />
@@ -144,7 +212,7 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <FieldRow
           id="pflow-max-iterations"
           label="Max iterations"
-          hint={`Give up after this many, from ${PFLOW_LIMITS.maxIterationsMin} to ${PFLOW_LIMITS.maxIterationsMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.maxIterations}).`}
+          hint={nk ? `${iterHint}${nkSuffix}` : dc ? `${iterHint}${dcSuffix}` : iterHint}
           error={iterParsed.ok ? undefined : `${iterParsed.error} The case's own limit is used.`}
         >
           <TextInput
@@ -152,28 +220,123 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
             value={iterText}
             placeholder={String(ANDES_PFLOW_DEFAULTS.maxIterations)}
             invalid={!iterParsed.ok}
+            disabled={dc}
             onChange={onMaxIterations}
             onBlur={() => iterParsed.ok && setIterDraft(null)}
           />
         </FieldRow>
 
-        <CheckRow
-          id="pflow-flat-start"
-          label="Flat start"
-          hint="Start every bus from 1 pu at angle 0 instead of the case's own voltages and angles. Try it when a run does not converge."
-          checked={shownSwitch(options.flatStart, caseSettings.flatStart)}
-          onChange={(checked) => setOptions({ flatStart: checked })}
-          note={caseNote(options.flatStart, caseSettings.flatStart)}
-        />
+        <fieldset
+          className="flex flex-col gap-1"
+          data-testid="pflow-method"
+          aria-describedby={
+            nk
+              ? 'pflow-method-hint pflow-nk-note'
+              : dc
+                ? 'pflow-method-hint pflow-dc-note'
+                : 'pflow-method-hint'
+          }
+        >
+          <legend className="text-muted-foreground text-xs font-medium">Solver method</legend>
+          <MethodRadio
+            testId="pflow-method-default"
+            value=""
+            label="Case's own (NR unless the case says otherwise)"
+            checked={method === null}
+            onChange={() => setOptions({ method: null })}
+          />
+          {methods.map((value) => (
+            <MethodRadio
+              key={value}
+              testId={`pflow-method-${value.toLowerCase()}`}
+              value={value}
+              label={methodLabel(value)}
+              checked={method === value}
+              onChange={() => setOptions({ method: value })}
+            />
+          ))}
+          <span id="pflow-method-hint" className="text-muted-foreground text-[10px] leading-snug">
+            Which solver runs. Dishonest Newton-Raphson reuses the Jacobian after the first
+            iterations; Newton-Krylov is SciPy&apos;s solver. Case&apos;s own keeps what the case
+            sets (ANDES: NR). A Sienna session lists its own methods; DC solves directly and reads
+            neither the tolerance nor the iteration limit.
+          </span>
+          {nk ? (
+            <span
+              id="pflow-nk-note"
+              data-testid="pflow-nk-note"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              Under Newton-Krylov the tolerance, iteration limit and line search do not apply: SciPy
+              stops by its own rule and reports 0 iterations.
+            </span>
+          ) : null}
+          {dc ? (
+            <span
+              id="pflow-dc-note"
+              data-testid="pflow-dc-note"
+              className="text-muted-foreground text-[10px] leading-snug"
+            >
+              A DC power flow is solved directly; it has no tolerance or iteration limit.
+            </span>
+          ) : null}
+        </fieldset>
 
-        <CheckRow
-          id="pflow-enforce-q-limits"
-          label="Enforce generator Q limits"
-          hint="Hold a generator at its Qmin or Qmax when its reactive power goes past one, and let its voltage give; the Messages tab then names each generator held. Without it the limits are only reported, in the Violations tab."
-          checked={shownSwitch(options.enforceQLimits, caseSettings.enforceQLimits)}
-          onChange={(checked) => setOptions({ enforceQLimits: checked })}
-          note={caseNote(options.enforceQLimits, caseSettings.enforceQLimits)}
-        />
+        {andesOptions ? (
+          <FieldRow
+            id="pflow-n-factorize"
+            label="Refactorize first N iterations"
+            hint={`With the dishonest method, the Jacobian is refactorized only while the iteration count is below this, from ${PFLOW_LIMITS.nFactorizeMin} to ${PFLOW_LIMITS.nFactorizeMax}. Blank keeps the case's own (ANDES: ${ANDES_PFLOW_DEFAULTS.nFactorize}).`}
+            error={
+              nFactorizeParsed.ok
+                ? undefined
+                : `${nFactorizeParsed.error} The case's own count is used.`
+            }
+          >
+            <TextInput
+              id="pflow-n-factorize"
+              value={nFactorizeText}
+              placeholder={String(ANDES_PFLOW_DEFAULTS.nFactorize)}
+              invalid={!nFactorizeParsed.ok}
+              onChange={onNFactorize}
+              onBlur={() => nFactorizeParsed.ok && setNFactorizeDraft(null)}
+            />
+          </FieldRow>
+        ) : null}
+
+        {andesOptions ? (
+          <CheckRow
+            id="pflow-flat-start"
+            label="Flat start"
+            hint="Start every bus from 1 pu at angle 0 instead of the case's own voltages and angles. Try it when a run does not converge."
+            checked={shownSwitch(options.flatStart, caseSettings.flatStart)}
+            onChange={(checked) => setOptions({ flatStart: checked })}
+            note={caseNote(options.flatStart, caseSettings.flatStart)}
+          />
+        ) : null}
+
+        {andesOptions ? (
+          <CheckRow
+            id="pflow-enforce-q-limits"
+            label="Enforce generator Q limits"
+            hint="Hold a generator at its Qmin or Qmax when its reactive power goes past one, and let its voltage give; the Messages tab then names each generator held. Without it the limits are only reported, in the Violations tab."
+            checked={shownSwitch(options.enforceQLimits, caseSettings.enforceQLimits)}
+            onChange={(checked) => setOptions({ enforceQLimits: checked })}
+            note={caseNote(options.enforceQLimits, caseSettings.enforceQLimits)}
+          />
+        ) : null}
+
+        {andesOptions ? (
+          <CheckRow
+            id="pflow-linesearch"
+            label="Line search"
+            hint={nk ? `${linesearchHint}${nkSuffix}` : linesearchHint}
+            // Untouched it shows ANDES's own, which is on, as the two switches above
+            // show theirs (off).
+            checked={options.linesearch ?? ANDES_PFLOW_DEFAULTS.linesearch}
+            onChange={(checked) => setOptions({ linesearch: checked })}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2 pt-1">
@@ -193,6 +356,34 @@ export function PflowOptionsForm({ className }: PflowOptionsFormProps) {
         <RunReadinessNote routine="pflow" testId="pflow-options-run" />
       </div>
     </section>
+  );
+}
+
+interface MethodRadioProps {
+  testId: string;
+  value: string;
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}
+
+function MethodRadio({ testId, value, label, checked, onChange }: MethodRadioProps) {
+  return (
+    <label className="text-foreground flex items-start gap-2 text-xs">
+      <input
+        type="radio"
+        name="pflow-method"
+        value={value}
+        data-testid={testId}
+        checked={checked}
+        onChange={onChange}
+        className={cn(
+          'border-border mt-0.5 h-3.5 w-3.5 rounded border',
+          'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        )}
+      />
+      {label}
+    </label>
   );
 }
 
@@ -233,11 +424,20 @@ interface TextInputProps {
   value: string;
   placeholder: string;
   invalid: boolean;
+  disabled?: boolean;
   onChange: (next: string) => void;
   onBlur: () => void;
 }
 
-function TextInput({ id, value, placeholder, invalid, onChange, onBlur }: TextInputProps) {
+function TextInput({
+  id,
+  value,
+  placeholder,
+  invalid,
+  disabled,
+  onChange,
+  onBlur,
+}: TextInputProps) {
   return (
     <input
       id={id}
@@ -246,6 +446,7 @@ function TextInput({ id, value, placeholder, invalid, onChange, onBlur }: TextIn
       inputMode="decimal"
       value={value}
       placeholder={placeholder}
+      disabled={disabled}
       aria-invalid={invalid ? true : undefined}
       aria-describedby={invalid ? `${id}-hint ${id}-error` : `${id}-hint`}
       onChange={(e) => onChange(e.target.value)}
@@ -253,6 +454,7 @@ function TextInput({ id, value, placeholder, invalid, onChange, onBlur }: TextIn
       className={cn(
         'bg-background border-border h-7 rounded border px-2 font-mono text-xs',
         'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:outline-none',
+        'disabled:opacity-50',
         invalid ? 'border-danger' : '',
       )}
     />

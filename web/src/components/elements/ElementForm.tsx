@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { ModelDocButton } from '@/components/models/ModelDocButton';
 import { useCurrentTopology, useTopologyRefetching, useTopologySchema } from '@/api/queries';
 import type { ParamValue, TopologyParamMeta, TopologySummary } from '@/api/types';
 import { cn } from '@/lib/cn';
@@ -715,6 +716,10 @@ export function ElementForm({
       className={cn('flex flex-col gap-3', className)}
       data-testid={`element-form-${model}`}
     >
+      <div className="flex items-center gap-1">
+        <span className="text-foreground font-mono text-xs font-semibold">{model}</span>
+        <ModelDocButton model={model} />
+      </div>
       {help && help.note.length > 0 ? (
         <div
           role="note"

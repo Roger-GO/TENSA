@@ -7,11 +7,57 @@ import {
   cpfGeneratorsToCsv,
   cpfResultToCsv,
   eigResultToCsv,
+  eigSweepResultToCsv,
   participationToCsv,
   seResidualsToCsv,
 } from '@/components/analyze/analyzeExport';
 import { readBlob } from '../../helpers/downloads';
 import type { CpfResult, EigResult, SeResult } from '@/api/types';
+import type { EigSweepResponse } from '@/api/types';
+
+describe('eigSweepResultToCsv', () => {
+  const result: EigSweepResponse = {
+    model: 'GENROU',
+    idx: '1',
+    param: 'M',
+    points: [
+      {
+        value: 1,
+        eigenvalues: [
+          { real: -0.2, imag: 3 },
+          { real: -1, imag: 0 },
+        ],
+        damping_ratios: [0.066, 1],
+        frequencies_hz: [0.477, 0],
+      },
+      {
+        value: 3,
+        eigenvalues: [
+          { real: 0.05, imag: 2.5 },
+          { real: -0.9, imag: 0 },
+        ],
+        damping_ratios: [-0.02, 1],
+        frequencies_hz: [0.398, 0],
+      },
+    ],
+    mode_count: 2,
+    tds_initialized: false,
+    job_id: null,
+  };
+
+  it('writes one row per (point, mode) at full precision and names the run', async () => {
+    const text = await readBlob(eigSweepResultToCsv(result));
+    expect(text.split('\n')).toEqual([
+      '# sweep of M of GENROU 1, 2 points, 2 modes per point',
+      'point,value,mode,real,imag,damping_ratio,frequency_hz',
+      '0,1,0,-0.2,3,0.066,0.477',
+      '0,1,1,-1,0,1,0',
+      '1,3,0,0.05,2.5,-0.02,0.398',
+      '1,3,1,-0.9,0,1,0',
+      '',
+    ]);
+  });
+});
 
 describe('eigResultToCsv', () => {
   const result: EigResult = {
@@ -190,6 +236,38 @@ describe('cpfResultToCsv', () => {
     );
     expect(text).toContain('# the lower branch stops before it is back at the base load\n');
   });
+
+  it('says a run to a target stopped there, or met the nose first, and calls neither truncated', async () => {
+    const reached = await readBlob(
+      cpfResultToCsv({
+        ...pv,
+        truncated: true,
+        nose_idx: -1,
+        complete: true,
+        stop_at: 'nose',
+        done_msg: 'Reached target lambda=1',
+        stop_at_lambda: 1,
+      }),
+    );
+    expect(reached).not.toContain('truncated');
+    expect(reached).toContain(
+      '# Reached target lambda=1\n# stopped at the target lambda = 1, as asked, before any nose\n',
+    );
+
+    const short = await readBlob(
+      cpfResultToCsv({
+        ...pv,
+        complete: false,
+        stop_at: 'nose',
+        done_msg: 'Nose point at lambda=1.000000, short of the target lambda=3',
+        stop_at_lambda: 3,
+      }),
+    );
+    expect(short).toContain(
+      '# the nose came before the target lambda = 3, and the run ended there\n',
+    );
+    expect(short).not.toContain('lower branch');
+  });
 });
 
 describe('cpfGeneratorsToCsv', () => {
@@ -255,6 +333,42 @@ describe('seResidualsToCsv', () => {
       '1,-0.5,true',
       '2,0.02,false',
       '',
+    ]);
+  });
+
+  it('says which estimator ran, with what, and what the bad-data test found', async () => {
+    const base: SeResult = {
+      converged: true,
+      iterations: 4,
+      mismatch: 31.5,
+      residuals: [0.01],
+      measurement_count: 1,
+      flagged_indices: [],
+    };
+    const wls = await readBlob(
+      seResidualsToCsv({
+        ...base,
+        algorithm: 'wls',
+        settings: { tol: 0.0001, max_iter: 100, noise_seed: null },
+        chi_squared: { passed: false, J: 31.5, threshold: 25.0, dof: 15, confidence: 0.95 },
+      }),
+    );
+    expect(wls.split('\n').slice(0, 3)).toEqual([
+      '# SE converged in 4 iterations, J = 31.5',
+      '# Estimator: WLS, tol = 0.0001, max_iter = 100',
+      '# Bad-data test (chi-squared, confidence 0.95): failed, J = 31.5, threshold = 25, 15 degrees of freedom',
+    ]);
+    const lav = await readBlob(
+      seResidualsToCsv({
+        ...base,
+        algorithm: 'lav',
+        settings: { tol: 0.0001, max_iter: 400, noise_seed: 7 },
+        chi_squared: null,
+      }),
+    );
+    expect(lav.split('\n').slice(1, 3)).toEqual([
+      '# Estimator: LAV, tol = 0.0001, max_iter = 400, noise drawn for this run with seed 7',
+      '# No bad-data test: it needs weighted least squares and more measurements than states.',
     ]);
   });
 });

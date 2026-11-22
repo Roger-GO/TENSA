@@ -152,7 +152,10 @@ test('CPF: limits change the nose, and the result says which generator it is due
   await expect(page.getByTestId('cpf-curve-lower-14')).toBeAttached();
   // The nose has not moved.
   expect(await maxLambda(page)).toBeCloseTo(nose, 3);
-  await page.getByTestId('cpf-config-lower-branch').uncheck();
+  // The full curve is one of three radios now: going back to the nose is the
+  // nose's radio, which leaves the full-curve one unchecked.
+  await page.getByTestId('cpf-config-stop-at-nose').check();
+  await expect(page.getByTestId('cpf-config-lower-branch')).not.toBeChecked();
 
   // ---- a custom direction -------------------------------------------------------
   await page.getByTestId('cpf-config-direction-custom').check();

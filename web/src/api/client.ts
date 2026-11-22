@@ -362,4 +362,12 @@ export const TIMEOUTS = {
    * most of a minute.
    */
   cpfRun: 180_000,
+  /**
+   * One point of an EIG parameter sweep: a read, a setup, a power flow and an
+   * eigenvalue analysis of the case, which is seconds for the example cases on
+   * a busy machine. A sweep is given this much per point on top of
+   * ``pflowRun``, so the bound grows with the sweep (200 points, the most the
+   * server takes, is a little over an hour and a half).
+   */
+  eigSweepPoint: 30_000,
 } as const;

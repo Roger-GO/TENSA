@@ -55,11 +55,11 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     for line_idx, flow in raw_flows.items():
         line_flows[str(line_idx)] = LineFlow(
             p=float(flow["p"]),
-            q=float(flow["q"]),
+            q=None if flow["q"] is None else float(flow["q"]),
             from_idx=flow["from_idx"],
             to_idx=flow["to_idx"],
             p_to=float(flow["p_to"]),
-            q_to=float(flow["q_to"]),
+            q_to=None if flow["q_to"] is None else float(flow["q_to"]),
             loss=float(flow["loss"]),
             rate_a=flow["rate_a"],
             loading_pct=flow["loading_pct"],
@@ -69,7 +69,7 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     for gen_idx, gen in raw_gen.items():
         generator_outputs[str(gen_idx)] = GeneratorOutput(
             p=float(gen["p"]),
-            q=float(gen["q"]),
+            q=None if gen["q"] is None else float(gen["q"]),
             v=float(gen["v"]),
             bus=gen["bus"],
             q_min=gen["q_min"],
@@ -80,7 +80,7 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
     for load_idx, load in raw_load.items():
         load_consumption[str(load_idx)] = LoadConsumption(
             p=float(load["p"]),
-            q=float(load["q"]),
+            q=None if load["q"] is None else float(load["q"]),
             bus=load["bus"],
         )
     return PflowResult(
@@ -97,6 +97,10 @@ def _result_from_payload(payload: dict[str, Any], run_id: str) -> PflowResult:
             PflowSettings(**payload["settings"]) if payload.get("settings") else None
         ),
         summary=PflowSummary(**payload["summary"]) if payload.get("summary") else None,
+        keys={
+            str(kind): {str(idx): str(key) for idx, key in entries.items()}
+            for kind, entries in (payload.get("keys") or {}).items()
+        },
     )
 
 
@@ -134,7 +138,8 @@ def _to_http_error(exc: WorkerError) -> HTTPException:
                 "ANDES setup() failed, OR a previous EIG run mutated dae "
                 "state (``TDS.initialized=True``). Either case requires "
                 "POST /reload to recover. Also a setting outside its range "
-                "(``tolerance``, ``max_iterations``), which needs no reload: "
+                "(``tolerance``, ``max_iterations``, ``method``, "
+                "``n_factorize``, ``linesearch``), which needs no reload: "
                 "fix the request."
             ),
         },

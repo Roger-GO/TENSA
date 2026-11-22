@@ -1,0 +1,1876 @@
+"""The per-session state of the Sienna engine.
+
+One ``SiennaState`` per session, the Sienna counterpart of the ANDES
+``Wrapper`` for the six ops the engine answers. It holds the
+:class:`~tensa.engines.sienna.bridge.JuliaBridge` (made on first use when none
+is given), the Julia session the bridge returned, the case path and addfiles,
+the :class:`~tensa.engines.identity.CaseIdentity`, the
+:class:`~tensa.engines.keys.KeyBook`, the last topology, report and power flow
+JSON, and the settings of the last power flow.
+
+Every path that reaches the bridge (the case, the ``.dyr``, the scratch
+folder) is checked against the workspace in Python first, by the validation
+the case route uses, because Julia's own file reads go through the C library
+and are invisible to the worker's audit hook.
+
+Everything the engine says about a load or a power flow is logged on the
+``tensa.notice`` logger, which the worker's log capture sends to the session's
+message log (``tensa.core.messages``).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+import math
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from tensa.core.disturbance import DisturbanceSpec, FaultSpec, ToggleSpec
+from tensa.core.edit_log import EditStep
+from tensa.core.eig_math import (
+    _ZERO_EIGENVALUE_TOL,
+    _compute_damping_ratio,
+    _compute_frequency_hz,
+    _settle_axis,
+    _settle_zero,
+    eigen_decomposition,
+)
+from tensa.core.eig_result import ComplexNumber, EigResult
+from tensa.core.errors import (
+    AndesAppError,
+    CaseLoadError,
+    DisturbanceValidationError,
+    EigComputationError,
+    EigPrerequisiteError,
+    ElementNotFoundError,
+    ElementValidationError,
+    NoCaseLoadedError,
+    PflowRequestError,
+    SiennaError,
+    TdsRequestError,
+    short_repr,
+)
+from tensa.core.messages import PathScrubber
+from tensa.core.pflow_options import PflowSettings
+from tensa.core.session_dirs import SESSIONS_DIRNAME, write_owner_marker
+from tensa.core.wrapper.results import PflowResult, TopologySnapshot
+from tensa.core.wrapper.ybus import MAX_YBUS_ENTRIES
+from tensa.engines.case_facts import corrections_document, read_case_facts
+from tensa.engines.identity import _matpower_rows, read_identity
+from tensa.engines.keys import KeyBook, KeyEntry
+from tensa.engines.series_names import build_name
+from tensa.engines.sienna.bridge import JuliaBridge
+from tensa.engines.sienna.convert import (
+    file_ratings,
+    pflow_result,
+    report_messages,
+    topology_snapshot,
+)
+from tensa.engines.sienna.dispatch import (
+    NO_COST_DATA_MESSAGE,
+    DispatchRequestError,
+    DispatchResult,
+    check_network_model,
+    dispatch_result,
+)
+from tensa.engines.sienna.disturbances import (
+    PendingDisturbance,
+    islanding_refusal,
+    run_json_entries,
+    to_pending,
+    unit_key_of,
+)
+from tensa.engines.sienna.edit_log import (
+    AddElementOp,
+    NeutralOp,
+    RemoveElementOp,
+    SetFieldOp,
+    bucket_of_key,
+    make_add,
+    make_remove,
+    make_set_field,
+    ops_to_json,
+)
+from tensa.engines.sienna.ext import SiennaExtSpec, ext_to_json, validate_ext
+from tensa.engines.sienna.keys import assign_sienna_keys
+from tensa.engines.sienna.matrix_io import read_matrix
+from tensa.engines.sienna.sim import SimResult, check_load_profile, sim_result
+from tensa.engines.sienna.uc import (
+    UcResult,
+    check_uc_overrides,
+    check_uc_request,
+    uc_result,
+)
+from tensa.security.paths import (
+    WorkspacePathError,
+    canonical_directory,
+    open_workspace_file_for_andes,
+)
+
+if TYPE_CHECKING:
+    from tensa.engines.identity import CaseIdentity
+
+log = logging.getLogger("tensa.notice")
+
+# The network matrix kinds the engine builds (spec section 6.1, ``matrices``).
+NETWORK_MATRIX_KINDS = frozenset({"ptdf", "lodf", "ybus", "incidence"})
+
+
+class NetworkMatrixKindError(AndesAppError):
+    """A network matrix kind the Sienna engine does not build."""
+
+    def __init__(self, kind: object) -> None:
+        super().__init__(
+            f"unknown network matrix kind: {short_repr(kind)}; "
+            f"the kinds are ptdf, lodf, ybus, incidence"
+        )
+
+
+class NetworkMatrixTooLargeError(AndesAppError):
+    """A network matrix with more entries than one answer carries."""
+
+    def __init__(self, kind: str, entries: int, cap: int) -> None:
+        super().__init__(
+            f"the {kind} matrix has {entries} entries, more than the {cap} "
+            f"one answer carries"
+        )
+
+# The ops the Sienna engine does not take, named for the error message.
+_ANDES_ONLY_PFLOW_OPTIONS = ("n_factorize", "linesearch")
+
+# The power flow methods the Sienna engine takes (``None`` and ``"ac"`` are
+# the AC power flow; ``"dc"`` and ``"ptdf-dc"`` the DC solvers).
+_PFLOW_METHODS = ("ac", "dc", "ptdf-dc")
+
+# Why a dynamic analysis refuses to start after a DC power flow.
+_DC_NOT_AN_OPERATING_POINT = (
+    "the last power flow was a DC one, which gives no operating point a dynamic "
+    "analysis can start from; solve the AC power flow (method ac) first"
+)
+
+# The load models a dynamic analysis takes (spec section 6.3).
+_LOAD_MODELS = ("impedance", "power", "as-case")
+
+# The TDS request options the Sienna engine does not have, named for the
+# refusal message. ``integrator`` is special-cased: the route always sends it,
+# and its schema default is read as "not given".
+_TDS_OPTIONS_NOT_TAKEN = ("tds_config_overrides", "dae_vars", "controllers")
+
+# The note a batch result carries for the relative rotor angles it does not
+# hold (the dyn plan's machines report no inertia; see the unit's resolutions).
+_ROTOR_REL_NOTE = (
+    "relative rotor angles need each machine's inertia, "
+    "which the Sienna engine does not report yet"
+)
+
+
+def _finite_or_none(value: Any) -> float | None:
+    """A value of a run's row as a float, or ``None`` for a gap: ``null`` (how
+    the Julia side writes a value that is not finite) or a NaN or infinity."""
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+# The note every Sienna eigenvalue result carries (spec section 13: PSID's own
+# docs call the validation of its small-signal results work in progress, and
+# every cross-engine eig comparison shows that note).
+SIENNA_EIG_NOTE = (
+    "PSID's small-signal results are work in progress in validation, "
+    "by PSID's own documentation."
+)
+
+
+def _topology_handles(topology: Mapping[str, Any]) -> set[tuple[str, str]]:
+    """Every ``(model, idx)`` handle the topology JSON holds, as
+    ``assign_sienna_keys`` builds them."""
+    handles: set[tuple[str, str]] = set()
+    for row in topology.get("buses", []):
+        handles.add(("Bus", str(int(row["number"]))))
+    for row in topology.get("branches", []):
+        handles.add(("Line", str(row.get("name"))))
+    for row in topology.get("generators", []):
+        handles.add((str(row.get("kind") or "PV"), str(row.get("name"))))
+    for row in topology.get("loads", []):
+        handles.add(("PQ", str(row.get("name"))))
+    for row in topology.get("shunts", []):
+        handles.add(("Shunt", str(row.get("name"))))
+    for row in topology.get("dynamics", []):
+        handles.add((str(row.get("model")), f"{row.get('generator')}/{row.get('model')}"))
+    return handles
+
+
+def _add_handle(op: AddElementOp) -> tuple[str, str]:
+    """The ``(model, idx)`` handle an add gives its element: the Julia side
+    names an added load ``load<bus>-<id>`` and an added shunt ``<bus>-<id>``,
+    with ``id`` the ordinal the key carries."""
+    kind, _, rest = op.key.partition(":")
+    bus, _, ordinal = rest.partition("-")
+    if kind == "load":
+        return ("PQ", f"load{bus}-{ordinal}")
+    return ("Shunt", f"{bus}-{ordinal}")
+
+
+def _remove_handle(op: RemoveElementOp) -> tuple[str, str]:
+    """The ``(model, idx)`` handle a remove takes out: the book entry's model
+    for the key's kind, and its idx, which the op carries as ``name``."""
+    kind = op.key.partition(":")[0]
+    return ("PQ" if kind == "load" else "Shunt", op.name)
+
+
+def _case_stamp(case_path: Path) -> tuple[Path, int, int]:
+    """What tells one content of a case file from another: its path, its
+    modification time in nanoseconds and its size. A file that cannot be read
+    for them stamps as -1, -1 (the load is about to fail anyway)."""
+    try:
+        stat = case_path.stat()
+    except OSError:
+        return (case_path, -1, -1)
+    return (case_path, stat.st_mtime_ns, stat.st_size)
+
+
+def _read_text(path: Path) -> str:
+    """The text of a case file, as UTF-8 or else Latin-1, as the identity and
+    facts readers read it."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="latin-1")
+
+
+def matpower_branch_rows(text: str) -> dict[tuple[int, int, str], int]:
+    """The row number (from 1) of each ``mpc.branch`` row of a MATPOWER case,
+    keyed by ``(from, to, ckt)``.
+
+    ``ckt`` is the ordinal among the rows of the same unordered bus pair, as
+    ``identity.py`` and ``case_facts.py`` assign it. The row number is the
+    position in the file's branch matrix, not in the identity's ``branches``
+    or the facts' lists, which put the lines first and the transformers after.
+    """
+    numbers: dict[tuple[int, int, str], int] = {}
+    pair_ordinals: dict[tuple[int, int], int] = {}
+    for number, row in enumerate(_matpower_rows(text, "branch"), start=1):
+        from_bus, to_bus = int(row[0]), int(row[1])
+        pair = (min(from_bus, to_bus), max(from_bus, to_bus))
+        pair_ordinals[pair] = pair_ordinals.get(pair, 0) + 1
+        numbers[(from_bus, to_bus, str(pair_ordinals[pair]))] = number
+    return numbers
+
+
+def julia_corrections(path: Path, document: Mapping[str, Any]) -> dict[str, Any]:
+    """What the bridge's ``corrections`` argument takes for the case at ``path``:
+    the ``transformers`` and ``line_charging`` rows of its corrections document,
+    the only keys the Julia module knows. The ``transformer_charging`` rows (a
+    MATPOWER transformer row with a ``b``) go with the ``line_charging`` ones:
+    the Julia module puts back the charging of any branch it holds as a
+    transformer the same way, half at each end of the file's pi.
+
+    The Julia module names a branch of a PSS/E file by the record's circuit id
+    and a branch of a MATPOWER file by its row number in the file, so for a
+    ``.m`` file each row's third field becomes that row number, as text (``"1"``
+    for the first branch row). A row whose branch the file does not have (the
+    readers disagree, which is a bug) is sent as it is, and the Julia module's
+    note that the System does not hold it says so.
+    """
+    transformers = [list(row) for row in document.get("transformers", [])]
+    line_charging = [list(row) for row in document.get("line_charging", [])]
+    line_charging += [list(row) for row in document.get("transformer_charging", [])]
+    if path.suffix.lower() == ".m":
+        numbers = matpower_branch_rows(_read_text(path))
+        for rows in (transformers, line_charging):
+            for row in rows:
+                number = numbers.get((int(row[0]), int(row[1]), str(row[2])))
+                if number is not None:
+                    row[2] = str(number)
+    return {"transformers": transformers, "line_charging": line_charging}
+
+
+def _validated(workspace: Path, path: Path) -> Path:
+    """``path`` checked against the workspace by the validation the case route
+    uses (``open_workspace_file_for_andes``), answered in its canonical form.
+
+    The route has checked it already; this is the check again in the process
+    that hands it to Julia, whose own file reads the audit hook does not see.
+    A path outside the workspace, missing, or otherwise refused raises
+    :class:`CaseLoadError` naming the file only.
+    """
+    try:
+        root = canonical_directory(workspace)
+        try:
+            relative = Path(os.path.abspath(path)).relative_to(root)
+        except ValueError:
+            relative = Path(os.path.realpath(path)).relative_to(root)
+        with open_workspace_file_for_andes(root, str(relative)) as canonical:
+            return canonical
+    except (ValueError, WorkspacePathError) as exc:
+        raise CaseLoadError(
+            path.name, f"{path.name} is not a file in the workspace"
+        ) from exc
+
+
+class SiennaState:
+    """One session's Sienna state: the bridge, the Julia session, the case.
+
+    The constructor takes the same first three arguments
+    :meth:`EngineRuntime.make_state` passes the ANDES wrapper. ``workspace``
+    and ``session_id`` decide the scratch folder Julia works in;
+    ``owner_pid`` is kept for the owner marker the session directories write.
+    """
+
+    def __init__(
+        self,
+        workspace: str | None,
+        session_id: str | None,
+        owner_pid: int | None,
+        bridge: JuliaBridge | None = None,
+    ) -> None:
+        self._workspace = Path(workspace) if workspace is not None else None
+        self._session_id = session_id
+        self._owner_pid = owner_pid
+        self._bridge = bridge
+        self._session: Any = None
+        self._case_path: Path | None = None
+        self._addfiles: list[Path] | None = None
+        self._on_unsupported: str = "refuse"
+        self._identity: CaseIdentity | None = None
+        self._key_book = KeyBook()
+        self._keyed_case: tuple[Path, int, int] | None = None
+        self._topology_json: dict[str, Any] | None = None
+        self._report_json: dict[str, Any] | None = None
+        self._pflow_json: dict[str, Any] | None = None
+        self._pflow_settings: PflowSettings | None = None
+        self._document: dict[str, Any] | None = None
+        self._versions: dict[str, str] | None = None
+        self._eig_result: EigResult | None = None
+        self._eig_participation: list[list[float]] | None = None
+        self._pending_disturbances: list[PendingDisturbance] = []
+        self._edit_log: list[NeutralOp] = []
+        self._redo_log: list[NeutralOp] = []
+
+    # ---- the bridge ---------------------------------------------------------
+
+    def _require_bridge(self) -> JuliaBridge:
+        """The bridge, made and started on first use. Its messages name a file of
+        the workspace relative to it, as the worker's own log capture does."""
+        if self._bridge is None:
+            self._bridge = JuliaBridge(scrub=PathScrubber(self._workspace))
+        if not self._bridge.started:
+            self._bridge.start()
+        return self._bridge
+
+    def _require_workspace(self, path: Path) -> Path:
+        """The workspace, which every file the engine reads must be in."""
+        if self._workspace is None:
+            raise CaseLoadError(
+                path.name,
+                "the Sienna engine reads case files from a workspace only, "
+                "and this session has none",
+            )
+        return self._workspace
+
+    def _scratch_dir(self, workspace: Path, name: str) -> Path:
+        """The ``sienna`` subfolder of the session's own scratch directory,
+        ``<workspace>/.sessions/<session id>/sienna``, made with the owner marker
+        the session directories carry (``tensa.core.session_dirs``), as the
+        ANDES engine's clone folder is. The server removes the session directory
+        when the session closes."""
+        if not self._session_id:
+            raise CaseLoadError(
+                name, "the Sienna engine needs the session's id for its scratch folder"
+            )
+        session_root = workspace / SESSIONS_DIRNAME / self._session_id
+        scratch = session_root / "sienna"
+        scratch.mkdir(parents=True, exist_ok=True)
+        write_owner_marker(session_root, self._owner_pid)
+        return scratch
+
+    def _drop_case(self) -> None:
+        """Forget the case: the state holds none afterwards, and the Julia session
+        is released."""
+        self._session = None
+        self._case_path = None
+        self._addfiles = None
+        self._on_unsupported = "refuse"
+        self._identity = None
+        self._key_book = KeyBook()
+        self._keyed_case = None
+        self._topology_json = None
+        self._report_json = None
+        self._pflow_json = None
+        self._pflow_settings = None
+        self._document = None
+        self._eig_result = None
+        self._eig_participation = None
+        self._pending_disturbances = []
+        self._edit_log = []
+        self._redo_log = []
+
+    # ---- load_case ----------------------------------------------------------
+
+    def load_case(
+        self,
+        path: Path,
+        addfiles: list[Path] | None = None,
+        on_unsupported: str = "refuse",
+    ) -> TopologySnapshot:
+        """Load a PSS/E ``.raw`` or MATPOWER ``.m`` case through Julia, with no
+        edits: a case that is loaded starts a new edit log and an empty redo
+        log, as the ANDES wrapper's ``load_case`` does. What else it does and
+        raises is :meth:`_load`'s."""
+        snapshot = self._load(path, addfiles, on_unsupported, [], keep_disturbances=False)
+        self._edit_log = []
+        self._redo_log = []
+        return snapshot
+
+    def _load(
+        self,
+        path: Path,
+        addfiles: list[Path] | None,
+        on_unsupported: str,
+        edit_log: list[NeutralOp],
+        *,
+        keep_disturbances: bool,
+    ) -> TopologySnapshot:
+        """Read the case's files through Julia and apply ``edit_log`` to the
+        System read, which is then the session's: the System is always the
+        case file with the log applied.
+
+        ``keep_disturbances`` keeps the pending disturbances (an edit, an undo
+        and a redo keep them, as the ANDES wrapper's do); a load and a reload
+        drop them. The caller adopts ``edit_log`` as the state's log.
+
+        Every path that reaches the bridge (the case, the ``.dyr``, the
+        scratch folder) is validated against the workspace in Python first, by
+        the same validation the ANDES handler uses, because Julia's own file
+        reads go through the C library and are invisible to the worker's audit
+        hook.
+
+        Raises :class:`CaseLoadError` for a file kind the engine does not
+        read, for an addfile that is not one ``.dyr`` with a ``.raw``, for a file
+        outside the workspace, and for unsupported dynamic records when
+        ``on_unsupported`` is ``"refuse"``; that refusal leaves the state with no
+        case. A file Julia cannot read raises :class:`SiennaError` with the Julia
+        module's message, and the case held before (if any) stays, as a failed
+        load leaves the ANDES engine's. An edit of the log that the System
+        refuses raises :class:`ElementValidationError` naming it, and the case
+        held before stays as well.
+        """
+        suffix = path.suffix.lower()
+        if suffix not in (".raw", ".m"):
+            raise CaseLoadError(
+                path.name,
+                f"the Sienna engine reads PSS/E .raw and MATPOWER .m case "
+                f"files; {path.name} is neither",
+            )
+        if on_unsupported not in ("refuse", "drop"):
+            raise CaseLoadError(
+                path.name,
+                f'on_unsupported must be "refuse" or "drop", got '
+                f"{short_repr(on_unsupported)}",
+            )
+        dyr: Path | None = None
+        if addfiles:
+            if len(addfiles) > 1:
+                raise CaseLoadError(
+                    path.name,
+                    "the Sienna engine takes at most one addfile, a .dyr",
+                )
+            candidate = Path(addfiles[0])
+            if candidate.suffix.lower() != ".dyr":
+                raise CaseLoadError(
+                    path.name,
+                    f"the Sienna engine's addfile must be a .dyr; "
+                    f"{candidate.name} is not",
+                )
+            if suffix != ".raw":
+                raise CaseLoadError(
+                    path.name,
+                    f"a .dyr file goes with a PSS/E .raw case, not with {path.name}",
+                )
+            dyr = candidate
+
+        workspace = self._require_workspace(path)
+        path = _validated(workspace, path)
+        if dyr is not None:
+            dyr = _validated(workspace, dyr)
+
+        # What the file says where PowerSystems' reader departs from it. A file
+        # these readers cannot read goes to Julia without corrections, so that a
+        # file that is not a case is refused with the Julia module's message.
+        identity: CaseIdentity | None
+        document: dict[str, Any] | None
+        try:
+            identity = read_identity(path)
+            document = dict(corrections_document(read_case_facts(path)))
+        except (OSError, ValueError) as exc:
+            log.debug("the case facts of %s could not be read: %s", path.name, exc)
+            identity, document = None, None
+        v_setpoints: dict[str, float] | None = None
+        corrections: dict[str, Any] | None = None
+        if document is not None:
+            v_setpoints = {
+                str(bus): float(vs) for bus, vs in dict(document["v_setpoints"]).items()
+            }
+            corrections = julia_corrections(path, document)
+
+        bridge = self._require_bridge()
+        scratch = self._scratch_dir(workspace, path.name)
+        session = bridge.load_case(path, dyr, scratch, v_setpoints, corrections)
+        if edit_log:
+            answer = bridge.apply_edits(session, ops_to_json(edit_log))
+            refused = answer.get("refused") or []
+            if refused:
+                reasons = "; ".join(
+                    f"{row.get('key')}: {row.get('reason')}" for row in refused
+                )
+                raise ElementValidationError(f"the System refused the edit: {reasons}")
+        report = bridge.report(session)
+        topology = bridge.topology(session)
+
+        unsupported = report.get("unsupported") or []
+        if unsupported and on_unsupported == "refuse":
+            del session
+            self._drop_case()
+            records = "; ".join(
+                f"{row.get('model')} at bus {row.get('bus')}, id {row.get('id')}"
+                for row in unsupported
+            )
+            raise CaseLoadError(
+                path.name,
+                f"the Sienna engine does not support these dynamic records: "
+                f'{records}. Load it with on_unsupported "drop" to leave these '
+                f"out, or use the ANDES engine.",
+            )
+
+        # Keys: keep the book when the same file content is loaded again,
+        # start a new one when the file's path, size or modification time
+        # differs (the rule of the ANDES wrapper's ``load_case``).
+        stamp = _case_stamp(path)
+        if self._keyed_case != stamp:
+            self._key_book = KeyBook()
+            self._keyed_case = stamp
+        self._identity = identity
+
+        self._session = session
+        self._case_path = path
+        self._addfiles = [dyr] if dyr is not None else None
+        self._on_unsupported = on_unsupported
+        self._topology_json = topology
+        self._report_json = report
+        self._pflow_json = None
+        self._pflow_settings = None
+        self._document = document
+        self._eig_result = None
+        self._eig_participation = None
+        # A fresh case holds no disturbances, as the ANDES wrapper's load_case
+        # wipes the disturbance log; an edit keeps them.
+        if not keep_disturbances:
+            self._pending_disturbances = []
+
+        book = assign_sienna_keys(topology, identity, self._key_book)
+        added, removed = self._log_handle_delta(edit_log)
+        book.retain((_topology_handles(topology) | added) - removed)
+
+        # What the load found and did goes to the session's message log.
+        if document is None:
+            log.warning(
+                "%s was read without the corrections TENSA makes to what "
+                "PowerSystems reads: its records could not be read in Python",
+                path.name,
+            )
+        for level, text in report_messages(report):
+            if level == "warning":
+                log.warning("%s", text)
+            else:
+                log.info("%s", text)
+        for note in (document or {}).get("notes") or []:
+            log.warning("%s", note)
+
+        return self._with_steps(
+            topology_snapshot(topology, report, book, ratings=self._ratings(log_unmatched=True))
+        )
+
+    def _ratings(self, *, log_unmatched: bool = False) -> dict[str, float] | None:
+        """The file's branch ratings, keyed by branch key, for the snapshot and
+        the power flow result: where the file gives a branch no rating,
+        PowerSystems invents one. ``log_unmatched`` says on ``tensa.notice`` how
+        many branch records of the file matched no branch of the System."""
+        ratings, unmatched = file_ratings(self._document, self._key_book)
+        if unmatched and log_unmatched:
+            log.warning(
+                "%d branch record(s) of the file matched no branch of the System; "
+                "their ratings are the ones PowerSystems reports",
+                unmatched,
+            )
+        return ratings
+
+    # ---- the reads ----------------------------------------------------------
+
+    def _require_session(self) -> Any:
+        if self._session is None:
+            raise NoCaseLoadedError("no case has been loaded")
+        return self._session
+
+    def topology(self) -> TopologySnapshot:
+        """The topology of the loaded case, from the held JSON."""
+        self._require_session()
+        assert self._topology_json is not None  # noqa: S101
+        assert self._report_json is not None  # noqa: S101
+        ratings = self._ratings()
+        return self._with_steps(
+            topology_snapshot(
+                self._topology_json, self._report_json, self._key_book, ratings=ratings
+            )
+        )
+
+    def _with_steps(self, snapshot: TopologySnapshot) -> TopologySnapshot:
+        """``snapshot`` with ``undo`` and ``redo`` naming the edits
+        ``undo_last_edit`` and ``redo_edit`` would act on, as the ANDES
+        wrapper's topology names them."""
+        snapshot.undo = self._edit_step(self._edit_log[-1]) if self._edit_log else None
+        snapshot.redo = self._edit_step(self._redo_log[-1]) if self._redo_log else None
+        return snapshot
+
+    def _edit_step(self, op: NeutralOp) -> EditStep:
+        """One log entry as the ANDES engine's ``EditStep``: the element's
+        model and idx (the key book's entry; for an element the log has
+        taken out, the model its key's bucket is added as and the topology
+        name the op carries), and for a set the ANDES param the field is
+        edited through (``p_mw`` is ``p0``), so a client reads one shape from
+        either engine."""
+        from tensa.engines.sienna.runtime import edit_param_of  # the runtime imports this module
+
+        entry = self._key_book.entry_of(op.key)
+        bucket_model = {"load": "PQ", "shunt": "Shunt"}.get(bucket_of_key(op.key) or "", "")
+        model = entry.model if entry is not None else bucket_model
+        if isinstance(op, SetFieldOp):
+            idx: int | str | None = entry.idx if entry is not None else op.name
+            return EditStep(op="edit", model=model, idx=idx, params=(edit_param_of(model, op.field),))
+        if isinstance(op, AddElementOp):
+            return EditStep(op="add", model=model, idx=entry.idx if entry is not None else None)
+        return EditStep(op="delete", model=model, idx=entry.idx if entry is not None else op.name)
+
+    def reload_case(self) -> TopologySnapshot:
+        """Load the same files again with the same ``on_unsupported`` and the
+        edit log applied; the pending disturbances are dropped."""
+        if self._case_path is None:
+            raise NoCaseLoadedError("no case has been loaded")
+        return self._load(
+            self._case_path,
+            self._addfiles,
+            self._on_unsupported,
+            self._edit_log,
+            keep_disturbances=False,
+        )
+
+    def run_pflow(
+        self,
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        flat_start: bool | None = None,
+        enforce_q_limits: bool | None = None,
+        method: str | None = None,
+        **other: Any,
+    ) -> PflowResult:
+        """Solve the power flow.
+
+        ``method`` may be ``"ac"`` (the default), ``"dc"`` or ``"ptdf-dc"``;
+        ``"dc"`` and ``"ptdf-dc"`` take neither ``tolerance`` nor
+        ``max_iterations``, and a DC method given with ``flat_start`` or
+        ``enforce_q_limits`` is refused naming the option, since a DC power
+        flow has none of them. Any ANDES-only option (``n_factorize``,
+        ``linesearch``) that is not ``None`` raises :class:`PflowRequestError`
+        naming the option, as does a ``method`` the engine does not have.
+        ``tolerance`` must be a finite number above 0 and ``max_iterations``
+        an integer of at least 1 (not a bool).
+        """
+        self._require_session()
+        for name in ("flat_start", "enforce_q_limits"):
+            value = locals()[name]
+            if value is not None:
+                raise PflowRequestError(
+                    f"the Sienna engine does not take {name}"
+                )
+        if method is not None and method not in _PFLOW_METHODS:
+            raise PflowRequestError(
+                f"the Sienna engine does not have method {short_repr(method)}; "
+                f"it has ac, dc and ptdf-dc"
+            )
+        is_dc = method in ("dc", "ptdf-dc")
+        if is_dc:
+            if tolerance is not None:
+                raise PflowRequestError(
+                    f"method {method} takes neither tolerance nor max_iterations"
+                )
+            if max_iterations is not None:
+                raise PflowRequestError(
+                    f"method {method} takes neither tolerance nor max_iterations"
+                )
+        for name in _ANDES_ONLY_PFLOW_OPTIONS:
+            value = other.pop(name, None)
+            if value is not None:
+                raise PflowRequestError(
+                    f"the Sienna engine does not take {name}"
+                )
+        for name, value in other.items():
+            if value is not None:
+                raise PflowRequestError(
+                    f"the Sienna engine does not take {name}"
+                )
+        if tolerance is not None and (
+            isinstance(tolerance, bool)
+            or not isinstance(tolerance, int | float)
+            or not math.isfinite(float(tolerance))
+            or float(tolerance) <= 0
+        ):
+            raise PflowRequestError(
+                f"tolerance must be a finite number above 0, got "
+                f"{short_repr(tolerance)}"
+            )
+        if max_iterations is not None and (
+            isinstance(max_iterations, bool)
+            or not isinstance(max_iterations, int)
+            or max_iterations < 1
+        ):
+            raise PflowRequestError(
+                f"max_iterations must be a whole number of at least 1, got "
+                f"{short_repr(max_iterations)}"
+            )
+
+        bridge = self._require_bridge()
+        if is_dc:
+            assert method is not None  # noqa: S101 - is_dc implies a method
+            pflow = bridge.dc_pflow(self._session, method)
+        else:
+            pflow = bridge.pflow(
+                self._session,
+                tolerance=None if tolerance is None else float(tolerance),
+                max_iterations=max_iterations,
+            )
+        self._pflow_json = pflow
+        # A new operating point is not the one the last analysis linearised at.
+        self._eig_result = None
+        self._eig_participation = None
+
+        for note in pflow.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+
+        assert self._topology_json is not None  # noqa: S101
+        ratings = self._ratings()
+        result = pflow_result(
+            pflow, self._topology_json, self._key_book, ratings=ratings
+        )
+        # The settings the JSON reports, with the fields the Sienna engine
+        # has no value for set to the value that states "not used". A DC power
+        # flow has no tolerance or iteration limit, so both are 0 there, and
+        # the method says which solver ran.
+        result.settings = PflowSettings(
+            tolerance=float(pflow["tolerance"])
+            if pflow.get("tolerance") is not None
+            else 0.0,
+            max_iterations=int(pflow["max_iterations"])
+            if pflow.get("max_iterations") is not None
+            else 0,
+            flat_start=False,
+            enforce_q_limits=False,
+            method=str(method) if is_dc else "NR",
+            n_factorize=1,
+            linesearch=False,
+        )
+        self._pflow_settings = result.settings
+        return result
+
+    def operating_point(self) -> PflowResult:
+        """The last power flow's result when one converged; otherwise the
+        voltages and angles of the case as loaded, ``converged`` False.
+
+        As the ANDES wrapper's, this leaves ``settings`` and ``summary``
+        ``None``: only ``run_pflow`` sets them on its own result.
+        """
+        self._require_session()
+        if self._pflow_json is not None and self._pflow_json.get("converged"):
+            assert self._topology_json is not None  # noqa: S101
+            ratings = self._ratings()
+            result = pflow_result(
+                self._pflow_json,
+                self._topology_json,
+                self._key_book,
+                ratings=ratings,
+            )
+            result.settings = None
+            result.summary = None
+            return result
+
+        assert self._topology_json is not None  # noqa: S101
+        bus_voltages: dict[int | str, float] = {}
+        bus_angles: dict[int | str, float] = {}
+        bus_keys: dict[str, str] = {}
+        for row in self._topology_json.get("buses", []):
+            number = int(row["number"])
+            bus_voltages[number] = float(row.get("v_pu", 1.0))
+            bus_angles[number] = float(row.get("angle_rad", 0.0))
+            key = self._key_book.key_of("Bus", number)
+            if key is not None:
+                bus_keys[str(number)] = key
+        return PflowResult(
+            converged=False,
+            iterations=0,
+            mismatch=0.0,
+            bus_voltages=bus_voltages,
+            bus_angles=bus_angles,
+            line_flows={},
+            generator_outputs={},
+            load_consumption={},
+            settings=None,
+            summary=None,
+            keys={"bus": bus_keys, "line": {}, "generator": {}, "load": {}},
+        )
+
+    # ---- run_eig ------------------------------------------------------------
+
+    def run_eig(self, load_model: str = "impedance") -> EigResult:
+        """Small-signal analysis at the solved operating point.
+
+        ``load_model`` is ``"impedance"`` (the default), ``"power"`` or
+        ``"as-case"`` (spec section 6.3); any other value raises
+        :class:`EigComputationError`. Without a converged power flow in this
+        session raises :class:`EigPrerequisiteError` with the message the ANDES
+        engine uses. A failure the Julia side reports (``ok`` false) arrives as
+        :class:`SiennaError` carrying the answer's ``stage`` and becomes
+        :class:`EigComputationError` with the stage and the message, so a case
+        with no dynamic models or no solved power flow is a 422 that says why.
+        """
+        self._require_session()
+        # The same gate as the ANDES engine's, on this session's own record.
+        if self._pflow_json is None or not self._pflow_json.get("converged"):
+            raise EigPrerequisiteError(
+                "Run PFlow first; EIG requires a converged operating point."
+            )
+        if self._dc_pflow_last():
+            raise EigPrerequisiteError(_DC_NOT_AN_OPERATING_POINT)
+        if load_model not in _LOAD_MODELS:
+            raise EigComputationError(
+                f'load_model must be "impedance", "power" or "as-case", got '
+                f"{short_repr(load_model)}"
+            )
+
+        assert self._case_path is not None  # noqa: S101 - a session has a case
+        workspace = self._require_workspace(self._case_path)
+        scratch = self._scratch_dir(workspace, "eig")
+        sim_dir = scratch / "sim"
+        sim_dir.mkdir(parents=True, exist_ok=True)
+        matrix_file = sim_dir / "eig-state-matrix.bin"
+
+        bridge = self._require_bridge()
+        try:
+            answer = bridge.eig(self._session, load_model=load_model, matrix_file=matrix_file)
+        except SiennaError as exc:
+            stage = getattr(exc, "stage", "eig")
+            raise EigComputationError(
+                f"eigenvalue analysis failed at {stage}: {exc}"
+            ) from exc
+
+        # State names: the unit key of the machine the state belongs to, then
+        # the state as PSID names it (``gen:1-1 δ``). A device the key book has
+        # no entry for (one PowerSystems renamed) falls back to the name Julia
+        # gave, so a name is never empty.
+        from tensa.engines.keys import generator_key
+
+        state_names: list[str] = []
+        for row in answer["states"]:
+            key = generator_key(int(row["bus"]), str(row["id"]))
+            entry = self._key_book.entry_of(key)
+            prefix = entry.key if entry is not None else str(row["device"])
+            state_names.append(f"{prefix} {row['state']}")
+
+        n_states = int(answer["n_states"])
+        matrix = read_matrix(matrix_file, n_states, n_states)
+        try:
+            matrix_file.unlink()
+        except OSError:
+            log.debug("the state matrix file %s could not be removed", matrix_file.name)
+        # The eigenvalues and their factors come from one decomposition of the
+        # matrix, as ANDES pairs them: PSID lists the same eigenvalues, but not
+        # necessarily in the order a decomposition of ours would, and a factor
+        # row must belong to the eigenvalue at its position.
+        eigenvalues, self._eig_participation = eigen_decomposition(matrix)
+        reported = int(len(answer["eigenvalues"]))
+        if len(eigenvalues) != reported:
+            raise EigComputationError(
+                f"the state matrix has {len(eigenvalues)} eigenvalues and the "
+                f"analysis reported {reported}"
+            )
+        settled = [
+            _settle_axis(_settle_zero(z, _ZERO_EIGENVALUE_TOL)) for z in eigenvalues
+        ]
+
+        loads = answer.get("loads") or {}
+        log.info(
+            "Sienna eig: load model %s, %d load(s) converted",
+            load_model,
+            int(loads.get("converted", 0)),
+        )
+        for note in answer.get("notes", []):
+            log.info("%s", note)
+        log.info("%s", SIENNA_EIG_NOTE)
+
+        result = EigResult(
+            eigenvalues=[ComplexNumber.from_complex(z) for z in settled],
+            damping_ratios=[_compute_damping_ratio(z) for z in settled],
+            frequencies_hz=[_compute_frequency_hz(z) for z in settled],
+            mode_count=len(settled),
+            state_count=len(settled),
+            state_names=state_names,
+            tds_initialized=True,
+        )
+        self._eig_result = result
+        return result
+
+    def eig_participation(self, mode_idx: int) -> dict[str, object]:
+        """Per-mode participation factors, the same dict the ANDES engine answers.
+
+        Served from the matrix of the session's last ``run_eig``, kept in
+        memory. Without a prior ``run_eig`` raises :class:`EigPrerequisiteError`
+        with the ANDES message; a ``mode_idx`` out of range raises
+        :class:`ElementNotFoundError` as the ANDES engine's does.
+        """
+        self._require_session()
+        if self._eig_result is None or self._eig_participation is None:
+            raise EigPrerequisiteError(
+                "EIG has not been run on this session; run /eig first"
+            )
+        n_modes = self._eig_result.mode_count
+        if mode_idx < 0 or mode_idx >= n_modes:
+            raise ElementNotFoundError(
+                f"mode_idx {mode_idx} out of range [0, {n_modes - 1}]"
+            )
+        participation = [
+            {"state_name": name, "factor": factor}
+            for name, factor in zip(
+                self._eig_result.state_names,
+                self._eig_participation[mode_idx],
+                strict=False,
+            )
+        ]
+        return {"mode_idx": mode_idx, "participation": participation}
+
+    def keys(self) -> KeyBook:
+        """The keys of the loaded case's elements."""
+        self._require_session()
+        return self._key_book
+
+    def base_mva(self) -> float:
+        """The system base of the loaded case, for the runtime's per-unit
+        conversion of the ANDES-shaped route arguments."""
+        self._require_session()
+        return float((self._topology_json or {}).get("base_mva", 100.0))
+
+    # ---- editing --------------------------------------------------------------
+
+    def _edit_error(self, exc: ValueError) -> ElementNotFoundError | ElementValidationError:
+        """The error class a refusal of ``edit_log`` maps to: an unknown key is
+        a 404, every other refusal a 422."""
+        message = str(exc)
+        if message.startswith("no element with key"):
+            return ElementNotFoundError(message)
+        return ElementValidationError(message)
+
+    def _log_handle_delta(
+        self, edit_log: list[NeutralOp] | None = None
+    ) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        """The handles the edit log adds and removes, for the book's retain.
+
+        The re-read topology is authoritative, but a bridge answer can lag the
+        log (and a removed element's handle must leave the book even while a
+        topology still lists it): an add keeps its handle, a remove drops its
+        own, and a later add of the same handle cancels the remove.
+        """
+        added: set[tuple[str, str]] = set()
+        removed: set[tuple[str, str]] = set()
+        for op in self._edit_log if edit_log is None else edit_log:
+            if isinstance(op, AddElementOp):
+                handle = _add_handle(op)
+                added.add(handle)
+                removed.discard(handle)
+            elif isinstance(op, RemoveElementOp):
+                handle = _remove_handle(op)
+                if handle not in added:
+                    removed.add(handle)
+        return added, removed
+
+    def _record_edit(self, op: NeutralOp) -> TopologySnapshot:
+        """Rebuild the System from the case file with ``op`` added to the log;
+        only a rebuild that succeeds adopts the longer log and clears the redo
+        log, so the log always says what the System holds."""
+        log_ops = [*self._edit_log, op]
+        snapshot = self._reload_with(log_ops)
+        self._edit_log = log_ops
+        self._redo_log = []
+        if isinstance(op, AddElementOp):
+            # The key was decided before the apply; the book must hold it even
+            # when the re-read topology does not show the element yet.
+            model, idx = _add_handle(op)
+            if self._key_book.key_of(model, idx) is None:
+                bucket = "load" if model == "PQ" else "shunt"
+                self._key_book.assign(KeyEntry(op.key, bucket, model, idx, "ordinal"))
+        # The snapshot was built before the logs moved; its steps are the new ones.
+        return self._with_steps(snapshot)
+
+    def add_element(self, kind: str, fields: dict[str, Any]) -> TopologySnapshot:
+        """Add a load or a shunt on an existing bus and answer the topology."""
+        self._require_session()
+        try:
+            op = make_add(self._key_book, kind, fields)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def edit_element(self, key: str, field: str, value: Any) -> TopologySnapshot:
+        """Set one field of one element, addressed by key, and answer the
+        topology."""
+        self._require_session()
+        try:
+            op = make_set_field(self._key_book, key, field, value)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def delete_element(self, key: str) -> TopologySnapshot:
+        """Remove one load or shunt, addressed by key, and answer the
+        topology."""
+        self._require_session()
+        try:
+            op = make_remove(self._key_book, key)
+        except ValueError as exc:
+            raise self._edit_error(exc) from exc
+        return self._record_edit(op)
+
+    def _reload_with(self, log_ops: list[NeutralOp]) -> TopologySnapshot:
+        """Load the case's files again with ``log_ops`` applied, keeping the
+        pending disturbances and leaving the state's own log fields untouched
+        until the caller adopts them. A load clears the solved state, so the
+        next power flow solves the edited case."""
+        if self._case_path is None:
+            raise NoCaseLoadedError("no case has been loaded")
+        return self._load(
+            self._case_path,
+            self._addfiles,
+            self._on_unsupported,
+            log_ops,
+            keep_disturbances=True,
+        )
+
+    def undo_last_edit(self) -> TopologySnapshot:
+        """Take back the last edit: rebuild the case from the file with the log
+        minus its last entry, which goes to the redo log."""
+        self._require_session()
+        if not self._edit_log:
+            raise ElementValidationError("no edits to undo")
+        op = self._edit_log[-1]
+        kept = self._edit_log[:-1]
+        redo = [*self._redo_log, op]
+        snapshot = self._reload_with(kept)
+        self._edit_log = kept
+        self._redo_log = redo
+        return self._with_steps(snapshot)
+
+    def redo_edit(self) -> TopologySnapshot:
+        """Put back the edit ``undo_last_edit`` took back last."""
+        self._require_session()
+        if not self._redo_log:
+            raise ElementValidationError("no edits to redo")
+        op = self._redo_log[-1]
+        log_ops = [*self._edit_log, op]
+        redo = self._redo_log[:-1]
+        snapshot = self._reload_with(log_ops)
+        self._edit_log = log_ops
+        self._redo_log = redo
+        return self._with_steps(snapshot)
+
+    # ---- run_dispatch ---------------------------------------------------------
+
+    def run_dispatch(
+        self,
+        network_model: Any,
+        duals: bool = False,
+    ) -> DispatchResult:
+        """Solve the one-period economic dispatch of the loaded case.
+
+        ``network_model`` is ``"copper_plate"``, ``"dc"``, ``"ptdf"`` or
+        ``"ac"``; any other value raises :class:`DispatchRequestError` before
+        any Julia
+        call, mirroring the ``run_pflow`` validation messages. With no case
+        loaded raises :class:`NoCaseLoadedError`, and for a case that is not a
+        MATPOWER file (no gencost) :class:`DispatchRequestError` before any
+        Julia call. A :class:`SiennaError` from
+        the bridge (a case with no cost data, a build or solve that failed)
+        propagates unchanged; the route maps it. The notes the Julia side
+        captured are logged on ``tensa.notice`` exactly as ``run_pflow`` does.
+        """
+        self._require_session()
+        check_network_model(network_model)
+        # A PSS/E .raw file has no cost data, and PowerSystems gives each of
+        # its generators a placeholder cost of 1 $/MWh, which the Julia check
+        # cannot tell from a real one; only a MATPOWER file carries gencost.
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        bridge = self._require_bridge()
+        payload = bridge.dispatch(self._session, network_model, duals=duals)
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return dispatch_result(payload, self._key_book)
+
+    # ---- run_uc ---------------------------------------------------------------
+
+    def run_uc(
+        self,
+        network_model: Any,
+        horizon_h: Any,
+        resolution_min: Any,
+        series: Any,
+        overrides: Mapping[str, Any] | None = None,
+    ) -> UcResult:
+        """Solve the unit commitment of the loaded case.
+
+        All request validation is ``check_uc_request`` and
+        ``check_uc_overrides``, before any Julia call, mirroring the
+        ``run_pflow`` validation messages. With no case loaded raises
+        :class:`NoCaseLoadedError`, and for a case that is not a MATPOWER
+        file (no gencost) :class:`DispatchRequestError` before any Julia
+        call: a PSS/E .raw case has no cost data and PowerSystems gives its
+        generators a placeholder curve of 1 $/MWh. A :class:`SiennaError`
+        from the bridge propagates unchanged; the route maps it. The notes
+        the Julia side captured are logged on ``tensa.notice`` exactly as
+        ``run_dispatch`` does.
+        """
+        self._require_session()
+        check_uc_request(network_model, horizon_h, resolution_min, series)
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        named = check_uc_overrides(overrides or {}, self._key_book)
+        ops = (self._document or {}).get("generator_ops")
+        bridge = self._require_bridge()
+        payload = bridge.uc(
+            self._session,
+            str(network_model),
+            int(horizon_h),
+            int(resolution_min),
+            [float(f) for f in series],
+            named,
+            ops if isinstance(ops, list) else None,
+        )
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return uc_result(payload, self._key_book)
+
+    # ---- run_sim ----------------------------------------------------------------
+
+    def run_sim(
+        self,
+        load_profile: Any,
+        network_model: Any = "copper_plate",
+    ) -> SimResult:
+        """Run the two-stage simulation of the loaded case.
+
+        ``load_profile`` is 96 fractions of each load's max active power, one
+        per 15-minute step of the day; ``network_model`` is
+        ``"copper_plate"``, ``"dc"`` or ``"ptdf"``. All request validation is
+        ``check_load_profile`` and ``check_network_model``, before any Julia
+        call, mirroring the ``run_dispatch`` validation. With no case loaded
+        raises :class:`NoCaseLoadedError`, and for a case that is not a
+        MATPOWER file (no gencost) :class:`DispatchRequestError` before any
+        Julia call: a PSS/E .raw case has no cost data and PowerSystems gives
+        its generators a placeholder curve of 1 $/MWh. A :class:`SiennaError`
+        from the bridge propagates unchanged; the route maps it. The notes
+        the Julia side captured are logged on ``tensa.notice`` exactly as
+        ``run_dispatch`` does.
+        """
+        self._require_session()
+        profile = check_load_profile(load_profile)
+        check_network_model(network_model)
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        ops = (self._document or {}).get("generator_ops")
+        bridge = self._require_bridge()
+        payload = bridge.sim(
+            self._session,
+            profile,
+            str(network_model),
+            ops if isinstance(ops, list) else None,
+        )
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return sim_result(payload, self._key_book)
+
+    # ---- network_matrix -------------------------------------------------------
+
+    def _bus_axis_key(self, number: Any) -> str:
+        """The key of one bus axis entry. The book holds every bus of the loaded
+        case; a bus it does not hold (a reduced bus, say) falls back to the raw
+        ``bus:<n>`` key so the answer stays well-formed."""
+        from tensa.engines.keys import bus_key
+
+        n = int(number)
+        return self._key_book.key_of("Bus", n) or bus_key(n)
+
+    def _arc_axis_entry(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+        """One arc axis entry as ``{"from", "to", "keys"}``: the bus numbers of
+        the arc and the key of every branch of the topology on that arc
+        (parallel circuits share an arc)."""
+        from_bus = int(entry["from"])
+        to_bus = int(entry["to"])
+        pair = (min(from_bus, to_bus), max(from_bus, to_bus))
+        keys: list[str] = []
+        assert self._topology_json is not None  # noqa: S101
+        for branch in self._topology_json.get("branches", []):
+            ends = (int(branch["from"]), int(branch["to"]))
+            if (min(ends), max(ends)) != pair:
+                continue
+            key = self._key_book.key_of("Line", str(branch.get("name")))
+            if key is not None:
+                keys.append(key)
+        return {"from": from_bus, "to": to_bus, "keys": keys}
+
+    def _matrix_axis(self, axis: list[Any]) -> list[Any]:
+        """One axis of the descriptor with its entries keyed: arc entries as
+        ``{"from", "to", "keys"}``, bus entries as ``{"bus", "key"}``."""
+        out: list[Any] = []
+        for entry in axis:
+            if isinstance(entry, Mapping):
+                out.append(self._arc_axis_entry(entry))
+            else:
+                n = int(entry)
+                out.append({"bus": n, "key": self._bus_axis_key(n)})
+        return out
+
+    def network_matrix(self, kind: str) -> dict[str, Any]:
+        """One network matrix of the loaded case.
+
+        ``kind`` is ``"ptdf"``, ``"lodf"``, ``"ybus"`` or ``"incidence"``; any
+        other value raises :class:`NetworkMatrixKindError` before any Julia
+        call. The answer is the descriptor the route serialises: the axes with
+        TENSA keys, the shape, the entry count, and either the values inline
+        (``values``) or, for ``ybus``, the sparse triplets (``entries``). A
+        matrix with more entries than one answer carries raises
+        :class:`NetworkMatrixTooLargeError` after the build.
+        """
+        self._require_session()
+        if kind not in NETWORK_MATRIX_KINDS:
+            raise NetworkMatrixKindError(kind)
+        assert self._case_path is not None  # noqa: S101 - a session has a case
+        workspace = self._require_workspace(self._case_path)
+        scratch = self._scratch_dir(workspace, "network-matrix")
+        file = scratch / f"{kind}.bin"
+        descriptor = self._require_bridge().network_matrix(self._session, kind, file)
+
+        n_rows = int(descriptor["n_rows"])
+        n_cols = int(descriptor["n_cols"])
+        rows_axis: list[Any] = list(descriptor["rows"])
+        cols_axis: list[Any] = list(descriptor["cols"])
+        rows = self._matrix_axis(rows_axis)
+        cols = self._matrix_axis(cols_axis)
+        answer: dict[str, Any] = {
+            "kind": kind,
+            "n_rows": n_rows,
+            "n_cols": n_cols,
+            "complex": bool(descriptor["complex"]),
+            "base_mva": float((self._topology_json or {}).get("base_mva", 100.0)),
+            "rows": rows,
+            "cols": cols,
+            "distributed_slack": False,
+        }
+        if "ref_buses" in descriptor:
+            answer["ref_buses"] = [
+                self._bus_axis_key(number) for number in descriptor["ref_buses"]
+            ]
+
+        what = f"{kind} matrix"
+        files = [file]
+        try:
+            if kind == "ybus":
+                # The Julia side writes the nonzero entries alone, row by row
+                # as the ANDES route lists them (0-based row, 0-based column,
+                # real part, imaginary part), and says how many: the count is
+                # refused by its size before the file is read, and a large
+                # case's Ybus is never written dense.
+                n_entries = int(descriptor["n_entries"])
+                if n_entries > MAX_YBUS_ENTRIES:
+                    raise NetworkMatrixTooLargeError(kind, n_entries, MAX_YBUS_ENTRIES)
+                triplets = read_matrix(file, n_entries, 4, what=what, error=SiennaError)
+                answer["n_entries"] = n_entries
+                answer["entries"] = [
+                    {"row": int(r), "col": int(c), "re": float(re), "im": float(im)}
+                    for r, c, re, im in triplets.tolist()
+                ]
+            else:
+                # A dense answer: refused by its size before the file is read.
+                n_entries = n_rows * n_cols
+                if n_entries > MAX_YBUS_ENTRIES:
+                    raise NetworkMatrixTooLargeError(kind, n_entries, MAX_YBUS_ENTRIES)
+                matrix = read_matrix(file, n_rows, n_cols, what=what, error=SiennaError)
+                answer["n_entries"] = n_entries
+                answer["values"] = matrix.tolist()
+        finally:
+            for path in files:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    log.debug("the matrix file %s could not be removed", path.name)
+        return answer
+
+    def case_document_parts(
+        self,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        CaseIdentity | None,
+        KeyBook,
+        Path | None,
+        list[Path] | None,
+    ]:
+        """What the case document builder reads, as one tuple.
+
+        The topology JSON, the report JSON, the corrections document, the
+        identity, the key book, the case path and the addfiles. With no case
+        loaded raises :class:`NoCaseLoadedError`, as ``topology`` does.
+        """
+        self._require_session()
+        return (
+            self._topology_json or {},
+            self._report_json,
+            self._document,
+            self._identity,
+            self._key_book,
+            self._case_path,
+            self._addfiles,
+        )
+
+    # ---- disturbances ---------------------------------------------------------
+
+    def add_disturbance(self, spec: DisturbanceSpec) -> str:
+        """Accept one disturbance for the next run, in the neutral form.
+
+        Returns the position of the entry in the pending list as a string
+        (``"0"``, ``"1"``, ...): the route's ``DisturbanceAck.idx`` wants the
+        handle of what was created, and a Sienna disturbance has no engine idx
+        until a run builds it. Raises :class:`NoCaseLoadedError` with no case
+        and :class:`DisturbanceValidationError` for a spec the engine does not
+        take (``disturbances.to_pending``'s message). There is no pre-setup
+        gate: a Sienna run builds its simulation from the held system each
+        time, so a disturbance is accepted whenever a case is loaded.
+        """
+        self._require_session()
+        pending = to_pending(spec, self._key_book)
+        if pending.neutral["kind"] == "branch_trip":
+            # A NetworkSwitch takes a whole admittance matrix and PSID refuses
+            # one that splits the network (spec section 4), so a branch trip
+            # that would island the system is refused here, before the run.
+            # Trips accumulate: two trips that together split the network
+            # refuse the second. A Toggle that puts a branch that is out of
+            # service back in maps to branch_trip in to_pending today; it is
+            # treated as a removal here (the branch connects nothing either
+            # way, so the check below refuses nothing for it).
+            trips = {
+                self._topology_branch_id(str(item.neutral["target"]))
+                for item in self._pending_disturbances
+                if item.neutral["kind"] == "branch_trip"
+            }
+            trip_key = str(pending.neutral["target"])
+            refusal = islanding_refusal(
+                self._topology_json or {}, trips, self._topology_branch_id(trip_key)
+            )
+            if refusal is not None:
+                # The message names the branch by its key, not by the
+                # topology's own ends and circuit.
+                raise DisturbanceValidationError(
+                    refusal.replace(self._topology_branch_id(trip_key), trip_key, 1)
+                )
+        self._pending_disturbances.append(pending)
+        neutral = pending.neutral
+        target = neutral.get("target") or neutral.get("bus")
+        t = neutral.get("t", neutral.get("t_on"))
+        log.info(
+            "disturbance %s on %s at t=%s is held for the next run",
+            neutral["kind"],
+            target,
+            t,
+        )
+        return str(len(self._pending_disturbances) - 1)
+
+    def _topology_branch_id(self, key: str) -> str:
+        """The branch a key names, as ``islanded_buses`` reads the topology
+        JSON: ``branch:<from>-<to>-<ckt>`` with the ends and circuit of the
+        JSON row the key book gives the key to. These are not the key's own:
+        PowerSystems gives a MATPOWER branch the row number of the file's
+        branch matrix as its circuit (``branch:1-5-1`` is the row with
+        ``ckt`` "2" on IEEE 14), and may hold the ends the other way round.
+        A key the book or the JSON does not hold is answered as it is."""
+        entry = self._key_book.entry_of(key)
+        if entry is None:
+            return key
+        for row in (self._topology_json or {}).get("branches", []):
+            if str(row.get("name")) == str(entry.idx):
+                return f"branch:{int(row['from'])}-{int(row['to'])}-{row.get('ckt', '')}"
+        return key
+
+    def list_disturbances(self) -> list[FaultSpec | ToggleSpec]:
+        """The specs accepted since the last load or clear, in order, as the
+        ANDES wrapper's ``list_disturbances`` answers them."""
+        self._require_session()
+        return [item.spec for item in self._pending_disturbances]
+
+    def clear_disturbances(self) -> None:
+        """Forget the pending disturbances."""
+        self._pending_disturbances = []
+
+    # ---- run_tds ------------------------------------------------------------
+
+    def _dc_pflow_last(self) -> bool:
+        """Whether the last power flow was a DC one, which solves a copy of the
+        System and leaves no operating point a dynamic analysis can start from."""
+        return self._pflow_json is not None and self._pflow_json.get("method") in (
+            "dc",
+            "ptdf-dc",
+        )
+
+    def _require_converged_pflow(self) -> None:
+        """The gate every dynamic analysis shares: a solved AC power flow."""
+        if self._pflow_json is None or not self._pflow_json.get("converged"):
+            raise TdsRequestError("solve the power flow first")
+        if self._dc_pflow_last():
+            raise TdsRequestError(_DC_NOT_AN_OPERATING_POINT)
+
+    def _reference_bus(self) -> int:
+        """The bus the relative angles are taken against: the case's reference
+        bus, else the first bus by number."""
+        assert self._topology_json is not None  # noqa: S101
+        buses = sorted(
+            int(row["number"]) for row in self._topology_json.get("buses", [])
+        )
+        for row in self._topology_json.get("buses", []):
+            # The Julia module writes PowerSystems' bus types as they are named
+            # there, ``REF`` for the reference.
+            if str(row.get("type", "")).upper() == "REF":
+                return int(row["number"])
+        return buses[0] if buses else 0
+
+    def _column_key(self, column: Mapping[str, Any], notes: list[str]) -> str:
+        """The key part of a trace name for one column of the run's plan.
+
+        A column whose element the key book lacks is named from its address
+        (``bus 7`` or ``2-1``) and noted; the run's result must not fail for
+        it.
+        """
+        quantity = str(column.get("quantity"))
+        if column.get("kind") == "branch":
+            from tensa.engines.keys import branch_key
+
+            from_bus = int(column.get("from", 0))
+            to_bus = int(column.get("to", 0))
+            ckt = str(column.get("ckt", ""))
+            branch = branch_key(from_bus, to_bus, ckt)
+            entry = self._key_book.entry_of(branch)
+            if entry is not None:
+                # Not ``build_name``: the quantity catalogue of spec section
+                # 6.5 is not extended, so it has no ``i_from``/``i_to``; the
+                # name is composed here, as the fallback below composes it.
+                return f"{quantity}|{entry.key}"
+            notes.append(
+                f"no key for branch {from_bus}-{to_bus}-{ckt}; "
+                f"its series is named {quantity}|branch {from_bus}-{to_bus}-{ckt}"
+            )
+            return f"{quantity}|branch {from_bus}-{to_bus}-{ckt}"
+        bus = int(column.get("bus", 0))
+        if column.get("kind") == "bus":
+            key = self._key_book.key_of("Bus", bus)
+            if key is not None:
+                return build_name(quantity, key)
+            notes.append(f"no key for bus {bus}; its series is named {quantity}|bus {bus}")
+            return f"{quantity}|bus {bus}"
+        id = str(column.get("id", ""))
+        key = unit_key_of(self._key_book, bus, id)
+        if key is not None:
+            return build_name(quantity, key)
+        notes.append(f"no key for the generator at bus {bus} id {id}; its series is named {quantity}|{bus}-{id}")
+        return f"{quantity}|{bus}-{id}"
+
+    def run_tds(
+        self,
+        tf: float,
+        h: float | None = None,
+        load_model: str = "impedance",
+        ext_sienna: SiennaExtSpec | None = None,
+        abort_event: Any = None,
+        on_step: Any = None,
+        **other: Any,
+    ) -> dict[str, Any]:
+        """The batch time-domain run, in the shape the ANDES engine answers.
+
+        Options the engine does not have (``integrator`` other than the
+        schema's default, ``tds_config_overrides``, ``dae_vars``,
+        ``controllers``, and any other unexpected keyword) are refused by name
+        with :class:`TdsRequestError` before anything runs, as are a ``tf`` or
+        ``h`` that is not a finite number of seconds above 0 and a
+        ``load_model`` outside the three of spec section 6.3. Without a
+        converged power flow the refusal is "solve the power flow first".
+
+        ``on_step`` is a per-step callback handed to the bridge's
+        ``tds_run``: it is called once for the initial point and once after
+        every accepted step with ``(t, values)``, and its ``False`` return
+        stops the run (the P5-A contract). The streaming driver uses it to
+        hand each row to the stream; ``abort_event`` is the other abort
+        channel, checked here on every step through the same hook.
+        """
+        self._require_session()
+        integrator = other.pop("integrator", None)
+        if integrator not in (None, "trapezoidal"):
+            raise TdsRequestError(
+                f"the Sienna engine does not take integrator {integrator!r}; "
+                "it runs IDA on the residual model"
+            )
+        for name in _TDS_OPTIONS_NOT_TAKEN:
+            value = other.pop(name, None)
+            if value is not None and value != [] and value != {}:
+                raise TdsRequestError(f"the Sienna engine does not take {name}")
+        for name, value in other.items():
+            if value is not None and value != [] and value != {}:
+                raise TdsRequestError(f"the Sienna engine does not take {name}")
+        if (
+            isinstance(tf, bool)
+            or not isinstance(tf, int | float)
+            or not math.isfinite(float(tf))
+            or float(tf) <= 0
+        ):
+            raise TdsRequestError(
+                f"tf must be a finite number of seconds above 0, got {short_repr(tf)}"
+            )
+        if h is not None and (
+            isinstance(h, bool)
+            or not isinstance(h, int | float)
+            or not math.isfinite(float(h))
+            or float(h) <= 0
+        ):
+            raise TdsRequestError(
+                f"h must be a finite number of seconds above 0, got {short_repr(h)}"
+            )
+        if load_model not in _LOAD_MODELS:
+            raise TdsRequestError(
+                f'load_model must be "impedance", "power" or "as-case", got '
+                f"{short_repr(load_model)}"
+            )
+        if ext_sienna is not None:
+            validate_ext(ext_sienna, self._key_book, self._topology_json or {})
+        self._require_converged_pflow()
+
+        ext_doc = ext_to_json(ext_sienna, self._key_book) if ext_sienna is not None else None
+        if ext_sienna is not None:
+            for branch in ext_sienna.dynamic_branches:
+                log.info(
+                    "ext.sienna: branch %s is simulated dynamically (DynamicBranch)",
+                    branch.target,
+                )
+            for inverter in ext_sienna.inverters:
+                log.info(
+                    "ext.sienna: generator %s runs as an inverter (%s)",
+                    inverter.target,
+                    inverter.parameter_set,
+                )
+
+        entries = run_json_entries(self._pending_disturbances, self._key_book)
+
+        hook: Any = on_step
+        if abort_event is not None:
+            user_on_step = on_step
+
+            def hook(t: float, values: Any) -> bool:
+                # The abort channel of spec section 13: False stops the run.
+                try:
+                    if abort_event.is_set():
+                        return False
+                except Exception:  # noqa: BLE001 - a broken event must not kill a run
+                    pass
+                if user_on_step is not None:
+                    return bool(user_on_step(t, values))
+                return True
+
+        bridge = self._require_bridge()
+        # ``ext`` is passed only when a document exists, as the bridge passes
+        # it to Julia only then; a bridge double written before the keyword
+        # existed keeps answering the runs that name no ext.
+        ext_kw: dict[str, Any] = {"ext": ext_doc} if ext_doc is not None else {}
+        try:
+            answer = bridge.tds_run(
+                self._session,
+                tf=float(tf),
+                step=h,
+                disturbances=entries or None,
+                load_model=load_model,
+                on_step=hook,
+                **ext_kw,
+            )
+        finally:
+            # As the ANDES runs do (worker.py): an abort sent while nothing ran
+            # stops this run at once, and is spent by it, so it never reaches
+            # the run after.
+            if abort_event is not None:
+                with contextlib.suppress(Exception):
+                    abort_event.clear()
+
+        status = str(answer.get("status", "failed"))
+        t_values = [float(v) for v in answer.get("t", [])]
+        final_t = t_values[-1] if t_values else 0.0
+        steps = int(answer.get("steps", 0))
+        converged = status == "completed"
+        if status == "aborted":
+            log.info("the run was aborted at t=%s s", final_t)
+        elif status == "failed":
+            log.warning("the run failed at t=%s s: %s", final_t, answer.get("error"))
+
+        notes: list[str] = []
+        columns = answer.get("columns", [])
+        rows = answer.get("rows", [])
+        variables: list[dict[str, Any]] = []
+        angle_series: list[tuple[int, list[float | None]]] = []
+        for position, column in enumerate(columns):
+            name = self._column_key(column, notes)
+            # The Julia side writes a value that is not finite as null (JSON has
+            # no NaN); either is a gap in the series.
+            values = [_finite_or_none(row[position]) for row in rows]
+            variables.append({"name": name, "values": values})
+            if column.get("kind") == "bus" and column.get("quantity") == "angle":
+                angle_series.append((int(column.get("bus", 0)), values))
+
+        # angle_rel of every bus against the reference bus, by the shared
+        # arithmetic of engines/frames.py. rotor_angle_rel is left out: the
+        # dyn plan's machines report no inertia (see _ROTOR_REL_NOTE).
+        if angle_series:
+            import numpy as np
+
+            from tensa.engines.frames import angle_rel, unwrap_angle
+
+            reference = self._reference_bus()
+            bus_numbers = [bus for bus, _ in angle_series]
+            reference_index = (
+                bus_numbers.index(reference) if reference in bus_numbers else 0
+            )
+            matrix = np.asarray(
+                [
+                    [math.nan if value is None else value for value in values]
+                    for _, values in angle_series
+                ],
+                dtype=float,
+            ).T
+            # The Julia side reports a bus angle as atan(Vi, Vr), wrapped into
+            # one turn, so a bus passing pi jumps by 2 pi; each series is made
+            # continuous in time before the difference, or angle_rel would
+            # jump with it.
+            relative = angle_rel(unwrap_angle(matrix), reference_index)
+            for column_index, (bus, _) in enumerate(angle_series):
+                key = self._key_book.key_of("Bus", bus)
+                if key is None:
+                    continue
+                values = [
+                    float(relative[row, column_index])
+                    if math.isfinite(float(relative[row, column_index]))
+                    else None
+                    for row in range(relative.shape[0])
+                ]
+                variables.append({"name": build_name("angle_rel", key), "values": values})
+        notes.append(_ROTOR_REL_NOTE)
+
+        post_payload: dict[str, Any] | None = None
+        post = answer.get("post")
+        if isinstance(post, Mapping) and post.get("series") is not None:
+            post_variables = []
+            for series in post.get("series", []):
+                bus = int(series.get("bus", 0))
+                id = str(series.get("id", ""))
+                key = unit_key_of(self._key_book, bus, id)
+                if key is None:
+                    notes.append(
+                        f"no key for the generator at bus {bus} id {id}; "
+                        "its post series is left out"
+                    )
+                    continue
+                values = [
+                    float(v) if v is not None and math.isfinite(float(v)) else None
+                    for v in series.get("y", [])
+                ]
+                post_variables.append(
+                    {"name": build_name(str(series.get("quantity")), key), "values": values}
+                )
+            post_payload = {
+                "t": [float(v) for v in post.get("t", [])],
+                "variables": post_variables,
+                "truncated": False,
+            }
+
+        log.info(
+            "TDS to %s s: %s, %d steps, load model %s",
+            tf,
+            status,
+            steps,
+            load_model,
+        )
+        for note in answer.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, Mapping):
+                text = str(note.get("text", ""))
+                if note.get("level") in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        loads = answer.get("loads") or {}
+        for left in loads.get("left", []) or []:
+            if isinstance(left, Mapping):
+                log.warning(
+                    "load %s at bus %s was left unconverted: %s",
+                    left.get("name"),
+                    left.get("bus"),
+                    left.get("reason"),
+                )
+
+        payload: dict[str, Any] = {
+            "converged": converged,
+            "final_t": final_t,
+            "callpert_count": steps,
+            "integrator": "ida",
+            # completed, aborted or failed: what a streamed run's end reports.
+            "status": status,
+            "traces": {
+                "t": t_values,
+                "variables": variables,
+                "truncated": False,
+            },
+            "controllers": None,
+            "notes": notes,
+        }
+        if post_payload is not None:
+            payload["post"] = post_payload
+        return payload
+
+    # ---- init_tds -----------------------------------------------------------
+
+    def init_tds(self, test_init: bool = True) -> dict[str, Any]:
+        """The initialisation report, in the route's ``TdsInitResult`` shape.
+
+        The Sienna engine has no residual-test toggle: PSID's
+        ``read_initial_conditions`` always reports what it found, so
+        ``test_init=False`` is refused. ``n_states`` counts the devices'
+        states and ``n_algeb`` the bus voltage parts of PSID's state vector.
+        Fields with no Sienna meaning (``max_residual``, ``nan_residuals``,
+        ``clamped``, ``residuals``) answer the value that states "not used",
+        the convention ``run_pflow`` already uses; PSID reports no residual
+        table and no clamped-limits table.
+        """
+        self._require_session()
+        if not isinstance(test_init, bool):
+            raise TdsRequestError(
+                f"test_init must be true or false, got {short_repr(test_init)}"
+            )
+        if not test_init:
+            raise TdsRequestError(
+                "the Sienna engine always checks the initialisation; "
+                "it does not take test_init false"
+            )
+        self._require_converged_pflow()
+        bridge = self._require_bridge()
+        answer = bridge.tds_init(self._session, load_model="impedance")
+        initialized = bool(answer.get("initialized"))
+        for note in answer.get("notes", []):
+            if isinstance(note, str):
+                text, level = note, "info"
+            elif isinstance(note, Mapping):
+                text, level = str(note.get("text", "")), str(note.get("level", "info"))
+            else:
+                continue
+            if not initialized or level in ("warning", "error"):
+                log.warning("%s", text)
+            else:
+                log.info("%s", text)
+        # PSID's state vector holds the devices' states and, after them, the
+        # real and imaginary voltage of every bus; the Julia answer's
+        # ``n_states`` is the whole vector and its ``states`` the devices' part.
+        # The route's fields are ANDES's: differential states and algebraic
+        # variables apart.
+        n_vector = int(answer.get("n_states", 0))
+        n_device = len(answer.get("states", []))
+        return {
+            "initialized": initialized,
+            "test_ok": initialized,
+            "test_init": True,
+            "n_states": n_device,
+            "n_algeb": max(n_vector - n_device, 0),
+            "max_residual": 0.0,
+            "nan_residuals": 0,
+            "clamped": [],
+            "residuals": [],
+            "diagnostics_truncated": False,
+        }
+
+    def versions(self) -> dict[str, str]:
+        """The versions the running Julia reports, cached after the first call.
+
+        For the results document of a later unit (spec section 9: "The adapter
+        records the versions it ran with in every result"). They cannot change
+        while the worker lives. A bridge whose ``versions()`` raises answers an
+        empty dict, logged at warning: a version lookup must never fail an op.
+        """
+        if self._versions is None:
+            try:
+                reported = self._require_bridge().versions()
+            except Exception as exc:  # noqa: BLE001 - never fail an op for this
+                logging.getLogger("tensa.sienna").warning(
+                    "could not read the Sienna versions (%s: %s)",
+                    exc.__class__.__name__,
+                    exc,
+                )
+                reported = {}
+            self._versions = {str(k): str(v) for k, v in reported.items()}
+        return dict(self._versions)

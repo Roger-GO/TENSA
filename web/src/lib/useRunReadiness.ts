@@ -39,6 +39,7 @@
  */
 import type { ReactNode } from 'react';
 import type { RecoveryDescriptor } from '@/lib/recovery';
+import { engineLabel, engineRoutines } from '@/lib/engines';
 import { useAnalyzeStore } from '@/store/analyze';
 import { useCaseStore } from '@/store/case';
 import { usePflowStore } from '@/store/pflow';
@@ -144,6 +145,18 @@ export function hasDynamicModels(
   return hasDynamicGenerator || (topology.controllers ?? []).length > 0;
 }
 
+/** How a routine is named for the user in the engine-availability reason. */
+const ROUTINE_NAME: Partial<Record<RunRoutine, string>> = {
+  pflow: 'Power flow',
+  tds: 'Time-domain simulation',
+  eig: 'Eigenvalue analysis',
+  cpf: 'Continuation power flow',
+  se: 'State estimation',
+};
+
+/** The routines an engine can lack; `sweep` is never gated by the engine. */
+const ENGINE_GATED: ReadonlySet<RunRoutine> = new Set(['pflow', 'tds', 'eig', 'cpf', 'se']);
+
 /**
  * What the readiness of a routine is worked out from: the slices of the stores
  * `useRunReadiness` subscribes to, which `runReadinessNow` reads once.
@@ -159,6 +172,14 @@ interface ReadinessInputs {
   activeSweepId: string | null;
   sweeps: ReturnType<typeof useSweepStore.getState>['sweeps'];
   topology: ReturnType<typeof useCaseStore.getState>['topology'];
+  /** The engine of the live session, as the session store keeps it. */
+  engine: string | null;
+  /**
+   * The routines of that engine from the engines list the session store
+   * mirrors, or null when the list is not loaded yet or does not name the
+   * engine: the engine gate does not apply then.
+   */
+  engineRoutines: readonly string[] | null;
 }
 
 /**
@@ -186,6 +207,10 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
   // Store mirror of the topology query (kept in sync by `setTopology`), so the
   // readiness hook stays a pure store reader — no query side effects.
   const topology = useCaseStore((s) => s.topology);
+  const engine = useSessionStore((s) => s.engine);
+  // Store mirror of the engines query (kept in sync by `useEnginesSync`), so
+  // the readiness hook stays a pure store reader — no query side effects.
+  const engines = useSessionStore((s) => s.engines);
 
   return readinessFrom(routine, {
     selection,
@@ -198,6 +223,8 @@ export function useRunReadiness(routine: RunRoutine): RunReadiness {
     activeSweepId,
     sweeps,
     topology,
+    engine,
+    engineRoutines: engineRoutines(engines ?? undefined, engine),
   });
 }
 
@@ -210,6 +237,10 @@ export function runReadinessNow(routine: RunRoutine): RunReadiness {
   const caseState = useCaseStore.getState();
   const analyze = useAnalyzeStore.getState();
   const sweep = useSweepStore.getState();
+  const session = useSessionStore.getState();
+  const engine = session.engine;
+  // The store mirror of the engines list; a command must not start a fetch.
+  const engines = session.engines;
   return readinessFrom(routine, {
     selection: caseState.selection,
     loadingPath: caseState.loadingPath,
@@ -221,6 +252,8 @@ export function runReadinessNow(routine: RunRoutine): RunReadiness {
     activeSweepId: sweep.activeSweepId,
     sweeps: sweep.sweeps,
     topology: caseState.topology,
+    engine,
+    engineRoutines: engineRoutines(engines ?? undefined, engine),
   });
 }
 
@@ -236,6 +269,8 @@ function readinessFrom(routine: RunRoutine, inputs: ReadinessInputs): RunReadine
     activeSweepId,
     sweeps,
     topology,
+    engine,
+    engineRoutines: routinesOfEngine,
   } = inputs;
 
   // Order matters: the most fundamental gate (no case) shadows every
@@ -266,6 +301,26 @@ function readinessFrom(routine: RunRoutine, inputs: ReadinessInputs): RunReadine
     const sweep = sweeps[activeSweepId];
     const progress = sweep === undefined ? '' : ` (${sweep.iterations.length}/${sweep.total})`;
     return ready(false, `Sweep ${activeSweepId} in progress${progress}; wait or abort.`, null);
+  }
+
+  // Engine gate: a routine the session's engine does not have cannot run.
+  // Placed after the gates that mean nothing can run at all and before the
+  // routine-specific prerequisites. When the engines list is not loaded yet
+  // or does not name the engine (`routinesOfEngine` null) the rule does not
+  // apply; `sweep` is never gated by it.
+  if (
+    routinesOfEngine !== null &&
+    engine !== null &&
+    ENGINE_GATED.has(routine) &&
+    !routinesOfEngine.includes(routine)
+  ) {
+    return ready(
+      false,
+      `${ROUTINE_NAME[routine] ?? routineLabel(routine)} is not available with the ${engineLabel(
+        engine,
+      )} engine.`,
+      null,
+    );
   }
 
   // Dynamic-content prerequisite (R18): TDS/EIG need dynamic-model data

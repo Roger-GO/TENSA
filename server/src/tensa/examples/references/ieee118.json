@@ -541,5 +541,6 @@
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on the network ANDES holds for case118.m; written by scripts/crosscheck_pf.py",
       "generated_by": "scripts/crosscheck_pf.py"
     }
-  ]
+  ],
+  "cross_engine": {"sienna": "pass", "pf_power_mw": 0.002}
 }

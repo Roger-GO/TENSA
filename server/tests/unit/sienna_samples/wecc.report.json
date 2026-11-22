@@ -1,0 +1,1 @@
+{"buses":179,"notes":[{"level":"warning","text":"Parsing PSS(R)E Substation data into a PowerModels Dict..."},{"level":"warning","text":"This PSS(R)E parser currently doesn't support Storage data parsing..."},{"level":"warning","text":"No substation data found"}],"unsupported":[],"events":[],"normalised_buses":[],"dyr_records":0,"dynamic_injectors":0,"applied":[]}

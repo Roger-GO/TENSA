@@ -1260,5 +1260,6 @@
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on case300.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
       "generated_by": "scripts/crosscheck_pf.py"
     }
-  ]
+  ],
+  "cross_engine": {"sienna": "pass", "pf_power_mw": 0.005}
 }

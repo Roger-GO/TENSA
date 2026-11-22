@@ -25,6 +25,33 @@ export type { CpfDirection } from '@/api/types';
 /** Stop at the nose, or go on along the lower branch back to `lambda = 0`. */
 export type CpfStopAt = 'nose' | 'full';
 
+/** The corrector's step-length equation. */
+export type CpfParameterization = 'natural' | 'arclength' | 'pseudo_arclength';
+
+export interface CpfParameterizationOption {
+  value: CpfParameterization;
+  label: string;
+  hint: string;
+}
+
+export const CPF_PARAMETERIZATIONS: readonly CpfParameterizationOption[] = [
+  {
+    value: 'pseudo_arclength',
+    label: 'Pseudo-arclength',
+    hint: "ANDES's default and the most robust at the nose.",
+  },
+  {
+    value: 'arclength',
+    label: 'Arclength',
+    hint: 'Also goes round the nose.',
+  },
+  {
+    value: 'natural',
+    label: 'Natural',
+    hint: 'Fixes λ in each step, which is singular at the nose: it finds the nose a little low, and cannot trace the full curve.',
+  },
+];
+
 export interface CpfDirectionOption {
   value: CpfDirection;
   label: string;
@@ -285,6 +312,13 @@ export interface CpfRunOptions {
   stopAt?: CpfStopAt;
   step?: number;
   maxIter?: number;
+  parameterization?: CpfParameterization;
+  tol?: number;
+  correctorMaxIter?: number;
+  stepMin?: number;
+  stepMax?: number;
+  /** A target lambda to stop at; mutually exclusive with `stopAt: 'full'`. */
+  stopAtLambda?: number;
 }
 
 /** The request body: only what was set; the rest stays the server's default. */
@@ -304,7 +338,90 @@ export function cpfRequestBody(options: CpfRunOptions): Partial<CpfRunRequest> {
   if (options.stopAt === 'full') body.stop_at = 'full';
   if (options.step !== undefined) body.step = options.step;
   if (options.maxIter !== undefined) body.max_iter = options.maxIter;
+  if (options.parameterization !== undefined) body.parameterization = options.parameterization;
+  if (options.tol !== undefined) body.tol = options.tol;
+  if (options.correctorMaxIter !== undefined) body.corrector_max_iter = options.correctorMaxIter;
+  if (options.stepMin !== undefined) body.step_min = options.stepMin;
+  if (options.stepMax !== undefined) body.step_max = options.stepMax;
+  if (options.stopAtLambda !== undefined) body.stop_at = options.stopAtLambda;
   return body;
+}
+
+/**
+ * Validate the new advanced fields. Returns a field→message map; an empty
+ * object means submittable. `stopAt` is the current stop-at choice
+ * ('nose' | 'full' | 'target'); `stopAtLambdaText` is the raw text of the
+ * target-lambda field (only read when `stopAt === 'target'`).
+ */
+export function validateCpfAdvanced(
+  parameterization: CpfParameterization | '',
+  stopAt: 'nose' | 'full' | 'target',
+  stopAtLambdaText: string,
+  tolText: string,
+  correctorMaxIterText: string,
+  stepMinText: string,
+  stepMaxText: string,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+
+  if (parameterization === 'natural' && stopAt === 'full') {
+    errors.parameterization =
+      'The natural parameterization cannot trace the full curve: choose another parameterization, or stop at the nose or at a target λ.';
+  }
+
+  if (stopAt === 'target') {
+    const trimmed = stopAtLambdaText.trim();
+    const value = Number(trimmed);
+    if (trimmed.length === 0 || !Number.isFinite(value) || value <= 0) {
+      errors.stopAtLambda = 'Target λ must be a positive number.';
+    }
+  }
+
+  const tolTrim = tolText.trim();
+  if (tolTrim.length > 0) {
+    const tol = Number(tolTrim);
+    if (!Number.isFinite(tol) || tol <= 0) {
+      errors.tol = 'Tolerance must be a positive number.';
+    } else if (tol > 1e-4) {
+      errors.tol = 'Tolerance must be at most 1e-4.';
+    }
+  }
+
+  const cmiTrim = correctorMaxIterText.trim();
+  if (cmiTrim.length > 0) {
+    const cmi = Number(cmiTrim);
+    if (!Number.isInteger(cmi) || cmi < 2) {
+      errors.correctorMaxIter = 'Corrector iterations must be an integer of at least 2.';
+    }
+  }
+
+  const stepMinTrim = stepMinText.trim();
+  const stepMaxTrim = stepMaxText.trim();
+  let stepMin: number | null = null;
+  let stepMax: number | null = null;
+  if (stepMinTrim.length > 0) {
+    stepMin = Number(stepMinTrim);
+    if (!Number.isFinite(stepMin) || stepMin <= 0) {
+      errors.stepMin = 'Minimum step must be a positive number.';
+    }
+  }
+  if (stepMaxTrim.length > 0) {
+    stepMax = Number(stepMaxTrim);
+    if (!Number.isFinite(stepMax) || stepMax <= 0) {
+      errors.stepMax = 'Maximum step must be a positive number.';
+    }
+  }
+  if (
+    errors.stepMin === undefined &&
+    errors.stepMax === undefined &&
+    stepMin !== null &&
+    stepMax !== null &&
+    stepMin > stepMax
+  ) {
+    errors.stepMin = 'Minimum step must not be above maximum step.';
+  }
+
+  return errors;
 }
 
 // ---- reading a result -------------------------------------------------------
@@ -314,6 +431,32 @@ export function hasLowerBranch(result: CpfResult): boolean {
   return (
     result.stop_at === 'full' && result.nose_idx >= 0 && result.nose_idx < result.lambdas.length - 1
   );
+}
+
+/**
+ * The target lambda a run was given, or `null` for a run to the nose or along
+ * the full curve. The result says `stop_at: 'nose'` for a run to a target and
+ * carries the target here.
+ */
+export function targetLambda(result: CpfResult): number | null {
+  const target = result.stop_at_lambda;
+  return target === undefined || target === null ? null : target;
+}
+
+/**
+ * Whether a run given a target lambda stopped on it, as asked. It found no
+ * nose on the way, so the result has `truncated` true with `complete` true.
+ */
+export function reachedTarget(result: CpfResult): boolean {
+  return targetLambda(result) !== null && result.complete === true;
+}
+
+/**
+ * Whether a run given a target lambda met the nose first and ended there,
+ * short of the target (`complete` false, the nose found).
+ */
+export function noseBeforeTarget(result: CpfResult): boolean {
+  return targetLambda(result) !== null && !result.truncated && result.nose_idx >= 0;
 }
 
 /**

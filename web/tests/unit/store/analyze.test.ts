@@ -16,11 +16,13 @@ import {
   useAnalyzeStore,
 } from '@/store/analyze';
 import type { CpfResult, EigResult } from '@/api/types';
+import type { EigSweepResponse } from '@/api/types';
 
 function resetAnalyzeStore() {
   useAnalyzeStore.setState({
     subMode: 'pflow',
     eigResult: null,
+    eigSweepResult: null,
     selectedModeId: null,
     filter: { ...DEFAULT_EIG_FILTER },
     cpfResult: null,
@@ -213,6 +215,53 @@ describe('useAnalyzeStore — cpfResult (Unit 12)', () => {
     expect(useAnalyzeStore.getState().cpfResult).toEqual(SAMPLE_CPF);
     useAnalyzeStore.getState().clearEigResult();
     expect(useAnalyzeStore.getState().cpfResult).toEqual(SAMPLE_CPF);
+  });
+});
+
+describe('eigSweepResult slice', () => {
+  const SWEEP: EigSweepResponse = {
+    model: 'GENROU',
+    idx: '1',
+    param: 'M',
+    points: [
+      {
+        value: 1,
+        eigenvalues: [{ real: -0.2, imag: 3 }],
+        damping_ratios: [0.066],
+        frequencies_hz: [0.477],
+      },
+    ],
+    mode_count: 1,
+    tds_initialized: false,
+    job_id: null,
+  };
+
+  it('starts null, is set by setEigSweepResult and cleared by clearEigSweepResult', () => {
+    useAnalyzeStore.getState().clearEigSweepResult();
+    expect(useAnalyzeStore.getState().eigSweepResult).toBeNull();
+    useAnalyzeStore.getState().setEigSweepResult(SWEEP);
+    expect(useAnalyzeStore.getState().eigSweepResult).toEqual(SWEEP);
+    useAnalyzeStore.getState().clearEigSweepResult();
+    expect(useAnalyzeStore.getState().eigSweepResult).toBeNull();
+  });
+
+  it('clearing the sweep touches no selection and no other result', () => {
+    useAnalyzeStore.getState().setEigResult({
+      eigenvalues: [{ real: -0.1, imag: 1 }],
+      damping_ratios: [0.1],
+      frequencies_hz: [0.159],
+      mode_count: 1,
+      state_count: 1,
+      state_names: ['delta_1'],
+      tds_initialized: true,
+    });
+    useAnalyzeStore.getState().setSelectedModeId(0);
+    useAnalyzeStore.getState().setEigSweepResult(SWEEP);
+    useAnalyzeStore.getState().clearEigSweepResult();
+    expect(useAnalyzeStore.getState().eigSweepResult).toBeNull();
+    expect(useAnalyzeStore.getState().selectedModeId).toBe(0);
+    expect(useAnalyzeStore.getState().eigResult).not.toBeNull();
+    useAnalyzeStore.getState().clearEigResult();
   });
 });
 

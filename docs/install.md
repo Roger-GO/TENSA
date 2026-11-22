@@ -68,6 +68,21 @@ pip install "tensa[mcp]"
 
 See [Agents and MCP](agents.md) for how to connect a client.
 
+### The Sienna engine
+
+TENSA can run a session on a second engine, Sienna, which is written in Julia. A Sienna session needs three things on the machine: the `sienna` extra, a Julia executable, and the Sienna packages, which are not pip packages. Install the first two, then let TENSA install the third:
+
+```bash
+pip install "tensa[sienna]"
+tensa warm-cache --engine sienna
+```
+
+Julia itself comes from [julialang.org](https://julialang.org/install/): the environment was resolved for Julia 1.13, and the command refuses a Julia of another minor version unless you add `--allow-julia-mismatch`. Point `TENSA_JULIA` (or `--julia`) at the executable when it is not on `PATH`. The command copies the `Project.toml` and `Manifest.toml` the package ships into the project folder (`~/.tensa/julia/dyn`, or `TENSA_SIENNA_PROJECT`, or `--project DIR`), has Julia download, install and precompile the exact package versions they pin, from Julia's registry, and then loads the engine's Julia module there once as a check. The first time, that is about 220 packages and their binary libraries, which took about 1.1 GB of Julia's package folder on Windows (0.8 GB of package sources and binary libraries, which Julia downloads compressed, and 0.35 GB of precompiled code), and several minutes or more, depending on the connection and the machine; Julia's own output shows the progress. Run again, with the packages already there, it takes under a minute. If a step fails, the command says which and exits with status 1, and the engine stays unavailable until a run succeeds. After an upgrade of TENSA that ships other package versions, a Sienna session says the environment was not set up by this version: run the command again.
+
+The environment holds PowerSystems, PowerFlows, PowerNetworkMatrices and PowerSimulationsDynamics for the network, the power flow and the dynamics, and PowerSimulations with the HiGHS and Ipopt solvers for the economic dispatch, the optimal power flow and the unit commitment, at the exact versions the shipped Manifest pins. The size above was measured before the three operations packages joined it; they brought 34 more packages.
+
+The first request of a Sienna session is slow even with the environment ready: Julia starts when the session's worker first needs it, never in the server process and never for an ANDES session, and the first use of each Julia function compiles it. On a Windows laptop the first case load took 56 to 84 seconds and the first power flow 40 to 47 seconds; later loads and power flows take under a second. What each engine can do once it runs is on the [Engines](engines.md) page.
+
 ### A window of its own
 
 `tensa desktop` shows the same app in a native window instead of a browser tab. It starts the server on a free port of your machine, opens the window on it, and stops the server when you close the window. It needs the `desktop` extra, which installs [pywebview](https://pywebview.flowrl.com):

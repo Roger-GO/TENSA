@@ -1,0 +1,253 @@
+name: sienna
+
+# The Sienna engine's tests that need a real Julia are marked `sienna` and skip
+# wherever Julia or the Julia project is missing, which is every job of the
+# other workflows. This one installs Julia, sets the project up with the
+# project's own command and runs them, so the engine is held by CI and not only
+# on a developer's machine. It runs on Linux only for now: nothing holds the
+# engine on macOS or Windows yet.
+
+on:
+  push:
+    branches: [main, "improve/**"]
+    paths:
+      # Every test marked sienna is an integration test, and the API, the
+      # session manager and the worker all sit between it and the engine, so
+      # any change to the server's code or its integration tests runs it.
+      - "server/src/**"
+      - "server/tests/integration/**"
+      - "server/tests/julia/**"
+      - "server/pyproject.toml"
+      - "scripts/make_sienna_samples.py"
+      - "scripts/verify_example_cases.py"
+      - ".github/workflows/sienna.yml"
+  pull_request:
+    paths:
+      # Every test marked sienna is an integration test, and the API, the
+      # session manager and the worker all sit between it and the engine, so
+      # any change to the server's code or its integration tests runs it.
+      - "server/src/**"
+      - "server/tests/integration/**"
+      - "server/tests/julia/**"
+      - "server/pyproject.toml"
+      - "scripts/make_sienna_samples.py"
+      - "scripts/verify_example_cases.py"
+      - ".github/workflows/sienna.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A run takes long, so a newer push to the same ref cancels the one before it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sienna:
+    name: Sienna engine (Julia, Linux, ${{ matrix.part }})
+    runs-on: ubuntu-latest
+    # The tests are split into parts that run side by side, each from the
+    # cached depot: in one job the model audits (about 40 minutes), the
+    # known-difference tests (about 30) and the operations tests outran any
+    # sensible limit. Every test marked sienna is in exactly one part (a test
+    # of test_ci_config.py holds the split), and the Julia module tests are a
+    # part of their own. A cold depot downloads about 0.8 GB and precompiles
+    # the Sienna packages, which can take 30 minutes on a runner.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: julia
+          - part: audits-a
+            tests: tests/integration/test_model_audits.py -k "genrou or gencls or sexs or ieeest or esst1a or esac1a"
+          - part: audits-b
+            tests: tests/integration/test_model_audits.py -k "not (genrou or gencls or sexs or ieeest or esst1a or esac1a)"
+          - part: known-differences
+            tests: tests/integration/test_known_differences.py
+          - part: operations
+            tests: tests/integration/test_sienna_dispatch.py tests/integration/test_sienna_uc.py tests/integration/test_sienna_sim.py
+          - part: others
+            tests: >-
+              tests/integration
+              --ignore=tests/integration/test_model_audits.py
+              --ignore=tests/integration/test_known_differences.py
+              --ignore=tests/integration/test_sienna_dispatch.py
+              --ignore=tests/integration/test_sienna_uc.py
+              --ignore=tests/integration/test_sienna_sim.py
+    defaults:
+      run:
+        # Named explicitly so that bash runs with -o pipefail: the Julia tests
+        # pipe into tee, and without it a failing run would pass the step.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/pyproject.toml
+
+      # The shipped Manifest (server/src/tensa/engines/sienna/envs/dyn/Manifest.toml)
+      # was resolved for Julia 1.13, and the setup refuses another major.minor.
+      # A test holds this version to the Manifest's julia_version.
+      - name: Set up Julia 1.13.4
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13.4"
+
+      # The depot holds the installed and precompiled Sienna packages, about
+      # 1.1 GB; a cold run downloads about 0.8 GB of it. Keyed on the Julia
+      # version and the Manifest with no restore-keys: a depot built for another
+      # Manifest is not wanted. Julia itself is in the tool cache, not the depot.
+      - name: Cache the Julia depot
+        uses: actions/cache@v6
+        with:
+          path: ~/.julia
+          key: sienna-julia-1.13.4-${{ runner.os }}-${{ hashFiles('server/src/tensa/engines/sienna/envs/dyn/Manifest.toml') }}
+
+      # An editable install needs no built UI.
+      - name: Install tensa with dev and sienna dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "./server[dev,sienna]"
+
+      # The project's own command: copies the shipped project, instantiates and
+      # precompiles it, checks that the engine's module loads and writes the
+      # stamp. It finds the julia that setup-julia put on PATH.
+      - name: Set up the Sienna environment
+        run: tensa warm-cache --engine sienna --project "$RUNNER_TEMP/sienna/dyn"
+
+      # The Julia module's own tests, from the repository root, against the ANDES
+      # cases folder. The file exits non-zero when a test fails. It prints a line
+      # starting with SKIP for a case file missing from the folder, which here
+      # means the ANDES install is not what the job thinks, so that fails too.
+      # The log of a job cannot be read without signing in, but its annotations
+      # can, so a failure is also written as an error annotation that carries the
+      # end of the log. Julia's status is kept rather than left to -e, which would
+      # end the step before the annotation is written.
+      # One file per module and routine: runtests.jl (TensaSienna),
+      # runtests_dyn.jl (TensaSiennaDyn), runtests_net.jl and runtests_dcpf.jl
+      # (TensaSiennaNet's matrices and DC power flow, on cases built in code,
+      # which take no folder), runtests_ops.jl (TensaSiennaOps' economic
+      # dispatch, on MATPOWER cases the test writes into a temporary folder).
+      # Every one runs; the status is the first
+      # failure's. runtests_dyn.jl checks that a hook written in Python stops a
+      # run, which needs PythonCall to load: it is given this job's Python, and
+      # no conda environment of its own (it would skip the check otherwise).
+      - name: Julia module tests
+        if: matrix.part == 'julia'
+        run: |
+          export JULIA_PYTHONCALL_EXE="$(command -v python)" JULIA_CONDAPKG_BACKEND=Null
+          cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
+          status=0
+          : > "$RUNNER_TEMP/julia-tests.log"
+          for file in runtests.jl runtests_dyn.jl runtests_net.jl runtests_dcpf.jl runtests_edit.jl runtests_ops.jl; do
+            echo "== $file" | tee -a "$RUNNER_TEMP/julia-tests.log"
+            one=0
+            julia --project="$RUNNER_TEMP/sienna/dyn" "server/tests/julia/$file" "$cases" 2>&1 | tee -a "$RUNNER_TEMP/julia-tests.log" || one=$?
+            if [ "$status" -eq 0 ] && [ "$one" -ne 0 ]; then status=$one; fi
+          done
+          python - "$RUNNER_TEMP/julia-tests.log" "$status" <<'EOF'
+          import sys
+          from pathlib import Path
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          status = int(sys.argv[2])
+          skips = [line for line in lines if line.startswith("SKIP ")]
+          problem = ""
+          if status != 0:
+              problem = f"julia exited with status {status}"
+          elif skips:
+              problem = "the Julia tests skipped checks"
+          if problem:
+              tail = "\n".join([problem, *skips[:10], "...", *lines[-30:]])[-1500:]
+              tail = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title=Julia module tests::{tail}")
+          sys.exit(1 if problem else 0)
+          EOF
+
+      # The Python tests that need Julia, against the project set up above. A
+      # skipped test in this job means the environment is not what the job
+      # thinks, so the JUnit report is read after the run and any test case in
+      # it that skipped fails the step (as does a report with no test in it).
+      # The report is read whatever pytest's status, so pytest's is kept rather
+      # than left to -e, and each failed or errored test is written as an error
+      # annotation and each skipped one as a warning: the annotations are the
+      # one part of a run that can be read without signing in. The failure text
+      # in an annotation is the message, the lines pytest marks with E (the
+      # assertion) and the end of the traceback, and the end of what the test
+      # wrote to stderr, which the report holds because of junit_logging.
+      - name: Sienna tests, with no skip allowed
+        if: matrix.part != 'julia'
+        working-directory: server
+        env:
+          TENSA_SIENNA_PROJECT: ${{ runner.temp }}/sienna/dyn
+        run: |
+          status=0
+          python -m pytest -m sienna ${{ matrix.tests }} -rs -o junit_logging=system-err --junitxml="$RUNNER_TEMP/sienna-junit.xml" || status=$?
+          report=0
+          python - "$RUNNER_TEMP/sienna-junit.xml" "$status" <<'EOF' || report=$?
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          LIMIT = 1500
+
+
+          def data(text):
+              return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+          def prop(text):
+              return data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+          def annotate(level, test, text):
+              if len(text) > LIMIT:
+                  text = text[: LIMIT - 4] + "\n..."
+              print(f"::{level} title={prop(test)}::{data(text)}")
+
+
+          def failure_text(element, case):
+              lines = (element.text or "").splitlines()
+              marked = [line for line in lines if line.startswith("E ")]
+              parts = [element.get("message") or element.tag]
+              if marked:
+                  parts += ["", *marked[:12]]
+              parts += ["", *lines[-8:]]
+              stderr = case.find("system-err")
+              if stderr is not None and (stderr.text or "").strip():
+                  parts += ["", "stderr:", *stderr.text.strip().splitlines()[-6:]]
+              return "\n".join(parts)
+
+
+          path = Path(sys.argv[1])
+          status = int(sys.argv[2])
+          if not path.is_file():
+              annotate("error", "pytest", f"pytest exited with status {status} and wrote no report")
+              sys.exit(1)
+          cases = list(ET.parse(path).iter("testcase"))
+          failed = skipped = 0
+          for case in cases:
+              test = f"{case.get('classname')}.{case.get('name')}"
+              for tag in ("failure", "error"):
+                  for element in case.findall(tag):
+                      failed += 1
+                      annotate("error", test, failure_text(element, case))
+              skip = case.find("skipped")
+              if skip is not None:
+                  skipped += 1
+                  annotate("warning", test, "skipped: " + (skip.get("message") or ""))
+          if status != 0 and not failed:
+              annotate("error", "pytest", f"pytest exited with status {status} and the report names no failed test")
+          print(f"{len(cases)} Sienna tests in the report, {failed} failed, {skipped} skipped")
+          sys.exit(1 if failed or skipped or not cases or status != 0 else 0)
+          EOF
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          exit "$report"

@@ -395,6 +395,88 @@ def test_the_local_time_zone_file_is_a_routine_open_on_posix() -> None:
         assert worker._normalized_path("/etc/localtime") in worker._routine_files()
 
 
+def test_the_stat_file_of_the_owner_markers_pid_is_a_routine_open_on_linux() -> None:
+    """Writing the owner marker of a scratch folder reads ``/proc/<pid>/stat`` on Linux for
+    the start time of the pid it names. A Sienna state writes one on every load, so every
+    Sienna worker warned of it and failed its hygiene test on Linux only."""
+    on_linux = worker._owner_marker_files(2648, platform="linux")
+    assert on_linux == ("/proc/2648/stat",)
+    assert _routine("/proc/2648/stat", directories=on_linux)
+    # Handed no owner pid, the marker names the worker itself, and so does the rule.
+    assert worker._owner_marker_files(None, platform="linux") == (f"/proc/{os.getpid()}/stat",)
+    # Only that file of only that pid: the rest of ``/proc`` and the rest of the system are not.
+    for stray in (
+        "/proc/2648/environ",
+        "/proc/2648/mem",
+        "/proc/2648",
+        "/proc/2649/stat",
+        "/proc/self/stat",
+        "/proc/26480/stat",
+        "/etc/passwd",
+    ):
+        assert not _routine(stray, directories=on_linux), stray
+    # Windows asks the kernel and macOS records no start time: no file is read there.
+    assert worker._owner_marker_files(2648, platform="win32") == ()
+    assert worker._owner_marker_files(2648, platform="darwin") == ()
+
+
+def test_the_hook_takes_the_owner_pid_it_is_handed(
+    layout: dict[str, Path], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The installer counts the marker's file routine for the pid the worker was handed, and
+    warns of another file of that process. Run as on Linux on every platform."""
+    as_on_linux = worker._owner_marker_files
+    monkeypatch.setattr(
+        worker, "_owner_marker_files", lambda pid: as_on_linux(pid, platform="linux")
+    )
+    hooks: list[Any] = []
+    monkeypatch.setattr(sys, "addaudithook", hooks.append)
+    worker._install_strict_fs_audit_hook(str(layout["cases"]), "sienna", 2648)
+    (hook,) = hooks
+    caplog.set_level("DEBUG", logger="tensa.worker.audit")
+    hook("open", ("/proc/2648/stat", "r", 0))
+    hook("open", ("/proc/2648/environ", "r", 0))
+    hook("open", (f"/proc/{os.getpid()}/stat", "r", 0))
+    assert [r.levelname for r in caplog.records] == ["DEBUG", "WARNING", "WARNING"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="only Linux reads /proc for it")
+def test_a_real_hook_is_quiet_when_a_worker_writes_its_owner_marker_on_linux(
+    tmp_path: Path,
+) -> None:
+    """In a fresh interpreter with the real hook, ``write_owner_marker`` reads the owner's
+    ``stat`` and prints nothing; a read of its ``environ`` still warns."""
+    workspace = tmp_path / "ws"
+    (workspace / ".sessions" / "s1").mkdir(parents=True)
+    code = textwrap.dedent(
+        """
+        import os, sys
+        from pathlib import Path
+        from tensa.core import worker
+        from tensa.core.session_dirs import read_owner_marker, write_owner_marker
+
+        owner = os.getppid()
+        worker._install_strict_fs_audit_hook(sys.argv[1], "andes", owner)
+        root = Path(sys.argv[1]) / ".sessions" / "s1"
+        write_owner_marker(root, owner)
+        assert read_owner_marker(root).start is not None
+        open(f"/proc/{owner}/environ", "rb").close()
+        """
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", code, str(workspace)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    lines = [line for line in done.stderr.splitlines() if "strict-fs" in line]
+    assert len(lines) == 1, lines
+    assert lines[0].endswith("/environ")
+
+
 def test_what_tensa_ships_is_read_by_its_worker_without_a_warning_even_from_a_checkout(
     layout: dict[str, Path],
 ) -> None:

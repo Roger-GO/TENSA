@@ -21,6 +21,10 @@ checks are the ones a release must not skip:
   licence asks to travel with every copy of the data;
 * neither carries a source map (``*.map``), which would add about 10 MB for
   nothing;
+* both carry the Sienna engine's Julia environment (the ``Project.toml`` and
+  ``Manifest.toml`` of ``engines/sienna/envs/dyn``) and its Julia module
+  (``engines/sienna/julia/TensaSienna.jl``), which ``tensa warm-cache --engine
+  sienna`` installs from;
 * both carry the license text, and the sdist the build hook it needs to be built
   again;
 * both name the license as the SPDX expression in ``License-Expression`` (PEP 639),
@@ -51,6 +55,27 @@ SDIST_UI = "src/tensa/static"
 UI_LICENSES = "THIRD-PARTY-LICENSES.txt"
 WHEEL_EXAMPLES = "tensa/examples"
 SDIST_EXAMPLES = "src/tensa/examples"
+# The Sienna engine's Julia side: the environment ``tensa warm-cache --engine
+# sienna`` installs and the modules the worker loads (the static one, the
+# dynamics one and the network matrices one).
+SIENNA_FILES = (
+    "engines/sienna/envs/dyn/Project.toml",
+    "engines/sienna/envs/dyn/Manifest.toml",
+    "engines/sienna/julia/TensaSienna.jl",
+    "engines/sienna/julia/TensaSiennaDyn.jl",
+    "engines/sienna/julia/TensaSiennaNet.jl",
+    "engines/sienna/julia/TensaSiennaOps.jl",
+)
+
+
+def _sienna_problems(kind: str, names: Iterable[str], package_dir: str) -> list[str]:
+    """The Julia environment and module of the Sienna engine must be in the archive."""
+    names = set(names)
+    return [
+        f"{kind} has no {package_dir}/{path}: the Sienna engine's Julia files are not packaged"
+        for path in SIENNA_FILES
+        if f"{package_dir}/{path}" not in names
+    ]
 
 
 def _metadata_field(text: str, field: str) -> str | None:
@@ -152,6 +177,7 @@ def _check_wheel(path: Path) -> tuple[str | None, list[str]]:
         catalog_text = wheel.read(catalog).decode("utf-8") if catalog in names else None
     problems = _ui_problems(path.name, names, WHEEL_UI)
     problems += _example_problems(path.name, names, catalog_text, WHEEL_EXAMPLES)
+    problems += _sienna_problems(path.name, names, "tensa")
     problems += _license_problems(path.name, metadata)
     if not any(n.endswith(".dist-info/licenses/LICENSE") for n in names):
         problems.append(f"{path.name} has no license file under .dist-info/licenses/")
@@ -175,6 +201,7 @@ def _check_sdist(path: Path) -> tuple[str | None, list[str]]:
     names = list(members)
     problems = _ui_problems(path.name, names, SDIST_UI)
     problems += _example_problems(path.name, names, catalog_text, SDIST_EXAMPLES)
+    problems += _sienna_problems(path.name, names, "src/tensa")
     problems += _license_problems(path.name, metadata)
     for required in ("LICENSE", "hatch_build.py", "pyproject.toml"):
         if required not in members:

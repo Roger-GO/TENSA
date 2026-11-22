@@ -31,6 +31,7 @@ Per Unit 1a spike (``docs/spikes/2026-05-09-andes-routine-surface-spike.md``):
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import field
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,6 +57,20 @@ class SeResult:
       residual ``|r_i| / sigma_i`` exceeds 3. These are candidate
       bad-data points — the UI highlights the bars in the residual
       histogram.
+    - ``algorithm``: the estimator the run used, normalised lowercase
+      (``"wls"`` or ``"lav"``).
+    - ``settings``: what the run used: ``tol``, ``max_iter`` (the
+      effective values the solver saw, after any per-run override) and
+      ``noise_seed`` (the seed this run's measurement noise was drawn
+      with, or ``None`` when the run used the generate step's draw).
+    - ``chi_squared``: for WLS, the chi-squared bad-data test on the
+      objective ``J``: ``passed``, ``J``, ``threshold``, ``dof`` and the
+      ``confidence`` the threshold was taken at. ``None`` for LAV, where
+      the test is not valid, and when the set has no redundancy
+      (``dof <= 0``).
+
+    Note on ``mismatch``: for LAV, ``J`` is the LAV objective
+    ``sum(|r| / sigma)``, not the weighted sum of squares.
     """
 
     converged: bool
@@ -64,6 +79,9 @@ class SeResult:
     residuals: list[float]
     measurement_count: int
     flagged_indices: list[int]
+    algorithm: str = "wls"
+    settings: dict[str, float | int | None] = field(default_factory=dict)
+    chi_squared: dict[str, float | int | bool] | None = None
 
 
 @dataclasses.dataclass(frozen=True)

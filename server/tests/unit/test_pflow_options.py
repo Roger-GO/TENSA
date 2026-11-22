@@ -1,7 +1,7 @@
 """Unit tests for the power-flow settings and the system summary.
 
 The settings of a request (tolerance, iteration limit, flat start, Q-limit
-enforcement) reach ANDES through ``pflow_options_applied``, which writes them for
+enforcement; the solver settings are in ``test_pflow_method_options.py``) reach ANDES through ``pflow_options_applied``, which writes them for
 one run and puts back what it found. These run against stand-ins for the parts of
 an ANDES System it touches, so what is checked is the bookkeeping: what is written,
 what is restored, what the limiter flags look like at the start and the end of a
@@ -116,7 +116,7 @@ def test_the_request_body_carries_what_was_asked() -> None:
         {"max_iterations": MAX_ITERATIONS_MAX + 1},
         {"max_iterations": 2.5},
         {"flat_start": "maybe"},
-        {"method": "NR"},  # a setting this request does not have
+        {"solver": "NR"},  # a setting this request does not have
     ],
 )
 def test_the_request_body_refuses_what_the_wrapper_would(payload: dict[str, Any]) -> None:
@@ -186,9 +186,14 @@ def _limiter(n: int = 2, *, enable: Any = 0) -> SimpleNamespace:
     )
 
 
+def _pflow_config() -> SimpleNamespace:
+    """A stand-in for ``PFlow.config`` with ANDES's defaults."""
+    return SimpleNamespace(tol=1e-6, max_iter=25, method="NR", n_factorize=4, linesearch=1)
+
+
 def _system(*, converged: bool = True, slack: bool = True, **limiter_kwargs: Any) -> Any:
     ss = SimpleNamespace(
-        PFlow=SimpleNamespace(config=SimpleNamespace(tol=1e-6, max_iter=25), converged=converged),
+        PFlow=SimpleNamespace(config=_pflow_config(), converged=converged),
         Bus=SimpleNamespace(config=SimpleNamespace(flat_start=0)),
         PV=SimpleNamespace(qlim=_limiter(**limiter_kwargs)),
     )
@@ -207,7 +212,7 @@ def test_the_request_is_written_for_the_run_and_the_system_is_given_back() -> No
         assert ss.Bus.config.flat_start == 1
         assert ss.PV.qlim.enable is True
         assert ss.Slack.qlim.enable is True
-        assert used == PflowSettings(1e-4, 60, True, True)
+        assert used == PflowSettings(1e-4, 60, True, True, "NR", 4, True)
     assert ss.PFlow.config.tol == 1e-6
     assert ss.PFlow.config.max_iter == 25
     assert ss.Bus.config.flat_start == 0
@@ -223,7 +228,7 @@ def test_what_the_request_leaves_out_keeps_the_systems_own_value() -> None:
     ss.PFlow.config.max_iter = 40
     ss.Bus.config.flat_start = 1
     with pflow_options_applied(ss, max_iterations=10) as used:
-        assert used == PflowSettings(1e-8, 10, True, True)
+        assert used == PflowSettings(1e-8, 10, True, True, "NR", 4, True)
     assert ss.PFlow.config.max_iter == 40
     assert ss.PV.qlim.enable == 1
 
@@ -282,7 +287,7 @@ def test_a_run_that_did_not_converge_leaves_the_flags_cleared() -> None:
 
 def test_a_system_without_generators_has_nothing_to_enforce() -> None:
     ss = SimpleNamespace(
-        PFlow=SimpleNamespace(config=SimpleNamespace(tol=1e-6, max_iter=25), converged=False),
+        PFlow=SimpleNamespace(config=_pflow_config(), converged=False),
         Bus=SimpleNamespace(config=SimpleNamespace(flat_start=0)),
     )
     with pflow_options_applied(ss, enforce_q_limits=True) as used:  # type: ignore[arg-type]

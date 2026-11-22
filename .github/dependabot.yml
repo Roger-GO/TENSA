@@ -34,6 +34,9 @@ updates:
         update-types:
           - version-update:semver-major
           - version-update:semver-minor
+      # juliacall (the sienna extra) is pinned to the release whose PythonCall
+      # the shipped Julia Manifest holds; a new one needs a new Manifest too.
+      - dependency-name: juliacall
 
   - package-ecosystem: npm
     directory: /web

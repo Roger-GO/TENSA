@@ -22,6 +22,10 @@ class TopologyEntry:
     name: str
     kind: str  # ANDES model class name (e.g., "Bus", "Line", "GENROU")
     params: dict[str, Any] = field(default_factory=dict)
+    # The element's key (section 4 of ``design/multiengine/spec.md``): the same
+    # in every engine that loads the case. ``None`` where the entry was built
+    # away from the key book.
+    key: str | None = None
 
 
 @dataclass
@@ -76,6 +80,9 @@ class TopologySnapshot:
     # put back, or ``None`` when there is none. See ``tensa.core.edit_log``.
     undo: EditStep | None = None
     redo: EditStep | None = None
+    # Whether the case carries dynamic models (a machine, an exciter, ...), so
+    # a client need not infer it from model names.
+    has_dynamics: bool = False
 
 
 @dataclass
@@ -123,12 +130,15 @@ class LineFlow:
     rating (a ``rate_a`` of zero).
     """
 
+    # ``q`` and ``q_to`` are ``None`` for a DC power flow (a Sienna session's
+    # ``method`` dc or ptdf-dc), which computes no reactive power; an AC power
+    # flow, and every ANDES one, fills them.
     p: float
-    q: float
+    q: float | None
     from_idx: int | str
     to_idx: int | str
     p_to: float
-    q_to: float
+    q_to: float | None
     loss: float
     rate_a: float | None
     loading_pct: float | None
@@ -151,7 +161,7 @@ class GeneratorOutput:
     """
 
     p: float  # MW (scaled by ss.config.mva)
-    q: float  # MVAr
+    q: float | None  # MVAr; None for a DC power flow (see LineFlow)
     v: float  # terminal voltage (pu)
     bus: int | str
     q_min: float | None = None  # MVAr
@@ -163,7 +173,7 @@ class LoadConsumption:
     """Per-load PF consumption: P + Q draw at the load's terminal bus."""
 
     p: float  # MW
-    q: float  # MVAr
+    q: float | None  # MVAr; None for a DC power flow (see LineFlow)
     bus: int | str
 
 
@@ -179,14 +189,16 @@ class PflowSummary:
     in-service slack generators, ``None`` when there is none.
     """
 
+    # The reactive totals are ``None`` for a DC power flow, which computes no
+    # reactive power (see LineFlow).
     generation_p: float
-    generation_q: float
+    generation_q: float | None
     load_p: float
-    load_q: float
+    load_q: float | None
     shunt_p: float
-    shunt_q: float
+    shunt_q: float | None
     loss_p: float
-    loss_q: float
+    loss_q: float | None
     slack_p: float | None
     slack_q: float | None
 
@@ -207,6 +219,10 @@ class PflowResult:
     # converged) the system totals. ``operating_point`` leaves both ``None``.
     settings: PflowSettings | None = None
     summary: PflowSummary | None = None
+    # The key of every element a result dict names, per kind: ``keys["bus"]``
+    # maps the stringified idx of every bus in ``bus_voltages`` to its key, and
+    # so on. An idx with no key is left out.
+    keys: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -220,3 +236,88 @@ class TdsBatchResult:
     converged: bool
     final_t: float
     callpert_count: int  # how many times the per-step hook fired
+    integrator: str = "trapezoidal"  # the integrator the run used, by its API name
+
+
+@dataclass
+class YbusEntry:
+    """One nonzero of the bus admittance matrix: row, column, and the complex
+    value split into its real and imaginary parts (per unit on the system
+    base)."""
+
+    row: int
+    col: int
+    re: float
+    im: float
+
+
+@dataclass
+class YbusResult:
+    """The bus admittance matrix of the loaded case, as sparse triplets.
+
+    ``n_bus`` is the matrix's size (N x N for an N-bus case), ``bus_idx[i]``
+    the bus of row and column ``i`` (the position of the bus in
+    ``ss.Bus.idx.v``) and ``bus_key[i]`` its key (``None`` for a bus the key
+    book has none for). ``base_mva`` is the system base the per-unit values
+    are on, ``None`` when the System carries no usable one. ``entries`` holds
+    only the nonzeros.
+    """
+
+    n_bus: int
+    base_mva: float | None
+    bus_idx: list[str]
+    bus_key: list[str | None]
+    entries: list[YbusEntry]
+
+
+@dataclass
+class TdsInitClamp:
+    """One variable clamped at a limit during TDS initialisation.
+
+    The row ANDES's ``TDS.test_init()`` draws in its clamped-limits table:
+    model, idx, variable, the limit parameter's name, the limit value, and the
+    unconstrained value ANDES computed.
+    """
+
+    model: str
+    idx: str
+    var: str
+    limit_name: str
+    limit_val: float
+    unconstr: float
+
+
+@dataclass
+class TdsInitResidual:
+    """One equation with a non-zero residual after TDS initialisation.
+
+    ``name`` is the variable's ``dae.xy_name`` name, ``mismatch`` the residual
+    (``None`` when it is NaN, which does not survive JSON), and ``equation``
+    ANDES's equation string, empty where the model gives none.
+    """
+
+    name: str
+    mismatch: float | None
+    equation: str
+
+
+@dataclass
+class TdsInitResult:
+    """What ``Wrapper.init_tds`` reports: whether the System initialised, the
+    verdict of ANDES's initialisation test, and the two diagnostic tables.
+
+    ``test_ok`` is ``None`` when the call ran with ``test_init`` off and ANDES
+    never checked. The lists are empty, not ``None``, when there is nothing to
+    report, and each is capped at 500 rows (``diagnostics_truncated``).
+    """
+
+    initialized: bool
+    test_ok: bool | None
+    test_init: bool
+    n_states: int
+    n_algeb: int
+    max_residual: float
+    nan_residuals: int
+    clamped: list[TdsInitClamp] = field(default_factory=list)
+    residuals: list[TdsInitResidual] = field(default_factory=list)
+    diagnostics_truncated: bool = False

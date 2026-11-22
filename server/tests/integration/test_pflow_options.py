@@ -183,9 +183,215 @@ def test_a_refused_request_touches_nothing() -> None:
         w.run_pflow(tolerance=0.0)
     with pytest.raises(PflowRequestError):
         w.run_pflow(max_iterations=0)
+    for bad in ({"method": "nr"}, {"n_factorize": 0}, {"linesearch": 1}):
+        with pytest.raises(PflowRequestError):
+            w.run_pflow(**bad)
     # Not even the setup that a run does first.
     assert not w._require_loaded().is_setup
     assert w.run_pflow().converged
+
+
+# ---- the solver: method, n_factorize, linesearch ----------------------------
+
+
+def _spy_on_solver_config(w: Wrapper) -> list[tuple[Any, Any, Any]]:
+    """Record ``PFlow.config``'s solver settings each time ``PFlow.run`` is called."""
+    ss = w._require_loaded()
+    seen: list[tuple[Any, Any, Any]] = []
+    real_run = ss.PFlow.run
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        config = ss.PFlow.config
+        seen.append((config.method, config.n_factorize, config.linesearch))
+        return real_run(*args, **kwargs)
+
+    ss.PFlow.run = spy
+    return seen
+
+
+def test_the_solver_settings_reach_andes_for_that_run_only() -> None:
+    w = _loaded()
+    seen = _spy_on_solver_config(w)
+    asked = w.run_pflow(method="dishonest", n_factorize=2, linesearch=False)
+    plain = w.run_pflow()
+    assert seen == [("dishonest", 2, 0), ("NR", 4, 1)]
+    assert asked.settings is not None and plain.settings is not None
+    assert (asked.settings.method, asked.settings.n_factorize, asked.settings.linesearch) == (
+        "dishonest",
+        2,
+        False,
+    )
+    assert (plain.settings.method, plain.settings.n_factorize, plain.settings.linesearch) == (
+        "NR",
+        4,
+        True,
+    )
+
+
+def test_the_dishonest_method_reuses_the_jacobian_after_n_factorize_iterations() -> None:
+    """On Kundur's system NR converges in 4 iterations. Refactorising only on the
+    first takes several times as many to the same solution; refactorising on the
+    first 100 is NR again, iteration for iteration."""
+    w = _loaded("kundur/kundur_full.xlsx")
+    nr = w.run_pflow()
+    once = w.run_pflow(method="dishonest", n_factorize=1)
+    always = w.run_pflow(method="dishonest", n_factorize=100)
+    assert nr.converged and once.converged and always.converged
+    # 22 against 4 on this machine: a margin no other LAPACK moves it across.
+    assert once.iterations > 2 * nr.iterations
+    # Exact, because it is the same computation: with n_factorize past every
+    # iteration the dishonest branch refactorises on each, which is NR's path.
+    assert always.iterations == nr.iterations
+    assert once.bus_voltages == pytest.approx(nr.bus_voltages, abs=1e-6)
+    assert once.bus_angles == pytest.approx(nr.bus_angles, abs=1e-6)
+
+    after = w.run_pflow()
+    assert after.settings is not None and after.settings.method == "NR"
+    assert after.iterations == nr.iterations  # the first run again, on the same machine
+
+
+def test_newton_krylov_reaches_the_newton_solution_by_its_own_stopping_rule() -> None:
+    w = _loaded()
+    nr = w.run_pflow()
+    nk = w.run_pflow(method="NK")
+    assert nk.converged
+    assert nk.settings is not None and nk.settings.method == "NK"
+    # SciPy stops once the largest residual is under its own tolerance (the
+    # cube root of the machine epsilon, about 6e-6 pu), so that is what the
+    # residual is held to, and the voltages to a margin over it.
+    assert nk.iterations == 0  # SciPy keeps no count ANDES reads
+    assert 0.0 <= nk.mismatch < 1e-5
+    assert nk.bus_voltages == pytest.approx(nr.bus_voltages, abs=1e-4)
+    assert nk.bus_angles == pytest.approx(nr.bus_angles, abs=1e-4)
+    # It reads neither ANDES's tolerance nor its iteration limit.
+    assert w.run_pflow(method="NK", max_iterations=1).converged
+
+    after = w.run_pflow()
+    assert after.settings is not None and after.settings.method == "NR"
+    assert after.iterations == nr.iterations  # the first run again, on the same machine
+
+
+def test_newton_krylov_prints_nothing(capsys: pytest.CaptureFixture[str]) -> None:
+    """ANDES 2.0.0 runs SciPy's solver verbose, which prints a line per
+    iteration; the wrapper keeps that off standard output, converged or not."""
+    w = _loaded()
+    capsys.readouterr()
+    assert w.run_pflow(method="NK").converged
+    assert capsys.readouterr().out == ""
+
+    failing = _overloaded("ieee14/ieee14.raw", 20.0)
+    capsys.readouterr()
+    assert not failing.run_pflow(method="NK").converged
+    assert capsys.readouterr().out == ""
+
+
+def _overloaded(name: str, scale: float) -> Wrapper:
+    """A case set up with every load scaled by ``scale``, past what it can carry."""
+    w = _loaded(name)
+    w._ensure_setup()
+    ss = w._require_loaded()
+    ss.PQ.p0.v[:] *= scale
+    ss.PQ.q0.v[:] *= scale
+    return w
+
+
+class _CountingNumpy:
+    """``numpy`` as ANDES's power flow module sees it, counting ``empty_like``.
+
+    ``nr_solve`` calls ``np.empty_like`` only to keep the point a line search
+    steps back from (twice, for ``x`` and ``y``, before the first iteration),
+    and nothing else in the module calls it, so the count says whether the run
+    took the line-search branch whatever the numbers it computed."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+        self.empty_like_calls = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+    def empty_like(self, *args: Any, **kwargs: Any) -> Any:
+        self.empty_like_calls += 1
+        return self._real.empty_like(*args, **kwargs)
+
+
+def test_the_line_search_setting_decides_the_branch_nr_solve_takes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from andes.routines import pflow as andes_pflow
+
+    counting = _CountingNumpy(andes_pflow.np)
+    monkeypatch.setattr(andes_pflow, "np", counting)
+    w = _loaded()
+
+    searched = w.run_pflow()
+    assert searched.converged and counting.empty_like_calls == 2
+
+    counting.empty_like_calls = 0
+    unsearched = w.run_pflow(linesearch=False)
+    assert unsearched.converged and counting.empty_like_calls == 0
+    assert unsearched.settings is not None and unsearched.settings.linesearch is False
+    # IEEE 14 takes the full Newton step every time, so both reach one solution.
+    assert unsearched.bus_voltages == pytest.approx(searched.bus_voltages, abs=1e-6)
+
+    # The case's own setting is back for the next run, in the config and in the branch.
+    assert w._require_loaded().PFlow.config.linesearch == 1
+    counting.empty_like_calls = 0
+    again = w.run_pflow()
+    assert again.settings is not None and again.settings.linesearch is True
+    assert counting.empty_like_calls == 2
+
+    # The setting is NR's and the dishonest method's, not Newton-Krylov's.
+    counting.empty_like_calls = 0
+    assert w.run_pflow(method="dishonest", linesearch=True).converged
+    assert counting.empty_like_calls == 2
+    counting.empty_like_calls = 0
+    assert w.run_pflow(method="NK", linesearch=True).converged
+    assert counting.empty_like_calls == 0
+
+
+def test_newton_krylov_that_does_not_converge_says_so() -> None:
+    """ANDES 2.0.0 raises from a Newton-Krylov run that fails (the ``IndexError``
+    of ``mis[-2]`` after the ``ValueError`` it catches, or SciPy's
+    ``NoConvergence``, which it does not); the wrapper answers either as a run
+    that did not converge, with the settings given back."""
+    w = _overloaded("ieee14/ieee14.raw", 20.0)
+    failed = w.run_pflow(method="NK")
+    assert not failed.converged
+    assert failed.summary is None
+    assert failed.settings is not None and failed.settings.method == "NK"
+    assert failed.mismatch > 1e-6
+    assert w._require_loaded().PFlow.config.method == "NR"
+
+
+def test_newton_krylov_out_of_iterations_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SciPy's ``NoConvergence``, which ANDES does not catch at all."""
+    from andes.routines import pflow as andes_pflow
+    from scipy.optimize import NoConvergence
+
+    def gives_up(*args: Any, **kwargs: Any) -> Any:
+        raise NoConvergence("out of iterations")
+
+    monkeypatch.setattr(andes_pflow, "newton_krylov", gives_up)
+    w = _loaded()
+    failed = w.run_pflow(method="NK")
+    assert not failed.converged
+    assert w._require_loaded().PFlow.config.method == "NR"
+
+
+def test_only_a_newton_krylov_failure_is_taken_for_non_convergence() -> None:
+    w = _loaded()
+    ss = w._require_loaded()
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise IndexError("not a solver outcome")
+
+    ss.PFlow.run = broken
+    with pytest.raises(IndexError):
+        w.run_pflow()
+    with pytest.raises(IndexError):
+        w.run_pflow(method="dishonest")
+    assert ss.PFlow.config.method == "NR"
 
 
 def test_a_time_domain_run_follows_a_run_that_enforced_the_limits() -> None:

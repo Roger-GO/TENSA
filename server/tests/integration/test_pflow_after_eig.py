@@ -114,9 +114,34 @@ async def test_pflow_after_eig_returns_422_with_actionable_detail(
     # The detail must point at /reload so RunButton.tsx's
     # ``recoverViaReload = /reload/i.test(detail)`` heuristic fires.
     assert "reload" in detail.lower(), detail
-    # And it should call out that EIG was the cause so the user
+    # And it should say what closed the case to a power flow, so the user
     # understands why PF failed.
-    assert "EIG" in detail, detail
+    assert "time-domain run has been initialised" in detail, detail
+    assert "eigenvalue analysis" in detail, detail
+    assert body["recovery"]["kind"] == "reload-case"
+
+
+@pytest.mark.integration
+async def test_pflow_after_an_initialisation_check_names_it_and_the_reload(
+    client: httpx.AsyncClient,
+) -> None:
+    """An initialisation check (``POST /tds/init``) initialises the time-domain
+    run as an eigenvalue analysis does, and the power flow after it is refused
+    the same way, with a detail that names the check and not only EIG."""
+    sid = await _create_session_with_dyr(client)
+
+    init = await client.post(f"/api/sessions/{sid}/tds/init")
+    assert init.status_code == 200, init.text
+    assert init.json()["initialized"] is True
+
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 422, pf.text
+    body = pf.json()
+    detail = body.get("detail") or ""
+    assert "time-domain run has been initialised" in detail, detail
+    assert "initialisation check" in detail, detail
+    assert "/reload" in detail, detail
+    assert body["recovery"]["kind"] == "reload-case"
 
 
 @pytest.mark.integration

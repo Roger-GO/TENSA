@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Literal
 from tensa.core.case_events import CaseEvent, events_in_case
 from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.disturbance import DisturbanceSpec
+from tensa.core.dyr_columns import put_back_dyr_columns
+from tensa.core.dyr_writer import write_dyr
 from tensa.core.edit_log import Op, apply_op, step_of
 from tensa.core.errors import (
     CaseLoadError,
@@ -30,6 +32,8 @@ from tensa.core.wrapper.topology import TopologyMixin
 
 if TYPE_CHECKING:
     from andes.system import System
+
+    from tensa.engines.identity import CaseIdentity
 
 
 class CaseMixin(TopologyMixin, DisturbanceMixin):
@@ -54,6 +58,21 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
 
         self._ss = ss
         self._case_path = case_path
+        # The identity the keys are assigned from (``tensa.engines.identity``):
+        # read for the formats the reader knows, and never a reason to fail the
+        # load. A reload calls this with the path the session already holds and
+        # keeps the identity and the book, so the keys of a session do not
+        # change; another file, or this one changed on disk since, starts a
+        # fresh book (identifiers read from the old content would be assigned
+        # to the new one's elements).
+        stamp = self._case_stamp(case_path)
+        if self._keyed_case != stamp:
+            self._identity = self._read_identity(case_path)
+            from tensa.engines.keys import KeyBook
+
+            self._key_book = KeyBook()
+            self._key_notes_logged = 0
+            self._keyed_case = stamp
         self._addfiles = resolved_addfiles
         self._buses_without_vn = buses_without_rated_voltage(ss, case_path)
         self._case_events = events_in_case(ss)
@@ -76,11 +95,53 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         return self._topology_snapshot_locked()
 
     @staticmethod
-    def _load_system(case_path: Path, addfiles: list[Path] | None) -> System:
+    def _case_stamp(case_path: Path) -> tuple[Path, int, int]:
+        """What tells one content of a case file from another: its path, its
+        modification time in nanoseconds and its size. A file that cannot be
+        read for them (it is about to fail the load anyway) stamps as -1, -1."""
+        try:
+            stat = case_path.stat()
+        except OSError:
+            return (case_path, -1, -1)
+        return (case_path, stat.st_mtime_ns, stat.st_size)
+
+    @staticmethod
+    def _read_identity(case_path: Path) -> CaseIdentity | None:
+        """The identity of ``case_path``, or ``None`` when it cannot be read.
+
+        Only ``.raw`` and ``.m`` files have an identity reader; anything else
+        (xlsx, json, dyr) keys its elements by order. A failure of the reader
+        is a warning, never a failed load.
+        """
+        import logging
+
+        from tensa.engines.identity import read_identity
+
+        if case_path.suffix.lower() not in (".raw", ".m"):
+            return None
+        try:
+            return read_identity(case_path)
+        except Exception as exc:  # noqa: BLE001 - never fail a load over keys
+            logging.getLogger("tensa.notice").warning(
+                "keys: the identity of %s could not be read (%s); "
+                "keys are assigned by order",
+                case_path.name,
+                exc,
+            )
+            return None
+
+    @staticmethod
+    def _load_system(
+        case_path: Path, addfiles: list[Path] | None, *, notify: bool = True
+    ) -> System:
         """Read a case into a new System, before ``setup()``.
 
         Touches nothing on the wrapper, so a caller can build a System and
         decide afterwards whether to keep it. Raises ``CaseLoadError``.
+
+        The values of the ``.dyr`` records ANDES reads in an order other than
+        PSS/E's are put back (``tensa.core.dyr_columns``); with ``notify``
+        each correction is said on ``tensa.notice``.
         """
         import andes  # heavy import — kept lazy
 
@@ -122,6 +183,7 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
 
         if ss is None:
             raise CaseLoadError(str(case_path), "andes.load returned None")
+        put_back_dyr_columns(ss, addfiles, notify=notify)
         return ss
 
     def reload_case(self) -> TopologySnapshot:
@@ -199,7 +261,8 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         naming the entry that could not be replayed.
         """
         if self._case_path is not None:
-            ss = self._load_system(self._case_path, self._addfiles)
+            # The load said what it put back of the file when it was first read.
+            ss = self._load_system(self._case_path, self._addfiles, notify=False)
         else:
             import andes  # heavy import — kept lazy
 
@@ -272,11 +335,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
             raise
 
     def save_case(
-        self, format: Literal["xlsx", "json", "raw"], filename: str
+        self, format: Literal["xlsx", "json", "raw", "m"], filename: str
     ) -> Path:
         """Write the current System to a workspace file.
 
-        Three formats:
+        Four formats:
 
         - ``xlsx`` — ANDES native, via ``andes.io.xlsx.write``.
         - ``json`` — ANDES JSON, via ``andes.io.json.write``.
@@ -285,8 +348,25 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
           built-in PSS/E writer; the substrate ships one for the
           power-flow data (Bus, PQ, Shunt, PV/Slack, Line, 2W
           transformer). A ``.raw`` holds no dynamic data, so the dynamic
-          models of the case (a ZIP on its PQ, a machine on its PV or
-          Slack) are not in it.
+          models of the case are written beside it, same stem, as a
+          ``.dyr`` (``tensa.core.dyr_writer.write_dyr``) when the System
+          has a dynamic device the writer writes. The path of that file
+          and what the writer left out are logged on ``tensa.notice``,
+          which the reply's messages carry.
+        - ``m``: MATPOWER v2, via the substrate's writer
+          (``tensa.core.matpower_writer.write_matpower``) around ANDES's
+          ``system2mpc``. It covers the power-flow data (Bus, PQ, Shunt,
+          PV and Slack, Line). A ``.m`` holds no dynamic data, so
+          machines, exciters and a ZIP load are not in it: save as
+          ``xlsx`` or ``json`` to keep them. Slack generators precede PV
+          generators in the ``gen`` section. When a bus idx is not a
+          positive integer (text, say) the buses are numbered
+          ``uid + 1``, so such a case comes back with integer bus
+          numbers. Bus area and zone are written as zero because
+          ``system2mpc`` does not export them, and the loads and shunts
+          of a bus are added up into one. What the file leaves out of
+          this System is logged on ``tensa.notice`` once it is saved, so
+          it shows in the session's Messages log.
 
         Writing over the file the case was loaded from makes that file the new
         base of the session: it now holds the edits made since the load, so
@@ -296,15 +376,15 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         while the System holds disturbances a client committed or a restore
         replayed, because they would become part of the case file.
 
-        Returns the absolute path of the written file. Caller (the
-        route handler) is responsible for canonicalizing ``filename``
-        against the workspace and rejecting traversal.
+        Returns the absolute path of the written file. Caller (the route
+        handler) is responsible for canonicalizing ``filename`` against
+        the workspace and rejecting traversal.
         """
         ss = self._require_loaded()
         target = Path(filename)
-        if format not in ("xlsx", "json", "raw"):  # pragma: no cover — Literal
+        if format not in ("xlsx", "json", "raw", "m"):  # pragma: no cover — Literal
             raise ElementValidationError(
-                f"unsupported save format {format!r}; supported: xlsx, json, raw"
+                f"unsupported save format {format!r}; supported: xlsx, json, raw, m"
             )
         overwrites_open_case = self._is_open_case_file(target)
         if overwrites_open_case and (self._disturbance_log or self._restored_events):
@@ -334,6 +414,12 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         )
         os.close(fd)
         tmp_path = Path(tmp_name)
+        # What the written file does not hold of the System (the m writer's
+        # notes), said once the file is in place.
+        notes: list[str] = []
+        dyr_path: Path | None = None
+        dyr_notes: list[str] = []
+        dyr_skipped: list[str] = []
         try:
             # ANDES's writers call ``confirm_overwrite`` → ``input()`` when the
             # file exists; the temp always exists (mkstemp created it), so force
@@ -346,10 +432,35 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                 from andes.io import json as andes_json
 
                 andes_json.write(ss, str(tmp_path), overwrite=True)
-            else:  # raw
+            elif format == "raw":
                 from tensa.core.psse_writer import write_raw
 
                 write_raw(ss, str(tmp_path))
+                # The dynamics beside the network, same stem, when the
+                # System has a dynamic device the writer writes. Written
+                # and validated the way the .raw is: a temporary file,
+                # then moved into place, nothing exposed on failure.
+                dyr_tmp = tmp_path.with_suffix(".dyr")
+                dyr_report = write_dyr(ss, str(dyr_tmp))
+                dyr_skipped = [
+                    f"{s.model} {s.idx} has no PSS/E reader entry and was not written"
+                    for s in dyr_report.skipped
+                ]
+                dyr_notes = list(dyr_report.notes)
+                if dyr_report.records:
+                    if not dyr_tmp.exists() or dyr_tmp.stat().st_size == 0:
+                        raise CaseSaveError(
+                            "the dyr writer produced an empty file for a "
+                            "system with dynamic models"
+                        )
+                    dyr_path = target.with_suffix(".dyr")
+                else:
+                    with contextlib.suppress(OSError):
+                        dyr_tmp.unlink()
+            else:  # m
+                from tensa.core.matpower_writer import write_matpower
+
+                notes = write_matpower(ss, str(tmp_path))
 
             # Validate the artifact BEFORE exposing it. A 0-byte or truncated
             # write must never become a "saved case".
@@ -363,16 +474,53 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
                 raise CaseSaveError(
                     "the xlsx writer produced a corrupt (non-zip) file"
                 )
+            if format == "m":
+                # A MATPOWER file is a MATLAB function; ``m2mpc`` skips that
+                # line when reading back. A file whose first non-blank line is
+                # not one is not a valid ``.m``.
+                first_line = next(
+                    (
+                        line.strip()
+                        for line in tmp_path.read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                        if line.strip()
+                    ),
+                    "",
+                )
+                if not first_line.startswith("function"):
+                    raise CaseSaveError(
+                        "the m writer produced a file that is not a MATLAB "
+                        "function (the first line does not start with "
+                        "'function')"
+                    )
 
             os.replace(str(tmp_path), str(target))
+            if dyr_path is not None:
+                os.replace(str(tmp_path.with_suffix(".dyr")), str(dyr_path))
         except CaseSaveError:
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
+            with contextlib.suppress(OSError):
+                tmp_path.with_suffix(".dyr").unlink()
             raise
         except Exception as exc:  # noqa: BLE001 — wrap so no raw writer error leaks
             with contextlib.suppress(OSError):
                 tmp_path.unlink()
+            with contextlib.suppress(OSError):
+                tmp_path.with_suffix(".dyr").unlink()
             raise CaseSaveError(_sanitize_message(str(exc))) from exc
+        notice = logging.getLogger("tensa.notice")
+        for note in notes:
+            notice.warning("%s: %s", target.name, note)
+        if dyr_path is not None:
+            notice.warning(
+                "%s: the dynamic models were written beside it as %s",
+                target.name,
+                dyr_path.name,
+            )
+        for note in (*dyr_skipped, *dyr_notes):
+            notice.warning("%s: %s", target.name, note)
         if overwrites_open_case:
             self._edit_log = []
             self._redo_log = []
@@ -409,4 +557,11 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         self._edit_log = []
         self._redo_log = []
         self._client_events = []
+        # A blank system has no file, so no identity, and a fresh book.
+        from tensa.engines.keys import KeyBook
+
+        self._identity = None
+        self._key_book = KeyBook()
+        self._key_notes_logged = 0
+        self._keyed_case = None
         return self._topology_snapshot_locked()

@@ -469,3 +469,36 @@ describe('chartTitle', () => {
     }
   });
 });
+
+describe('parseColumnName: neutral names (a Sienna run)', () => {
+  it('reads a quantity as the group and field of its ANDES column', () => {
+    expect(parseColumnName('voltage|bus:7')).toEqual({
+      name: 'voltage|bus:7',
+      group: 'bus_v',
+      field: 'v',
+      elementIdx: '7',
+      neutral: { quantity: 'voltage', key: 'bus:7' },
+    });
+    expect(parseColumnName('angle|bus:7')).toMatchObject({
+      group: 'bus_v',
+      field: 'a',
+      elementIdx: '7',
+    });
+    expect(parseColumnName('rotor_speed|gen:2-1')).toMatchObject({
+      group: 'gen_state',
+      field: 'omega',
+      elementIdx: 'gen:2-1',
+    });
+    expect(parseColumnName('rotor_angle|gen:2-1')).toMatchObject({
+      group: 'gen_state',
+      field: 'delta',
+    });
+  });
+
+  it('lists no quantity it has no ANDES column for, and no malformed name', () => {
+    expect(parseColumnName('angle_rel|bus:7')).toBeNull();
+    expect(parseColumnName('state|gen:1-1/machine#omega')).toBeNull();
+    expect(parseColumnName('voltage|bus:7|x')).toBeNull();
+    expect(parseColumnName('voltage|')).toBeNull();
+  });
+});

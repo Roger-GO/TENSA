@@ -57,6 +57,7 @@ nav:
       - Example case verification: examples-verification.md
       - API guide: api.md
       - Agents and MCP: agents.md
+      - Engines: engines.md
   - Reference:
       - Command line: reference/cli.md
       - API routes: reference/api.md

@@ -140,6 +140,7 @@ describe('<ExportMenu />', () => {
       'topbar-menu-export-snapshot',
       'topbar-menu-export-html-report',
       'topbar-menu-export-figure',
+      'topbar-menu-export-ybus',
       'topbar-menu-export-reports',
     ]);
     const reports = screen.getByTestId('topbar-menu-export-reports');

@@ -131,8 +131,22 @@ export interface TopBarMenuProps {
    * label stays as the accessible name and the hover text. Needs `icon`.
    */
   iconOnly?: boolean;
+  /**
+   * Draw the chevron after the label (the default). A trigger whose label is a
+   * value the bar must show at every width (the engine picker's) leaves it out
+   * to stay narrow; it is still announced as a menu (`aria-haspopup`).
+   */
+  chevron?: boolean;
   /** Optional class on the trigger button. */
   triggerClassName?: string;
+  /**
+   * The trigger's accessible name and hover text, for a menu whose label is a
+   * value rather than a name (the engine picker shows `ANDES` and is named
+   * `Engine: ANDES`). The menu itself is then named by `menuLabel`.
+   */
+  triggerAriaLabel?: string;
+  /** The menu's accessible name, when it is not `label`. */
+  menuLabel?: string;
 }
 
 /**
@@ -146,7 +160,10 @@ export function TopBarMenu({
   alignEnd = false,
   disabled = false,
   iconOnly = false,
+  chevron = true,
   triggerClassName,
+  triggerAriaLabel,
+  menuLabel,
 }: TopBarMenuProps) {
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -218,8 +235,8 @@ export function TopBarMenu({
           size="sm"
           disabled={disabled}
           aria-haspopup="menu"
-          aria-label={iconOnly ? label : undefined}
-          title={iconOnly ? label : undefined}
+          aria-label={triggerAriaLabel ?? (iconOnly ? label : undefined)}
+          title={triggerAriaLabel ?? (iconOnly ? label : undefined)}
           data-testid={`${testId}-trigger`}
           className={cn(
             'gap-1 px-2 text-xs',
@@ -232,7 +249,7 @@ export function TopBarMenu({
         >
           {Icon ? <Icon className={iconOnly ? 'h-4 w-4' : 'h-3.5 w-3.5'} /> : null}
           {iconOnly ? null : <span>{label}</span>}
-          {iconOnly ? null : <ChevronDown className="ml-0.5 opacity-80" />}
+          {iconOnly || !chevron ? null : <ChevronDown className="ml-0.5 opacity-80" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -240,7 +257,7 @@ export function TopBarMenu({
         align={alignEnd ? 'end' : 'start'}
         sideOffset={4}
         role="menu"
-        aria-label={label}
+        aria-label={menuLabel ?? label}
         onKeyDown={handleKeyDown}
         data-testid={`${testId}-content`}
         className="w-60 p-1"
@@ -290,6 +307,12 @@ export interface TopBarMenuItemProps extends Omit<
    * unavailable, where the line under the label is the reason.
    */
   note?: string;
+  /**
+   * A second muted line under the note, in the same styling (the engine
+   * picker's package versions under the routines). Shown only with a note;
+   * left out, like the note, while the entry is unavailable.
+   */
+  detail?: string;
   /** Stable testid. */
   testId?: string;
   /**
@@ -310,6 +333,7 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
       preventCloseOnSelect = false,
       unavailableReason,
       note,
+      detail,
       onClick,
       testId,
       className,
@@ -390,12 +414,22 @@ const TopBarMenuItemImpl = forwardRef<HTMLButtonElement, TopBarMenuItemProps>(
               {unavailableReason}
             </span>
           ) : note !== undefined ? (
-            <span
-              data-testid={testId ? `${testId}-note` : undefined}
-              className="text-muted-foreground text-[10px] leading-snug"
-            >
-              {note}
-            </span>
+            <>
+              <span
+                data-testid={testId ? `${testId}-note` : undefined}
+                className="text-muted-foreground text-[10px] leading-snug"
+              >
+                {note}
+              </span>
+              {detail !== undefined ? (
+                <span
+                  data-testid={testId ? `${testId}-detail` : undefined}
+                  className="text-muted-foreground text-[10px] leading-snug"
+                >
+                  {detail}
+                </span>
+              ) : null}
+            </>
           ) : null}
         </span>
         {shortcut ? (

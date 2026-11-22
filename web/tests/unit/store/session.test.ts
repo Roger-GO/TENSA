@@ -20,8 +20,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   useSessionStore,
+  ENGINE_STORAGE_KEY,
   RECOVERY_STUCK_TIMEOUT_MS,
   MAX_RECOVERY_ATTEMPTS,
+  readKeptEngine,
   setHardResetImpl,
   resetHardResetImpl,
 } from '@/store/session';
@@ -29,11 +31,136 @@ import { parseSessionId } from '@/api/types';
 
 const FRESH_STATE = {
   sessionId: null,
+  engine: null,
+  previousEngine: null,
+  engines: null,
   recoveryInProgress: false,
   recoveryFailed: false,
   recoveryAttempts: [],
   recoveryStuckSince: null,
 };
+
+const ENGINES_LIST = {
+  engines: [
+    {
+      name: 'andes',
+      available: true,
+      unavailable_reason: null,
+      versions: {},
+      formats: { read: [], write: [] },
+      routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+      ops: [],
+      editing: true,
+    },
+  ],
+};
+
+describe('session store — engines list mirror', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().engines).toBeNull();
+  });
+
+  it('setEngines sets it', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+
+  it('clearSession keeps it (the list is server-wide, not per session)', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+
+  it('resetSession keeps it', () => {
+    useSessionStore.getState().setEngines(ENGINES_LIST);
+    useSessionStore.getState().resetSession();
+    expect(useSessionStore.getState().engines).toEqual(ENGINES_LIST);
+  });
+});
+
+describe('session store — engine of the session', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().engine).toBeNull();
+  });
+
+  it('setEngine sets it', () => {
+    useSessionStore.getState().setEngine('sienna');
+    expect(useSessionStore.getState().engine).toBe('sienna');
+  });
+
+  it('clearSession clears it (the user closed the session)', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().engine).toBeNull();
+  });
+
+  it('resetSession keeps it, so the replacement session asks for the same engine', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().resetSession();
+    expect(useSessionStore.getState().engine).toBe('sienna');
+  });
+});
+
+describe('session store — previousEngine of an engine switch', () => {
+  beforeEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  it('starts null', () => {
+    expect(useSessionStore.getState().previousEngine).toBeNull();
+  });
+
+  it('setPreviousEngine records the engine the session had', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setPreviousEngine('andes');
+    expect(useSessionStore.getState().previousEngine).toBe('andes');
+  });
+
+  it('setPreviousEngine(null) clears it once a session has landed', () => {
+    useSessionStore.getState().setPreviousEngine('andes');
+    useSessionStore.getState().setPreviousEngine(null);
+    expect(useSessionStore.getState().previousEngine).toBeNull();
+  });
+
+  it('clearSession leaves it alone (the switch rollback still needs it)', () => {
+    useSessionStore.getState().setPreviousEngine('andes');
+    useSessionStore.getState().clearSession();
+    expect(useSessionStore.getState().previousEngine).toBe('andes');
+  });
+
+  it('startEngineSwitch clears the session, sets the engine and records the old one in one change', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'andes' });
+    const seen: Array<{ sessionId: unknown; engine: unknown; previousEngine: unknown }> = [];
+    const stop = useSessionStore.subscribe((s) =>
+      seen.push({ sessionId: s.sessionId, engine: s.engine, previousEngine: s.previousEngine }),
+    );
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    stop();
+    expect(seen).toEqual([{ sessionId: null, engine: 'sienna', previousEngine: 'andes' }]);
+    // Not a recovery: the case closes with the session.
+    expect(useSessionStore.getState().recoveryInProgress).toBe(false);
+  });
+});
 
 describe('session store — recoveryStuckSince stamp', () => {
   beforeEach(() => {
@@ -192,6 +319,97 @@ describe('session store — stuck-detection wall-clock arithmetic', () => {
     vi.setSystemTime(new Date('2026-05-09T12:00:05Z'));
     const elapsed = Date.now() - (stuckSince ?? 0);
     expect(elapsed).toBeLessThan(RECOVERY_STUCK_TIMEOUT_MS);
+  });
+});
+
+describe('session store — kept engine across a reload', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    useSessionStore.setState(FRESH_STATE);
+  });
+
+  afterEach(() => {
+    useSessionStore.setState(FRESH_STATE);
+    window.sessionStorage.clear();
+  });
+
+  it('setEngine alone keeps nothing: an engine that was only asked for is not kept', () => {
+    useSessionStore.getState().setEngine('sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1') });
+    useSessionStore.getState().setEngine('sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('setSessionId keeps the engine of the session that landed (a session landing keeps its engine)', () => {
+    useSessionStore.setState({ engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+
+  it('a session of the default engine, or of none named, drops what was kept', () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ engine: 'andes' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ engine: null });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-2'));
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('startEngineSwitch keeps nothing until the session of the new engine lands', () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().startEngineSwitch('sienna', 'andes');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+    useSessionStore.setState({ sessionId: null, engine: 'andes' });
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+    window.sessionStorage.removeItem(ENGINE_STORAGE_KEY);
+    useSessionStore.getState().startEngineSwitch('andes', 'sienna');
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('clearSession keeps the key (a recovery clears and recreates the session and must keep the engine)', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    useSessionStore.getState().clearSession();
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+
+  it('resetSession leaves the key alone', () => {
+    useSessionStore.setState({ sessionId: parseSessionId('sess-1'), engine: 'sienna' });
+    useSessionStore.getState().setSessionId(parseSessionId('sess-1'));
+    useSessionStore.getState().resetSession();
+    expect(window.sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('sienna');
+  });
+});
+
+describe('session store — the initial engine is the kept one', () => {
+  afterEach(() => {
+    vi.resetModules();
+    window.sessionStorage.clear();
+  });
+
+  it('a fresh store starts with the engine the tab kept', async () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, 'sienna');
+    vi.resetModules();
+    const fresh = await import('@/store/session');
+    expect(fresh.useSessionStore.getState().engine).toBe('sienna');
+    expect(fresh.readKeptEngine()).toBe('sienna');
+  });
+
+  it('a malformed kept value (an empty string) reads as none', async () => {
+    window.sessionStorage.setItem(ENGINE_STORAGE_KEY, '');
+    vi.resetModules();
+    const fresh = await import('@/store/session');
+    expect(fresh.useSessionStore.getState().engine).toBeNull();
+    expect(fresh.readKeptEngine()).toBeNull();
+  });
+
+  it('nothing kept reads as none', () => {
+    expect(readKeptEngine()).toBeNull();
   });
 });
 

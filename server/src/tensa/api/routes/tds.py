@@ -27,6 +27,10 @@ from tensa.api.schemas import (
     TdsBatchResult,
     TdsControllerCatalogue,
     TdsControllerResult,
+    TdsInitClamp,
+    TdsInitRequest,
+    TdsInitResidual,
+    TdsInitResult,
     TdsRunRequest,
     TdsTraces,
     TdsTraceSeries,
@@ -106,7 +110,7 @@ async def run_tds(
     mgr = _manager(request)
     # Unit 16: forward integrator + tolerance overrides. The wrapper
     # validates ``integrator`` (Literal-bounded by Pydantic) and the
-    # override keys (rtol/atol/max_step). ``tds_config_overrides`` is
+    # override keys (rtol/atol/max_step/min_step). ``tds_config_overrides`` is
     # only forwarded when non-None so the wire shape stays minimal for
     # the default trapezoidal path.
     args: dict[str, Any] = {
@@ -114,8 +118,25 @@ async def run_tds(
         "h": body.h,
         "integrator": body.integrator,
     }
+    # ``names`` is forwarded only when the body carried it: the schema's
+    # default is "engine", and a request without the field must answer byte
+    # for byte what it always did (the stream's metadata gains no "names"
+    # key). ``model_fields_set`` tells the two apart.
+    if "names" in body.model_fields_set:
+        args["names"] = body.names
+    if body.ext_sienna is not None:
+        record = mgr._sessions.get(session_id)  # noqa: SLF001 - the route reads the engine off the session record; the manager exposes no public getter for it
+        engine = getattr(record, "engine", "andes") if record is not None else "andes"
+        if engine != "sienna":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="ext_sienna is a Sienna option; an ANDES session does not take it",
+            )
+        args["ext_sienna"] = body.ext_sienna.model_dump()
     if body.tds_config_overrides is not None:
         args["tds_config_overrides"] = body.tds_config_overrides
+    if body.load_model is not None:
+        args["load_model"] = body.load_model
     if body.dae_vars:
         args["dae_vars"] = body.dae_vars
     if body.controllers:
@@ -203,6 +224,7 @@ async def run_tds(
         _broadcast_job(mgr, session_id, run_id)
 
     traces = payload.get("traces")
+    post = payload.get("post")
     controllers = payload.get("controllers")
     return TdsBatchResult(
         run_id=run_id,
@@ -210,6 +232,7 @@ async def run_tds(
         converged=bool(payload["converged"]),
         final_t=float(payload["final_t"]),
         callpert_count=int(payload["callpert_count"]),
+        integrator=payload.get("integrator"),
         traces=(
             TdsTraces(
                 t=traces["t"],
@@ -219,11 +242,89 @@ async def run_tds(
             if traces
             else None
         ),
+        post=(
+            TdsTraces(
+                t=post["t"],
+                variables=[TdsTraceSeries(**v) for v in post["variables"]],
+                truncated=bool(post.get("truncated", False)),
+            )
+            if post
+            else None
+        ),
         controllers=(
             [TdsControllerResult(**controller) for controller in controllers]
             if controllers
             else None
         ),
+    )
+
+
+# parity-reviewed: 2026-11-21. The "Check initialisation" action beside the
+# time-domain run button of the run controls calls it (``useTdsInit``).
+@router.post(
+    "/sessions/{session_id}/tds/init",
+    openapi_extra={"x-tensa-gui-location": "run-controls"},
+    operation_id="initTds",
+    summary="Initialise the time-domain simulation without running it, and report the initialisation diagnostics.",
+    response_model=TdsInitResult,
+    responses={
+        404: {"model": ProblemDetails, "description": "Session not found or already closed."},
+        409: {
+            "model": ProblemDetails,
+            "description": "No case has been loaded into this session.",
+        },
+        422: {
+            "model": ProblemDetails,
+            "description": (
+                "The power flow did not converge, TDS.init raised, the case has "
+                "no dynamic models, or the System is already initialised, by "
+                "this route, a run or an eigenvalue analysis (the detail says "
+                "which; call POST /api/sessions/{id}/reload to initialise again)."
+                " A failed initialisation test is not an error: it answers 200 "
+                "with test_ok false."
+            ),
+        },
+    },
+)
+async def init_tds(
+    session_id: str,
+    request: Request,
+    body: TdsInitRequest = TdsInitRequest(test_init=True),
+) -> TdsInitResult:
+    """Runs ANDES's ``TDS.init()`` and stops before the first step: every
+    dynamic model is initialised from the power flow (which runs first if it
+    has not), and the answer says whether the initialisation test passed and,
+    when the case did not start from a steady state, which variables were
+    clamped at a limit and which equations kept a residual. The session is left
+    set up and initialised: disturbances and edits are refused until a reload,
+    as after a first run, and the next run carries on from this
+    initialisation. A quick check rather than a run, so no job is recorded."""
+    mgr = _manager(request)
+    try:
+        payload = await mgr.invoke(
+            session_id,
+            "init_tds",
+            {"test_init": body.test_init},
+            timeout=300.0,
+        )
+    except SessionExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WorkerError as exc:
+        raise _to_http_error(exc) from exc
+    return TdsInitResult(
+        initialized=bool(payload["initialized"]),
+        test_ok=payload["test_ok"],
+        test_init=bool(payload["test_init"]),
+        n_states=int(payload["n_states"]),
+        n_algeb=int(payload["n_algeb"]),
+        max_residual=float(payload["max_residual"]),
+        nan_residuals=int(payload["nan_residuals"]),
+        clamped=[TdsInitClamp(**row) for row in payload["clamped"]],
+        residuals=[TdsInitResidual(**row) for row in payload["residuals"]],
+        diagnostics_truncated=bool(payload["diagnostics_truncated"]),
     )
 
 

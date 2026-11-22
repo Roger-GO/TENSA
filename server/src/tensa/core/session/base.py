@@ -25,9 +25,14 @@ class _Session:
     ctrl: Any  # multiprocessing.connection.Connection (no Generic in 3.12 stdlib)
     data: Any
     abort_event: Any  # multiprocessing.synchronize.Event
+    engine: str = "andes"
     lock: threading.RLock = field(default_factory=threading.RLock)
     seq: int = 0
     last_active: float = field(default_factory=time.monotonic)
+    # How many requests are waiting for the worker's reply. The idle reaper leaves
+    # a session with one alone: a request in flight is not idleness, however long
+    # the worker takes (a Sienna worker's first op starts Julia, a minute or two).
+    requests_in_flight: int = 0
     closed: bool = False
     # Set when the session was closed because its worker subprocess crashed
     # mid-RPC (torn IPC pipe). Lets ``invoke`` distinguish a crashed worker

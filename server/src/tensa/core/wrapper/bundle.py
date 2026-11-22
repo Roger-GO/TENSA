@@ -57,6 +57,7 @@ class BundleMixin(CaseMixin):
         """
         from tensa.core.bundle import (
             BundleResolveChoices,
+            BundleValidationError,
             bundle_plan_to_dict,
             extract_bundle,
             read_bundle_disturbances,
@@ -77,6 +78,16 @@ class BundleMixin(CaseMixin):
             workspace=self._workspace,
             current_andes_version=current_andes,
         )
+
+        if plan.engine != "andes":
+            # The case document (GET /sessions/{id}/case/neutral) cannot open
+            # a case yet (decision 41), so the recovery is the case file.
+            raise BundleValidationError(
+                "engine-mismatch",
+                f"bundle was written by the {plan.engine} engine; this "
+                "session runs andes. Open the bundle's case file in a "
+                f"session of the {plan.engine} engine to import it there.",
+            )
 
         plan_dict = bundle_plan_to_dict(plan)
 

@@ -8,11 +8,15 @@ import {
   ANDES_PFLOW_DEFAULTS,
   DEFAULT_PFLOW_OPTIONS,
   caseSettingsFromRun,
+  dcIgnores,
   describeSettings,
   formatTolerance,
   isDefaultPflowOptions,
+  iterationsPhrase,
+  nkIgnores,
   nonDefaultSettings,
   parseMaxIterations,
+  parseNFactorize,
   parseTolerance,
   pflowRequestBody,
   pflowRetries,
@@ -31,7 +35,11 @@ const PLAIN: PflowSettings = {
 
 describe('pflowRequestBody', () => {
   it('is empty for the defaults, so the case keeps its own settings', () => {
-    expect(pflowRequestBody(DEFAULT_PFLOW_OPTIONS)).toEqual({});
+    const body = pflowRequestBody(DEFAULT_PFLOW_OPTIONS);
+    expect(body).toEqual({});
+    expect('method' in body).toBe(false);
+    expect('n_factorize' in body).toBe(false);
+    expect('linesearch' in body).toBe(false);
   });
 
   it('carries only what was changed', () => {
@@ -44,13 +52,63 @@ describe('pflowRequestBody', () => {
         maxIterations: 100,
         flatStart: true,
         enforceQLimits: true,
+        method: 'dishonest',
+        nFactorize: 10,
+        linesearch: false,
       }),
     ).toEqual({
       tolerance: 1e-8,
       max_iterations: 100,
       flat_start: true,
       enforce_q_limits: true,
+      method: 'dishonest',
+      n_factorize: 10,
+      linesearch: false,
     });
+  });
+
+  it('sends a chosen solver, and an explicit line-search off, like the other switches', () => {
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'NK' })).toEqual({
+      method: 'NK',
+    });
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, linesearch: false })).toEqual({
+      linesearch: false,
+    });
+  });
+
+  it('sends any method string the engine publishes', () => {
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'dc' })).toEqual({
+      method: 'dc',
+    });
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'ptdf-dc' })).toEqual({
+      method: 'ptdf-dc',
+    });
+    expect(pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, method: 'ac' })).toEqual({
+      method: 'ac',
+    });
+  });
+
+  it('leaves tolerance and iterations out under a DC method, which the server refuses them with', () => {
+    expect(
+      pflowRequestBody({
+        ...DEFAULT_PFLOW_OPTIONS,
+        method: 'dc',
+        tolerance: 1e-4,
+        maxIterations: 50,
+      }),
+    ).toEqual({ method: 'dc' });
+    expect(
+      pflowRequestBody({
+        ...DEFAULT_PFLOW_OPTIONS,
+        method: 'ptdf-dc',
+        tolerance: 1e-4,
+        maxIterations: 50,
+      }),
+    ).toEqual({ method: 'ptdf-dc' });
+    // The values stay in the options for when the user switches back; only the body drops them.
+    expect(
+      pflowRequestBody({ ...DEFAULT_PFLOW_OPTIONS, tolerance: 1e-4, maxIterations: 50 }),
+    ).toEqual({ tolerance: 1e-4, max_iterations: 50 });
   });
 
   it('sends a checkbox only once it has been touched, and then whichever way it points', () => {
@@ -74,6 +132,11 @@ describe('isDefaultPflowOptions', () => {
     expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, enforceQLimits: true })).toBe(false);
     // An explicit "off" is a choice, not the case's own.
     expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, enforceQLimits: false })).toBe(false);
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, method: 'NR' })).toBe(false);
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, nFactorize: 4 })).toBe(false);
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, linesearch: false })).toBe(false);
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, method: 'NK' })).toBe(false);
+    expect(isDefaultPflowOptions({ ...DEFAULT_PFLOW_OPTIONS, linesearch: true })).toBe(false);
   });
 });
 
@@ -151,6 +214,44 @@ describe('parseMaxIterations', () => {
   );
 });
 
+describe('parseNFactorize', () => {
+  it('reads a whole number and treats blank as the case’s own', () => {
+    expect(parseNFactorize('10')).toEqual({ ok: true, value: 10 });
+    expect(parseNFactorize(' 1 ')).toEqual({ ok: true, value: 1 });
+    expect(parseNFactorize('100')).toEqual({ ok: true, value: 100 });
+    expect(parseNFactorize('')).toEqual({ ok: true, value: null });
+  });
+
+  it.each(['0', '101', '-5', '2.5', '1e2', 'abc', '+5'])(
+    'refuses %s and names the range',
+    (text) => {
+      const parsed = parseNFactorize(text);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toMatch(/1 to 100/);
+    },
+  );
+});
+
+describe('nkIgnores', () => {
+  it('is true only for Newton-Krylov', () => {
+    expect(nkIgnores('NK')).toBe(true);
+    expect(nkIgnores('NR')).toBe(false);
+    expect(nkIgnores('dishonest')).toBe(false);
+    expect(nkIgnores(null)).toBe(false);
+  });
+});
+
+describe('dcIgnores', () => {
+  it('is true for the two DC methods and nothing else', () => {
+    expect(dcIgnores('dc')).toBe(true);
+    expect(dcIgnores('ptdf-dc')).toBe(true);
+    expect(dcIgnores('NR')).toBe(false);
+    expect(dcIgnores('NK')).toBe(false);
+    expect(dcIgnores('ac')).toBe(false);
+    expect(dcIgnores(null)).toBe(false);
+  });
+});
+
 describe('formatTolerance', () => {
   it('writes a tolerance the way a person does', () => {
     expect(formatTolerance(1e-6)).toBe('1e-6');
@@ -169,6 +270,83 @@ describe('describeSettings', () => {
     expect(
       describeSettings({ ...PLAIN, flat_start: true, enforce_q_limits: true, max_iterations: 50 }),
     ).toBe('tolerance 1e-6, up to 50 iterations, flat start, Q limits enforced');
+  });
+
+  it('names the solver when it was not NR, and the dishonest refactorisation count', () => {
+    expect(
+      describeSettings({ ...PLAIN, method: 'dishonest', n_factorize: 10, linesearch: true }),
+    ).toBe(
+      'tolerance 1e-6, up to 25 iterations, dishonest method, refactorizing the first 10 iterations',
+    );
+    expect(describeSettings({ ...PLAIN, method: 'NR', n_factorize: 4, linesearch: false })).toBe(
+      'tolerance 1e-6, up to 25 iterations, line search off',
+    );
+  });
+
+  it('under Newton-Krylov names only the method and what still applies', () => {
+    expect(describeSettings({ ...PLAIN, method: 'NK', n_factorize: 4, linesearch: true })).toBe(
+      "Newton-Krylov (SciPy's own stopping rule)",
+    );
+    expect(
+      describeSettings({
+        ...PLAIN,
+        method: 'NK',
+        flat_start: true,
+        enforce_q_limits: true,
+        linesearch: false,
+      }),
+    ).toBe("Newton-Krylov (SciPy's own stopping rule), flat start, Q limits enforced");
+  });
+
+  it('says nothing of the solver from a server that did not report it', () => {
+    expect(describeSettings({ ...PLAIN, method: null, n_factorize: null, linesearch: null })).toBe(
+      'tolerance 1e-6, up to 25 iterations',
+    );
+    expect(
+      describeSettings({
+        ...PLAIN,
+        method: undefined,
+        n_factorize: undefined,
+        linesearch: undefined,
+      }),
+    ).toBe('tolerance 1e-6, up to 25 iterations');
+    // PLAIN is what an older server sends: the three keys absent.
+    expect(describeSettings(PLAIN)).not.toMatch(/undefined|null/);
+  });
+
+  it('names a DC method as a direct solve, and never a tolerance or a limit', () => {
+    // The server reports 0.0 and 0 for the two settings a DC solve does not read.
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(describeSettings(dc)).toBe('DC power flow (direct solve)');
+    expect(describeSettings({ ...dc, method: 'ptdf-dc' })).toBe(
+      'DC power flow from the PTDF matrix (direct solve)',
+    );
+    expect(describeSettings({ ...dc, flat_start: true, enforce_q_limits: true })).toBe(
+      'DC power flow (direct solve), flat start, Q limits enforced',
+    );
+    expect(describeSettings(dc)).not.toMatch(/tolerance|iteration/);
+  });
+
+  it('under Newton-Krylov never names a tolerance or a limit, whatever the server echoed', () => {
+    const line = describeSettings({
+      tolerance: 1e-4,
+      max_iterations: 50,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'NK',
+      n_factorize: 4,
+      linesearch: false,
+    });
+    expect(line).toBe("Newton-Krylov (SciPy's own stopping rule)");
+    expect(line).not.toMatch(/tolerance|iteration|line search/);
   });
 });
 
@@ -202,6 +380,132 @@ describe('nonDefaultSettings and pflowSuccessMessage', () => {
       }),
     ).toBe('PF converged in 9 iterations (flat start, tolerance 1e-4, up to 50 iterations).');
   });
+
+  it('name the solver when it was not NR, and never a tolerance or limit under Newton-Krylov', () => {
+    // Newton-Krylov keeps no count (the server reports 0): the toast names the
+    // method instead of "0 iterations".
+    expect(
+      pflowSuccessMessage({
+        iterations: 0,
+        settings: { ...PLAIN, method: 'NK', n_factorize: 4, linesearch: true },
+      }),
+    ).toBe('PF converged by Newton-Krylov.');
+    expect(
+      pflowSuccessMessage({
+        iterations: 5,
+        settings: { ...PLAIN, method: 'NR', n_factorize: 4, linesearch: false },
+      }),
+    ).toBe('PF converged in 5 iterations (line search off).');
+    expect(
+      pflowSuccessMessage({
+        iterations: 0,
+        settings: {
+          tolerance: 1e-4,
+          max_iterations: 50,
+          flat_start: true,
+          enforce_q_limits: false,
+          method: 'NK',
+          n_factorize: 4,
+          linesearch: false,
+        },
+      }),
+    ).toBe('PF converged by Newton-Krylov (flat start).');
+    expect(
+      nonDefaultSettings({
+        tolerance: 1e-4,
+        max_iterations: 50,
+        flat_start: false,
+        enforce_q_limits: true,
+        method: 'NK',
+        n_factorize: 10,
+        linesearch: false,
+      }),
+    ).toEqual(['Q limits enforced', 'Newton-Krylov']);
+    expect(
+      pflowSuccessMessage({
+        iterations: 6,
+        settings: { ...PLAIN, method: 'dishonest', n_factorize: 10, linesearch: true },
+      }),
+    ).toBe(
+      'PF converged in 6 iterations (dishonest method, refactorizing the first 10 iterations).',
+    );
+    expect(
+      nonDefaultSettings({ ...PLAIN, method: null, n_factorize: null, linesearch: null }),
+    ).toEqual([]);
+    // An older server leaves the three out altogether.
+    expect(
+      nonDefaultSettings({
+        ...PLAIN,
+        method: undefined,
+        n_factorize: undefined,
+        linesearch: undefined,
+      }),
+    ).toEqual([]);
+    expect(
+      nonDefaultSettings({ ...PLAIN, method: 'dishonest', n_factorize: 4, linesearch: true }),
+    ).toEqual(['dishonest method']);
+  });
+
+  it('name a DC method and never a tolerance or a limit, and the toast does not name it twice', () => {
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(nonDefaultSettings(dc)).toEqual(['DC power flow']);
+    expect(nonDefaultSettings({ ...dc, method: 'ptdf-dc' })).toEqual(['DC power flow (PTDF)']);
+    expect(nonDefaultSettings({ ...dc, enforce_q_limits: true })).toEqual([
+      'Q limits enforced',
+      'DC power flow',
+    ]);
+    expect(nonDefaultSettings({ ...dc, flat_start: true })).toEqual([
+      'flat start',
+      'DC power flow',
+    ]);
+    expect(pflowSuccessMessage({ iterations: 0, settings: dc })).toBe(
+      'PF converged by direct solve.',
+    );
+    expect(pflowSuccessMessage({ iterations: 0, settings: { ...dc, flat_start: true } })).toBe(
+      'PF converged by direct solve (flat start).',
+    );
+  });
+});
+
+describe('iterationsPhrase', () => {
+  it('gives the count, or names Newton-Krylov, which keeps none', () => {
+    expect(iterationsPhrase({ iterations: 5, settings: PLAIN })).toBe('in 5 iterations');
+    expect(iterationsPhrase({ iterations: 5 })).toBe('in 5 iterations');
+    expect(iterationsPhrase({ iterations: 5, settings: null })).toBe('in 5 iterations');
+    expect(iterationsPhrase({ iterations: 0, settings: { ...PLAIN, method: 'NK' } })).toBe(
+      'by Newton-Krylov',
+    );
+    expect(iterationsPhrase({ iterations: 7, settings: { ...PLAIN, method: 'dishonest' } })).toBe(
+      'in 7 iterations',
+    );
+  });
+
+  it('names a direct solve for a DC method, whose 0 iterations would read as a failure', () => {
+    const dc: PflowSettings = {
+      tolerance: 0,
+      max_iterations: 0,
+      flat_start: false,
+      enforce_q_limits: false,
+      method: 'dc',
+      n_factorize: 1,
+      linesearch: false,
+    };
+    expect(iterationsPhrase({ iterations: 0, settings: dc })).toBe('by direct solve');
+    expect(iterationsPhrase({ iterations: 0, settings: { ...dc, method: 'ptdf-dc' } })).toBe(
+      'by direct solve',
+    );
+    expect(iterationsPhrase({ iterations: 0, settings: { ...dc, method: 'ac' } })).toBe(
+      'in 0 iterations',
+    );
+  });
 });
 
 describe('settingsOrAssumed', () => {
@@ -215,6 +519,9 @@ describe('settingsOrAssumed', () => {
       max_iterations: ANDES_PFLOW_DEFAULTS.maxIterations,
       flat_start: false,
       enforce_q_limits: false,
+      method: 'NR',
+      n_factorize: 4,
+      linesearch: true,
     });
     expect(
       settingsOrAssumed(undefined, {
@@ -222,8 +529,19 @@ describe('settingsOrAssumed', () => {
         maxIterations: 10,
         flatStart: true,
         enforceQLimits: true,
+        method: 'NK',
+        nFactorize: 20,
+        linesearch: false,
       }),
-    ).toEqual({ tolerance: 1e-3, max_iterations: 10, flat_start: true, enforce_q_limits: true });
+    ).toEqual({
+      tolerance: 1e-3,
+      max_iterations: 10,
+      flat_start: true,
+      enforce_q_limits: true,
+      method: 'NK',
+      n_factorize: 20,
+      linesearch: false,
+    });
   });
 });
 

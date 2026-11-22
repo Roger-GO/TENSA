@@ -84,6 +84,16 @@ mcp = [
 desktop = [
     "pywebview>=5,<7",
 ]
+# The Sienna engine (embedded Julia through juliacall). Julia itself and the Sienna
+# packages are not pip packages: install Julia, then `tensa warm-cache --engine sienna`
+# installs the packages into the project folder. juliacall is pinned to one release
+# because each release asks for the PythonCall of its own version exactly (the
+# "=<version>" of its juliapkg.json), and the worker starts it offline on the
+# PythonCall the shipped Manifest holds (engines/sienna/envs/dyn); the two move
+# together, by hand.
+sienna = [
+    "juliacall==0.9.37",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
@@ -196,7 +206,10 @@ files = ["src"]
 # tests), and the module imports from whichever of its majors is installed, so the
 # modules of the other one are always unresolved. ``webview`` (pywebview, for ``tensa
 # desktop``) is optional too, and ``[dev]`` does not install it, so its import is
-# unresolved under the default CI type-check.
+# unresolved under the default CI type-check. ``juliacall`` (the Sienna engine's
+# embedded Julia, imported only inside ``engines/sienna/bridge.py``) ships no stubs
+# and is not installed by ``[dev]`` either, so one override covers it whether it is
+# installed or not.
 module = [
     "andes",
     "andes.*",
@@ -209,6 +222,8 @@ module = [
     "mcp.*",
     "webview",
     "webview.*",
+    "juliacall",
+    "juliacall.*",
 ]
 ignore_missing_imports = true
 
@@ -229,6 +244,7 @@ markers = [
     "acceptance: end-to-end acceptance tests (require running server + ANDES)",
     "integration: tests that spawn subprocesses or hit ANDES",
     "smoke: cross-platform smoke test, run on every OS in the CI matrix (pytest -m smoke)",
+    "sienna: tests that start the real Julia runtime of the Sienna engine",
     "unit: pure-unit tests with no I/O",
 ]
 addopts = [

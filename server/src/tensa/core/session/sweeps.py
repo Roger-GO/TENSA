@@ -12,7 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from tensa.core.errors import WorkerDiedError
+from tensa.core.errors import EngineUnsupportedError, WorkerDiedError
 from tensa.core.jobs import JobKind
 from tensa.core.session.base import _Session
 from tensa.core.session.buffers import SweepState, _SweepBuffer
@@ -30,6 +30,7 @@ from tensa.core.sweep_pool import (
     SweepWorkersLostError,
     SweepWorkersUnavailableError,
 )
+from tensa.engines.ops import ENGINE_OPS, engines_with_op
 
 log = logging.getLogger("tensa.session")
 
@@ -77,6 +78,10 @@ class SweepsMixin(RegistryMixin):
                 iter_done=sess.sweep_iter_done,
                 iter_total=sess.sweep_iter_total,
             )
+        # The sweep runs in the background, where a worker's refusal would only
+        # fail it after it was accepted: refuse it here for an engine without it.
+        if "run_sweep" not in ENGINE_OPS[sess.engine]:
+            raise EngineUnsupportedError("run_sweep", sess.engine, engines_with_op("run_sweep"))
 
         sweep_id = uuid.uuid4().hex
         values_raw = sweep_args.get("values")

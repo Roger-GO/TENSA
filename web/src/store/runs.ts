@@ -65,6 +65,7 @@
  * that was still streaming when the page was left is not kept.
  */
 import { create } from 'zustand';
+import type { KeyEntrySchema } from '@/api/queries/compare';
 import type { UnitBases } from '@/lib/units';
 
 /** Run lifecycle state (mirrors plan: starting → streaming → done/error/aborted). */
@@ -170,6 +171,17 @@ export interface RunRecord {
    * the run across a reload.
    */
   colorOverride?: string;
+  /**
+   * The engine the run was computed with, recorded when the run started.
+   * Absent on a run kept before engines were recorded.
+   */
+  engine?: string;
+  /**
+   * The session's key listing as ``GET /sessions/{id}/keys`` answered it,
+   * recorded when the run started, so a later comparison can send it back
+   * with the run's traces. Absent on a run kept before keys were recorded.
+   */
+  keys?: KeyEntrySchema[];
 }
 
 /** Default initial capacity for typed arrays (one row each on first append). */
@@ -395,6 +407,13 @@ export interface RunsState {
    * run id is unknown.
    */
   setRunColorOverride: (runId: string, color: string | null) => void;
+
+  /**
+   * Record the engine and the session's key listing on a run that just
+   * started, so a later comparison can build its results document. No-op
+   * when the run id is unknown.
+   */
+  setRunIdentity: (runId: string, engine: string, keys: KeyEntrySchema[]) => void;
 }
 
 // ---- internal helpers -----------------------------------------------------
@@ -914,6 +933,17 @@ export const useRunsStore = create<RunsState>((set, get) => ({
       runs: {
         ...get().runs,
         [runId]: nextRecord,
+      },
+    });
+  },
+
+  setRunIdentity: (runId, engine, keys) => {
+    const cur = get().runs[runId];
+    if (!cur) return;
+    set({
+      runs: {
+        ...get().runs,
+        [runId]: { ...cur, engine, keys },
       },
     });
   },

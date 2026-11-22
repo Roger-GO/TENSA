@@ -42,7 +42,7 @@ Wire protocol on the control Pipe (parent → worker):
 
     {"op": "load_case", "args": {"path": ..., "addfiles": [...]}, "seq": N}
     {"op": "add_disturbance", "args": {"spec": <dict>}, "seq": N}
-    {"op": "run_pflow", "args": {"tolerance": ..., "max_iterations": ..., "flat_start": ..., "enforce_q_limits": ...}, "seq": N}
+    {"op": "run_pflow", "args": {"tolerance": ..., "max_iterations": ..., "flat_start": ..., "enforce_q_limits": ..., "method": ..., "n_factorize": ..., "linesearch": ...}, "seq": N}
     {"op": "run_tds", "args": {"tf": ..., "h": ...}, "seq": N}
     {"op": "reload_case", "args": {}, "seq": N}
     {"op": "topology", "args": {}, "seq": N}
@@ -83,7 +83,9 @@ from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from tensa.core.errors import (
     AndesAppError,
     DisturbanceCommitError,
+    EigComputationError,
     ElementHasDependentsError,
+    EngineUnsupportedError,
     NoCaseLoadedError,
     TdsRequestError,
     short_repr,
@@ -96,6 +98,7 @@ from tensa.core.messages import (
     uninstall_capture,
 )
 from tensa.core.pflow_notices import log_pflow_notices
+from tensa.core.session_dirs import proc_stat_path
 
 # AndesAppError catches the new ElementValidationError /
 # ElementNotFoundError / SystemAlreadyLoadedError subclasses and forwards
@@ -104,22 +107,30 @@ from tensa.core.pflow_notices import log_pflow_notices
 from tensa.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,
-    StreamAggregator,
     StreamCollector,
-    StreamRow,
     TraceRecorder,
     VarGroup,
     bus_idx_values_from_system,
-    encode_batch,
     line_idx_values_from_system,
     pq_idx_values_from_system,
+    run_tds_stream,
     syngen_idx_values_from_system,
     var_column_names,
 )
+from tensa.core.tds_controllers import ControllerBank, parse_controllers
 from tensa.core.tds_controllers import log_notices as log_controller_notices
-from tensa.core.tds_controllers import parse_controllers
 from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
+from tensa.core.wrapper.tds import validate_integrator
+from tensa.engines import frames
+from tensa.engines.base import EngineRuntime, TdsStreamPlan
+from tensa.engines.ops import ENGINE_OPS, engines_with_op
+from tensa.engines.registry import load_runtime
+from tensa.engines.series_names import (
+    build_name,
+    neutral_name_andes,
+    state_name_andes,
+)
 
 
 def _set_parent_death_signal() -> None:
@@ -236,20 +247,25 @@ def _warm_andes() -> None:
             importlib.import_module(name)
 
 
-def _warm_up_if_idle(ctrl: Connection) -> None:
-    """Run :func:`_warm_andes`, unless a command is already waiting.
+def _warm_up_if_idle(ctrl: Connection, warm_up: Callable[[], None]) -> float | None:
+    """Run the engine's warm-up, unless a command is already waiting.
 
     A command that arrives before the worker is up (a script that creates a
     session and loads a case at once) pulls in what it needs itself, and a warm-up
     first would only delay it. Called before the first ``recv``, so a command
-    that arrives during the warm-up waits for it, at most a second.
+    that arrives during the warm-up waits for it. A worker warms up only its own
+    engine, and at most once.
+
+    Returns the seconds the warm-up took, or ``None`` when it did not run.
     """
     try:
         if ctrl.poll(0):
-            return
+            return None
     except (EOFError, OSError):
-        return
-    _warm_andes()
+        return None
+    started = time.monotonic()
+    warm_up()
+    return time.monotonic() - started
 
 
 def _normalized_path(path: str) -> str:
@@ -321,11 +337,31 @@ def _routine_files(*directories: str) -> frozenset[str]:
     anything asks for a type, which ``openpyxl`` does, and ``dateutil`` reads the local time
     zone from ``/etc/localtime``. None of them reads anything of a case. Each of
     ``directories`` is itself one too (not what is in it): ``NamedTemporaryFile`` opens the
-    temporary directory it makes its file in, on every platform.
+    temporary directory it makes its file in, on every platform. The installer also passes
+    the files of ``_owner_marker_files`` here: each name is one exact path, never a tree.
     """
     local_time = () if os.name == "nt" else ("/etc/localtime",)
     names = (os.devnull, *getattr(mimetypes, "knownfiles", ()), *local_time, *directories)
     return frozenset(_normalized_path(name) for name in names)
+
+
+def _owner_marker_files(owner_pid: int | None, platform: str | None = None) -> tuple[str, ...]:
+    """The files outside the workspace that writing the session's owner marker reads, as
+    ``write_owner_marker`` (``core/session_dirs.py``) reads them in this worker.
+
+    The marker records when its owner started, which on Linux is a field of
+    ``/proc/<pid>/stat`` (``process_start_time``), so that a later server can tell a reused
+    pid. A Sienna state writes the marker on every load and an ANDES worker's clone manager
+    when it makes its scratch folder. The pid is the one the marker names: ``owner_pid``,
+    the server's, as the worker was handed it, or the worker's own when it was handed none,
+    which is the marker code's own default. Only that pid's ``stat``, never ``/proc`` as a
+    whole: another process's file there (its ``environ``, its memory) is no part of it.
+    Other systems read no file for it (Windows asks the kernel, macOS does not record it).
+    """
+    if not (platform or sys.platform).startswith("linux"):
+        return ()
+    pid = os.getpid() if owner_pid is None else owner_pid
+    return (proc_stat_path(pid),)
 
 
 def _routine_trees() -> tuple[str, ...]:
@@ -421,7 +457,9 @@ def _out_of_workspace_open(
     return real
 
 
-def _install_strict_fs_audit_hook(workspace: str | None) -> None:
+def _install_strict_fs_audit_hook(
+    workspace: str | None, engine: str = "andes", owner_pid: int | None = None
+) -> None:
     """Install a Python ``sys.audit`` hook (PEP 578, Python 3.8+) that logs
     file opens occurring outside the configured workspace.
 
@@ -430,6 +468,15 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     read of anything else still shows. A worker has no log handler of its own beyond
     Python's default, which prints warnings, so the debug lines are for a developer who
     configures one.
+
+    ``engine`` names the engine the session runs. A Sienna worker's Julia
+    opens ``lock.pid`` and ``pyjuliapkg/meta.json`` in the Sienna project
+    folder when it starts, which is outside the workspace and routine for
+    that engine, so the project folder is a routine tree then and only then.
+
+    ``owner_pid`` is the pid the worker was handed for the owner marker of its
+    scratch folders; on Linux the marker reads that pid's ``/proc/<pid>/stat``
+    (``_owner_marker_files``), which is routine for every engine.
 
     Best-effort only — the hook fires for ``open()`` events that travel
     through the Python interpreter. Reads from C extensions
@@ -449,11 +496,16 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
     # The standard library finds the temporary directory by creating a file with a random
     # name in a candidate directory the first time it is asked, which is an open outside the
     # workspace that ``tempfile`` does not announce. It is asked here, before the hook is in.
+    marker_files = _owner_marker_files(owner_pid)
     try:
-        routine_files = _routine_files(tempfile.gettempdir())
+        routine_files = _routine_files(tempfile.gettempdir(), *marker_files)
     except OSError:  # no usable temporary directory: nothing is made in one
-        routine_files = _routine_files()
+        routine_files = _routine_files(*marker_files)
     routine_trees = _routine_trees()
+    if engine == "sienna":
+        from tensa.engines.sienna.environment import sienna_project
+
+        routine_trees = (*routine_trees, _normalized_path(str(sienna_project())))
 
     def _hook(event: str, args: tuple[Any, ...]) -> None:
         if event != "open":
@@ -471,6 +523,21 @@ def _install_strict_fs_audit_hook(workspace: str | None) -> None:
             log.warning("strict-fs: out-of-workspace open: %s", real)
 
     sys.addaudithook(_hook)
+
+
+def _run_eig_andes(wrapper: Any, args: dict[str, Any]) -> Any:
+    """The ANDES ``run_eig`` handler: ``EIG.run()`` takes no public arguments,
+    so a ``load_model`` that is not ``None`` is refused as an option the ANDES
+    engine does not have (it converts loads to constant impedance for the
+    analysis, which is what ``impedance`` asks for; the other two it cannot
+    do)."""
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise EigComputationError(
+            "the ANDES engine converts loads to constant impedance for the "
+            f"eigenvalue analysis; load_model {load_model} is not available with it"
+        )
+    return wrapper.run_eig()
 
 
 def _serialize_dataclass(obj: Any) -> Any:
@@ -520,8 +587,52 @@ def _handle_topology(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.topology_snapshot())
 
 
+def _handle_list_keys(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The keys of the loaded case's elements, in assignment order, with the
+    problems the assignment noted. A listing is a read: with no case loaded the
+    truthful answer is empty lists."""
+    try:
+        book = wrapper.keys()
+    except NoCaseLoadedError:
+        return {"keys": [], "problems": []}
+    return {
+        "keys": [
+            {
+                "key": entry.key,
+                "bucket": entry.bucket,
+                "model": entry.model,
+                "idx": entry.idx,
+                "source": entry.source,
+            }
+            for entry in book.entries()
+        ],
+        "problems": list(book.problems),
+    }
+
+
 def _handle_operating_point(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.operating_point())
+
+
+def _handle_fidelity(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The fidelity entries of the loaded case: none. ANDES is the reference
+    engine for every model it holds (spec section 8), and its reader reports no
+    record it left out, so nothing of an ANDES case is other than exact. The
+    case must be loaded: with none the wrapper's :class:`NoCaseLoadedError`
+    propagates, as the ``topology`` op's does."""
+    from tensa.engines.fidelity import fidelity_entries
+
+    wrapper.topology_snapshot()
+    return fidelity_entries("andes", [], [])
+
+
+def _handle_case_document(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The neutral case document of the loaded case (spec section 5). With no
+    case loaded the wrapper's :class:`NoCaseLoadedError` propagates, as the
+    ``topology`` op's does."""
+    from tensa.engines.andes.case_doc import build_case_document
+
+    return build_case_document(wrapper).model_dump(mode="json", by_alias=True)
 
 
 def _handle_add_disturbance(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -573,17 +684,24 @@ def _handle_create_blank(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 def _handle_save_case(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     from tensa.core.layout import carry_layout_sidecar
+    from tensa.core.matpower_writer import bus_numbers
 
     path = wrapper.save_case(args["format"], args["filename"])
     # A case saved under a new name opens with the diagram the open one has.
     # (A client that shows the diagram writes its current layout afterwards;
-    # this is what a save through the API alone gets.) A ``.raw`` file keeps no
-    # idx, so the system read back from it is numbered afresh.
-    carry_layout_sidecar(
-        wrapper._case_path,  # noqa: SLF001
-        path,
-        renumbered=args["format"] == "raw",
-    )
+    # this is what a save through the API alone gets.) A ``.raw`` or ``.m``
+    # file keeps no device idx, so the system read back from it is numbered
+    # afresh. A ``.m`` whose buses were numbered afresh as well (a bus idx that
+    # is not a positive integer) keeps nothing a layout could be matched by, so
+    # a copy gets none, and a stale one beside it is removed.
+    source = wrapper._case_path  # noqa: SLF001
+    if (
+        args["format"] == "m"
+        and bus_numbers(wrapper._require_loaded())[1]  # noqa: SLF001
+        and not wrapper._is_open_case_file(path)  # noqa: SLF001
+    ):
+        source = None
+    carry_layout_sidecar(source, path, renumbered=args["format"] in ("raw", "m"))
     return str(path)
 
 
@@ -609,6 +727,20 @@ def _handle_delete_element(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
 def _handle_alterable_params(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return list(wrapper.alterable_params(args["model"]))
+
+
+def _handle_supported_models(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Every model ANDES ships, grouped as ANDES groups them. A read that needs
+    no case: the wrapper builds a fresh System of its own for it."""
+    return {"groups": wrapper.supported_models()}
+
+
+def _handle_model_doc(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """ANDES's documentation text for one model. ``ModelDocError`` (a name
+    that is no model) and ``ModelDocUnavailableError`` reach the route as the
+    other wrapper errors do."""
+    model = str(args["model"])
+    return {"model": model, "doc": wrapper.model_doc(model)}
 
 
 # ---- clone-on-write (Unit 21) ----------------------------------------------
@@ -649,7 +781,15 @@ def _handle_run_pflow(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     # value out of range, so the worker does not rely on the REST body's checks.
     options = {
         key: args[key]
-        for key in ("tolerance", "max_iterations", "flat_start", "enforce_q_limits")
+        for key in (
+            "tolerance",
+            "max_iterations",
+            "flat_start",
+            "enforce_q_limits",
+            "method",
+            "n_factorize",
+            "linesearch",
+        )
         if args.get(key) is not None
     }
     result = wrapper.run_pflow(**options)
@@ -713,8 +853,38 @@ def _handle_run_eig(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     Returns the serialized :class:`EigResult` dict (eigenvalues split
     into ``{real, imag}`` pairs, damping ratios, frequencies, mode
     count, state names, ``tds_initialized`` flag).
+
+    ANDES's ``EIG.run()`` takes no public arguments, so a ``load_model``
+    that is not ``None`` and not ``impedance`` is refused as an option the
+    ANDES engine does not have: it converts loads to constant impedance
+    for the analysis, which is what ``impedance`` asks for, and the other
+    two it cannot do.
     """
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise EigComputationError(
+            "the ANDES engine converts loads to constant impedance for the "
+            f"eigenvalue analysis; load_model {load_model} is not available with it"
+        )
     return _serialize_dataclass(wrapper.run_eig())
+
+
+def _handle_run_eig_sweep(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.run_eig_sweep``: the eigenvalues at each value of one
+    parameter of one device, each on a System of its own.
+
+    Returns the serialized :class:`EigSweepResult` dict. The wrapper validates
+    the target and the values; the worker does not rely on the REST body's
+    checks.
+    """
+    return _serialize_dataclass(
+        wrapper.run_eig_sweep(
+            model=args["model"],
+            idx=args["idx"],
+            param=args["param"],
+            values=args["values"],
+        )
+    )
 
 
 def _handle_eig_participation(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -736,9 +906,10 @@ def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
 
     Forwards ``direction`` / ``step`` / ``max_iter`` and the settings of
     :mod:`tensa.core.cpf_options` (``load_increase``,
-    ``generator_increase``, ``enforce_q_limits``, ``stop_at``) from the
-    request body as they are; ``run_cpf`` checks them. Returns a
-    serialized :class:`CpfResult` dict.
+    ``generator_increase``, ``enforce_q_limits``, ``stop_at``,
+    ``parameterization``, ``tol``, ``corrector_max_iter``, ``step_min``,
+    ``step_max``) from the request body as they are; ``run_cpf`` checks
+    them. Returns a serialized :class:`CpfResult` dict.
     """
     return _serialize_dataclass(
         wrapper.run_cpf(
@@ -749,6 +920,11 @@ def _handle_run_cpf(wrapper: Wrapper, args: dict[str, Any]) -> Any:
             generator_increase=args.get("generator_increase"),
             enforce_q_limits=args.get("enforce_q_limits"),
             stop_at=args.get("stop_at", "nose"),
+            parameterization=args.get("parameterization"),
+            tol=args.get("tol"),
+            corrector_max_iter=args.get("corrector_max_iter"),
+            step_min=args.get("step_min"),
+            step_max=args.get("step_max"),
         )
     )
 
@@ -781,6 +957,17 @@ def _handle_compute_connectivity(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.compute_connectivity())
 
 
+def _handle_bus_admittance_matrix(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Wire ``Wrapper.bus_admittance_matrix``.
+
+    Returns the serialized :class:`YbusResult` dict (``n_bus``, ``bus_idx``
+    and the nonzero ``entries`` as ``row`` / ``col`` / ``re`` / ``im``). A
+    computed result, not a listing: with no case loaded the
+    ``NoCaseLoadedError`` propagates like the other case-requiring handlers.
+    """
+    return _serialize_dataclass(wrapper.bus_admittance_matrix())
+
+
 def _handle_generate_measurements_from_pflow(
     wrapper: Wrapper, args: dict[str, Any]
 ) -> Any:
@@ -799,10 +986,19 @@ def _handle_generate_measurements_from_pflow(
 def _handle_run_se(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """Wire ``Wrapper.run_se`` for Unit 13.
 
-    Returns the serialized :class:`SeResult` dict (converged, iterations,
-    mismatch, residuals, measurement_count, flagged_indices).
+    Forwards the per-run options (``algorithm``, ``tol``, ``max_iter``,
+    ``noise_seed``) when the request names them; the wrapper checks them,
+    so the worker does not rely on the REST body's validation. Returns the
+    serialized :class:`SeResult` dict (converged, iterations, mismatch,
+    residuals, measurement_count, flagged_indices, algorithm, settings,
+    chi_squared).
     """
-    return _serialize_dataclass(wrapper.run_se())
+    options = {
+        key: args[key]
+        for key in ("algorithm", "tol", "max_iter", "noise_seed")
+        if args.get(key) is not None
+    }
+    return _serialize_dataclass(wrapper.run_se(**options))
 
 
 def _handle_add_pmu(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -1394,42 +1590,68 @@ def _handle_run_sweep_iteration(
         abort_flag.set()
 
 
-def _handle_run_tds(
-    wrapper: Wrapper,
-    args: dict[str, Any],
-    abort_event: EventType,
-    data_pipe: Connection | None = None,
-    seq: int | None = None,
-) -> Any:
-    """Run TDS in batch or streaming mode.
+@dataclasses.dataclass(frozen=True)
+class _AndesStreamPrep:
+    """What a streaming ANDES run is made of, worked out before anything is sent.
 
-    Streaming mode is selected by ``args["stream"] == True``. When streaming,
-    each per-step state snapshot is encoded as an Arrow IPC batch and sent on
-    the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
-    <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
-    ``{"type": "stream_start", ...}`` message carrying the column names, which
-    the frames leave out (see ``tensa.core.stream`` for the frame layout).
-    The final ``{"type": "result", ...}`` message lands as usual at end of run.
+    ``plan`` is what the engine-neutral driver streams from; the handler keeps
+    the rest (the controllers, the clock, the request's checked values) for the
+    run itself and for the payload afterwards. ``names`` is the request's
+    naming mode, ``"engine"`` or ``"neutral"`` (spec section 6.5).
     """
-    # Everything the run would refuse for reasons known from the request and the
-    # System's state is checked here, before any stream metadata goes out and
-    # before the abort bridge starts: a refused run must not start a stream the
-    # client then sees fail, nor leave a bridge thread polling (a refusal sets
-    # no ``abort_flag``). The route layers validate ``h`` and the integrator
-    # too; the worker does not rely on that.
+
+    plan: TdsStreamPlan
+    controllers: ControllerBank | None
+    clock: StepClock
+    h: float | None
+    integrator_raw: Any
+    tds_config_overrides: dict[str, float] | None
+    dae_names: list[str]
+    names: str
+    decimation: str
+    max_rate_hz: float | None
+    fixed_step: bool
+    # The row of the step the run ended on, which no call of the hook saw.
+    final_row: Callable[[], tuple[float, Any] | None]
+
+
+def _check_names_arg(args: dict[str, Any]) -> str:
+    """The request's ``names`` mode, ``"engine"`` (the default) or ``"neutral"``.
+
+    The route layers hold the field to the two values; the worker does not rely
+    on that, whoever sent the frame.
+    """
+    names_raw = args.get("names")
+    if names_raw is None:
+        return "engine"
+    if names_raw not in ("engine", "neutral"):
+        raise TdsRequestError(
+            f"unknown names mode {short_repr(names_raw)}; expected 'engine' or 'neutral'"
+        )
+    return str(names_raw)
+
+
+def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStreamPrep:
+    """The ANDES engine's column plan for one streaming run: the groups' and
+    ``dae_vars``' columns of the loaded System, and a ``collect`` that reads the
+    step's values off the System under ``stored_step``.
+
+    Everything the run would refuse for reasons known from the request and the
+    System's state is checked here, before any stream metadata goes out and
+    before the abort bridge starts: the step size, the integrator and overrides
+    (``Wrapper.check_tds_request``), the ``dae_vars`` names against the case,
+    the controllers against their devices, the ``vars`` selector, and, with
+    ``names: "neutral"``, that every column has a neutral name. A refusal
+    raises before the driver sends anything.
+    """
     h = validate_step_size(args.get("h"))
 
     # Unit 16: integrator selection + adaptive-tolerance overrides.
     # ``integrator`` defaults to ``"trapezoidal"`` so a caller that names
     # none (the REST route and the WS ``start_tds`` frame both pass it on
-    # when given) sees no behaviour change. Validation of the literal value
-    # lives in the wrapper; we only normalise the wire shape here.
-    integrator_raw = args.get("integrator", "trapezoidal")
-    if integrator_raw not in ("trapezoidal", "qndf"):
-        raise AndesAppError(
-            f"unknown integrator {integrator_raw!r}; "
-            "expected 'trapezoidal' or 'qndf'"
-        )
+    # when given) sees no behaviour change. The value is held to the literal
+    # the REST body takes, here as in the wrapper, whoever sent it.
+    integrator_raw = validate_integrator(args.get("integrator", "trapezoidal"))
 
     overrides_raw = args.get("tds_config_overrides")
     tds_config_overrides: dict[str, float] | None = None
@@ -1438,7 +1660,7 @@ def _handle_run_tds(
             raise AndesAppError(
                 "'tds_config_overrides' must be a dict of "
                 "{string → float}; keys are canonical aliases "
-                "(rtol/atol/max_step) or real ss.TDS.config field names"
+                "(rtol/atol/max_step/min_step) or real ss.TDS.config field names"
             )
         coerced: dict[str, float] = {}
         for key, value in overrides_raw.items():
@@ -1474,169 +1696,448 @@ def _handle_run_tds(
     # is refused like a bad variable name, before a stream starts.
     controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
 
-    abort_flag = threading.Event()
-    if abort_event.is_set():
-        abort_flag.set()
+    # Decimation config (validated at the WS layer; defaults match the
+    # current behavior of "every step is its own one-row batch").
+    decimation_raw = args.get("decimation") or "none"
+    if decimation_raw not in ("none", "mean"):
+        raise AndesAppError(
+            f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
+        )
+    max_rate_hz_raw = args.get("max_rate_hz")
+    max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
 
+    # ``vars`` selects which variable groups appear in each Arrow batch.
+    # The WS layer validates the literal set and rejects empty lists; the
+    # worker still defends against missing/empty input (other code paths
+    # may invoke streaming without the WS layer in tests).
+    vars_raw = args.get("vars")
+    if vars_raw is None:
+        var_groups: list[VarGroup] = list(DEFAULT_VARS)
+    elif isinstance(vars_raw, list) and all(
+        isinstance(v, str) for v in vars_raw
+    ):
+        unknown = [v for v in vars_raw if v not in VAR_GROUPS]
+        if unknown:
+            raise AndesAppError(
+                f"unknown var group(s): {unknown!r}; expected one of "
+                f"{list(VAR_GROUPS)!r}"
+            )
+        if not vars_raw and not dae_names:
+            raise AndesAppError(
+                "'vars' must be a non-empty list when provided"
+            )
+        # Dedupe while preserving canonical ordering (``var_column_names``
+        # also iterates VAR_GROUPS canonically, but normalize here so the
+        # metadata's ``vars`` list is stable too).
+        seen: set[str] = set()
+        var_groups = []
+        for g in VAR_GROUPS:
+            if g in vars_raw and g not in seen:
+                var_groups.append(g)
+                seen.add(g)
+    else:
+        raise AndesAppError(
+            "'vars' must be a list of variable-group names"
+        )
+
+    # Resolve the System ONCE (after load); we need its Bus model to list
+    # the columns. If the wrapper has no System loaded the run will fail
+    # later — surface the same error path as before.
+    ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
+    # Ensure setup so Bus.v exists; the wrapper would do this anyway when
+    # run_tds runs PF first.
+    wrapper._ensure_setup()  # noqa: SLF001
+    if not bool(getattr(ss.PFlow, "converged", False)):
+        ss.PFlow.run()
+
+    # Whether the run steps at a fixed size, so the algorithm label can be
+    # honest: boxcar mean over adaptive-step samples is best-effort. Read
+    # from the request, not from ``ss.TDS.config.fixt``, which ``run_tds``
+    # has not set yet and which still holds an earlier run's value.
+    fixed_step = tds_fixed_step(integrator_raw, tds_config_overrides)
+
+    # Snapshot the topology ONCE per run so each callpert tick only reads
+    # values: the collector resolves where each one lives now, and the
+    # column names list the same devices, so column order and value order
+    # line up.
+    bus_idx_values = bus_idx_values_from_system(ss)
+    syngen_idx_values = syngen_idx_values_from_system(ss)
+    line_idx_values = line_idx_values_from_system(ss)
+    pq_idx_values = pq_idx_values_from_system(ss)
+    var_columns = var_column_names(var_groups, ss, dae_names)
+    collector = StreamCollector(ss, var_groups, dae_names)
+
+    # The request's naming mode (spec section 6.5): ``engine`` is the columns
+    # as ANDES names them, byte for byte what the stream always sent;
+    # ``neutral`` renames every column ``<quantity>|<key>`` and adds the two
+    # relative quantities as extra columns after the renamed ones.
+    names = _check_names_arg(args)
+    rel: _AndesRelFrames | None = None
+    if names == "neutral":
+        var_columns, rel = _neutral_stream_columns(
+            wrapper, ss, var_groups, var_columns, dae_names
+        )
+    # ``"names"`` is reported only when the request carried the field: a
+    # request without it keeps the metadata's keys exactly as they were.
+    names_extra: dict[str, str] = {"names": names} if args.get("names") is not None else {}
+
+    # The hook is called before the step it names is solved, so a row is the
+    # step before, under that step's time (``tensa.core.tds_steps``).
+    clock = StepClock()
+
+    def collect(t: float, values: Any) -> Any:  # noqa: ARG001 - ANDES reads the System
+        solved = clock.hook(t, ss)
+        if solved is None:
+            return None  # no new solved step; the driver skips the row
+        # As ANDES solved the step, not as an event at its time left it, and
+        # under the time of that step.
+        with stored_step(ss, solved):
+            row = collector.collect()
+            if rel is not None:
+                row = rel.append(row)
+            return solved, row
+
+    def final_row() -> tuple[float, Any] | None:
+        last = clock.end(ss)
+        if last is None:
+            return None
+        with stored_step(ss, last):
+            row = collector.collect()
+            if rel is not None:
+                row = rel.append(row)
+            return last, row
+
+    plan = TdsStreamPlan(
+        var_columns=var_columns,
+        # In the order the stream's metadata has always had.
+        metadata_extra={
+            "vars": list(var_groups),
+            "dae_vars": dae_names,
+            "var_columns": var_columns,
+            "bus_idx_values": [str(idx) for idx in bus_idx_values],
+            "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
+            "line_idx_values": [str(idx) for idx in line_idx_values],
+            "pq_idx_values": [str(idx) for idx in pq_idx_values],
+            # Last, and only when the request named a mode: the keys above are
+            # the stream's byte-identity schema, which a request without
+            # ``names`` keeps exactly.
+            **names_extra,
+        },
+        collect=collect,
+    )
+    return _AndesStreamPrep(
+        plan=plan,
+        controllers=controllers,
+        clock=clock,
+        h=h,
+        integrator_raw=integrator_raw,
+        tds_config_overrides=tds_config_overrides,
+        dae_names=dae_names,
+        names=names,
+        decimation=decimation_raw,
+        max_rate_hz=max_rate_hz,
+        fixed_step=fixed_step,
+        final_row=final_row,
+    )
+
+
+def _neutral_stream_columns(
+    wrapper: Wrapper,
+    ss: Any,
+    var_groups: list[VarGroup],
+    var_columns: list[str],
+    dae_names: list[str],
+) -> tuple[list[str], _AndesRelFrames]:
+    """The neutral names of a stream's columns, and the relative frames to add.
+
+    Every column is renamed with ``tensa.engines.series_names``: a group
+    column by ``neutral_name_andes``, a ``dae_vars`` column by
+    ``state_name_andes`` (``state|<key>#<variable>``). A column that has no
+    neutral name (an element the book does not key) raises
+    :class:`TdsRequestError` naming the columns, before the run starts: never
+    a stream with a column silently renamed or dropped.
+
+    The relative quantities follow the renamed columns: ``angle_rel|<bus
+    key>`` for every bus when the ``bus_v`` group is streamed, against the
+    reference bus (the bus of the first ``Slack`` device), and
+    ``rotor_angle_rel|<unit key>`` for every machine when the ``gen_state``
+    group is streamed, weighted by ``H * Sn`` (ANDES's ``M`` is ``2H`` on the
+    machine base ``Sn``, so ``M / 2 * Sn`` is the specification's inertia on a
+    common base).
+    """
+    book = wrapper.keys()
+    renamed: list[str] = []
+    unnamed: list[str] = []
+    for column in var_columns[: len(var_columns) - len(dae_names)]:
+        neutral = neutral_name_andes(column, book)
+        if neutral is None:
+            unnamed.append(column)
+        else:
+            renamed.append(neutral)
+    for name in dae_names:
+        neutral = state_name_andes(name, book)
+        if neutral is None:
+            unnamed.append(name)
+        else:
+            renamed.append(neutral)
+    if unnamed:
+        raise TdsRequestError(
+            f"no neutral name for column(s) {short_repr(unnamed, 80)}: the book "
+            "does not key the element; run with names 'engine' to stream them "
+            "as ANDES names them"
+        )
+
+    bus_angles: tuple[list[str], int] | None = None
+    if "bus_v" in var_groups:
+        bus_idx_values = bus_idx_values_from_system(ss)
+        bus_keys: list[str] = []
+        for idx in bus_idx_values:
+            key = book.key_of("Bus", idx)
+            if key is None:  # the columns above were renamed, so this cannot happen
+                raise TdsRequestError(f"the book does not key Bus {short_repr(idx)}")
+            bus_keys.append(key)
+        slack = getattr(ss, "Slack", None)
+        # The bus of the first Slack device, not its idx: ANDES's PSS/E and
+        # MATPOWER readers number generators by a running count (IEEE 39's
+        # Slack is device 10 on bus 39).
+        slack_idx = list(getattr(getattr(slack, "bus", None), "v", []))
+        if not slack_idx:
+            raise TdsRequestError(
+                "names 'neutral' streams angle_rel against the reference bus, "
+                "and the case has no Slack device to take it from"
+            )
+        try:
+            reference = bus_idx_values.index(slack_idx[0])
+        except ValueError as exc:
+            raise TdsRequestError(
+                f"the reference bus {short_repr(slack_idx[0])} of the first Slack "
+                "device is not a bus of the case"
+            ) from exc
+        bus_angles = (bus_keys, reference)
+        renamed += [build_name("angle_rel", key) for key in bus_keys]
+
+    rotor: tuple[list[str], Any] | None = None
+    if "gen_state" in var_groups:
+        syngen_idx_values = syngen_idx_values_from_system(ss)
+        unit_keys: list[str] = []
+        weights: list[float] = []
+        for idx in syngen_idx_values:
+            model = ss.SynGen.idx2model(idx)
+            entry = next(
+                (
+                    e
+                    for e in book.entries()
+                    if e.bucket == "dynamic" and e.model == model.class_name and str(e.idx) == str(idx)
+                ),
+                None,
+            )
+            if entry is None:  # the columns above were renamed, so this cannot happen
+                raise TdsRequestError(
+                    f"the book does not key {model.class_name} {short_repr(idx)}"
+                )
+            unit_keys.append(entry.key.partition("/")[0])
+            # ANDES's M is 2H on the machine base Sn; the weight is H * Sn.
+            # ANDES's M is 2H on the machine base Sn as the case gives it
+            # (``vin``); ``setup()`` puts ``v`` on the system base, so the
+            # weight H * Sn is read from ``vin``.
+            uid = model.idx2uid(idx)
+            weights.append(float(model.M.vin[uid]) / 2.0 * float(model.Sn.v[uid]))
+        import numpy as np
+
+        rotor = (unit_keys, np.asarray(weights, dtype=np.float64))
+        renamed += [build_name("rotor_angle_rel", key) for key in unit_keys]
+
+    return renamed, _AndesRelFrames(ss, bus_angles, rotor)
+
+
+class _AndesRelFrames:
+    """Computes the relative quantities of one neutral-named stream's rows.
+
+    Reads the bus angles (``Bus.a.v``) and the machine rotor angles and
+    in-service flags (``delta`` and ``u`` of each SynGen member's model) off
+    the System at each step, under the same ``stored_step`` as the rest of the
+    row, so the relative values cross the pipe in the same row as the angles
+    they come from. One row is a ``(1, n)`` array for the ``frames``
+    functions.
+    """
+
+    def __init__(
+        self,
+        ss: Any,
+        bus_angles: tuple[list[str], int] | None,
+        rotor: tuple[list[str], Any] | None,
+    ) -> None:
+        self._bus = getattr(ss, "Bus", None) if bus_angles is not None else None
+        self._reference = bus_angles[1] if bus_angles is not None else 0
+        self._n_buses = len(bus_angles[0]) if bus_angles is not None else 0
+        self._rotor_parts: list[tuple[Any, Any]] = []
+        self._weights: Any = None
+        if rotor is not None:
+            unit_keys, weights = rotor
+            self._weights = weights
+            syngen = ss.SynGen
+            for idx in syngen.get_all_idxes():
+                model = syngen.idx2model(idx)
+                self._rotor_parts.append((model, model.idx2uid(idx)))
+            self._n_machines = len(unit_keys)
+        else:
+            self._n_machines = 0
+
+    def append(self, row: Any) -> Any:
+        """``row`` with the relative quantities of this step appended."""
+        import numpy as np
+
+        extra: list[float] = []
+        if self._bus is not None:
+            angles = np.asarray(self._bus.a.v, dtype=np.float64).reshape(1, self._n_buses)
+            extra.extend(float(v) for v in frames.angle_rel(angles, self._reference)[0])
+        if self._rotor_parts:
+            import numpy as np
+
+            angles = np.asarray(
+                [np.asarray(m.delta.v, dtype=np.float64)[uid] for m, uid in self._rotor_parts],
+                dtype=np.float64,
+            ).reshape(1, self._n_machines)
+            in_service = np.asarray(
+                [bool(np.asarray(m.u.v)[uid]) for m, uid in self._rotor_parts],
+                dtype=np.bool_,
+            ).reshape(1, self._n_machines)
+            rel = frames.rotor_angle_rel(angles, self._weights, in_service)[0]
+            extra.extend(float(v) for v in rel)
+        if not extra:
+            return row
+        return np.concatenate([row, np.asarray(extra, dtype=np.float64)])
+
+
+def _handle_run_tds(
+    wrapper: Wrapper,
+    args: dict[str, Any],
+    abort_event: EventType,
+    data_pipe: Connection | None = None,
+    seq: int | None = None,
+) -> Any:
+    """Run TDS in batch or streaming mode.
+
+    Streaming mode is selected by ``args["stream"] == True``. When streaming,
+    each per-step state snapshot is encoded as an Arrow IPC batch and sent on
+    the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
+    <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
+    ``{"type": "stream_start", ...}`` message carrying the column names, which
+    the frames leave out (see ``tensa.core.stream`` for the frame layout).
+    The final ``{"type": "result", ...}`` message lands as usual at end of run.
+    """
+    # Everything the run would refuse for reasons known from the request and the
+    # System's state is checked here, before any stream metadata goes out and
+    # before the abort bridge starts: a refused run must not start a stream the
+    # client then sees fail, nor leave a bridge thread polling (a refusal sets
+    # no ``abort_flag``). The route layers validate ``h`` and the integrator
+    # too; the worker does not rely on that.
+    # ANDES turns loads into constant impedance for a time-domain run
+    # (PQ.config.p2z), which is what ``impedance`` asks for; it has no other.
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise TdsRequestError(
+            "the ANDES engine converts loads to constant impedance for a "
+            f"time-domain run; load_model {load_model} is not available with it"
+        )
     stream = bool(args.get("stream"))
-    on_step: Callable[[float, Any], None] | None = None
-    # Takes the System's values as the row of the step solved at the time given.
-    record_step: Callable[[float], None] | None = None
-    aggregator: StreamAggregator | None = None
-
+    prep: _AndesStreamPrep | None = None
     if stream:
         if data_pipe is None or seq is None:
             raise AndesAppError(
                 "streaming mode requires data_pipe + seq context (worker bug)"
             )
+        prep = _andes_tds_stream_prep(wrapper, args)
+        h = prep.h
+        integrator_raw = prep.integrator_raw
+        tds_config_overrides = prep.tds_config_overrides
+        dae_names = prep.dae_names
+        controllers = prep.controllers
+        trace_names: list[str] | None = None
+    else:
+        h = validate_step_size(args.get("h"))
 
-        # Decimation config (validated at the WS layer; defaults match the
-        # current behavior of "every step is its own one-row batch").
-        decimation_raw = args.get("decimation") or "none"
-        if decimation_raw not in ("none", "mean"):
-            raise AndesAppError(
-                f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
-            )
-        max_rate_hz_raw = args.get("max_rate_hz")
-        max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
+        # Unit 16: integrator selection + adaptive-tolerance overrides.
+        integrator_raw = validate_integrator(args.get("integrator", "trapezoidal"))
 
-        # ``vars`` selects which variable groups appear in each Arrow batch.
-        # The WS layer validates the literal set and rejects empty lists; the
-        # worker still defends against missing/empty input (other code paths
-        # may invoke streaming without the WS layer in tests).
-        vars_raw = args.get("vars")
-        if vars_raw is None:
-            var_groups: list[VarGroup] = list(DEFAULT_VARS)
-        elif isinstance(vars_raw, list) and all(
-            isinstance(v, str) for v in vars_raw
-        ):
-            unknown = [v for v in vars_raw if v not in VAR_GROUPS]
-            if unknown:
+        overrides_raw = args.get("tds_config_overrides")
+        tds_config_overrides = None
+        if overrides_raw is not None:
+            if not isinstance(overrides_raw, dict):
                 raise AndesAppError(
-                    f"unknown var group(s): {unknown!r}; expected one of "
-                    f"{list(VAR_GROUPS)!r}"
+                    "'tds_config_overrides' must be a dict of "
+                    "{string → float}; keys are canonical aliases "
+                    "(rtol/atol/max_step/min_step) or real ss.TDS.config field names"
                 )
-            if not vars_raw and not dae_names:
-                raise AndesAppError(
-                    "'vars' must be a non-empty list when provided"
+            coerced: dict[str, float] = {}
+            for key, value in overrides_raw.items():
+                if not isinstance(key, str):
+                    raise AndesAppError(
+                        f"'tds_config_overrides' keys must be strings, got {type(key).__name__}"
+                    )
+                try:
+                    coerced[key] = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise AndesAppError(
+                        f"'tds_config_overrides[{short_repr(key)}]' must be a float-coercible value"
+                    ) from exc
+            tds_config_overrides = coerced
+
+        # QNDF on a System that has already stepped, an unknown override key, or an
+        # override value that breaks its rule: the same refusals ``Wrapper.run_tds``
+        # raises, asked for up front.
+        wrapper.check_tds_request(integrator_raw, tds_config_overrides)
+
+        # The ANDES variables the run records beyond the streamed groups.
+        dae_vars_raw = args.get("dae_vars")
+        if dae_vars_raw is None:
+            dae_vars_raw = []
+        if not isinstance(dae_vars_raw, list) or not all(isinstance(v, str) for v in dae_vars_raw):
+            raise TdsRequestError("'dae_vars' must be a list of ANDES variable names")
+        dae_names = [v.name for v in resolve_dae_vars(wrapper._require_loaded(), dae_vars_raw)]  # noqa: SLF001
+
+        # The run's controllers (``tensa.core.tds_controllers``).
+        controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
+
+        # The names the recorded traces carry: with ``names: "neutral"`` each
+        # variable is renamed ``state|<key>#<variable>``, and a name that
+        # cannot be renamed fails the request before the run, as the stream's
+        # rule 3 does. No relative quantities are added to the batch traces.
+        names = _check_names_arg(args)
+        if names == "neutral":
+            book = wrapper.keys()
+            renamed_traces: list[str] = []
+            unnamed = []
+            for name in dae_names:
+                neutral = state_name_andes(name, book)
+                if neutral is None:
+                    unnamed.append(name)
+                else:
+                    renamed_traces.append(neutral)
+            if unnamed:
+                raise TdsRequestError(
+                    f"no neutral name for variable(s) {short_repr(unnamed, 80)}: "
+                    "the book does not key the device; run with names 'engine' "
+                    "to record them as ANDES names them"
                 )
-            # Dedupe while preserving canonical ordering (``var_column_names``
-            # also iterates VAR_GROUPS canonically, but normalize here so the
-            # metadata's ``vars`` list is stable too).
-            seen: set[str] = set()
-            var_groups = []
-            for g in VAR_GROUPS:
-                if g in vars_raw and g not in seen:
-                    var_groups.append(g)
-                    seen.add(g)
+            trace_names = renamed_traces
         else:
-            raise AndesAppError(
-                "'vars' must be a list of variable-group names"
-            )
+            trace_names = None
 
-        # Resolve the System ONCE (after load); we need its Bus model to list
-        # the columns. If the wrapper has no System loaded the run will fail
-        # later — surface the same error path as before.
-        ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
-        # Ensure setup so Bus.v exists; the wrapper would do this anyway when
-        # run_tds runs PF first.
-        wrapper._ensure_setup()  # noqa: SLF001
-        if not bool(getattr(ss.PFlow, "converged", False)):
-            ss.PFlow.run()
-
-        # Whether the run steps at a fixed size, so the algorithm label can be
-        # honest: boxcar mean over adaptive-step samples is best-effort. Read
-        # from the request, not from ``ss.TDS.config.fixt``, which ``run_tds``
-        # has not set yet and which still holds an earlier run's value.
-        fixed_step = tds_fixed_step(integrator_raw, tds_config_overrides)
-
-        try:
-            aggregator = StreamAggregator(
-                decimation=decimation_raw,  # type: ignore[arg-type]
-                max_rate_hz=max_rate_hz,
-                fixed_step=fixed_step,
-            )
-        except ValueError as exc:
-            raise AndesAppError(str(exc)) from exc
-
-        # Snapshot the topology ONCE per run so each callpert tick only reads
-        # values: the collector resolves where each one lives now, and the
-        # column names list the same devices, so column order and value order
-        # line up.
-        bus_idx_values = bus_idx_values_from_system(ss)
-        syngen_idx_values = syngen_idx_values_from_system(ss)
-        line_idx_values = line_idx_values_from_system(ss)
-        pq_idx_values = pq_idx_values_from_system(ss)
-        var_columns = var_column_names(var_groups, ss, dae_names)
-        collector = StreamCollector(ss, var_groups, dae_names)
-
-        # Send the stream-start metadata BEFORE the run begins so the WS
-        # sender can forward it as a text frame ahead of any binary frames.
-        data_pipe.send(
-            {
-                "type": "stream_start",
-                "seq": seq,
-                "metadata": {
-                    "schema_version": "2.0",
-                    "decimation": {
-                        "algorithm": aggregator.algorithm,
-                        "mode": aggregator.decimation,
-                        "source_rate_hz": None,
-                        "output_rate_hz": aggregator.output_rate_hz,
-                        "fixed_step": fixed_step,
-                    },
-                    "vars": list(var_groups),
-                    "dae_vars": dae_names,
-                    "var_columns": var_columns,
-                    "bus_idx_values": [str(idx) for idx in bus_idx_values],
-                    "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
-                    "line_idx_values": [str(idx) for idx in line_idx_values],
-                    "pq_idx_values": [str(idx) for idx in pq_idx_values],
-                },
-            }
-        )
-
-        # Single-element list to allow mutation from inside the closure without
-        # stacking ``nonlocal`` declarations across both _emit_rows and the
-        # post-run tail-flush below.
-        frame_seq_holder = [0]
-
-        def _emit_rows(rows: list[StreamRow], *, tail: bool = False) -> None:
-            frame_seq_holder[0] += 1
-            payload = encode_batch(len(var_columns), rows)
-            envelope: dict[str, Any] = {
-                "type": "stream_frame",
-                "seq": seq,
-                "frame_seq": frame_seq_holder[0],
-                "row_count": len(rows),
-                "payload": payload,
-            }
-            if tail:
-                envelope["tail"] = True
-            try:
-                # What ANDES logged since the last frame goes with this one, so a
-                # long run's messages (an event applied at t = 2 s) arrive as it goes.
-                data_pipe.send(attach_log(envelope))
-            except (BrokenPipeError, OSError):
-                abort_flag.set()
-
-        def _emit(t: float) -> None:
-            assert aggregator is not None
-            # As ANDES solved the step, not as an event at its time left it.
-            with stored_step(ss, t):
-                row = collector.collect()
-            rows = aggregator.push(t, row)
-            if rows:
-                _emit_rows(rows)
-
-        record_step = _emit
+    abort_flag = threading.Event()
+    if abort_event.is_set():
+        abort_flag.set()
 
     # A batch run has no frames to carry the values it was asked to record, so it
     # keeps them and returns them with its summary.
     recorder: TraceRecorder | None = None
+    record_step: Callable[[float], None] | None = None
     if not stream and dae_names:
         loaded = wrapper._require_loaded()  # noqa: SLF001
-        recorder = TraceRecorder(StreamCollector(loaded, [], dae_names), dae_names)
+        recorder = TraceRecorder(
+            StreamCollector(loaded, [], dae_names),
+            trace_names if trace_names is not None else dae_names,
+        )
         kept = recorder
 
         def _keep(t: float) -> None:
@@ -1647,7 +2148,8 @@ def _handle_run_tds(
 
     # The hook is called before the step it names is solved, so a row is the
     # step before, under that step's time (``tensa.core.tds_steps``).
-    clock = StepClock()
+    clock = StepClock() if prep is None else prep.clock
+    on_step: Callable[[float, Any], None] | None = None
     if record_step is not None:
 
         def _on_step(t: float, system: Any) -> None:
@@ -1670,36 +2172,61 @@ def _handle_run_tds(
     bridge_thread.start()
 
     try:
-        result = wrapper.run_tds(
-            tf=args["tf"],
-            h=h,
-            on_step=on_step,
-            abort_flag=abort_flag,
-            integrator=integrator_raw,
-            tds_config_overrides=tds_config_overrides,
-            controllers=controllers,
-        )
+        if prep is not None:
+            # The streaming branch hands the run to the engine-neutral driver
+            # (``tensa.core.stream.run_tds_stream``), which sends stream_start,
+            # encodes the frames, applies the decimation and checks the abort
+            # event. The wrapper's abort channel stays ``abort_flag`` (the
+            # bridge above mirrors the event into it), so the driver's callback
+            # only collects rows and never returns a stop to the wrapper.
+            def _run(on_step_bool: Callable[[float, Any], bool]) -> Any:
+                def _collect(t: float, system: Any) -> None:  # noqa: ARG001
+                    on_step_bool(t, None)
+
+                return wrapper.run_tds(
+                    tf=args["tf"],
+                    h=prep.h,
+                    on_step=_collect,
+                    abort_flag=abort_flag,
+                    integrator=prep.integrator_raw,
+                    tds_config_overrides=prep.tds_config_overrides,
+                    controllers=prep.controllers,
+                )
+
+            try:
+                result = run_tds_stream(
+                    plan=prep.plan,
+                    run=_run,
+                    abort_event=abort_event,
+                    data_pipe=data_pipe,
+                    seq=seq,
+                    decimation=prep.decimation,  # type: ignore[arg-type]
+                    max_rate_hz=prep.max_rate_hz,
+                    fixed_step=prep.fixed_step,
+                    final_row=prep.final_row,
+                )
+            except ValueError as exc:
+                raise AndesAppError(str(exc)) from exc
+        else:
+            result = wrapper.run_tds(
+                tf=args["tf"],
+                h=h,
+                on_step=on_step,
+                abort_flag=abort_flag,
+                integrator=integrator_raw,
+                tds_config_overrides=tds_config_overrides,
+                controllers=controllers,
+            )
     finally:
         abort_flag.set()
 
     # The step the run ended on, which no call of the hook saw: at ``tf`` when
-    # the run got there.
+    # the run got there. A streamed run emits it through the driver's
+    # ``final_step``; a batch run records it here.
     if record_step is not None:
         last = clock.end(wrapper._require_loaded())  # noqa: SLF001
         if last is not None:
             record_step(last)
-
-    # Drain any buffered rows that didn't reach an emit boundary before run end.
-    # A mean-decimated run keeps its last step out of the last window's mean, so
-    # there can be two rows: each goes in a frame of its own, as every window's
-    # row of such a run does.
-    if stream and aggregator is not None:
-        tail_rows = aggregator.flush()
-        if tail_rows and aggregator.decimation == "mean":
-            for row in tail_rows:
-                _emit_rows([row], tail=True)
-        elif tail_rows:
-            _emit_rows(tail_rows, tail=True)
 
     abort_event.clear()
     payload = _serialize_dataclass(result)
@@ -1712,6 +2239,13 @@ def _handle_run_tds(
         log_controller_notices(controllers)
         payload["controllers"] = controllers.results(traces=not stream)
     return payload
+
+
+def _handle_init_tds(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """Initialise TDS without stepping and report the diagnostics. A run, not a
+    read: with no case loaded it raises the same no-case error as ``run_tds``."""
+    # Passed on as sent: the wrapper refuses a value that is not a bool.
+    return _serialize_dataclass(wrapper.init_tds(test_init=args.get("test_init", True)))
 
 
 def _handle_list_tds_controllers(wrapper: Wrapper, args: dict[str, Any]) -> Any:
@@ -1747,7 +2281,10 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "load_case": _handle_load_case,
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
+    "list_keys": _handle_list_keys,
     "operating_point": _handle_operating_point,
+    "fidelity": _handle_fidelity,
+    "case_document": _handle_case_document,
     "add_disturbance": _handle_add_disturbance,
     "list_disturbances": _handle_list_disturbances,
     "replay_disturbances": _handle_replay_disturbances,
@@ -1760,7 +2297,10 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "redo_edit": _handle_redo_edit,
     "delete_element": _handle_delete_element,
     "run_pflow": _handle_run_pflow,
+    "init_tds": _handle_init_tds,
     "alterable_params": _handle_alterable_params,
+    "supported_models": _handle_supported_models,
+    "model_doc": _handle_model_doc,
     "list_dae_variables": _handle_list_dae_variables,
     "list_tds_controllers": _handle_list_tds_controllers,
     # Unit 21 — clone-on-write file edits (init / edit / undo / redo / save-as / reset).
@@ -1776,6 +2316,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "import_bundle": _handle_import_bundle,
     "generate_report": _handle_generate_report,
     "run_eig": _handle_run_eig,
+    "run_eig_sweep": _handle_run_eig_sweep,
     "eig_participation": _handle_eig_participation,
     "eig_state_matrix": _handle_eig_state_matrix,
     # Unit 12 — CPF (continuation power flow): full PV-curve sweep + per-bus QV.
@@ -1797,6 +2338,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     # Unit 17 — connectivity / island detection (post-run only; no per-frame
     # streaming integration per the plan's auto-fix).
     "compute_connectivity": _handle_compute_connectivity,
+    "bus_admittance_matrix": _handle_bus_admittance_matrix,
     # Unit 7 — snapshot save / restore / list / delete.
     "save_snapshot": _handle_save_snapshot,
     "restore_snapshot": _handle_restore_snapshot,
@@ -1811,6 +2353,45 @@ HANDLERS: dict[str, Callable[..., Any]] = {
 }
 
 
+# ---- the ANDES runtime ------------------------------------------------------
+
+
+def _dispatch_andes(
+    state: Any,
+    op: str,
+    args: dict[str, Any],
+    abort_event: Any,
+    data: Any,
+    seq: Any,
+) -> Any:
+    """Answer one op on a ``Wrapper``: the branch of ``_serve_commands`` as a function.
+
+    ``run_tds``, ``run_sweep`` and ``run_sweep_iteration`` are special-cased (they
+    need the abort event and the data pipe); every other op goes to ``HANDLERS``.
+    """
+    if op == "run_tds":
+        return _handle_run_tds(state, args, abort_event, data, seq)
+    if op == "run_sweep":
+        # Sweep is also long-running + uses the data pipe for progress events +
+        # needs the abort event for cancellation. Same special-cased dispatch.
+        return _handle_run_sweep(state, args, abort_event, data, seq)
+    if op == "run_sweep_iteration":
+        return _handle_run_sweep_iteration(state, args, abort_event)
+    return HANDLERS[op](state, args)
+
+
+def andes_runtime() -> EngineRuntime:
+    """The ANDES engine: a ``Wrapper`` per session, the existing handlers, ``_warm_andes``."""
+    return EngineRuntime(
+        name="andes",
+        make_state=lambda workspace, session_id, owner_pid: Wrapper(
+            workspace=workspace, session_id=session_id, owner_pid=owner_pid
+        ),
+        dispatch=_dispatch_andes,
+        warm_up=_warm_andes,
+    )
+
+
 # ---- main entry point -------------------------------------------------------
 
 
@@ -1821,6 +2402,7 @@ def worker_main(
     workspace: str | None = None,
     session_id: str | None = None,
     owner_pid: int | None = None,
+    engine: str = "andes",
 ) -> int:
     """Subprocess entry. Runs until a ``shutdown`` command arrives, the parent
     dies, or an unrecoverable error occurs.
@@ -1837,6 +2419,10 @@ def worker_main(
     ``owner_pid`` is the parent server's pid. It goes into the scratch dir's
     owner marker so a later server can tell the dir was abandoned (see
     ``core/session_dirs.py``).
+
+    ``engine`` names the engine the session runs (``tensa.engines``); the worker
+    loads its runtime and warms up only it. The default is ``andes``, and an ANDES
+    worker behaves exactly as before.
 
     Unless a command is already waiting, the worker imports ANDES before it reads
     the first one (``_warm_andes``), so the first case load does not pay for it.
@@ -1858,12 +2444,26 @@ def worker_main(
     # workspace is the root its paths are written relative to, so none is sent in full.
     install_capture(workspace)
     try:
+        runtime = load_runtime(engine)
         # Import ANDES now, before the first ``recv``, so the first load does not. This
         # runs ahead of the audit hook on purpose: it reads only library files, and the
         # hook would log some of them (the system's ``mime.types``) as strays.
-        _warm_up_if_idle(ctrl)
-        _install_strict_fs_audit_hook(workspace)
-        return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid)
+        warmed = _warm_up_if_idle(ctrl, runtime.warm_up)
+        if warmed is not None and engine == "sienna":
+            # The warm-up ran before any command existed, so the line rides on the
+            # first reply through the same log capture every op's messages use:
+            # the notice logger, which the capture listens to (``tensa.worker``
+            # is not captured, and a line logged there never reaches the user).
+            import logging
+
+            from tensa.core.messages import NOTICE_LOGGER
+
+            logging.getLogger(NOTICE_LOGGER).info(
+                "The Sienna engine was started and warmed up in %d s.",
+                round(warmed),
+            )
+        _install_strict_fs_audit_hook(workspace, engine, owner_pid)
+        return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid, engine)
     finally:
         uninstall_capture()
 
@@ -1875,15 +2475,17 @@ def _serve_commands(
     workspace: str | None,
     session_id: str | None,
     owner_pid: int | None,
+    engine: str = "andes",
 ) -> int:
     """The command loop of :func:`worker_main`: read a command, run it, send the
     reply (with what ANDES logged while it ran), until ``shutdown`` or a closed pipe."""
 
+    runtime = load_runtime(engine)
     # ``workspace`` is forwarded so the wrapper's snapshot methods
     # (Unit 7) can resolve ``<workspace>/snapshots/<case>/<name>.{dill,json}``
     # without re-deriving the directory from the FastAPI app state (which
     # the worker subprocess can't read).
-    wrapper = Wrapper(workspace=workspace, session_id=session_id, owner_pid=owner_pid)
+    state = runtime.make_state(workspace, session_id, owner_pid)
 
     def reply(message: dict[str, Any]) -> None:
         data.send(attach_log(message))
@@ -1906,20 +2508,12 @@ def _serve_commands(
 
         begin_command(str(op))
         try:
-            if op == "run_tds":
-                payload = _handle_run_tds(wrapper, args, abort_event, data, seq)
-            elif op == "run_sweep":
-                # Sweep is also long-running + uses the data pipe for
-                # progress events + needs the abort event for
-                # cancellation. Same special-cased dispatch as run_tds.
-                payload = _handle_run_sweep(wrapper, args, abort_event, data, seq)
-            elif op == "run_sweep_iteration":
-                payload = _handle_run_sweep_iteration(wrapper, args, abort_event)
-            else:
-                handler = HANDLERS.get(op)
-                if handler is None:
-                    raise AndesAppError(f"unknown op: {op!r}")
-                payload = handler(wrapper, args)
+            if op not in ENGINE_OPS[engine]:
+                others = engines_with_op(str(op))
+                if others:
+                    raise EngineUnsupportedError(str(op), engine, others)
+                raise AndesAppError(f"unknown op: {op!r}")
+            payload = runtime.dispatch(state, str(op), args, abort_event, data, seq)
             reply({"type": "result", "seq": seq, "payload": payload})
         except DisturbanceCommitError as exc:
             reply(
@@ -1967,6 +2561,12 @@ def _serve_commands(
             # have to peek into ``detail`` strings.
             wire_category = exc.__class__.__name__
             extra: dict[str, Any] | None = None
+            if isinstance(exc, EngineUnsupportedError):
+                extra = {
+                    "op": exc.op,
+                    "engine": exc.engine,
+                    "engines_with_op": list(exc.engines_with_op),
+                }
             bundle_category = getattr(exc, "category", None)
             if isinstance(bundle_category, str) and exc.__class__.__name__ == "BundleValidationError":
                 wire_category = f"BundleValidationError:{bundle_category}"

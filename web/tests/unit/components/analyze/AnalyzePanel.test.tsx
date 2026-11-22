@@ -9,7 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnalyzePanel } from '@/components/analyze/AnalyzePanel';
@@ -22,8 +22,9 @@ import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
 import { useRunModeStore } from '@/store/runMode';
 import { useRunsStore } from '@/store/runs';
+import { useJobsStore } from '@/store/jobs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { EigResult, PflowResult } from '@/api/types';
+import type { EigResult, PflowResult, SeResult } from '@/api/types';
 
 function withQueryClient(ui: React.ReactNode) {
   const client = new QueryClient({
@@ -142,6 +143,60 @@ describe('<AnalyzePanel />', () => {
     expect(screen.getByTestId('analyze-run-eig')).toBeInTheDocument();
     // Empty-state shown until EIG runs.
     expect(screen.getByTestId('eig-empty')).toBeInTheDocument();
+  });
+
+  it('the EIG sub-mode shows the Parameter sweep section below the damping chart', async () => {
+    const user = userEvent.setup();
+    render(withQueryClient(<AnalyzePanel />));
+    await user.click(screen.getByTestId('analyze-sub-mode-eig'));
+    const sweep = screen.getByTestId('eig-sweep');
+    expect(sweep).toHaveTextContent('Parameter sweep');
+    expect(screen.getByTestId('eig-sweep-empty')).toHaveTextContent(
+      'Run a sweep to see the root locus.',
+    );
+    // Below the damping chart in the sub-mode's stack.
+    const damping = screen.getByTestId('eig-damping-chart');
+    expect(damping.compareDocumentPosition(sweep) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('the single EIG run still posts an empty body when the sweep section is untouched', async () => {
+    const fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    fetchSpy.mockImplementation((...args: unknown[]) => {
+      const url = String(args[0]);
+      const body = url.includes('/alterable_params')
+        ? { model: 'GENROU', params: ['M'] }
+        : url.endsWith('/topology')
+          ? { state: 'committed', buses: [], lines: [], generators: [], loads: [] }
+          : RESULT_WITH_TDS_INIT;
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+    try {
+      useAnalyzeStore.getState().setSubMode('eig');
+      usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-run-eig'));
+      await waitFor(() =>
+        expect(
+          fetchSpy.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith('/eig') && (init as RequestInit)?.method === 'POST',
+          ),
+        ).toBe(true),
+      );
+      const post = fetchSpy.mock.calls.find(
+        ([url, init]) => String(url).endsWith('/eig') && (init as RequestInit)?.method === 'POST',
+      )!;
+      expect((post[1] as RequestInit).body).toBe('{}');
+      // The sweep has its own button and mutation; nothing of it was sent.
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('/eig/sweep'))).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('shows the tds-initialized info banner when EIG result has tds_initialized=true', () => {
@@ -858,6 +913,461 @@ describe('<AnalyzePanel />', () => {
       ).toBe(false);
     });
   });
+
+  // ---- SE-2: estimator choice, run settings, chi-squared result -------
+
+  describe('SE estimator and run settings (SE-2)', () => {
+    let fetchSpy: MockInstance<typeof fetch>;
+
+    const SE_RESULT: SeResult = {
+      converged: true,
+      iterations: 3,
+      mismatch: 12.34,
+      residuals: [0.1, -0.2, 0.05],
+      measurement_count: 3,
+      flagged_indices: [],
+    };
+
+    beforeEach(() => {
+      fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+      // Converged PF + measurements so Run SE is enabled.
+      usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+      useAnalyzeStore.getState().setSubMode('se');
+      useAnalyzeStore.setState({ seMeasurementsCount: 12 });
+      // Each POST settles with a result at once: Run SE is disabled while a
+      // run is under way, and a test that runs twice needs the button back.
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(SE_RESULT), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        ),
+      );
+    });
+
+    afterEach(() => {
+      fetchSpy.mockRestore();
+    });
+
+    const sePosts = () =>
+      fetchSpy.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith('/se') && (init as RequestInit | undefined)?.method === 'POST',
+      );
+    const seBody = () => JSON.parse(String((sePosts().at(-1)![1] as RequestInit).body)) as unknown;
+
+    it('sends only the session (an empty body) when nothing was changed', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({});
+    });
+
+    it('sends the estimator only when LAV is picked', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({ algorithm: 'lav' });
+
+      await userEvent.click(screen.getByTestId('se-algorithm-wls'));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(2));
+      expect(seBody()).toEqual({});
+    });
+
+    it('shows the LAV iteration hint only while LAV is picked', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.queryByTestId('se-lav-max-iter-hint')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      expect(screen.getByTestId('se-lav-max-iter-hint')).toHaveTextContent(
+        'LAV is for a measurement set that may hold a bad measurement: it weighs large residuals less than WLS does, so one bad value can pull the estimate less. It often needs more iterations; raise max_iter under Advanced if the run does not converge.',
+      );
+      expect(screen.getByRole('radiogroup', { name: 'SE estimator' })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: 'LAV' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name: 'WLS' })).toHaveAttribute('aria-checked', 'false');
+      await userEvent.click(screen.getByTestId('se-algorithm-wls'));
+      expect(screen.queryByTestId('se-lav-max-iter-hint')).not.toBeInTheDocument();
+    });
+
+    it('sends tol as a number when one is typed', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-tol'), '1e-5');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({ tol: 1e-5 });
+    });
+
+    it('sends max_iter as a number when one is typed', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-max-iter'), '200');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({ max_iter: 200 });
+    });
+
+    it('sends noise_seed as a number when one is typed for the run', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-run-noise-seed'), '42');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({ noise_seed: 42 });
+    });
+
+    it('shows an inline error and does not run for a tol of 0 or of abc', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      const field = screen.getByTestId('field-se-tol');
+      await userEvent.type(field, '0');
+      const error = screen.getByTestId('error-se-tol');
+      expect(error).toHaveTextContent('Enter a tolerance above 0, or leave blank.');
+      expect(error).toHaveAttribute('role', 'alert');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+
+      await userEvent.clear(field);
+      await userEvent.type(field, 'abc');
+      expect(screen.getByTestId('error-se-tol')).toHaveTextContent(
+        'Enter a tolerance above 0, or leave blank.',
+      );
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+    });
+
+    it('shows an inline error and does not run for a max_iter of 0 or of 1.5', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      const field = screen.getByTestId('field-se-max-iter');
+      await userEvent.type(field, '0');
+      expect(screen.getByTestId('error-se-max-iter')).toHaveTextContent(
+        'Enter a whole number of at least 1, or leave blank.',
+      );
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+
+      await userEvent.clear(field);
+      await userEvent.type(field, '1.5');
+      expect(screen.getByTestId('error-se-max-iter')).toHaveTextContent(
+        'Enter a whole number of at least 1, or leave blank.',
+      );
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+    });
+
+    it('shows an inline error and does not run for a negative run seed', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-run-noise-seed'), '-1');
+      expect(screen.getByTestId('error-se-run-noise-seed')).toHaveTextContent(
+        'Enter a non-negative whole number (integer) seed, or leave blank.',
+      );
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+    });
+
+    it('shows the chi-squared outcome of a failed test', () => {
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: false, J: 120.5, threshold: 50.0, dof: 15, confidence: 0.95 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared-verdict')).toHaveTextContent(
+        'Bad-data test (chi-squared, 95% confidence): failed',
+      );
+      expect(screen.getByTestId('se-chi-squared-verdict')).toHaveClass('text-danger');
+      expect(screen.getByTestId('se-chi-squared-meaning')).toHaveTextContent(
+        'The residuals are larger than measurement noise alone explains at this confidence, so at least one measurement is suspect.',
+      );
+      expect(screen.getByTestId('se-chi-squared-numbers')).toHaveTextContent(
+        'J = 121, threshold 50, 15 degrees of freedom',
+      );
+    });
+
+    it('shows the chi-squared outcome of a passed test', () => {
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: true, J: 12.3456, threshold: 25.0, dof: 15, confidence: 0.95 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared-verdict')).toHaveTextContent(
+        'Bad-data test (chi-squared, 95% confidence): passed',
+      );
+      expect(screen.getByTestId('se-chi-squared-verdict')).not.toHaveClass('text-danger');
+      expect(screen.getByTestId('se-chi-squared-meaning')).toHaveTextContent(
+        'No bad data detected at this confidence. That does not show every measurement is good.',
+      );
+      expect(screen.getByTestId('se-chi-squared-numbers')).toHaveTextContent(
+        'J = 12.3, threshold 25, 15 degrees of freedom',
+      );
+      expect(screen.queryByTestId('se-chi-squared-none')).not.toBeInTheDocument();
+    });
+
+    it('takes the confidence of the test from the result', () => {
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: true, J: 12.3, threshold: 30.6, dof: 15, confidence: 0.99 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared-verdict')).toHaveTextContent(
+        'Bad-data test (chi-squared, 99% confidence): passed',
+      );
+    });
+
+    it('says nothing of a bad-data test before any run', () => {
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+    });
+
+    it('says there is no bad-data test when the result carries none (an LAV run)', () => {
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        algorithm: 'lav',
+        chi_squared: null,
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared-none')).toHaveTextContent(
+        'No bad-data test: it needs weighted least squares and more measurements than states.',
+      );
+      expect(screen.queryByTestId('se-chi-squared-verdict')).not.toBeInTheDocument();
+    });
+
+    it('drops the chi-squared block with the result when the power flow is cleared', () => {
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: true, J: 12.3, threshold: 50.0, dof: 15, confidence: 0.95 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared')).toBeInTheDocument();
+      act(() => {
+        usePflowStore.setState({ lastRun: null });
+      });
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+    });
+
+    it('sends the empty body it sent before, byte for byte', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect((sePosts()[0]![1] as RequestInit).body).toBe('{}');
+    });
+
+    it('sends every option at once, each under its name and type', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-tol'), ' 0.001 ');
+      await userEvent.type(screen.getByTestId('field-se-max-iter'), '500');
+      await userEvent.type(screen.getByTestId('field-se-run-noise-seed'), '0');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toStrictEqual({
+        algorithm: 'lav',
+        tol: 0.001,
+        max_iter: 500,
+        noise_seed: 0,
+      });
+    });
+
+    it('keeps the two seeds apart: the run seed is not sent to Generate, nor the reverse', async () => {
+      fetchSpy.mockImplementation((url) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              String(url).includes('/se/measurements/generate') ? { count: 12 } : SE_RESULT,
+            ),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-run-noise-seed'), '42');
+      await userEvent.click(screen.getByTestId('analyze-se-generate-measurements'));
+      const generatePosts = () =>
+        fetchSpy.mock.calls.filter(([url]) => String(url).includes('/se/measurements/generate'));
+      await waitFor(() => expect(generatePosts()).toHaveLength(1));
+      expect(JSON.parse(String((generatePosts()[0]![1] as RequestInit).body))).toEqual({});
+      expect(screen.getByTestId('field-se-noise-seed')).toHaveValue('');
+
+      await userEvent.clear(screen.getByTestId('field-se-run-noise-seed'));
+      await userEvent.type(screen.getByTestId('field-se-noise-seed'), '7');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({});
+      expect(screen.getByTestId('field-se-run-noise-seed')).toHaveValue('');
+    });
+
+    it('labels the run seed as this run only', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      expect(screen.getByLabelText('noise_seed for this run only (optional)')).toBe(
+        screen.getByTestId('field-se-run-noise-seed'),
+      );
+      expect(screen.getByTestId('field-se-run-noise-seed')).toHaveAccessibleDescription(
+        /for this run only.*Generate Measurements made/,
+      );
+    });
+
+    it('keeps the options of a run on its job, for a retry', async () => {
+      useJobsStore.setState({ jobs: {} });
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ title: 'Did not converge', status: 422 }), {
+            status: 422,
+            headers: { 'Content-Type': 'application/problem+json' },
+          }),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-max-iter'), '400');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() =>
+        expect(Object.values(useJobsStore.getState().jobs).map((j) => j.status)).toEqual([
+          'failed',
+        ]),
+      );
+      const [job] = Object.values(useJobsStore.getState().jobs);
+      expect(job!.kind).toBe('se');
+      expect(job!.request_summary).toEqual({ algorithm: 'lav', max_iter: 400 });
+    });
+
+    it('hides the bad-data test while a new run is under way', async () => {
+      let answer: (r: Response) => void = () => {};
+      fetchSpy.mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: true, J: 12.3, threshold: 25.0, dof: 15, confidence: 0.95 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared')).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+      await act(async () => {
+        answer(
+          new Response(
+            JSON.stringify({
+              ...SE_RESULT,
+              chi_squared: { passed: false, J: 99, threshold: 25.0, dof: 15, confidence: 0.95 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+        await Promise.resolve();
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId('se-chi-squared-verdict')).toHaveTextContent('failed'),
+      );
+    });
+
+    it('hides the bad-data test of the last result once a run fails', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ title: 'Did not converge', status: 422 }), {
+            status: 422,
+            headers: { 'Content-Type': 'application/problem+json' },
+          }),
+        ),
+      );
+      useAnalyzeStore.getState().setSeResult({
+        ...SE_RESULT,
+        chi_squared: { passed: true, J: 12.3, threshold: 25.0, dof: 15, confidence: 0.95 },
+      });
+      render(withQueryClient(<AnalyzePanel />));
+      expect(screen.getByTestId('se-chi-squared')).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      await waitFor(() => expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument());
+    });
+
+    it('hides the bad-data test once the options differ from the run that made it', async () => {
+      fetchSpy.mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...SE_RESULT,
+              algorithm: 'wls',
+              chi_squared: { passed: true, J: 12.3, threshold: 25.0, dof: 15, confidence: 0.95 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
+      );
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(screen.getByTestId('se-chi-squared-verdict')).toBeInTheDocument());
+
+      // Another estimator: the test shown would read as LAV's.
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('se-algorithm-wls'));
+      expect(screen.getByTestId('se-chi-squared')).toBeInTheDocument();
+
+      // Another setting, or one that is not valid yet.
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      await userEvent.type(screen.getByTestId('field-se-max-iter'), '0');
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+      await userEvent.clear(screen.getByTestId('field-se-max-iter'));
+      expect(screen.getByTestId('se-chi-squared')).toBeInTheDocument();
+      await userEvent.type(screen.getByTestId('field-se-run-noise-seed'), '3');
+      expect(screen.queryByTestId('se-chi-squared')).not.toBeInTheDocument();
+    });
+
+    it('refuses a fractional or negative seed and a negative max_iter for the run', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      await userEvent.click(screen.getByTestId('se-advanced'));
+      const seed = screen.getByTestId('field-se-run-noise-seed');
+      await userEvent.type(seed, '1.5');
+      expect(screen.getByTestId('error-se-run-noise-seed')).toHaveAttribute('role', 'alert');
+      expect(seed).toHaveAttribute('aria-invalid', 'true');
+      expect(seed).toHaveAttribute('aria-describedby', 'se-run-noise-seed-error');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+
+      await userEvent.clear(seed);
+      const maxIter = screen.getByTestId('field-se-max-iter');
+      await userEvent.type(maxIter, '-3');
+      expect(screen.getByTestId('error-se-max-iter')).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+
+      await userEvent.clear(maxIter);
+      const tol = screen.getByTestId('field-se-tol');
+      await userEvent.type(tol, '-1e-4');
+      expect(screen.getByTestId('error-se-tol')).toBeInTheDocument();
+      expect(tol).toHaveAttribute('aria-describedby', 'se-tol-error');
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      expect(sePosts()).toHaveLength(0);
+
+      // Blank again: nothing is set and the run goes.
+      await userEvent.clear(tol);
+      await userEvent.click(screen.getByTestId('analyze-se-run'));
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({});
+    });
+
+    it('runs from the Run menu with the options of the form, as a click does', async () => {
+      render(withQueryClient(<AnalyzePanel />));
+      useRunModeStore.setState({ runRequest: null });
+      await userEvent.click(screen.getByTestId('se-algorithm-lav'));
+      act(() => {
+        useRunModeStore.getState().requestRun('se');
+      });
+      await waitFor(() => expect(sePosts()).toHaveLength(1));
+      expect(seBody()).toEqual({ algorithm: 'lav' });
+    });
+  });
 });
 
 // ---- visible run-readiness notes ----------------------------------------
@@ -885,7 +1395,9 @@ describe('<AnalyzePanel /> run-readiness notes', () => {
       'analyze-run-eig-hint',
     );
     expect(note.id).toBe('analyze-run-eig-hint');
-    expect(screen.getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
+    // The sweep section carries the same note for its own button; the single
+    // run's recovery is the one inside its note.
+    expect(within(note).getByRole('button', { name: 'Run power flow' })).toBeInTheDocument();
   });
 
   it('EIG: the Run power flow action starts a power flow', async () => {
@@ -996,10 +1508,36 @@ describe('<AnalyzePanel /> run-readiness notes', () => {
     useRunsStore.setState({ activeRunId: 'run-1' });
     try {
       render(withQueryClient(<AnalyzePanel />));
-      expect(screen.getByTestId('analyze-run-eig-hint')).toHaveTextContent(/Reset the run first/i);
-      expect(screen.getByRole('button', { name: 'Reset run' })).toBeInTheDocument();
+      const note = screen.getByTestId('analyze-run-eig-hint');
+      expect(note).toHaveTextContent(/Reset the run first/i);
+      expect(within(note).getByRole('button', { name: 'Reset run' })).toBeInTheDocument();
     } finally {
       useRunsStore.setState({ activeRunId: null });
     }
+  });
+});
+
+describe('<AnalyzePanel /> eigenvalue notes and load model', () => {
+  it("shows a result's notes and its load model, one muted line each", () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult({
+      ...RESULT_WITH_TDS_INIT,
+      notes: ['PSID calls the validation of its small-signal results work in progress.'],
+      load_model: 'power',
+    } as EigResult);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.getByTestId('eig-result-load-model')).toHaveTextContent('Load model: power');
+    expect(screen.getByTestId('eig-result-note-0')).toHaveTextContent(
+      'PSID calls the validation of its small-signal results work in progress.',
+    );
+  });
+
+  it('shows neither for a result that has none (an ANDES result)', () => {
+    usePflowStore.getState().setLastRun(FAKE_PFLOW_RESULT);
+    useAnalyzeStore.getState().setSubMode('eig');
+    useAnalyzeStore.getState().setEigResult(RESULT_WITH_TDS_INIT);
+    render(withQueryClient(<AnalyzePanel />));
+    expect(screen.queryByTestId('eig-result-notes')).toBeNull();
   });
 });

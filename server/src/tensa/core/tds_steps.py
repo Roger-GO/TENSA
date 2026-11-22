@@ -60,6 +60,19 @@ from numpy.typing import NDArray
 _EPS: Final = 1e-9
 
 
+def _moved_on(instant: float, before: float) -> bool:
+    """Whether the System holds a later solution at ``instant`` than it did at
+    ``before``: a step was solved in between, not retried.
+
+    A retried step's instant is the one before it worked out again by adding and
+    taking away step sizes, so it differs from it by a rounding error, a few
+    spacings of the numbers near it. A variable-step integrator can take steps
+    far shorter than ``_EPS`` (ANDES's adaptive trapezoidal method goes down to
+    ``dtmin_adapt``, about 1e-10 s unless set), and each is a row of its own.
+    """
+    return instant - before > 64.0 * float(np.spacing(max(abs(instant), abs(before), 1.0)))
+
+
 def solved_instant(t: float, system: Any) -> float:
     """The time of the solution ``system`` holds when the hook is called with
     ``t``: the step that ends at ``t`` is ``TDS.h`` long and not solved yet.
@@ -91,7 +104,7 @@ class StepClock:
         target = float(t)
         instant = solved_instant(target, system)
         solved: float | None = None
-        if self._target is not None and instant > self._instant + _EPS:
+        if self._target is not None and _moved_on(instant, self._instant):
             # ANDES stored the step under the very time it called the hook
             # with, so the label is that number and not one worked back to.
             solved = self._target
@@ -106,7 +119,7 @@ class StepClock:
             return None  # the run took no step
         target, self._target = self._target, None
         instant = solved_instant(float(system.dae.t), system)
-        if instant <= self._instant + _EPS:
+        if not _moved_on(instant, self._instant):
             return None
         # The time the last call announced, unless a call was missed in between.
         return target if abs(target - instant) <= _EPS else instant

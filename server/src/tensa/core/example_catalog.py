@@ -50,7 +50,12 @@ _MAX_NAME_BYTES = 255
 
 Analysis = Literal["pf", "tds", "eig"]
 CheckKind = Literal[
-    "independent-solver", "published", "stored-solution", "ring-down", "regression-baseline"
+    "independent-solver",
+    "published",
+    "stored-solution",
+    "ring-down",
+    "regression-baseline",
+    "cross-engine",
 ]
 CitationRole = Literal["system", "data", "software", "model"]
 

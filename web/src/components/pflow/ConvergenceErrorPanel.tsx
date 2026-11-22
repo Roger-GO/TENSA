@@ -5,7 +5,12 @@ import { usePflowOptionsStore } from '@/store/pflowOptions';
 import { useRunPflow } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
-import { describeSettings, pflowRetries, settingsOrAssumed } from '@/lib/pflowOptions';
+import {
+  describeSettings,
+  iterationsPhrase,
+  pflowRetries,
+  settingsOrAssumed,
+} from '@/lib/pflowOptions';
 import { openPflowPanel } from '@/lib/openPflowPanel';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { ProblemDetailsErrorSurface } from '@/components/error/ProblemDetailsErrorSurface';
@@ -112,7 +117,11 @@ export function ConvergenceErrorPanel({ className }: ConvergencePanelProps) {
         dismissLabel="Dismiss convergence error"
         error={{
           title: 'PF did not converge',
-          detail: pflowConvergenceDetail(lastRun.iterations),
+          // Newton-Krylov keeps no iteration count (the server reports 0).
+          detail:
+            lastRun.settings?.method === 'NK'
+              ? `${iterationsPhrase(lastRun)}.`
+              : pflowConvergenceDetail(lastRun.iterations),
           recovery,
         }}
         extras={

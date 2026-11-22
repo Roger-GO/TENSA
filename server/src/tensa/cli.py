@@ -18,11 +18,13 @@ Subcommands:
 - ``examples``: list, add and cite the example cases of the catalog (see
   ``core/examples.py``): ``tensa examples list``, ``add`` and ``cite``.
 - ``--version`` — print the tensa and ANDES versions and exit.
-- ``warm-cache`` — run ANDES's symbolic-equation code generation
-  (``andes.prepare()``) so the cache is populated; ``serve`` runs it in the
-  background when the cache needs it, so running it by hand is optional.
-  Subsequent ``andes.load`` calls skip the cold-start prep. The cache lives at
-  ``~/.andes/pycode/`` (about 0.6 MB) and is shared across all ANDES cases.
+- ``warm-cache`` — with the default ``--engine andes``, run ANDES's
+  symbolic-equation code generation (``andes.prepare()``) so the cache is
+  populated; ``serve`` runs it in the background when the cache needs it, so
+  running it by hand is optional. Subsequent ``andes.load`` calls skip the
+  cold-start prep. The cache lives at ``~/.andes/pycode/`` (about 0.6 MB) and
+  is shared across all ANDES cases. With ``--engine sienna``, install the
+  Sienna engine's Julia environment (see ``engines/sienna/setup.py``).
 """
 
 from __future__ import annotations
@@ -1190,14 +1192,33 @@ def examples_cite(
     typer.echo(text)
 
 
+class _Engine(enum.StrEnum):
+    """The values ``warm-cache --engine`` takes."""
+
+    andes = "andes"
+    sienna = "sienna"
+
+
 @app.command(name="warm-cache")
 def warm_cache(
+    engine: _Engine = typer.Option(
+        _Engine.andes,
+        "--engine",
+        help=(
+            "Which engine's cache or environment to prepare. andes (default) runs "
+            "ANDES's symbolic-equation code generation. sienna installs the Sienna "
+            "engine's Julia environment: it copies the Project.toml and Manifest.toml "
+            "the package ships into the project folder and has Julia download, "
+            "install and precompile the Sienna packages, which takes several minutes "
+            "the first time."
+        ),
+    ),
     quick: bool = typer.Option(
         False,
         "--quick",
         help=(
             "Run the faster, less-thorough code-generation pass. Useful in "
-            "CI / quick smoke checks; the default is the full prep."
+            "CI / quick smoke checks; the default is the full prep. ANDES only."
         ),
     ),
     incremental: bool = typer.Option(
@@ -1205,16 +1226,41 @@ def warm_cache(
         "--incremental",
         help=(
             "Only regenerate models whose source changed since the last "
-            "prep. Faster on top of an already-warm cache."
+            "prep. Faster on top of an already-warm cache. ANDES only."
+        ),
+    ),
+    julia: Path | None = typer.Option(
+        None,
+        "--julia",
+        help=(
+            "The Julia executable to set the Sienna environment up with. "
+            "Default: TENSA_JULIA, or the julia on PATH. Sienna only."
+        ),
+    ),
+    project: Path | None = typer.Option(
+        None,
+        "--project",
+        metavar="DIR",
+        help=(
+            "The folder to install the Sienna Julia environment into. "
+            "Default: TENSA_SIENNA_PROJECT, or ~/.tensa/julia/dyn. Sienna only."
+        ),
+    ),
+    allow_julia_mismatch: bool = typer.Option(
+        False,
+        "--allow-julia-mismatch",
+        help=(
+            "Set the Sienna environment up even when Julia's major.minor version "
+            "is not the one the shipped Manifest was resolved for. Sienna only."
         ),
     ),
 ) -> None:
-    """Warm the ANDES symbolic-equation cache.
+    r"""Prepare an engine for its first run: ANDES's code cache, or Sienna's Julia environment.
 
-    Runs ``andes.prepare()`` against the installed ANDES version. The
-    generated Python files land at ``~/.andes/pycode/`` (about 0.6 MB in all)
-    and are shared across all ANDES cases; subsequent ``andes.load``
-    calls skip the cold-start prep.
+    With ``--engine andes`` (the default), runs ``andes.prepare()`` against the
+    installed ANDES version. The generated Python files land at
+    ``~/.andes/pycode/`` (about 0.6 MB in all) and are shared across all ANDES
+    cases; subsequent ``andes.load`` calls skip the cold-start prep.
 
     Running this by hand is optional. Without a warm cache, the first case
     you load pays for the generation (about 10 s), so ``tensa serve`` starts
@@ -1228,7 +1274,52 @@ def warm_cache(
 
     After an ANDES upgrade ANDES regenerates the stale code on the next
     ``andes.load``; the check at startup, or this command, does it ahead of time.
+
+    With ``--engine sienna``, installs the Julia environment the Sienna engine
+    runs in: the Project.toml and Manifest.toml the package ships (the exact
+    package versions the engine was verified with) are copied into the project
+    folder, Julia downloads, installs and precompiles the packages from Julia's
+    registry, which takes several minutes the first time, and the engine's
+    Julia module is loaded there once as a check. It needs the ``sienna`` extra
+    and a Julia of the version the Manifest was resolved for:
+
+        pip install "tensa\[sienna]"
+        tensa warm-cache --engine sienna
+
+    Run it again after an upgrade of TENSA that ships another Manifest; until
+    then a Sienna session says so. ``tensa serve`` never starts it on its own,
+    since it downloads.
     """
+    if engine is _Engine.sienna:
+        for name, given in (("--quick", quick), ("--incremental", incremental)):
+            if given:
+                raise typer.BadParameter(
+                    f"{name} is an ANDES option; it cannot be used with --engine sienna",
+                    param_hint=name,
+                )
+        from tensa.engines.sienna.setup import SetupError, setup_sienna
+
+        try:
+            setup_sienna(
+                julia=julia,
+                project=project,
+                allow_julia_mismatch=allow_julia_mismatch,
+                echo=typer.echo,
+            )
+        except SetupError as exc:
+            typer.echo(f"error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        return
+    for name, given in (
+        ("--julia", julia is not None),
+        ("--project", project is not None),
+        ("--allow-julia-mismatch", allow_julia_mismatch),
+    ):
+        if given:
+            raise typer.BadParameter(
+                f"{name} is a Sienna option; it needs --engine sienna",
+                param_hint=name,
+            )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

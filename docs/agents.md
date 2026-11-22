@@ -60,7 +60,8 @@ On Windows the command is the `tensa.exe` in the environment's `Scripts` folder,
 | `list_workspace_files` | Lists the case files in the workspace |
 | `list_examples` | Lists the example cases TENSA can add, or describes one in full: citations, licence, caveats and checks |
 | `add_example` | Copies an example case into the workspace, to be opened with `load_case` |
-| `create_session` | Creates a session, an isolated ANDES system, and returns its id |
+| `list_engines` | Lists the engines the server can start (ANDES, Sienna), whether each is available, and what each can do |
+| `create_session` | Creates a session on an engine (ANDES unless one is named) and returns its id |
 | `close_session` | Closes a session and frees its worker process |
 | `load_case` | Loads a case file by its path in the workspace, with optional additional files such as a `.dyr` |
 | `reload_case` | Returns the case to its pre-setup state, which adding more disturbances after a run needs |
@@ -77,6 +78,16 @@ On Windows the command is the `tensa.exe` in the environment's `Scripts` folder,
 | `get_operating_point` | Reads bus voltages and angles, line flows, generator outputs and load consumption |
 | `get_messages` | Reads what ANDES said while the commands ran: warnings and errors by default |
 | `run_eig` | Runs the small-signal eigenvalue analysis, after a converged power flow |
+| `get_keys` | Lists the key of every element (`bus:7`, `gen:1-1`), which names it the same way in every engine |
+| `add_element` | Adds an element to the loaded case before the first run; a Sienna session adds a load or a shunt |
+| `edit_element` | Changes parameters of one element; a Sienna session edits a load, a shunt, a generator's output and voltage, and whether a branch is in service |
+| `delete_element` | Deletes an element, with what depends on it if asked; a Sienna session deletes a load or a shunt |
+| `undo_last_edit` | Takes back the last add, edit or delete |
+| `redo_edit` | Puts back the edit undo took back |
+| `network_matrix` | Reads the PTDF, LODF, Ybus or incidence matrix of the case (Sienna) |
+| `run_dispatch` | Solves the one-period economic dispatch of a MATPOWER case (Sienna) |
+| `convert_result` | Turns one engine's result into a neutral results document |
+| `compare_results` | Compares two results documents: the operating point, each series and the eigenvalues |
 
 ### How an assistant uses them
 
@@ -86,6 +97,8 @@ The server tells the client the usual order itself:
 2. Optionally `add_fault`, `add_toggle` or `add_alter`. These work only before the first run.
 3. `run_pflow`, then `run_tds`, then `get_operating_point`.
 4. `close_session` when done.
+
+Each tool's description says which engines have it, and a tool the session's engine lacks is refused with a message that names the engines that have it. To compare engines, run the same case in two sessions, one per engine, turn each result into a document with `convert_result`, and compare the two with `compare_results`.
 
 After the first run the session is committed, so `reload_case` comes before any further disturbance. A run that converged can still carry a warning, so after an odd result an assistant should call `get_messages`. The private server that `--workspace` starts keeps the default limit of four sessions, so close the ones you no longer need.
 

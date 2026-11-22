@@ -108,6 +108,18 @@ class SnapshotVersionMismatchError(SnapshotError):
     """
 
 
+class SnapshotEngineMismatchError(SnapshotError):
+    """Raised when a restore is asked of a session whose engine differs from
+    the snapshot's.
+
+    Routes layer surfaces as HTTP 409. The recovery is opening the case
+    file under the engine that saved the snapshot. The case document
+    (``GET /sessions/{id}/case/neutral``) describes a case the same way for
+    every engine but cannot open one yet, so it is not a way to move a
+    snapshot between engines (decision 41).
+    """
+
+
 # ---- snapshot metadata ------------------------------------------------------
 
 
@@ -129,6 +141,10 @@ class SnapshotMetadata:
     saved_at: str
     has_pflow: bool
     has_tds: bool
+    #: The engine that saved the snapshot. Defaults to ``"andes"`` so a
+    #: construction that predates the stamp (an old test, an old caller)
+    #: keeps working; ``from_dict`` applies the same default on read.
+    engine: str = "andes"
     #: The diagram's layout at the save, as the plain dict of a validated
     #: ``SidecarLayout``; ``None`` when the snapshot was saved without one.
     layout: dict[str, Any] | None = None
@@ -136,8 +152,8 @@ class SnapshotMetadata:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SnapshotMetadata:
         """Build from a parsed JSON object. Tolerant of missing optional
-        fields (defaults to ``None`` / ``False`` / ``[]``); raises
-        :class:`SnapshotMetadataError` only when required fields are
+        fields (defaults to ``None`` / ``False`` / ``[]`` / ``"andes"``);
+        raises :class:`SnapshotMetadataError` only when required fields are
         absent or not strings.
         """
         andes_version = data.get("andes_version")
@@ -155,9 +171,12 @@ class SnapshotMetadata:
                 "snapshot.json 'disturbance_log' must be a list of dicts"
             )
         disturbance_log = [d for d in disturbance_log_raw if isinstance(d, dict)]
+        engine_raw = data.get("engine")
+        engine = engine_raw if isinstance(engine_raw, str) else "andes"
         return cls(
             andes_version=andes_version,
             tensa_version=tensa_version,
+            engine=engine,
             case_filename=(
                 data.get("case_filename")
                 if isinstance(data.get("case_filename"), str)
@@ -191,6 +210,7 @@ class SnapshotMetadata:
         return {
             "andes_version": self.andes_version,
             "tensa_version": self.tensa_version,
+            "engine": self.engine,
             "case_filename": self.case_filename,
             "case_sha256": self.case_sha256,
             "disturbance_log": list(self.disturbance_log),
@@ -219,6 +239,9 @@ class SnapshotEntry:
     has_dill: bool
     andes_version: str
     disturbance_count: int
+    #: The engine that saved the snapshot; ``"andes"`` for one saved before
+    #: the stamp existed. Defaults so older constructions keep working.
+    engine: str = "andes"
 
 
 # ---- name validation --------------------------------------------------------
@@ -438,6 +461,7 @@ def list_snapshots_on_disk(
                 has_tds=meta.has_tds,
                 has_dill=dill_path.exists(),
                 andes_version=meta.andes_version,
+                engine=meta.engine,
                 disturbance_count=len(meta.disturbance_log),
             )
         )
@@ -491,6 +515,7 @@ __all__ = [
     "RestoreSnapshotResult",
     "SaveSnapshotResult",
     "SnapshotCollisionError",
+    "SnapshotEngineMismatchError",
     "SnapshotEntry",
     "SnapshotError",
     "SnapshotMetadata",

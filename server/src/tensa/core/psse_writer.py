@@ -240,6 +240,56 @@ def _fshunt_block(ss: System) -> list[str]:
     return lines
 
 
+def _machine_source_impedance(ss: System) -> dict[Any, tuple[float, float]]:
+    """The (ZR, ZX) PSS/E reads a machine's armature resistance and, for a
+    classical machine, its transient reactance from, by the static generator
+    the machine names: the machine's own ``ra``, and ``xd1`` for a GENCLS
+    (``xs`` of the generator otherwise, which GENROU does not read)."""
+    out: dict[Any, tuple[float, float]] = {}
+    xss: dict[Any, float] = {}
+    for model_name in ("PV", "Slack"):
+        m = getattr(ss, model_name, None)
+        if m is None:
+            continue
+        for idx, xs in zip(_safe_list(m, "idx"), _safe_list(m, "xs"), strict=False):
+            xss[idx] = _f(xs, 1.0)
+    for model_name in ("GENCLS", "GENROU", "GENSAL"):
+        m = getattr(ss, model_name, None)
+        if m is None or not getattr(m, "n", 0):
+            continue
+        gens = _safe_list(m, "gen")
+        ras = _safe_list(m, "ra")
+        xd1s = _safe_list(m, "xd1") if model_name == "GENCLS" else []
+        for i, gen in enumerate(gens):
+            zr = _f(ras[i] if i < len(ras) else 0.0, 0.0)
+            zx = _f(xd1s[i], 1.0) if i < len(xd1s) else xss.get(gen, 1.0)
+            out[gen] = (zr, zx)
+    return out
+
+
+def raw_generator_ids(ss: System) -> dict[Any, str]:
+    """The PSS/E machine id ``write_raw`` gives each static generator, by its
+    idx: ``1``, ``2``, ... per bus, in the order the generator block writes
+    them (every ``PV``, then every ``Slack``, a generator with no bus left
+    out). The ``.dyr`` writer names a machine's record by the same id."""
+    ids: dict[Any, str] = {}
+    counter_per_bus: dict[int, int] = {}
+    for model_name in ("PV", "Slack"):
+        m = getattr(ss, model_name, None)
+        if m is None:
+            continue
+        idxs = _safe_list(m, "idx")
+        buses = _safe_list(m, "bus")
+        for i, idx in enumerate(idxs):
+            bus = buses[i] if i < len(buses) else None
+            if bus is None:
+                continue
+            i_int = _bus_int(bus)
+            counter_per_bus[i_int] = counter_per_bus.get(i_int, 0) + 1
+            ids[idx] = str(counter_per_bus[i_int])
+    return ids
+
+
 def _generator_block(ss: System) -> list[str]:
     lines: list[str] = []
     mva_base = _f(getattr(ss.config, "mva", 100.0), 100.0)
@@ -266,13 +316,22 @@ def _generator_block(ss: System) -> list[str]:
         pmin = _safe_list(m, "pmin")
         qmax = _safe_list(m, "qmax")
         qmin = _safe_list(m, "qmin")
+        # The source impedance (ZR, ZX on the machine base), which ANDES's
+        # reader puts in ra and xs and a machine reads through its
+        # generator: GENROU's ra, GENCLS's xd1.
+        ras = _safe_list(m, "ra")
+        xss = _safe_list(m, "xs")
+        machine_source = _machine_source_impedance(ss)
         for i in range(len(idxs)):
             bus = buses[i] if i < len(buses) else None
             if bus is None:
                 continue
             i_int = _bus_int(bus)
             counter_per_bus[i_int] = counter_per_bus.get(i_int, 0) + 1
-            gen_id = f"{counter_per_bus[i_int]:>2}"
+            # Unpadded: PowerSystems keeps the spaces of a padded id (' 1'),
+            # and the .dyr writer names the machine by the same text
+            # (raw_generator_ids).
+            gen_id = str(counter_per_bus[i_int])
             mbase = _f(Sn[i] if i < len(Sn) else 100.0, 100.0)
             vs = _f(v0[i] if i < len(v0) else 1.0, 1.0)
             # A generator a machine has taken over is switched off by the
@@ -287,11 +346,16 @@ def _generator_block(ss: System) -> list[str]:
             qb = _f(qmin[i] if i < len(qmin) else -9999.0, -9999.0) * mva_base
             pt = _f(pmax[i] if i < len(pmax) else 9999.0, 9999.0) * mva_base
             pb = _f(pmin[i] if i < len(pmin) else 0.0, 0.0) * mva_base
+            zr = _f(ras[i] if i < len(ras) else 0.0, 0.0)
+            zx = _f(xss[i] if i < len(xss) else 1.0, 1.0)
+            # A machine on the generator gives the source impedance PSS/E
+            # reads it with: its ra, and for a GENCLS its xd1.
+            zr, zx = machine_source.get(idxs[i], (zr, zx))
             lines.append(
                 f"{i_int}, '{gen_id}', "
                 f"{pg:.5f}, {qg:.5f}, {qt:.5f}, {qb:.5f}, "
                 f"{vs:.5f}, 0, {mbase:.4f}, "
-                f"0.0, 1.0, 0.0, 0.0, 1.0, 1, 100.0, "
+                f"{zr!r}, {zx!r}, 0.0, 0.0, 1.0, 1, 100.0, "
                 f"{pt:.5f}, {pb:.5f}, "
                 f"1, 1.0, 0, 1.0, 0, 1.0, 0, 1.0, 0, 1.0"
             )

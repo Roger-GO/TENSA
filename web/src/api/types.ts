@@ -75,6 +75,10 @@ export type DeletedDisturbance = components['schemas']['DeletedDisturbance'];
 export type EditStep = components['schemas']['EditStep'];
 export type TopologySchema = components['schemas']['TopologySchema'];
 export type VersionInfo = components['schemas']['VersionInfo'];
+/** What one engine of `GET /engines` can do: routines, formats, versions. */
+export type EngineCapabilities = components['schemas']['EngineCapabilities'];
+/** The engines the server can start a session for, from `GET /engines`. */
+export type EngineList = components['schemas']['EngineList'];
 export type TopologyParamMeta = components['schemas']['TopologyParamMeta'];
 export type SaveCaseRequest = components['schemas']['SaveCaseRequest'];
 export type SaveCaseResponse = components['schemas']['SaveCaseResponse'];
@@ -119,6 +123,15 @@ export type AddDisturbancesRequest = components['schemas']['AddDisturbancesReque
 export type AddDisturbancesResponse = components['schemas']['AddDisturbancesResponse'];
 /** One ack entry returned by the disturbance commit endpoint. */
 export type DisturbanceAck = components['schemas']['DisturbanceAck'];
+
+/** Request body for ``POST /sessions/{id}/tds/init``: the check without the run. */
+export type TdsInitRequest = components['schemas']['TdsInitRequest'];
+/** Response body for ``POST /sessions/{id}/tds/init``. */
+export type TdsInitResult = components['schemas']['TdsInitResult'];
+/** One variable of ``TdsInitResult.clamped``: clamped at a limit as it initialised. */
+export type TdsInitClamp = components['schemas']['TdsInitClamp'];
+/** One equation of ``TdsInitResult.residuals``; ``mismatch`` is ``null`` for NaN. */
+export type TdsInitResidual = components['schemas']['TdsInitResidual'];
 
 /**
  * Response body for ``POST /sessions/{id}/abort`` (Unit 1b endpoint).
@@ -234,6 +247,18 @@ export interface EigParticipationResponse {
   participation: ParticipationFactor[];
 }
 
+/**
+ * The eigenvalues at one value of a parameter sweep
+ * (``POST /sessions/{id}/eig/sweep``). An eigenvalue ANDES counts as zero is
+ * exactly ``{0, 0}`` with a damping ratio of 1, as in ``EigResult``.
+ */
+export type EigSweepPoint = components['schemas']['EigSweepPointModel'];
+/**
+ * Wire shape of ``POST /sessions/{id}/eig/sweep``: one point per requested
+ * value, in the request's order, every point with ``mode_count`` eigenvalues.
+ */
+export type EigSweepResponse = components['schemas']['EigSweepResponse'];
+
 // ---- CPF result (Unit 12 — continuation power flow) ----------------------
 
 /**
@@ -279,6 +304,16 @@ export interface EigParticipationResponse {
  *   ``stop_at`` asked (with ``truncated`` false: a lower branch that broke
  *   off).
  * - ``direction`` — what lambda increased on a PV run; ``null`` for QV.
+ * - ``parameterization`` — the corrector's step-length equation the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``tol`` — the corrector's tolerance the run used; ``null`` when the
+ *   case's setting was kept.
+ * - ``corrector_max_iter`` — the corrector iterations per step the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``step_min`` / ``step_max`` — the continuation step bounds the run used;
+ *   ``null`` when the case's setting was kept.
+ * - ``stop_at_lambda`` — the target lambda a run asked for; ``null`` when
+ *   none was.
  *
  * The fields after ``mode`` are optional here because a result kept from
  * before they existed does not have them; the server always sends them.
@@ -298,6 +333,18 @@ export interface CpfResult {
   stop_at?: 'nose' | 'full';
   complete?: boolean;
   direction?: CpfDirection | null;
+  /** The corrector's step-length equation the run used; `null` when the case's setting was kept. */
+  parameterization?: ('natural' | 'arclength' | 'pseudo_arclength') | null;
+  /** The corrector's tolerance the run used; `null` when the case's setting was kept. */
+  tol?: number | null;
+  /** The corrector iterations per step the run used; `null` when the case's setting was kept. */
+  corrector_max_iter?: number | null;
+  /** The smallest continuation step the run used; `null` when the case's setting was kept. */
+  step_min?: number | null;
+  /** The largest continuation step the run used; `null` when the case's setting was kept. */
+  step_max?: number | null;
+  /** The target lambda a run asked for; `null` when none was. */
+  stop_at_lambda?: number | null;
 }
 
 /** One PV or slack generator's reactive output along a CPF path. */
@@ -333,6 +380,14 @@ export type CpfDirection = NonNullable<CpfRunRequest['direction']>;
  * - ``flagged_indices`` — indices into ``residuals`` whose normalised
  *   residual ``|r_i| / sigma_i`` exceeds 3-sigma. UI highlights the
  *   corresponding histogram bars in red.
+ * - ``algorithm`` — the estimator that ran (``wls`` or ``lav``).
+ * - ``settings`` — the effective run settings (tol, max_iter, noise_seed).
+ * - ``chi_squared`` — the chi-squared bad-data test; ``null`` for LAV or
+ *   a measurement set without redundancy.
+ *
+ * The fields after ``flagged_indices`` are optional here because a result
+ * kept from before they existed does not have them; the server always
+ * sends them.
  */
 export interface SeResult {
   converged: boolean;
@@ -341,6 +396,28 @@ export interface SeResult {
   residuals: number[];
   measurement_count: number;
   flagged_indices: number[];
+  /** The estimator that produced this result. */
+  algorithm?: 'wls' | 'lav' | null;
+  /** The effective settings the run used. */
+  settings?: SeRunSettings | null;
+  /** The chi-squared bad-data test; ``null`` when it cannot run. */
+  chi_squared?: SeChiSquaredTest | null;
+}
+
+/** The effective settings one SE run used, echoed by the server. */
+export interface SeRunSettings {
+  tol: number;
+  max_iter: number;
+  noise_seed?: number | null;
+}
+
+/** The chi-squared bad-data test of one WLS SE run. */
+export interface SeChiSquaredTest {
+  passed: boolean;
+  J: number;
+  threshold: number;
+  dof: number;
+  confidence: number;
 }
 
 /**

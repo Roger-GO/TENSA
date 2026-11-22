@@ -26,7 +26,12 @@ class CpfMixin(WrapperBase):
         load_increase: list[dict[str, Any]] | None = None,
         generator_increase: list[dict[str, Any]] | None = None,
         enforce_q_limits: bool | None = None,
-        stop_at: str = "nose",
+        stop_at: str | float = "nose",
+        parameterization: str | None = None,
+        tol: float | None = None,
+        corrector_max_iter: int | None = None,
+        step_min: float | None = None,
+        step_max: float | None = None,
     ) -> CpfResult:
         """Run continuation power flow — Unit 12.
 
@@ -59,7 +64,26 @@ class CpfMixin(WrapperBase):
                 own setting. Refused when the solved power flow leaves a
                 generator past a limit.
             stop_at: ``"nose"`` (default) stops at the nose; ``"full"``
-                goes on along the lower branch back to ``lambda = 0``.
+                goes on along the lower branch back to ``lambda = 0``. A
+                number above zero is a target lambda: the routine lands on
+                it when the curve crosses it, and a target past the nose is
+                not reached, the run ending at the nose.
+            parameterization: the equation that fixes the length of a step
+                in the corrector (``ss.CPF.config.parameterization``):
+                ``"pseudo_arclength"`` (ANDES's default) or ``"arclength"``,
+                which go round the nose, or ``"natural"``, which fixes lambda
+                and cannot pass the nose, so it is refused with ``"full"``.
+            tol: the corrector's tolerance on the mismatch
+                (``ss.CPF.config.tol``), at most ``MAX_TOL``.
+            corrector_max_iter: the corrector's Newton iterations per step,
+                ANDES's own ``max_iter``, at least 2. Not ``max_iter`` above,
+                which caps the continuation steps.
+            step_min: the smallest step (``ss.CPF.config.step_min``); a
+                failed step halved below it is where the routine calls the
+                nose.
+            step_max: the largest step the routine grows its step to
+                (``ss.CPF.config.step_max``). ``step_min`` above
+                ``step_max``, the request's or the case's, is refused.
 
         The settings apply to this run only and everything written to the
         System is put back (:mod:`tensa.core.cpf_options`, which also says
@@ -94,6 +118,11 @@ class CpfMixin(WrapperBase):
             step=step,
             max_steps=max_iter,
             enforce_q_limits=enforce_q_limits,
+            parameterization=parameterization,
+            tol=tol,
+            corrector_max_iter=corrector_max_iter,
+            step_min=step_min,
+            step_max=step_max,
         )
         ss = self._require_loaded()
         self._ensure_setup()
@@ -116,6 +145,11 @@ class CpfMixin(WrapperBase):
                 stop_at=stop_at,
                 step=step,
                 max_steps=max_iter,
+                parameterization=parameterization,
+                tol=tol,
+                corrector_max_iter=corrector_max_iter,
+                step_min=step_min,
+                step_max=step_max,
             ) as run:
                 ok = bool(ss.CPF.run(**targets))
         except AndesAppError:
@@ -315,22 +349,13 @@ def _build_cpf_result(
         bus_idxes_raw = []
     bus_idxes = [str(b) for b in bus_idxes_raw]
 
-    voltages_per_bus = {}
-    if v_matrix is not None and bus_idxes:
-        try:
-            n_rows = int(v_matrix.shape[0])
-        except (AttributeError, IndexError, TypeError):
-            n_rows = 0
-        # Defensive: use the smaller of n_rows and len(bus_idxes) so a
-        # mismatch (which the spike never observed but guards against
-        # future ANDES bus-elimination edge cases) doesn't index out
-        # of range.
-        for i in range(min(n_rows, len(bus_idxes))):
-            try:
-                row = [float(x) for x in v_matrix[i]]
-            except (TypeError, ValueError):
-                row = []
-            voltages_per_bus[bus_idxes[i]] = row
+    voltages_per_bus = _per_bus(v_matrix, bus_idxes)
+    # The angles are read with the voltages at every point (``CPF.theta``); a
+    # matrix of another shape cannot be matched to them point for point.
+    theta = getattr(cpf, "theta", None)
+    angles_per_bus = (
+        _per_bus(theta, bus_idxes) if _same_shape(theta, v_matrix) else {}
+    )
 
     # Truncate every series to the common finite prefix — an unconverged
     # CPF (e.g. "Reached max steps") leaves NaN tails that would 500 the
@@ -342,6 +367,10 @@ def _build_cpf_result(
         keep = min(keep, path.finite_steps())
     lambdas = lambdas[:keep]
     voltages_per_bus = {k: v[:keep] for k, v in voltages_per_bus.items()}
+    angles_per_bus = {k: a[:keep] for k, a in angles_per_bus.items()}
+    # The angles go with the points kept, and do not decide which are kept.
+    if any(_finite_prefix_len(row) < keep for row in angles_per_bus.values()):
+        angles_per_bus = {}
 
     # Nose detection: a NOSE event in CPF.events tells us the run hit
     # the maximum-loadability point. A run that stops at the nose and
@@ -365,6 +394,20 @@ def _build_cpf_result(
     if not max_lam and lambdas:
         max_lam = max(lambdas)
 
+    complete = ok and not truncated
+    target = run.stop_at_lambda if run is not None else None
+    if target is not None:
+        # A run given a target ends at it with no nose, or at the nose short of
+        # it, ended there by the run (ANDES alone would go on down the lower
+        # branch and report the corrector failing far below it).
+        reached = bool(lambdas) and math.isclose(lambdas[-1], target, abs_tol=1e-9)
+        complete = ok and reached
+        if run is not None and run.target_beyond_nose and nose_idx >= 0:
+            done_msg = (
+                f"Nose point at lambda={max_lam:.6f}, short of the target "
+                f"lambda={target:g}"
+            )
+
     generators, limit_events = _generators(lambdas, nose_idx)
     return CpfResult(
         lambdas=lambdas,
@@ -379,9 +422,56 @@ def _build_cpf_result(
         limit_events=limit_events,
         q_limits_enforced=q_limits_enforced,
         stop_at=stop_at,
-        complete=ok and not truncated,
+        complete=complete,
         direction=direction,
+        angles_per_bus=angles_per_bus,
+        **_settings(run),
     )
+
+
+def _settings(run: CpfRun | None) -> dict[str, Any]:
+    """The settings of the routine the request gave the run, for the result."""
+    if run is None:
+        return {}
+    return {
+        "parameterization": run.parameterization,
+        "tol": run.tol,
+        "corrector_max_iter": run.corrector_max_iter,
+        "step_min": run.step_min,
+        "step_max": run.step_max,
+        "stop_at_lambda": run.stop_at_lambda,
+    }
+
+
+def _same_shape(a: Any, b: Any) -> bool:
+    """Whether two arrays of the routine are both two-dimensional and of one shape."""
+    try:
+        shape_a, shape_b = tuple(a.shape), tuple(b.shape)
+    except AttributeError:
+        return False
+    return len(shape_a) == 2 and shape_a == shape_b
+
+
+def _per_bus(matrix: Any, bus_idxes: list[str]) -> dict[str, list[float]]:
+    """The rows of a (bus, point) matrix of the routine, by bus idx."""
+    rows: dict[str, list[float]] = {}
+    if matrix is None or not bus_idxes:
+        return rows
+    try:
+        n_rows = int(matrix.shape[0])
+    except (AttributeError, IndexError, TypeError):
+        n_rows = 0
+    # Defensive: use the smaller of n_rows and len(bus_idxes) so a
+    # mismatch (which the spike never observed but guards against
+    # future ANDES bus-elimination edge cases) doesn't index out
+    # of range.
+    for i in range(min(n_rows, len(bus_idxes))):
+        try:
+            row = [float(x) for x in matrix[i]]
+        except (TypeError, ValueError):
+            row = []
+        rows[bus_idxes[i]] = row
+    return rows
 
 
 def _first_turn(lambdas: list[float]) -> int:

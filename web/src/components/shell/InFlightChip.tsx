@@ -30,6 +30,7 @@ import { cn } from '@/lib/cn';
 import { useJobsStore, isTerminalStatus } from '@/store/jobs';
 import { useLayoutStore } from '@/store/layout';
 import { kindLabel, shortKindLabel } from '@/components/shell/jobLabels';
+import { LABEL_FROM_MEDIUM } from '@/components/shell/topBarLayout';
 
 export function InFlightChip() {
   const jobs = useJobsStore((s) => s.jobs);
@@ -71,6 +72,9 @@ export function InFlightChip() {
       data-testid="in-flight-chip"
       data-count={count}
       aria-label={`${label}. Open Activity panel.`}
+      // The words as hover text, for the window where only the dot shows; with
+      // three jobs or more the tooltip below lists them instead.
+      title={count < 3 ? label : undefined}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1',
         'border-primary/30 bg-primary/10 text-primary border text-xs font-medium',
@@ -83,7 +87,13 @@ export function InFlightChip() {
         aria-hidden="true"
         className="bg-primary inline-block h-1.5 w-1.5 animate-pulse rounded-full"
       />
-      <span data-testid="in-flight-chip-label">{label}</span>
+      {/* On a window narrower than MEDIUM_PX the chip is its pulsing dot alone,
+          with the words kept for a screen reader and in the hover text: the top
+          bar has no room for them there (`topBarLayout.ts`), and during a
+          time-domain run the status beside the Run button says it already. */}
+      <span data-testid="in-flight-chip-label" className={LABEL_FROM_MEDIUM}>
+        {label}
+      </span>
     </button>
   );
 

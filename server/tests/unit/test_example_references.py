@@ -18,6 +18,7 @@ import pytest
 from tensa.core import example_catalog
 from tensa.core.example_catalog import load_catalog
 from tensa.core.example_references import (
+    CrossEnginePlan,
     ExampleReference,
     ReferenceFileError,
     RingDownCompare,
@@ -313,6 +314,95 @@ def test_a_pole_cap_and_a_settle_bound_are_optional_and_must_be_positive() -> No
 def test_an_unknown_field_is_refused() -> None:
     with pytest.raises(ReferenceFileError, match="extra"):
         parse_reference(json.dumps(_document(surprise=1)))
+
+
+# ---- the cross-engine plan ----------------------------------------------------------------
+
+
+def test_cross_engine_plan_defaults() -> None:
+    plan = CrossEnginePlan.model_validate({})
+    assert plan.engine == "sienna"
+    assert plan.pf_voltage_pu == 2e-5
+    assert plan.pf_angle_rad == 2e-5
+    assert plan.pf_power_mw == 1e-3
+    assert plan.series_rms_pu == 2e-4
+    assert plan.series_max_pu == 2e-3
+    # Every expectation is unchecked until the reviewer runs the script.
+    assert plan.sienna == "unchecked"
+    assert plan.known_difference is None
+    assert plan.refusal_stage is None
+
+
+def test_cross_engine_check_kind_accepted() -> None:
+    document = _document()
+    document["checks"][0].update(
+        {"kind": "cross-engine", "reference": "the Sienna run held to the ANDES run"}
+    )
+    check = parse_reference(json.dumps(document)).checks[0]
+    assert check.kind == "cross-engine"
+
+
+def test_cross_engine_check_reference_must_name_engine() -> None:
+    document = _document()
+    document["checks"][0].update({"kind": "cross-engine", "reference": "ANDES"})
+    with pytest.raises(ReferenceFileError, match="names the engine"):
+        parse_reference(json.dumps(document))
+
+
+def test_refused_case_carries_no_cross_engine_checks() -> None:
+    document = _document(
+        cross_engine={"sienna": "refused", "refusal_stage": "not_ready"},
+    )
+    document["checks"][0].update(
+        {"kind": "cross-engine", "reference": "the Sienna run held to the ANDES run"}
+    )
+    with pytest.raises(ReferenceFileError, match="carries no cross-engine checks"):
+        parse_reference(json.dumps(document))
+    # The refusal alone, with no cross-engine check, is fine.
+    document["checks"][0]["kind"] = "published"
+    reference = parse_reference(json.dumps(document))
+    assert reference.cross_engine is not None
+    assert reference.cross_engine.sienna == "refused"
+    assert reference.cross_engine.refusal_stage == "not_ready"
+
+
+def test_differ_needs_known_difference() -> None:
+    document = _document(cross_engine={"sienna": "differ:tgov1-torque"})
+    with pytest.raises(ReferenceFileError, match="known_difference"):
+        parse_reference(json.dumps(document))
+    good = _document(
+        cross_engine={"sienna": "differ:tgov1-torque", "known_difference": "tgov1-torque"}
+    )
+    reference = parse_reference(json.dumps(good))
+    assert reference.cross_engine is not None
+    assert reference.cross_engine.known_difference == "tgov1-torque"
+    # A known difference without the differ outcome is refused too.
+    odd = _document(cross_engine={"sienna": "pass", "known_difference": "tgov1-torque"})
+    with pytest.raises(ReferenceFileError, match="differ"):
+        parse_reference(json.dumps(odd))
+
+
+def test_shipped_references_cross_engine_blocks_are_consistent() -> None:
+    for stem, reference in _shipped():
+        plan = reference.cross_engine
+        if plan is None:
+            continue
+        if plan.sienna == "refused":
+            assert not [c for c in reference.checks if c.kind == "cross-engine"], stem
+        if plan.sienna.startswith("differ:"):
+            assert plan.known_difference == plan.sienna.split(":", 1)[1], stem
+        for check in reference.checks:
+            if check.kind != "cross-engine" or not isinstance(check.expected, dict):
+                continue
+            # The map of a cross-engine check is the map of the file's solver check of the
+            # same quantity: the ANDES solution is far inside the cross-engine tolerance of it.
+            solver = [
+                c
+                for c in reference.checks
+                if c.kind == "independent-solver" and c.quantity == check.quantity
+            ]
+            assert solver, (stem, check.name)
+            assert check.expected == solver[0].expected, (stem, check.name)
 
 
 def test_tolerance_is_absolute_plus_relative() -> None:

@@ -1,0 +1,120 @@
+"""What ``GET /engines`` reports for each engine.
+
+The shapes of section 7 of ``design/multiengine/spec.md``, first scope: name,
+availability, versions, the formats it reads and writes, its routines, the ops its
+worker answers, and whether it edits a case. The section-7 object shape (an
+object keyed by routine name) is the target; the first-scope form is the flat
+list plus a ``routine_options`` sibling on the Sienna block, which is additive.
+This module imports only ``importlib.metadata`` for the ANDES version, never
+``andes`` itself, so the server process does not load ANDES to answer.
+"""
+
+from __future__ import annotations
+
+import importlib.metadata
+from typing import Any
+
+from tensa.core.pflow_options import METHODS
+from tensa.engines.fidelity import models_map
+from tensa.engines.ops import ENGINE_NAMES, ENGINE_OPS
+from tensa.engines.registry import engine_unavailable_reason
+
+
+def engine_capabilities(name: str) -> dict[str, Any]:
+    """The capability block of one engine. An unknown name raises ``ValueError``."""
+    reason = engine_unavailable_reason(name)
+    if reason is not None:
+        return {
+            "name": name,
+            "available": False,
+            "unavailable_reason": reason,
+            "versions": {},
+            "formats": {"read": [], "write": []},
+            "routines": [],
+            "ops": [],
+            "models": {},
+            "editing": False,
+        }
+    if name == "sienna":
+        # Imported lazily, as ``registry.engine_unavailable_reason`` imports the
+        # environment check, so this module keeps importing nothing of an engine.
+        # ``ext`` imports pydantic and the key helpers only, no Julia.
+        from tensa.engines.sienna.ext import INVERTER_PARAMETER_SETS
+        from tensa.engines.sienna.manifest import sienna_versions
+
+        return {
+            "name": name,
+            "available": True,
+            "unavailable_reason": None,
+            "versions": sienna_versions(),
+            "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
+            "routines": ["matrices", "pflow", "eig", "tds", "dispatch", "uc", "sim"],
+            "routine_options": {
+                "pflow": {
+                    "methods": ["ac", "dc", "ptdf-dc"],
+                },
+                "dispatch": {
+                    "network_models": ["copper_plate", "dc", "ptdf", "ac"],
+                },
+                "uc": {
+                    "network_models": ["copper_plate", "dc", "ptdf"],
+                    "resolutions_min": [15, 30, 60],
+                    "horizon_h": {"min": 1, "max": 168},
+                    "overrides": ["startup_cost", "min_up_h", "min_down_h", "must_run"],
+                },
+                "sim": {
+                    "network_models": ["copper_plate", "dc", "ptdf"],
+                    "profile_steps": 96,
+                    "profile_step_minutes": 15,
+                },
+                "tds": {
+                    "streaming": True,
+                    "abort": True,
+                    "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
+                    "options": {"load_model": ["impedance", "power", "as-case"]},
+                    "ext": {
+                        "dynamic_branches": True,
+                        "inverters": {
+                            "parameter_sets": sorted(INVERTER_PARAMETER_SETS),
+                        },
+                    },
+                },
+                "edit": {
+                    "fields": {
+                        "load": ["p_mw", "q_mvar", "in_service"],
+                        "generator": ["p_mw", "v_set_pu", "in_service"],
+                        "branch": ["in_service"],
+                        "shunt": ["g_mw", "b_mvar", "in_service"],
+                    },
+                    "addable": ["load", "shunt"],
+                },
+            },
+            "ops": sorted(ENGINE_OPS[name]),
+            "models": models_map(name),
+            # Edits the fields and adds the kinds ``routine_options.edit`` lists.
+            "editing": True,
+        }
+    return {
+        "name": name,
+        "available": True,
+        "unavailable_reason": None,
+        "versions": {"andes": importlib.metadata.version("andes")},
+        "formats": {
+            "read": ["xlsx", "json", "psse-raw", "psse-dyr", "matpower"],
+            "write": ["xlsx", "json", "psse-raw", "matpower"],
+        },
+        "routines": ["pflow", "tds", "eig", "cpf", "se"],
+        "routine_options": {
+            "pflow": {
+                "methods": list(METHODS),
+            },
+        },
+        "ops": sorted(ENGINE_OPS[name]),
+        "models": models_map(name),
+        "editing": True,
+    }
+
+
+def all_engine_capabilities() -> list[dict[str, Any]]:
+    """Every engine's capability block, in ``ENGINE_NAMES`` order."""
+    return [engine_capabilities(name) for name in ENGINE_NAMES]

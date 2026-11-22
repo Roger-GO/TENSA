@@ -96,7 +96,7 @@ import { TIDY_KEEP_RULE, TIDY_NONE_BETTER } from '@/lib/tidyWording';
 import { useExportCaseName } from '@/components/export/useExportCaseName';
 import { elementToPng } from '@/components/export/exportToPng';
 
-import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
+import { COMPONENT_DND_MIME } from '@/components/shell/componentDnd';
 import { BusNode } from './nodes/BusNode';
 import { LineNode } from './nodes/LineNode';
 import { GeneratorNode } from './nodes/GeneratorNode';

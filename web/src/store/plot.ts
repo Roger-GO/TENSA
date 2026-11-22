@@ -306,7 +306,8 @@ export interface ParsedSeries {
   group: VarGroup;
   /**
    * Element identifier (e.g., ``"5"`` for ``Bus_5_v``; the device, ``"GENROU 1"``,
-   * for the ANDES variable ``omega GENROU 1``).
+   * for the ANDES variable ``omega GENROU 1``; for a neutral name the bus's
+   * number, ``"7"`` for ``voltage|bus:7``, or the key of any other element).
    */
   elementIdx: string;
   /**
@@ -314,8 +315,15 @@ export interface ParsedSeries {
    * ``"a"`` (angle rad); ``gen_state`` → ``"omega"`` / ``"delta"``;
    * ``gen_power`` → ``"Pe"`` / ``"Qe"``; ``line_flow`` + ``load_pq`` →
    * ``"p"`` / ``"q"``; ``dae`` → the ANDES variable (``"omega"``, ``"vf"``).
+   * A neutral series carries the field of the ANDES column of its quantity.
    */
   field: string;
+  /**
+   * Set for a neutral series name (``<quantity>|<key>``, the names a Sienna
+   * run reports): the quantity and the key it was parsed from. Absent for an
+   * ANDES column.
+   */
+  neutral?: { quantity: string; key: string };
 }
 
 const BUS_RE = /^Bus_(.+)_(v|a)$/;
@@ -331,14 +339,44 @@ const LOAD_RE = /^Load_(.+)_(p|q)$/;
 const DAE_RE = /^(\S+) (\S+ .+)$/;
 
 /**
+ * The group and field a neutral quantity's series takes: the same an ANDES
+ * column of that quantity has (``voltage|bus:7`` is ``Bus_7_v``'s ``bus_v``
+ * / ``v``), so a Sienna run groups, titles and colours the diagram as an
+ * ANDES run does. Quantities not in this table (``angle_rel``,
+ * ``rotor_angle_rel``, the branch flows, ``state``) are not listed.
+ */
+const NEUTRAL_SERIES_OF: Record<string, { group: VarGroup; field: string }> = {
+  voltage: { group: 'bus_v', field: 'v' },
+  angle: { group: 'bus_v', field: 'a' },
+  rotor_speed: { group: 'gen_state', field: 'omega' },
+  rotor_angle: { group: 'gen_state', field: 'delta' },
+  p: { group: 'gen_power', field: 'Pe' },
+  q: { group: 'gen_power', field: 'Qe' },
+};
+
+/**
  * Classify a column name into a ``ParsedSeries`` or ``null`` when the
  * shape doesn't match any documented group. ``Gen_<idx>_Pe``/``_Qe``
  * route to the dedicated ``gen_power`` group; ``omega``/``delta`` stay
  * in ``gen_state``. ``Bus_<idx>_a`` (angle) shares the ``bus_v`` group
  * with voltage but carries ``field === 'a'`` so the plot + overlay can
- * tell them apart.
+ * tell them apart. A neutral name (``<quantity>|<key>``, exactly one
+ * separator, a quantity of ``NEUTRAL_SERIES_OF``) parses to the group and
+ * field of that quantity's ANDES column.
  */
 export function parseColumnName(name: string): ParsedSeries | null {
+  const separator = name.indexOf('|');
+  if (separator > 0 && separator === name.lastIndexOf('|') && separator < name.length - 1) {
+    const quantity = name.slice(0, separator);
+    const key = name.slice(separator + 1);
+    const series = NEUTRAL_SERIES_OF[quantity];
+    if (series !== undefined) {
+      // A bus is the bus's number, as the topology and an ANDES column name
+      // it; any other element is its key.
+      const elementIdx = key.startsWith('bus:') ? key.slice(4) : key;
+      return { name, ...series, elementIdx, neutral: { quantity, key } };
+    }
+  }
   const bus = BUS_RE.exec(name);
   if (bus) return { name, group: 'bus_v', elementIdx: bus[1]!, field: bus[2]! };
   const gen = GEN_RE.exec(name);
@@ -410,4 +448,37 @@ export function chartTitle(group: VarGroup, fields: ReadonlySet<string>): string
     default:
       return groupLabel(group);
   }
+}
+
+// ---- neutral series names -------------------------------------------------
+
+/** The unit a neutral quantity is plotted in, from the quantity name. */
+export function neutralQuantityUnit(quantity: string): string | null {
+  switch (quantity) {
+    case 'voltage':
+    case 'rotor_speed':
+      return 'pu';
+    case 'angle':
+    case 'angle_rel':
+    case 'rotor_angle':
+    case 'rotor_angle_rel':
+      return 'rad';
+    case 'p':
+    case 'p_from':
+      return 'MW';
+    case 'q':
+    case 'q_from':
+      return 'MVAr';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The label of a neutral series' element: the element's key and, when the
+ * topology names it, its name. The bare key when the topology has no name
+ * for it, which is always correct.
+ */
+export function neutralElementLabel(key: string, elementName: string | null): string {
+  return elementName === null ? key : `${key} (${elementName})`;
 }

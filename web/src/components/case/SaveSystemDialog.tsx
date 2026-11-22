@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -14,6 +14,8 @@ import { draftCaseKey, draftKeyOfPath, useDraftsStore } from '@/store/drafts';
 import { useEditJournalStore } from '@/store/editJournal';
 import { ProblemDetailsError } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { engineSaveFormats } from '@/lib/engines';
+import type { SaveFormat } from '@/lib/engines';
 import { useOpenCase } from '@/lib/openCase';
 import { baseName } from '@/lib/paths';
 import {
@@ -50,11 +52,13 @@ import { useWriteLayoutSidecar } from '@/lib/useSaveOpenCase';
  * - Filename input (workspace-relative; extension auto-derived from
  *   format). It opens on a name made from the open case's (`wscc9-copy`),
  *   selected, so typing replaces it and Enter saves under it.
- * - Format radio: xlsx (ANDES native), raw, or json. ANDES 2.0 has no PSS/E
- *   writer, so .raw comes from the substrate's own v33 writer
- *   (`server/src/tensa/core/psse_writer.py`). A .raw holds no dynamic data,
- *   and the option says so: the machines and controllers of the case are
- *   left out of it.
+ * - Format radio: xlsx (ANDES native), raw, m, or json, as the session's
+ *   engine lists them. ANDES 2.0 has no PSS/E writer, so .raw comes from
+ *   the substrate's own v33 writer (`server/src/tensa/core/psse_writer.py`).
+ *   A .raw holds no dynamic data, and the option says so: the machines and
+ *   controllers of the case are left out of it. A .m is written by the
+ *   server through ANDES's MATPOWER writer and holds the power-flow data
+ *   only, no dynamic models.
  * - Submit fires `useSaveCase()`. On 409 (file exists) the modal flips
  *   to an "Overwrite?" confirmation.
  */
@@ -63,15 +67,22 @@ export interface SaveSystemDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type Format = 'xlsx' | 'json' | 'raw';
-
-const EXT_BY_FORMAT: Record<Format, string> = {
+const EXT_BY_FORMAT: Record<SaveFormat, string> = {
   xlsx: '.xlsx',
   json: '.json',
   raw: '.raw',
+  m: '.m',
 };
 
-function ensureExtension(filename: string, format: Format): string {
+/** What each format's radio says after its name. */
+const FORMAT_DESCRIPTION: Record<SaveFormat, string> = {
+  xlsx: 'ANDES native, opens in Excel',
+  raw: 'PSS/E (.raw, with .dyr when the case has dynamics)',
+  m: 'MATPOWER case, the power-flow data only (no dynamic models)',
+  json: 'cleanest round-trip',
+};
+
+function ensureExtension(filename: string, format: SaveFormat): string {
   const ext = EXT_BY_FORMAT[format];
   if (filename.endsWith(ext)) return filename;
   // Strip any other recognized extension before appending.
@@ -81,6 +92,10 @@ function ensureExtension(filename: string, format: Format): string {
 
 export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDialogProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
+  const engine = useSessionStore((s) => s.engine);
+  // Store mirror of the engines query (kept in sync by `useEnginesSync`), so
+  // the dialog stays a pure store reader — no query side effects.
+  const engines = useSessionStore((s) => s.engines);
   const saveMutation = useSaveCase();
   // Writes the diagram's layout beside the case file (reading it at click time).
   const writeSidecarAlongside = useWriteLayoutSidecar();
@@ -92,10 +107,17 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
   const { openCase } = useOpenCase();
   const [filename, setFilename] = useState(() => suggestedCopyName(selection));
   const filenameInput = useRef<HTMLInputElement>(null);
-  const [format, setFormat] = useState<Format>('xlsx');
+  const [format, setFormat] = useState<SaveFormat>('xlsx');
   const [overwrite, setOverwrite] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // The formats the engine of the session writes, in the dialog's order. The
+  // format in use is derived from the state and this list (render stays
+  // pure): a selection the list no longer offers moves to the first offered.
+  const offered = engineSaveFormats(engines, engine);
+  const used = offered.includes(format) ? format : offered[0];
+  // The note under the m radio, which describes it while it is shown.
+  const noteMId = useId();
   // Each opening starts on the name made from the case open now, and without
   // the last opening's error or "saved" line, which stay while the modal fades
   // out. Set while rendering, not in an effect, so the first frame of the modal
@@ -151,11 +173,11 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
       : null;
 
   const submit = () => {
-    if (!sessionId || saveMutation.isPending) return;
+    if (!sessionId || saveMutation.isPending || used === undefined) return;
     setError(null);
     setSuccess(null);
-    const targetName = ensureExtension(filename.trim(), format);
-    if (targetName === ensureExtension('', format) || targetName.length <= 5) {
+    const targetName = ensureExtension(filename.trim(), used);
+    if (targetName === EXT_BY_FORMAT[used]) {
       setError('Pick a non-empty filename.');
       return;
     }
@@ -163,7 +185,7 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
     saveMutation.mutate(
       {
         sessionId,
-        body: { filename: targetName, format, overwrite },
+        body: { filename: targetName, format: used, overwrite },
       },
       {
         onSuccess: (resp) => {
@@ -267,48 +289,51 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
                 />
                 <span className="text-muted-foreground text-[10px]">
                   Will save as{' '}
-                  <code>{ensureExtension(filename || NAME_OF_A_NEW_SYSTEM, format)}</code>. Enter
-                  saves.
+                  <code>
+                    {used === undefined
+                      ? filename || NAME_OF_A_NEW_SYSTEM
+                      : ensureExtension(filename || NAME_OF_A_NEW_SYSTEM, used)}
+                  </code>
+                  . Enter saves.
                 </span>
               </label>
               <fieldset className="flex flex-col gap-2">
                 <legend className="text-muted-foreground text-xs font-medium">Format</legend>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="save-format"
-                    checked={format === 'xlsx'}
-                    onChange={() => setFormat('xlsx')}
-                    disabled={saveMutation.isPending}
-                  />
-                  <span>
-                    <strong>xlsx</strong> — ANDES native, opens in Excel
-                  </span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="save-format"
-                    checked={format === 'raw'}
-                    onChange={() => setFormat('raw')}
-                    disabled={saveMutation.isPending}
-                  />
-                  <span>
-                    <strong>raw</strong> — PSS/E v33, the power-flow data only (no dynamic models)
-                  </span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    name="save-format"
-                    checked={format === 'json'}
-                    onChange={() => setFormat('json')}
-                    disabled={saveMutation.isPending}
-                  />
-                  <span>
-                    <strong>json</strong> — cleanest round-trip
-                  </span>
-                </label>
+                {offered.length === 0 ? (
+                  <p data-testid="save-format-none" className="text-muted-foreground text-[10px]">
+                    This engine cannot write a case file.
+                  </p>
+                ) : (
+                  offered.map((offeredFormat) => (
+                    <label key={offeredFormat} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="save-format"
+                        data-testid={`save-format-${offeredFormat}`}
+                        checked={used === offeredFormat}
+                        onChange={() => setFormat(offeredFormat)}
+                        disabled={saveMutation.isPending}
+                        aria-describedby={
+                          offeredFormat === 'm' && used === 'm' ? noteMId : undefined
+                        }
+                      />
+                      <span>
+                        <strong>{offeredFormat}</strong> — {FORMAT_DESCRIPTION[offeredFormat]}
+                      </span>
+                    </label>
+                  ))
+                )}
+                {used === 'm' ? (
+                  <p
+                    id={noteMId}
+                    data-testid="save-format-note-m"
+                    className="text-muted-foreground text-[10px]"
+                  >
+                    The loads on one bus are written as one load, and its shunts as one shunt. Buses
+                    are numbered from 1 unless every bus already has a positive whole number. What
+                    the file leaves out is listed in Messages after the save.
+                  </p>
+                ) : null}
               </fieldset>
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -358,7 +383,7 @@ export function SaveSystemDialog({ open: modalOpen, onOpenChange }: SaveSystemDi
                 type="submit"
                 variant="primary"
                 size="sm"
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || used === undefined}
                 data-testid="save-confirm"
               >
                 {saveMutation.isPending ? 'Saving…' : 'Save'}

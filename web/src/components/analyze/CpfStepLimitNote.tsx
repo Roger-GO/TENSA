@@ -1,7 +1,7 @@
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import type { CpfResult } from '@/api/types';
-import { moreSteps, stepLimitReached } from '@/lib/cpfOptions';
+import { moreSteps, stepLimitReached, targetLambda } from '@/lib/cpfOptions';
 
 /**
  * CpfStepLimitNote: what to do about a nose-curve run that used up its steps.
@@ -43,6 +43,7 @@ export function CpfStepLimitNote({
 
   const next = moreSteps(limit);
   const last = lambdaText(result.lambdas[result.lambdas.length - 1]);
+  const target = targetLambda(result);
 
   return (
     <div
@@ -56,7 +57,7 @@ export function CpfStepLimitNote({
     >
       <span className="min-w-0 flex-1 basis-72">
         {result.truncated
-          ? `The run used all of its ${limit} steps and stopped at λ = ${last}, before it reached the nose. The curve below ends there.`
+          ? `The run used all of its ${limit} steps and stopped at λ = ${last}, before it reached the nose${target === null ? '' : ` or its target λ = ${target}`}. The curve below ends there.`
           : `The run used all of its ${limit} steps: it found the nose (λ = ${lambdaText(result.max_lam)}) and stopped on the lower branch at λ = ${last}, before it was back at the base load.`}{' '}
         {result.direction === 'custom'
           ? 'With a custom direction λ counts multiples of the increases you typed, and one step moves λ by half a unit at most, so small increases make a long path. More steps take it further, and so do larger numbers: ten times the increases is the same curve at a tenth of the λ.'

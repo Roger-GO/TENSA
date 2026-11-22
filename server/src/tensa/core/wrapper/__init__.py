@@ -31,10 +31,13 @@ each in its own module of this package over the shared state in
   case, read it as a topology, commit disturbances to it.
 - ``elements``, ``pmu``, ``timeseries``: add, edit, delete, undo and redo
   elements; PMU and TimeSeries devices.
-- ``pflow``, ``tds``, ``eig``, ``cpf``, ``se``, ``connectivity``: the routines.
+- ``pflow``, ``tds``, ``eig``, ``cpf``, ``se``, ``connectivity``, ``ybus``: the
+  routines.
 - ``snapshot``, ``sweep``, ``bundle``: save and restore a session, sweep over a
   snapshot, import a bundle.
 - ``clone``: clone-on-write editing.
+- ``docs``: the models ANDES ships and its documentation of each, read off a
+  fresh System of their own.
 
 ``results`` holds the records the methods return, ``params`` the models and
 parameters a client may touch, and ``pflow_extract`` the readers of a solved
@@ -48,6 +51,7 @@ from tensa.core.wrapper.bundle import BundleMixin
 from tensa.core.wrapper.clone import CloneMixin
 from tensa.core.wrapper.connectivity import ConnectivityMixin
 from tensa.core.wrapper.cpf import CpfMixin, _argmax, _build_cpf_result, _first_turn
+from tensa.core.wrapper.docs import DocsMixin
 from tensa.core.wrapper.eig import (
     EigMixin,
     _compute_damping_ratio,
@@ -101,6 +105,8 @@ from tensa.core.wrapper.results import (
     TdsBatchResult,
     TopologyEntry,
     TopologySnapshot,
+    YbusEntry,
+    YbusResult,
 )
 from tensa.core.wrapper.se import SeMixin
 from tensa.core.wrapper.snapshot import _SnapshotRecord
@@ -122,6 +128,7 @@ from tensa.core.wrapper.topology import (
     _system_base_mva,
     _system_frequency_hz,
 )
+from tensa.core.wrapper.ybus import YbusMixin
 
 
 class Wrapper(
@@ -135,6 +142,8 @@ class Wrapper(
     CpfMixin,
     SeMixin,
     ConnectivityMixin,
+    YbusMixin,
+    DocsMixin,
 ):
     """Synchronous wrapper around a single ``andes.System`` instance.
 
@@ -164,6 +173,8 @@ __all__ = [
     "TopologyEntry",
     "TopologySnapshot",
     "Wrapper",
+    "YbusEntry",
+    "YbusResult",
     "_ALTERABLE_SERVICES",
     "_CONTROLLER_MODEL_NAMES",
     "_GENROU_REACTANCE_CHAINS",

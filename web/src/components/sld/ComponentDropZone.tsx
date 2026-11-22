@@ -1,6 +1,6 @@
 import { useState, type DragEvent, type HTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
-import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
+import { COMPONENT_DND_MIME } from '@/components/shell/componentDnd';
 
 /**
  * ComponentDropZone — wraps an empty-canvas surface so a Component

@@ -412,6 +412,55 @@ describe('VariableTreePicker: ANDES variables', () => {
   });
 });
 
+describe('VariableTreePicker: neutral series names', () => {
+  beforeEach(() => {
+    useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });
+    usePlotStore.setState({ selectedByRun: {}, filterByRun: {}, expandedByRun: {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  const NEUTRAL = ['voltage|bus:7', 'angle|bus:7', 'rotor_speed|gen:2-1', 'rotor_angle|gen:2-1'];
+
+  it('groups a neutral run under the same headings an ANDES run uses', () => {
+    seedRun('r1', NEUTRAL);
+    usePlotStore.getState().toggleExpanded('r1', 'bus_v');
+    usePlotStore.getState().toggleExpanded('r1', 'gen_state');
+    render(<VariableTreePicker />);
+
+    expect(screen.getByTestId('variable-tree-picker-group-bus_v')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-group-gen_state')).toBeInTheDocument();
+    // A bus is its number, as for an ANDES run (the diagram colours it by that).
+    expect(screen.getByTestId('variable-tree-picker-element-bus_v-7')).toBeInTheDocument();
+    expect(
+      screen.getByTestId('variable-tree-picker-element-gen_state-gen:2-1'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-voltage|bus:7')).toBeInTheDocument();
+    expect(screen.getByTestId('variable-tree-picker-leaf-rotor_speed|gen:2-1')).toBeInTheDocument();
+  });
+
+  it('shows the field label and unit on a leaf, not the raw name', () => {
+    seedRun('r1', NEUTRAL);
+    usePlotStore.getState().toggleExpanded('r1', 'bus_v');
+    render(<VariableTreePicker />);
+
+    const leaf = screen.getByTestId('variable-tree-picker-leaf-voltage|bus:7').closest('label')!;
+    expect(leaf).toHaveTextContent('voltage');
+    expect(leaf).toHaveTextContent('(pu)');
+    expect(leaf).not.toHaveTextContent('voltage|bus:7');
+  });
+
+  it('auto-selects the voltages and the rotor speeds of a neutral run', () => {
+    seedRun('r1', NEUTRAL);
+    render(<VariableTreePicker />);
+
+    const selected = [...usePlotStore.getState().selectedByRun['r1']!].sort();
+    expect(selected).toEqual(['rotor_speed|gen:2-1', 'voltage|bus:7']);
+  });
+});
+
 describe('VariableTreePicker — streaming frames', () => {
   beforeEach(() => {
     useRunsStore.setState({ runs: {}, activeRunId: null, overlayRunIds: new Set() });

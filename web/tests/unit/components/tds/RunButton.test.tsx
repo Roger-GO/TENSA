@@ -30,7 +30,29 @@ vi.mock('@/lib/toast', () => ({
   },
 }));
 
+const tdsInitMutateMock = vi.fn();
+let tdsInitPending = false;
+let tdsInitHandlers: {
+  onSuccess?: (data: unknown) => void;
+  onError?: (err: unknown) => void;
+} = {};
+
+vi.mock('@/api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/queries')>();
+  return {
+    ...actual,
+    useTdsInit: () => ({
+      mutate: (vars: unknown, handlers?: typeof tdsInitHandlers) => {
+        tdsInitHandlers = handlers ?? {};
+        tdsInitMutateMock(vars, handlers);
+      },
+      isPending: tdsInitPending,
+    }),
+  };
+});
+
 import { RunButton } from '@/components/tds/RunButton';
+import { ProblemDetailsError } from '@/api/client';
 import { loadArrowDecoder } from '@/streaming/RunStream';
 import { makeQueryClient, queryKeys, useCurrentTopology } from '@/api/queries';
 import { useSessionStore } from '@/store/session';
@@ -50,6 +72,10 @@ import { arrowFrame } from '../../helpers/frames';
 // load it once so the waits below measure the flow and not the first import.
 beforeAll(async () => {
   await loadArrowDecoder();
+  // The Check initialisation dialog is a chunk of its own, fetched when it
+  // first opens. Fetched here, so a test waits for its mount and not for a
+  // cold import that takes longer than a wait while the whole suite runs.
+  await import('@/components/tds/TdsInitResultDialog');
 });
 
 const SESSION_ID = 'sess-1';
@@ -174,6 +200,19 @@ function seedReady(
 function tick(ms = 10): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+const TDS_INIT_OK = {
+  initialized: true,
+  test_ok: true,
+  test_init: true,
+  clamped: [],
+  residuals: [],
+  max_residual: 0,
+  nan_residuals: 0,
+  n_states: 10,
+  n_algeb: 20,
+  diagnostics_truncated: false,
+};
 
 function topologyBody(state: 'pre-setup' | 'committed') {
   return {
@@ -2229,6 +2268,253 @@ describe('<RunButton /> — tds_config_overrides wire merge (Unit 14/16)', () =>
   });
 });
 
+describe('<RunButton /> — integrator wire mapping (Unit 17)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+  let server: MockServerHandle;
+
+  /**
+   * Drive a TDS run to the point the client emits ``start_tds`` and return
+   * the whole payload, so each test can assert the ``integrator`` value and
+   * exactly which override keys the frame carries.
+   */
+  async function captureStartTds(): Promise<Record<string, unknown>> {
+    seedReady();
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+
+    const captured: { value: Record<string, unknown>; seen: boolean } = { value: {}, seen: false };
+    server.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'ready' }));
+      socket.on('message', (raw: unknown) => {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (msg.type === 'start_tds') {
+          captured.value = msg;
+          captured.seen = true;
+          socket.close({ code: 1000 });
+        }
+      });
+    });
+
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(screen.getByTestId('run-tds-button'));
+    await waitFor(() => expect(captured.seen).toBe(true));
+    return captured.value;
+  }
+
+  beforeEach(async () => {
+    installMockWebSocket();
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    server = new MockServer(`ws://${WS_HOST}/api/ws/${SESSION_ID}`) as unknown as MockServerHandle;
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  afterEach(async () => {
+    server.stop();
+    fetchSpy.mockRestore();
+    restoreWebSocket();
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+    });
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trapezoidal');
+    useUiStore.getState().resetTdsToleranceOverrides();
+    useUiStore.getState().resetTdsConfigOverrides();
+  });
+
+  it('trapezoidal sends its own name and no tds_config_overrides key', async () => {
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trapezoidal');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('backeuler sends its own name and no tolerance keys', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('backeuler');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('trap_adapt-auto sends trap_adapt with the Auto preset and no min_step', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('an Auto choice never sends min_step, whatever the Manual draft holds', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-auto never sends min_step either', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('backeuler sends no tolerance keys even with a Manual draft in the store', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsToleranceOverrides({ rtol: 5e-4, minStep: 0.0001 });
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('backeuler');
+    expect(start).not.toHaveProperty('tds_config_overrides');
+  });
+
+  it('backeuler sends h as trapezoidal does', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfig({ h: 0.01 });
+    useUiStore.getState().setTdsIntegrator('backeuler');
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('backeuler');
+      expect(start.h).toBe(0.01);
+    } finally {
+      useUiStore.getState().setTdsConfig({ h: null });
+    }
+  });
+
+  it('a variable-step choice still sends h, as QNDF did before (the server ignores it)', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsConfig({ h: 0.01 });
+    useUiStore.getState().setTdsIntegrator('trap_adapt-auto');
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('trap_adapt');
+      expect(start.h).toBe(0.01);
+    } finally {
+      useUiStore.getState().setTdsConfig({ h: null });
+    }
+  });
+
+  it('the advanced editor still wins over a Manual min_step of the same key', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-manual');
+    useUiStore.getState().setTdsToleranceOverrides({ minStep: 0.0001 });
+    useUiStore.getState().setTdsConfigOverrides({ min_step: 0.002, max_step: 0.01 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 1e-3,
+      atol: 1e-6,
+      max_step: 0.01,
+      min_step: 0.002,
+    });
+  });
+
+  it('trap_adapt-manual sends trap_adapt with the user values and min_step only above 0', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('trap_adapt-manual');
+    useUiStore
+      .getState()
+      .setTdsToleranceOverrides({ rtol: 5e-4, atol: 2e-6, maxStep: 0.02, minStep: 0.0001 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('trap_adapt');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 5e-4,
+      atol: 2e-6,
+      max_step: 0.02,
+      min_step: 0.0001,
+    });
+  });
+
+  it('a Manual min_step of 0 means not set and is never sent', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-manual');
+    // The store default is minStep 0.
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-auto sends qndf with the Auto preset, unchanged from before', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-auto');
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({ rtol: 1e-3, atol: 1e-6, max_step: 0.05 });
+  });
+
+  it('qndf-manual sends qndf with the user values and min_step when set', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsIntegrator('qndf-manual');
+    useUiStore
+      .getState()
+      .setTdsToleranceOverrides({ rtol: 5e-4, atol: 2e-6, maxStep: 0.02, minStep: 1e-5 });
+    const start = await captureStartTds();
+    expect(start.integrator).toBe('qndf');
+    expect(start.tds_config_overrides).toEqual({
+      rtol: 5e-4,
+      atol: 2e-6,
+      max_step: 0.02,
+      min_step: 1e-5,
+    });
+  });
+
+  it('a load model left at its default sends no load_model key', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel(null);
+    const start = await captureStartTds();
+    expect(start).not.toHaveProperty('load_model');
+  });
+
+  it('a load model the user picked is sent as load_model', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel('power');
+    try {
+      const start = await captureStartTds();
+      expect(start.load_model).toBe('power');
+    } finally {
+      useUiStore.getState().setTdsLoadModel(null);
+    }
+  });
+
+  it('a Sienna session with a default store sends the default integrator and nothing it refuses', async () => {
+    const { useUiStore } = await import('@/store/ui');
+    useUiStore.getState().setTdsLoadModel(null);
+    useSessionStore.setState({ engine: 'sienna' });
+    try {
+      const start = await captureStartTds();
+      expect(start.integrator).toBe('trapezoidal');
+      expect(start).not.toHaveProperty('load_model');
+      expect(start).not.toHaveProperty('dae_vars');
+      expect(start).not.toHaveProperty('controllers');
+      expect(start).not.toHaveProperty('tds_config_overrides');
+    } finally {
+      useSessionStore.setState({ engine: null });
+    }
+  });
+});
+
 describe('<RunButton /> v0.2 — abort + reset', () => {
   let fetchSpy: MockInstance<typeof fetch>;
   let server: MockServerHandle;
@@ -2533,5 +2819,432 @@ describe('<RunButton /> v0.2 — abort + reset', () => {
       expect(toastInfoMock).toHaveBeenCalledWith('run-done stays in History', expect.anything());
     });
     expect(toastWarningMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('<RunButton /> — Check initialisation (TDS-INIT)', () => {
+  let fetchSpy: MockInstance<typeof fetch>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis as unknown as { fetch: typeof fetch }, 'fetch');
+    fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse({}, 200)));
+    tdsInitMutateMock.mockReset();
+    tdsInitHandlers = {};
+    tdsInitPending = false;
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    tdsInitPending = false;
+    tdsInitHandlers = {};
+    useSessionStore.setState({ sessionId: null });
+    useCaseStore.setState({
+      selection: null,
+      topology: null,
+      layoutSidecar: null,
+      selectedElement: null,
+    });
+    usePflowStore.setState({ lastRun: null, isRunning: false, error: null });
+    useDisturbanceStore.setState({ disturbances: [], dirty: false, committed: false });
+    useRunsStore.setState({
+      runs: {},
+      activeRunId: null,
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+  });
+
+  // Check initialisation is an entry of the run actions menu beside the Run
+  // button, so each test opens the menu first. An entry that cannot be used is
+  // marked `aria-disabled` (it stays focusable, with its reason under it), not
+  // `disabled`.
+
+  /** Open the run actions menu and give its Check initialisation entry. */
+  async function openCheck(): Promise<HTMLElement> {
+    await userEvent.click(screen.getByTestId('run-actions-trigger'));
+    return screen.findByTestId('tds-init-check');
+  }
+
+  it('TDS mode, ready: the check is offered in the run actions menu', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    const button = await openCheck();
+    expect(button).not.toHaveAttribute('aria-disabled');
+    expect(button).toHaveTextContent('Check initialisation');
+    // Nothing holds the system: no Reset run beside it.
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
+  });
+
+  it('PF mode: neither the menu nor the check is rendered', () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    expect(screen.queryByTestId('run-actions-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tds-init-check')).not.toBeInTheDocument();
+  });
+
+  it('no case loaded: the check is refused with the run button’s reason', async () => {
+    // A disturbance puts the button in TDS mode even with no case behind it.
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: false,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const button = await openCheck();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAccessibleDescription(/No case loaded\./);
+    expect(screen.getByTestId('tds-init-check-reason')).toHaveTextContent(/No case loaded/i);
+    // A click on a refused entry does nothing.
+    await userEvent.click(button);
+    expect(tdsInitMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('while the check is pending it says Checking…, and both are refused', async () => {
+    seedReady();
+    tdsInitPending = true;
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    // The menu's trigger says so too, as the menu is closed while the check runs.
+    expect(screen.getByTestId('run-actions-trigger')).toHaveAccessibleName(
+      'More run actions: checking the initialisation',
+    );
+    const check = await openCheck();
+    expect(check).toHaveTextContent(/checking/i);
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByTestId('run-tds-button')).toBeDisabled();
+  });
+
+  it('while a TDS run streams, the check is refused and the run button still offers Abort', async () => {
+    seedReady();
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    useRunsStore.setState({
+      runs: {
+        'run-live': {
+          runId: 'run-live',
+          startedAt: 1,
+          tf: 5,
+          tCurrent: 1,
+          seqCount: 10,
+          t: new Float64Array(0),
+          columns: {},
+          columnNames: [],
+          state: 'streaming',
+          connection: 'connected',
+          abortedLocally: false,
+          errorReason: null,
+        },
+      },
+      activeRunId: 'run-live',
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const primary = screen.getByTestId('run-tds-button');
+    expect(primary).toHaveTextContent(/^abort$/i);
+    expect(primary).toBeEnabled();
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    expect(check).toHaveAccessibleDescription(/A run is under way/);
+  });
+
+  it('a finished run holds the system: the check is refused and says to Reset first', async () => {
+    seedReady();
+    useDisturbanceStore.setState({
+      disturbances: [
+        { id: 'd1', spec: { kind: 'fault', bus_idx: '4', tf: 1, tc: 1.1, xf: 0.05, rf: 0 } },
+      ],
+      dirty: false,
+      committed: true,
+    });
+    useRunsStore.setState({
+      runs: {
+        'run-done': {
+          runId: 'run-done',
+          startedAt: 1,
+          tf: 5,
+          tCurrent: 5,
+          seqCount: 100,
+          t: new Float64Array(0),
+          columns: {},
+          columnNames: [],
+          state: 'done',
+          connection: 'connected',
+          abortedLocally: false,
+          errorReason: null,
+        },
+      },
+      activeRunId: 'run-done',
+      memoryBudgetBytes: DEFAULT_MEMORY_BUDGET_BYTES,
+    });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    expect(check).toHaveAccessibleDescription(
+      /Reset the run first; the system is already initialised\./,
+    );
+    expect(screen.getByTestId('tds-init-check-reason')).toHaveTextContent(
+      /Reset the run first; the system is already/i,
+    );
+    // The Run button says Reset run itself after a finished run; the menu does not
+    // repeat it.
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
+  });
+
+  it('click sends only the session id: no testInit key, so the default request is unchanged', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    expect(tdsInitMutateMock).toHaveBeenCalledTimes(1);
+    const [vars] = tdsInitMutateMock.mock.calls[0] as [Record<string, unknown>, unknown];
+    expect(vars).toEqual({ sessionId: SESSION_ID });
+    expect(vars).not.toHaveProperty('testInit');
+  });
+
+  it('the check can be asked for from the keyboard', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    screen.getByTestId('run-actions-trigger').focus();
+    await userEvent.keyboard('{Enter}');
+    const check = await screen.findByTestId('tds-init-check');
+    await waitFor(() => expect(check).toHaveFocus());
+    await userEvent.keyboard('{Enter}');
+    expect(tdsInitMutateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('the result dialog loads on first open: nothing of it is mounted until a check answers', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
+    await userEvent.click(await openCheck());
+    expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument();
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
+  });
+
+  it('a successful check opens the dialog with the result and leaves Run TDS enabled', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-init-verdict')).toHaveTextContent(
+      'Every dynamic model starts at a steady state.',
+    );
+    // The next run carries on from this initialisation: the check's success
+    // itself does not disable the run button.
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
+  });
+
+  it('a 422 opens the dialog with the server’s detail and fires no toast', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    const error = new ProblemDetailsError({
+      type: 'about:blank',
+      title: 'Unprocessable Entity',
+      status: 422,
+      detail: 'the system is already initialised',
+      instance: null,
+    });
+    act(() => {
+      tdsInitHandlers.onError?.(error);
+    });
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
+        'The initialisation could not be checked: the system is already initialised',
+      ),
+    );
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('a non-ProblemDetails failure opens the dialog with the generic line and toasts it', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onError?.(new Error('socket hang up'));
+    });
+    expect(await screen.findByTestId('tds-init-dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('tds-init-error')).toHaveTextContent(
+      'The initialisation could not be checked:',
+    );
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      'Initialisation check failed',
+      expect.objectContaining({ description: expect.stringContaining('socket hang up') }),
+    );
+  });
+
+  it('after a successful check, a second is refused here until the case is read again', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await screen.findByTestId('tds-init-dialog');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    const check = await openCheck();
+    expect(check).toHaveAttribute('aria-disabled', 'true');
+    expect(check).toHaveAccessibleDescription(
+      'Reset the run first; the system is already initialised.',
+    );
+    // The way out is beside the reason.
+    expect(screen.getByTestId('run-actions-reset-run')).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByTestId('run-tds-button')).toBeEnabled();
+
+    // The topology read the check asked for says the case is set up: still refused.
+    act(() => {
+      const topology = useCaseStore.getState().topology;
+      if (topology !== null)
+        useCaseStore.setState({ topology: { ...topology, state: 'committed' } });
+    });
+    expect(screen.getByTestId('tds-init-check')).toHaveAttribute('aria-disabled', 'true');
+
+    // Reset run reads the case again, back to pre-setup: the check is offered again.
+    act(() => {
+      const topology = useCaseStore.getState().topology;
+      if (topology !== null)
+        useCaseStore.setState({ topology: { ...topology, state: 'pre-setup' } });
+    });
+    expect(screen.getByTestId('tds-init-check')).not.toHaveAttribute('aria-disabled');
+    expect(screen.queryByTestId('run-actions-reset-run')).not.toBeInTheDocument();
+  });
+
+  it('Reset run in the menu reads the case again after a check', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await screen.findByTestId('tds-init-dialog');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    await openCheck();
+    await userEvent.click(screen.getByTestId('run-actions-reset-run'));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(([input]) =>
+          (typeof input === 'string' ? input : (input as Request).url).endsWith(
+            `/sessions/${SESSION_ID}/reload`,
+          ),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('the dialog gives the focus back to the menu’s trigger when it closes', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onSuccess?.(TDS_INIT_OK);
+    });
+    await userEvent.click(await screen.findByTestId('tds-init-close'));
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    // The entry is in a menu that closed, so its trigger, beside the Run button, has
+    // the focus, and the entry is one key away.
+    expect(screen.getByTestId('run-actions-trigger')).toHaveFocus();
+  });
+
+  it('a refused check (422) leaves the check offered and marks nothing as set up', async () => {
+    seedReady();
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    await userEvent.click(screen.getByTestId('run-mode-tds'));
+    await userEvent.click(await openCheck());
+    act(() => {
+      tdsInitHandlers.onError?.(
+        new ProblemDetailsError({
+          type: 'about:blank',
+          title: 'Unprocessable Entity',
+          status: 422,
+          detail: 'power flow did not converge; TDS cannot begin',
+          instance: null,
+        }),
+      );
+    });
+    await screen.findByTestId('tds-init-dialog');
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('tds-init-dialog')).not.toBeInTheDocument());
+    expect(await openCheck()).not.toHaveAttribute('aria-disabled');
+    expect(useCaseStore.getState().topology?.state).toBe('pre-setup');
+  });
+
+  it('an eigenvalue analysis has initialised the run: the check is refused with the reason', async () => {
+    seedReady({ withDisturbances: true });
+    const { useAnalyzeStore } = await import('@/store/analyze');
+    useAnalyzeStore.setState({
+      eigResult: {
+        eigenvalues: [{ real: -0.1, imag: 1.0 }],
+        damping_ratios: [0.1],
+        frequencies_hz: [0.159],
+        mode_count: 1,
+        state_count: 1,
+        state_names: ['delta_1'],
+        tds_initialized: true,
+      },
+    });
+    try {
+      const { Wrapper } = makeWrapper();
+      render(<RunButton />, { wrapper: Wrapper });
+      const check = await openCheck();
+      expect(check).toHaveAttribute('aria-disabled', 'true');
+      expect(check).toHaveAccessibleDescription(
+        'Reset the run first; the system is already initialised.',
+      );
+    } finally {
+      useAnalyzeStore.setState({ eigResult: null });
+    }
+  });
+
+  it('a run asked for by a command while the check runs is held back', async () => {
+    seedReady({ withDisturbances: true });
+    tdsInitPending = true;
+    useRunModeStore.setState({ runRequest: null });
+    const { Wrapper } = makeWrapper();
+    render(<RunButton />, { wrapper: Wrapper });
+    act(() => useRunModeStore.getState().requestRun('tds'));
+    await waitFor(() =>
+      expect(toastInfoMock).toHaveBeenCalledWith('A run is already in progress', expect.anything()),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

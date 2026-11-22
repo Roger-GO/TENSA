@@ -198,6 +198,43 @@ describe('reloaded case store', () => {
     expect(mark()).toBeNull();
   });
 
+  it('names the engine of a session other than the default one in the mark', async () => {
+    const { useSessionStore } = await import('@/store/session');
+    const { markEngine, readOpenCaseMark, useReloadedCaseStore } =
+      await import('@/store/reloadedCase');
+    useSessionStore.setState({ engine: 'sienna' });
+    const { follow } = useReloadedCaseStore.getState();
+    follow({ primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] });
+    expect(mark()).toEqual({ primaryPath: 'ieee14.raw', addfiles: [], engine: 'sienna' });
+    follow({ primaryPath: null, addfiles: [], blank: true });
+    expect(mark()).toEqual({ primaryPath: null, addfiles: [], blank: true, engine: 'sienna' });
+    const read = readOpenCaseMark();
+    expect(read !== null && markEngine(read)).toBe('sienna');
+    // Under the default engine, or before a session has answered, the mark is what it always was.
+    for (const engine of ['andes', null]) {
+      useSessionStore.setState({ engine });
+      follow({ primaryPath: parseWorkspacePath('ieee14.raw'), addfiles: [] });
+      expect(mark()).toEqual({ primaryPath: 'ieee14.raw', addfiles: [] });
+    }
+  });
+
+  it.each([
+    ['no engine (a mark written before engines were kept)', undefined, 'andes'],
+    ['the default engine named', 'andes', 'andes'],
+    ['another engine', 'sienna', 'sienna'],
+    ['an engine that is not a name', 7, 'andes'],
+    ['an empty engine', '', 'andes'],
+  ])('reads a mark with %s, and its engine', async (_what, engine, expected) => {
+    window.sessionStorage.setItem(
+      KEY,
+      JSON.stringify({ primaryPath: 'ieee14.raw', addfiles: ['ieee14.dyr'], engine }),
+    );
+    const { markEngine, useReloadedCaseStore } = await import('@/store/reloadedCase');
+    const closed = useReloadedCaseStore.getState().closed;
+    expect(closed).toMatchObject({ primaryPath: 'ieee14.raw', addfiles: ['ieee14.dyr'] });
+    expect(closed !== null && markEngine(closed)).toBe(expected);
+  });
+
   it('works without the mark when the storage throws', async () => {
     vi.spyOn(window.sessionStorage, 'getItem').mockImplementation(() => {
       throw new Error('denied');

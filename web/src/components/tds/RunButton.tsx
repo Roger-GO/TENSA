@@ -12,8 +12,13 @@ import {
   useCommitDisturbances,
   useRefreshTopology,
   useReloadCase,
+  useTdsInit,
   loadOperatingPointIntoStore,
 } from '@/api/queries';
+import type { TdsInitResult } from '@/api/types';
+import { TopBarMenu, TopBarMenuItem } from '@/components/shell/TopBarMenu';
+import { LazyMount } from '@/components/ui/Lazy';
+import { lazyNamed } from '@/lib/lazyNamed';
 import { ProblemDetailsError } from '@/api/client';
 import { usePflowRunAction } from '@/lib/usePflowRunAction';
 import { runHeldNotice } from '@/lib/runLock';
@@ -30,10 +35,12 @@ import { useLayoutStore } from '@/store/layout';
 import { useRunsStore } from '@/store/runs';
 import { MAX_TDS_DAE_VARS, useUiStore } from '@/store/ui';
 import { RunStream } from '@/streaming/RunStream';
-import type { RunStreamError, VarGroup } from '@/streaming/RunStream';
+import type { RunStreamError, TdsIntegratorWire, VarGroup } from '@/streaming/RunStream';
 import { buildRunStreamWsUrl } from '@/streaming/wsUrl';
 import { useRunReadiness, type RunRoutine } from '@/lib/useRunReadiness';
 import { useRequestedRun } from '@/lib/useRequestedRun';
+import { useDepsChanged } from '@/lib/useDepsChanged';
+import { useAnalyzeStore } from '@/store/analyze';
 import { reportAbortError } from '@/lib/abortRun';
 import { describeError } from '@/lib/describeError';
 import { toast } from '@/lib/toast';
@@ -42,6 +49,14 @@ import { describeScenario } from '@/lib/runLabel';
 import { runDaeVars, summariseResults } from '@/lib/tdsControllers';
 import { stemOf } from '@/lib/paths';
 import { cn } from '@/lib/cn';
+
+// The answer of Check initialisation is its own chunk, fetched the first time
+// a check answers: the run button is on the first screen, the dialog is not.
+const TdsInitResultDialog = lazyNamed(
+  () => import('@/components/tds/TdsInitResultDialog'),
+  'TdsInitResultDialog',
+  'overlay',
+);
 
 /**
  * RunButton (v0.2). The top-bar primary action that consolidates v0.1's
@@ -55,6 +70,12 @@ import { cn } from '@/lib/cn';
  * - A small segmented control to the right of the button lets the user
  *   override the auto pick. Manual selection sticks until a state change
  *   (case load / reset) wipes it.
+ * - In TDS mode, a menu on a chevron beside the button holds the secondary
+ *   actions of the run: Check initialisation (with the reason it cannot be
+ *   used now under it), and Reset run once the check (or an eigenvalue
+ *   analysis) has initialised the run without a run to say Reset run itself.
+ *   The top bar has no room for a button of each at a laptop's width
+ *   (`topBarLayout.ts`).
  *
  * State machine:
  *
@@ -145,6 +166,41 @@ function Spinner() {
   );
 }
 
+/** The spinner, sized by the class the run actions trigger gives its glyph. */
+function SpinnerGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={cn('animate-spin', className)}
+    >
+      <path d="M8 1.5 A6.5 6.5 0 1 1 1.5 8" />
+    </svg>
+  );
+}
+
+/** A chevron pointing down: the trigger of the run actions menu, as on a split button. */
+function RunActionsGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M4 6.5 8 10.5 12 6.5" />
+    </svg>
+  );
+}
+
 export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const isPfRunning = usePflowStore((s) => s.isRunning);
@@ -152,15 +208,18 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // TDS args are owned by ``TdsConfigPanel`` (Unit 8) and live in
   // ``useUiStore``. Props remain as test-only overrides.
   const tdsConfig = useUiStore((s) => s.tdsConfig);
-  // Unit 16: integrator preset + adaptive tolerance overrides. The
-  // ``-auto`` / ``-manual`` suffix is a UI-side distinction; both wire
-  // up to ``integrator: "qndf"`` and forward the overrides. Manual mode
-  // exposes the inputs in TdsConfigPanel; Auto uses the same defaults.
+  // Unit 16/17: integrator preset + adaptive tolerance overrides. The
+  // ``-auto`` / ``-manual`` suffix is a UI-side distinction; the wire
+  // value is the suffix-stripped name. Manual mode exposes the inputs in
+  // TdsConfigPanel; Auto uses the same defaults.
   const tdsIntegrator = useUiStore((s) => s.tdsIntegrator);
   const tdsToleranceOverrides = useUiStore((s) => s.tdsToleranceOverrides);
   // Unit 14: free-form ``tds_config_overrides`` dict from the TDS
   // Advanced key-value editor. Empty by default → no overrides forwarded.
   const tdsConfigOverridesCustom = useUiStore((s) => s.tdsConfigOverrides);
+  // The load model an engine that takes one (Sienna) is asked for. Null sends
+  // no field, leaving the choice to the server.
+  const tdsLoadModel = useUiStore((s) => s.tdsLoadModel);
 
   // Active-run handle (if any) — drives the Reset / Abort label switch.
   const activeRunId = useRunsStore((s) => s.activeRunId);
@@ -174,6 +233,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   const reloadCase = useReloadCase();
   const refreshTopology = useRefreshTopology();
   const abortRun = useAbortRun();
+  const tdsInit = useTdsInit();
   const resetRun = useResetRunAction({ errorTitle: 'TDS error' });
 
   // Mode = "auto" derived from disturbances + a manual override that
@@ -201,6 +261,33 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // slice's ``abortedLocally`` flag flips on HTTP success — independent
   // of when the substrate actually exits.
   const [aborting, setAborting] = useState(false);
+
+  // The "Check initialisation" action beside the run control: its dialog's
+  // open flag and the payload it shows (the result, or the error). Both are
+  // set only in the mutation callbacks and cleared in the click handler, so
+  // the render stays pure.
+  const [tdsInitOpen, setTdsInitOpen] = useState(false);
+  const [tdsInitResult, setTdsInitResult] = useState<TdsInitResult | null>(null);
+  const [tdsInitError, setTdsInitError] = useState<Error | null>(null);
+  // The box (none of its own on the page) round the run actions menu, through
+  // which its dialog finds the menu's trigger to give the focus back to.
+  const runActionsAnchor = useRef<HTMLSpanElement>(null);
+
+  // Whether the check has initialised the run this session holds now. The
+  // server answers a second check 422 until the case is read again, so the
+  // button says so instead. A reload (Reset run, Reload case, another case, a
+  // new session) takes the topology back to pre-setup, which takes the
+  // initialisation with it. The check's own refetch only ever moves the state
+  // to `committed`, so it never clears the mark it was made with.
+  const topologyState = useCaseStore((s) => s.topology?.state ?? null);
+  const [checkedInit, setCheckedInit] = useState(false);
+  const sessionChanged = useDepsChanged([sessionId]);
+  const topologyStateChanged = useDepsChanged([topologyState]);
+  if (checkedInit && (sessionChanged || (topologyStateChanged && topologyState !== 'committed'))) {
+    setCheckedInit(false);
+  }
+  // An eigenvalue analysis initialises the run as well (`tds_initialized`).
+  const eigInitialised = useAnalyzeStore((s) => s.eigResult?.tds_initialized ?? false);
 
   // Cleanup the stream on unmount so a navigation-away mid-run doesn't
   // leave a dangling WS. Idempotent — RunStream.dispose() guards against
@@ -350,26 +437,38 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     // default step" → omit from the wire payload entirely. The
     // ``defaultH`` prop overrides only when explicitly set.
     const h = defaultH !== undefined ? defaultH : (tdsConfig.h ?? undefined);
-    // Unit 16: derive wire-side integrator + override payload from the
-    // UI-side preset. ``trapezoidal`` ships only the integrator key;
-    // both QNDF presets (Auto / Manual) ship the overrides too — the
-    // user's last-edited Manual values are preserved in the store and
-    // re-used in Auto mode (the inputs are hidden but the values stick).
-    const wireIntegrator: 'trapezoidal' | 'qndf' =
-      tdsIntegrator === 'trapezoidal' ? 'trapezoidal' : 'qndf';
-    // Base overrides: the structured rtol/atol/max_step preset (QNDF
-    // modes only). Unit 14 then merges the free-form editor dict on top
-    // (the editor wins on key collisions). An empty editor + trapezoidal
-    // integrator → ``undefined`` so the wire stays minimal and behaviour
-    // is unchanged for the default path.
-    const baseOverrides: Record<string, number> | undefined =
-      tdsIntegrator === 'trapezoidal'
-        ? undefined
-        : {
-            rtol: tdsToleranceOverrides.rtol,
-            atol: tdsToleranceOverrides.atol,
-            max_step: tdsToleranceOverrides.maxStep,
-          };
+    // Unit 17: derive wire-side integrator + override payload from the
+    // UI-side preset. The two fixed-step integrators ship only the
+    // integrator key; the variable-step presets (Auto / Manual) ship the
+    // overrides too: the user's last-edited Manual values are preserved
+    // in the store and re-used in Auto mode (the inputs are hidden but
+    // the values stick). Manual mode adds ``min_step`` only when it is
+    // above 0: 0 means "not set" and lets the server keep the case's own
+    // floor. ``h`` goes as before whatever the integrator; the
+    // variable-step ones ignore it on the server.
+    const wireIntegrator: TdsIntegratorWire =
+      tdsIntegrator === 'trapezoidal' || tdsIntegrator === 'backeuler'
+        ? tdsIntegrator
+        : tdsIntegrator === 'trap_adapt-auto' || tdsIntegrator === 'trap_adapt-manual'
+          ? 'trap_adapt'
+          : 'qndf';
+    // Base overrides: the structured rtol/atol/max_step preset
+    // (variable-step modes only). Unit 14 then merges the free-form
+    // editor dict on top (the editor wins on key collisions). An empty
+    // editor + a fixed-step integrator → ``undefined`` so the wire stays
+    // minimal and behaviour is unchanged for the default path.
+    const isFixedStep = tdsIntegrator === 'trapezoidal' || tdsIntegrator === 'backeuler';
+    const isManualPreset = tdsIntegrator === 'trap_adapt-manual' || tdsIntegrator === 'qndf-manual';
+    const baseOverrides: Record<string, number> | undefined = isFixedStep
+      ? undefined
+      : {
+          rtol: tdsToleranceOverrides.rtol,
+          atol: tdsToleranceOverrides.atol,
+          max_step: tdsToleranceOverrides.maxStep,
+          ...(isManualPreset && tdsToleranceOverrides.minStep > 0
+            ? { min_step: tdsToleranceOverrides.minStep }
+            : {}),
+        };
     const hasCustomOverrides = Object.keys(tdsConfigOverridesCustom).length > 0;
     const tdsConfigOverrides =
       baseOverrides === undefined && !hasCustomOverrides
@@ -388,6 +487,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
       ...(h === undefined ? {} : { h }),
       integrator: wireIntegrator,
       ...(tdsConfigOverrides === undefined ? {} : { tdsConfigOverrides }),
+      ...(tdsLoadModel === null ? {} : { loadModel: tdsLoadModel }),
     };
 
     const scenario = describeScenario(disturbances.map((d) => d.spec));
@@ -491,6 +591,34 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     stream.start();
   };
 
+  // ---- check-initialisation flow ------------------------------------------
+
+  const onCheckInit = () => {
+    if (!sessionId) return;
+    setTdsInitResult(null);
+    setTdsInitError(null);
+    tdsInit.mutate(
+      { sessionId },
+      {
+        onSuccess: (data) => {
+          setTdsInitResult(data);
+          setCheckedInit(true);
+          setTdsInitOpen(true);
+        },
+        onError: (err) => {
+          // The dialog shows the error either way (a 422 with the server's
+          // detail, anything else with its message); only a failure without a
+          // server detail is also toasted, as a failed start is.
+          setTdsInitError(err);
+          setTdsInitOpen(true);
+          if (!(err instanceof ProblemDetailsError)) {
+            toast.error('Initialisation check failed', { description: describeError(err) });
+          }
+        },
+      },
+    );
+  };
+
   // ---- abort flow ---------------------------------------------------------
 
   const onAbort = () => {
@@ -542,7 +670,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // only this button knows (a run under way, a finished run that holds the
   // system) is said here.
   useRequestedRun(['pflow', 'tds'], (routine) => {
-    if (isPfRunning || isTdsRunning || tdsStarting) {
+    if (isPfRunning || isTdsRunning || tdsStarting || tdsInit.isPending) {
       toast.info('A run is already in progress', {
         description: 'Wait for it to finish, or stop it with the Run button, and ask again.',
       });
@@ -617,7 +745,7 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     }
   }
 
-  const allDisabled = primaryDisabled || disabledReason !== null;
+  const allDisabled = primaryDisabled || disabledReason !== null || tdsInit.isPending;
 
   const primaryButton = (
     <Button
@@ -698,6 +826,79 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
     </div>
   );
 
+  // ---- run actions menu: Check initialisation -----------------------------
+
+  // The check is offered only when a TDS run could start (the readiness of
+  // the run button), and not while a run, a power flow, a reset or the check
+  // itself is under way. Nor once the run is initialised, by a finished run,
+  // an eigenvalue analysis or this check: the route would answer 422 "already
+  // initialised", and Reset run is the way back. The reason is derived during
+  // render, like the run button's own disabled reason, and the menu shows it
+  // under the entry.
+  //
+  // The check is a secondary action of the run control, so it is an entry of
+  // the menu beside the run button and not a button of its own in the top bar,
+  // which has no room for one at a laptop's width (`topBarLayout.ts`).
+  const initialised = isTdsTerminal || checkedInit || eigInitialised;
+  const checkReason =
+    disabledReason ??
+    (initialised
+      ? 'Reset the run first; the system is already initialised.'
+      : tdsInit.isPending
+        ? 'The check is under way.'
+        : isTdsRunning || tdsStarting
+          ? 'A run is under way. Wait for it to end, or abort it.'
+          : isPfRunning
+            ? 'Wait for power flow to finish.'
+            : resetRun.isPending
+              ? 'Wait for the case to be read again.'
+              : null);
+
+  const runActionsMenu = (
+    <span ref={runActionsAnchor} className="contents">
+      <TopBarMenu
+        label="More run actions"
+        triggerAriaLabel={
+          tdsInit.isPending ? 'More run actions: checking the initialisation' : undefined
+        }
+        menuLabel="Run actions"
+        icon={tdsInit.isPending ? SpinnerGlyph : RunActionsGlyph}
+        iconOnly
+        testId="run-actions"
+        triggerClassName="border-border border"
+      >
+        <TopBarMenuItem
+          testId="tds-init-check"
+          title="Initialise the time-domain run without stepping it, and report whether every dynamic model starts at a steady state"
+          unavailableReason={checkReason ?? undefined}
+          onClick={onCheckInit}
+        >
+          {tdsInit.isPending ? 'Checking…' : 'Check initialisation'}
+        </TopBarMenuItem>
+        {/* The way out of the reason above, beside it, as every place that says a
+            run holds the system has one (`lib/runLock.ts`). After a finished run
+            the Run button itself says Reset run, so it is offered here only for an
+            initialisation that left the button as it was (this check, or an
+            eigenvalue analysis). */}
+        {initialised && !isTdsTerminal ? (
+          <TopBarMenuItem
+            testId="run-actions-reset-run"
+            title={
+              'Read the case again, which takes the initialisation back, so the check can be made again. The disturbances stay in the list.' +
+              (reloadDiscardsEdits
+                ? ' The elements you added, changed or deleted since the case was opened do not: save the system first to keep them.'
+                : '')
+            }
+            unavailableReason={resetRun.isPending ? 'The case is being read again.' : undefined}
+            onClick={onReset}
+          >
+            Reset run
+          </TopBarMenuItem>
+        ) : null}
+      </TopBarMenu>
+    </span>
+  );
+
   // ---- inline recovery affordance ----------------------------------------
 
   // The Run-readiness hook surfaces a recovery descriptor when one is
@@ -722,32 +923,58 @@ export function RunButton({ className, defaultVars, defaultTf, defaultH }: RunBu
   // ---- render -------------------------------------------------------------
 
   return (
-    <div className="flex items-center gap-2">
-      {disabledReason ? (
-        <TooltipProvider delayDuration={150}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="inline-block">
-                {primaryButton}
-              </span>
-            </TooltipTrigger>
-            <TooltipPortal>
-              <TooltipContent id="run-button-disabled-reason">{disabledReason}</TooltipContent>
-            </TooltipPortal>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        primaryButton
-      )}
-      {/* The tooltip above only exists while it is open, so the reason is also
+    <>
+      <div className="flex items-center gap-2">
+        {disabledReason ? (
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="inline-block">
+                  {primaryButton}
+                </span>
+              </TooltipTrigger>
+              <TooltipPortal>
+                <TooltipContent id="run-button-disabled-reason">{disabledReason}</TooltipContent>
+              </TooltipPortal>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          primaryButton
+        )}
+        {/* The tooltip above only exists while it is open, so the reason is also
           kept in the page as text the button's aria-describedby can reach. */}
-      {disabledReason ? (
-        <span id="run-button-disabled-reason-text" className="sr-only">
-          {disabledReason}
-        </span>
-      ) : null}
-      {inlineRecovery}
-      {modeSelector}
-    </div>
+        {disabledReason ? (
+          <span id="run-button-disabled-reason-text" className="sr-only">
+            {disabledReason}
+          </span>
+        ) : null}
+        {mode === 'tds' ? runActionsMenu : null}
+        {inlineRecovery}
+        {modeSelector}
+      </div>
+      <LazyMount when={tdsInitOpen} onLoadFailed={() => setTdsInitOpen(false)}>
+        <TdsInitResultDialog
+          open={tdsInitOpen}
+          onOpenChange={setTdsInitOpen}
+          result={tdsInitResult}
+          error={tdsInitError}
+          discardsEdits={reloadDiscardsEdits}
+          onResetRun={onReset}
+          resetting={resetRun.isPending}
+          disturbancesListed={disturbances.length > 0}
+          onCloseAutoFocus={(event) => {
+            // The entry the check was asked from is in a menu that closed, so
+            // the focus goes back to the menu's trigger, beside the run button.
+            const target = runActionsAnchor.current?.querySelector<HTMLButtonElement>(
+              'button[aria-haspopup="menu"]',
+            );
+            if (target !== null && target !== undefined && target.isConnected) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
+        />
+      </LazyMount>
+    </>
   );
 }

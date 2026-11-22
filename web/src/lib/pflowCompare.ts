@@ -258,7 +258,8 @@ function compareLines(a: PflowSide, b: PflowSide): LineDelta[] {
 
 interface Injection {
   p: number;
-  q: number;
+  /** ``null`` for a DC power flow, which computes no reactive power. */
+  q: number | null;
   bus: number | string;
 }
 

@@ -148,6 +148,8 @@ export function collectViolations(
     if (!DYNAMIC_GENERATOR_KINDS.has(entry.kind)) statics.set(String(entry.idx), entry);
   }
   for (const [key, out] of Object.entries(pflow.generator_outputs ?? {})) {
+    // A DC power flow computes no reactive power: there is no limit to check.
+    if (out.q === null) continue;
     const state = assessQLimit(out.q, out.q_min, out.q_max);
     if (state === 'none') continue;
     checked.generators += 1;

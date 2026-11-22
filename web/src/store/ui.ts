@@ -17,6 +17,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { TdsControllerResult } from '@/api/types';
+import type { TdsLoadModel } from '@/lib/engines';
 import type { TdsControllerEntry } from '@/lib/tdsControllers';
 
 /** Variable group selector forwarded by ``RunStream`` to ``start_tds``. */
@@ -77,31 +78,47 @@ export const DEFAULT_TDS_CONFIG: TdsConfig = {
 };
 
 /**
- * Integrator preset (Unit 16). The substrate accepts the wire values
- * ``"trapezoidal"`` and ``"qndf"``; the ``-auto`` / ``-manual`` suffix is
- * a UI distinction so the form knows whether to expose the tolerance
- * inputs. The Auto preset injects ``rtol=1e-3, atol=1e-6, max_step=0.05``
- * (per the plan's KTD-16); Manual surfaces the same fields as
- * user-editable.
+ * Integrator preset. The substrate accepts the wire values
+ * ``"trapezoidal"``, ``"backeuler"``, ``"trap_adapt"`` and ``"qndf"``;
+ * the ``-auto`` / ``-manual`` suffix is a UI distinction so the form
+ * knows whether to expose the tolerance inputs. The two fixed-step
+ * integrators (``trapezoidal``, ``backeuler``) step at ``h`` and ignore
+ * the tolerances. The two variable-step integrators (``trap_adapt``,
+ * ``qndf``) ignore ``h``; the Auto preset injects
+ * ``rtol=1e-3, atol=1e-6, max_step=0.05`` and leaves ``min_step`` to the
+ * substrate; Manual surfaces all four fields as user-editable.
  */
-export type TdsIntegrator = 'trapezoidal' | 'qndf-auto' | 'qndf-manual';
+export type TdsIntegrator =
+  | 'trapezoidal'
+  | 'backeuler'
+  | 'trap_adapt-auto'
+  | 'trap_adapt-manual'
+  | 'qndf-auto'
+  | 'qndf-manual';
 
 export const TDS_INTEGRATORS: readonly TdsIntegrator[] = [
   'trapezoidal',
+  'backeuler',
+  'trap_adapt-auto',
+  'trap_adapt-manual',
   'qndf-auto',
   'qndf-manual',
 ] as const;
 
 /**
- * QNDF tolerance / max-step overrides forwarded to the substrate as
- * ``tds_config_overrides`` on the wire. ``rtol`` / ``atol`` map to
- * ANDES's ``reltol`` / ``abstol``; ``maxStep`` maps to ``dtmax`` (the
- * ANDES field name is ``dtmax``, NOT ``h_max``).
+ * Adaptive-integrator tolerance / step-bound overrides forwarded to the
+ * substrate as ``tds_config_overrides`` on the wire. ``rtol`` / ``atol``
+ * map to ANDES's ``reltol`` / ``abstol``; ``maxStep`` maps to ``dtmax``
+ * (the ANDES field name is ``dtmax``, NOT ``h_max``); ``minStep`` maps
+ * to ``dtmin_adapt``, the smallest step a variable-step integrator may
+ * shrink to (0 lets ANDES choose). All four apply to ``trap_adapt`` and
+ * ``qndf`` only; the fixed-step integrators ignore them.
  */
 export interface TdsToleranceOverrides {
   rtol: number;
   atol: number;
   maxStep: number;
+  minStep: number;
 }
 
 /** Auto-preset values per the plan's KTD-16. */
@@ -109,6 +126,7 @@ export const DEFAULT_TDS_TOLERANCE_OVERRIDES: TdsToleranceOverrides = {
   rtol: 1e-3,
   atol: 1e-6,
   maxStep: 0.05,
+  minStep: 0,
 };
 
 export const DEFAULT_TDS_INTEGRATOR: TdsIntegrator = 'trapezoidal';
@@ -125,6 +143,13 @@ export const DEFAULT_TDS_INTEGRATOR: TdsIntegrator = 'trapezoidal';
 export type TdsConfigOverrides = Record<string, number>;
 
 export const DEFAULT_TDS_CONFIG_OVERRIDES: TdsConfigOverrides = {};
+
+/**
+ * The load model of a dynamic run (`load_model` on the wire), for an engine
+ * that takes one. `null` sends no field and leaves the choice to the server
+ * (whose default is `impedance`), matching how `h: null` omits `h`.
+ */
+export const DEFAULT_TDS_LOAD_MODEL: TdsLoadModel | null = null;
 
 /**
  * Known ANDES ``ss.TDS.config`` keys offered as autocomplete in the
@@ -193,6 +218,14 @@ export interface UiState {
   tdsConfigOverrides: TdsConfigOverrides;
   setTdsConfigOverrides: (next: TdsConfigOverrides) => void;
   resetTdsConfigOverrides: () => void;
+
+  /**
+   * The load model the next dynamic run asks for, for an engine that takes
+   * one (Sienna). `null` sends no `load_model` and leaves the choice to the
+   * server. Session-scoped like the rest of `tdsConfig`: not persisted.
+   */
+  tdsLoadModel: TdsLoadModel | null;
+  setTdsLoadModel: (model: TdsLoadModel | null) => void;
 }
 
 /**
@@ -217,7 +250,11 @@ export const useUiStore = create<UiState>()(
             : { tdsControllerResults: null }),
         })),
       resetTdsConfig: () =>
-        set({ tdsConfig: { ...DEFAULT_TDS_CONFIG }, tdsControllerResults: null }),
+        set({
+          tdsConfig: { ...DEFAULT_TDS_CONFIG },
+          tdsControllerResults: null,
+          tdsLoadModel: DEFAULT_TDS_LOAD_MODEL,
+        }),
 
       tdsControllerResults: null,
       setTdsControllerResults: (results) => set({ tdsControllerResults: results }),
@@ -237,6 +274,9 @@ export const useUiStore = create<UiState>()(
       setTdsConfigOverrides: (next) => set({ tdsConfigOverrides: { ...next } }),
       resetTdsConfigOverrides: () =>
         set({ tdsConfigOverrides: { ...DEFAULT_TDS_CONFIG_OVERRIDES } }),
+
+      tdsLoadModel: DEFAULT_TDS_LOAD_MODEL,
+      setTdsLoadModel: (model) => set({ tdsLoadModel: model }),
     }),
     {
       name: 'andes-ui-tds-integrator',
@@ -259,9 +299,45 @@ export const useUiStore = create<UiState>()(
         }
         return persisted;
       },
+      // Unit 17: the payload is checked by its shape on every rehydrate.
+      // ``migrate`` runs only when the stored version differs from this
+      // config's, and this config has never set one, so a payload from
+      // before Unit 17 (version 0, like every other) never reaches it.
+      merge: (persisted, current) => ({ ...current, ...persistedTdsChoice(persisted) }),
     },
   ),
 );
+
+/**
+ * What a persisted TDS-integrator payload contributes to the store. A
+ * ``tdsIntegrator`` that is not one of the six known values falls back to
+ * the default; ``tdsToleranceOverrides`` is laid over the defaults, so a
+ * payload from before ``minStep`` existed gains ``minStep: 0``, and a
+ * field that is not a number (``NaN`` is stored as ``null``) takes its
+ * default. Anything else in the payload is ignored.
+ */
+function persistedTdsChoice(
+  persisted: unknown,
+): Pick<UiState, 'tdsIntegrator' | 'tdsToleranceOverrides'> | Record<string, never> {
+  if (persisted === null || typeof persisted !== 'object') return {};
+  const { tdsIntegrator, tdsToleranceOverrides } = persisted as Record<string, unknown>;
+  const tolerances: TdsToleranceOverrides = { ...DEFAULT_TDS_TOLERANCE_OVERRIDES };
+  if (tdsToleranceOverrides !== null && typeof tdsToleranceOverrides === 'object') {
+    const stored = tdsToleranceOverrides as Record<string, unknown>;
+    for (const key of Object.keys(tolerances) as (keyof TdsToleranceOverrides)[]) {
+      const value = stored[key];
+      if (typeof value === 'number') tolerances[key] = value;
+    }
+  }
+  return {
+    tdsIntegrator:
+      typeof tdsIntegrator === 'string' &&
+      (TDS_INTEGRATORS as readonly string[]).includes(tdsIntegrator)
+        ? (tdsIntegrator as TdsIntegrator)
+        : DEFAULT_TDS_INTEGRATOR,
+    tdsToleranceOverrides: tolerances,
+  };
+}
 
 /**
  * Validate a candidate TdsConfig draft. Returns a record of field-keyed
@@ -297,11 +373,11 @@ export function validateTdsConfig(draft: TdsConfig): Record<string, string> {
 }
 
 /**
- * Validate the QNDF tolerance / max-step overrides (Unit 16, Manual
- * preset only). Returns a record of field-keyed error messages; empty
- * record means valid. The Auto preset is hidden behind the radio choice
- * and never exposes these inputs, so this validator is only consulted
- * for Manual mode.
+ * Validate the adaptive-integrator tolerance / step-bound overrides
+ * (Manual preset only). Returns a record of field-keyed error messages;
+ * empty record means valid. The Auto preset is hidden behind the radio
+ * choice and never exposes these inputs, so this validator is only
+ * consulted for Manual mode.
  */
 export function validateTdsToleranceOverrides(
   draft: TdsToleranceOverrides,
@@ -321,6 +397,13 @@ export function validateTdsToleranceOverrides(
     out.maxStep = 'Enter a finite number';
   } else if (draft.maxStep <= 0) {
     out.maxStep = 'Must be > 0';
+  }
+  if (!Number.isFinite(draft.minStep)) {
+    out.minStep = 'Enter a finite number';
+  } else if (draft.minStep < 0) {
+    out.minStep = 'Must be >= 0';
+  } else if (out.maxStep === undefined && draft.minStep > draft.maxStep) {
+    out.minStep = 'Must be <= max_step';
   }
   return out;
 }

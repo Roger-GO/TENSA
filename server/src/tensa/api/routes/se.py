@@ -21,6 +21,8 @@ a later unit's UI), and only then commit to the WLS iteration.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,13 +69,117 @@ class SeGenerateMeasurementsRequest(BaseModel):
 class SeRunRequest(BaseModel):
     """Request body for ``POST /sessions/{id}/se``.
 
-    Empty body — the substrate's ``Wrapper.run_se`` reads the cached
-    measurement set from the prior generate call. Kept as a model so
-    the route can declare ``extra="forbid"`` and reject typos forward-
+    Every field is optional and applies to this run only; a body that
+    names none behaves exactly as before (WLS with the case's
+    ``SE.config`` defaults and the generate step's noise draw). Kept as
+    a model with ``extra="forbid"`` so typos are rejected forward-
     compatibly.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    algorithm: Literal["wls", "lav"] | None = Field(
+        default=None,
+        description=(
+            "The estimator. ``\"wls\"`` (default) is weighted least "
+            "squares (Gauss-Newton); ``\"lav\"`` is least absolute "
+            "value via iteratively reweighted least squares, robust to "
+            "gross measurement errors. LAV converges linearly and often "
+            "needs more than the default 100 iterations when a measurement "
+            "is bad, so raise ``max_iter`` with it (a run that runs out "
+            "answers 422). The chi-squared test is only computed for WLS."
+        ),
+    )
+    tol: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Convergence tolerance on the max absolute state correction "
+            "for this run only. ``None`` keeps the case's "
+            "``SE.config.tol`` (ANDES default 1e-4)."
+        ),
+    )
+    max_iter: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum iterations for this run only. ``None`` keeps the "
+            "case's ``SE.config.max_iter`` (ANDES default 100)."
+        ),
+    )
+    noise_seed: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "When set, this run's measurement values are drawn afresh "
+            "from the power flow solution with this seed (the noise is "
+            "drawn here, as the generate step draws it), over the cached "
+            "set's measurements and sigmas; the cached values are left as "
+            "the generate step made them. The same seed gives the same "
+            "run. ``None`` runs on the cached values."
+        ),
+    )
+
+
+class SeRunSettings(BaseModel):
+    """The settings a state-estimation run used: the request's where it gave
+    one, the case's ``SE.config`` (ANDES's default unless the case file sets
+    one) where it did not."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tol: float = Field(
+        ...,
+        description="Convergence tolerance on the max absolute state correction.",
+    )
+    max_iter: int = Field(..., description="Iteration limit.")
+    noise_seed: int | None = Field(
+        default=None,
+        description=(
+            "The seed this run's measurement noise was drawn with; ``null`` "
+            "when the run used the cached values from the generate step."
+        ),
+    )
+
+
+class ChiSquaredTest(BaseModel):
+    """The chi-squared bad-data test on the SE objective ``J`` (WLS only)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    passed: bool = Field(
+        ...,
+        description=(
+            "``True`` when ``J`` is below the threshold: no bad data "
+            "detected at this confidence."
+        ),
+    )
+    J: float = Field(
+        ...,
+        description=(
+            "The WLS objective ``sum(r_i^2 / sigma_i^2)`` the test ran on "
+            "(equal to ``mismatch``)."
+        ),
+    )
+    threshold: float = Field(
+        ...,
+        description=(
+            "The chi-squared quantile at ``confidence`` with ``dof`` degrees "
+            "of freedom; ``J`` is compared against it."
+        ),
+    )
+    dof: int = Field(
+        ...,
+        description=(
+            "Degrees of freedom, ``measurement_count - 2 * <bus count>``; "
+            "``measurement_count`` includes the angle-reference "
+            "pseudo-measurement, which stands in for the one state it fixes."
+        ),
+    )
+    confidence: float = Field(
+        ...,
+        description="The confidence level the threshold was taken at (0.95).",
+    )
 
 
 class SeMeasurementsGeneratedResponse(BaseModel):
@@ -127,7 +233,8 @@ class SeResultResponse(BaseModel):
     iterations: int = Field(
         ...,
         description=(
-            "Number of WLS Gauss-Newton iterations to convergence. "
+            "Number of iterations to convergence (Gauss-Newton for WLS, "
+            "reweighted steps for LAV). "
             "ANDES's ``result['n_iter']`` is 1-indexed; echoed verbatim."
         ),
         ge=0,
@@ -135,10 +242,9 @@ class SeResultResponse(BaseModel):
     mismatch: float = Field(
         ...,
         description=(
-            "Final WLS objective ``J = sum(w * r^2)``. Smaller is "
-            "better; the chi-squared test on ``J`` (not surfaced "
-            "yet) flags whether the measurement set fits "
-            "the model at a given confidence level."
+            "Final objective ``J``: for WLS ``sum(r^2 / sigma^2)``, which "
+            "``chi_squared`` tests against its distribution; for LAV "
+            "``sum(|r| / sigma)``. Smaller is better."
         ),
     )
     residuals: list[float] = Field(
@@ -166,6 +272,29 @@ class SeResultResponse(BaseModel):
             "``|r_i| / sigma_i`` exceeds 3-sigma. These are candidate "
             "bad-data measurements; the UI highlights the corresponding "
             "histogram bars in red."
+        ),
+    )
+    algorithm: Literal["wls", "lav"] | None = Field(
+        default=None,
+        description=(
+            "The estimator the run used (``\"wls\"`` or ``\"lav\"``); "
+            "``null`` only from a server that predates the choice, which "
+            "always ran WLS."
+        ),
+    )
+    settings: SeRunSettings | None = Field(
+        default=None,
+        description=(
+            "The ``tol``, ``max_iter`` and ``noise_seed`` the run used "
+            "(the effective values, after any per-run override)."
+        ),
+    )
+    chi_squared: ChiSquaredTest | None = Field(
+        default=None,
+        description=(
+            "The chi-squared bad-data test on the objective ``J`` at 95% "
+            "confidence; ``null`` for LAV runs, where ``J`` does not follow "
+            "a chi-squared distribution."
         ),
     )
     job_id: str | None = Field(
@@ -245,6 +374,15 @@ def _se_payload_to_response(
         residuals=[float(x) for x in (payload.get("residuals") or [])],
         measurement_count=int(payload.get("measurement_count", 0)),
         flagged_indices=[int(i) for i in (payload.get("flagged_indices") or [])],
+        algorithm="lav" if payload.get("algorithm") == "lav" else "wls",
+        settings=(
+            SeRunSettings(**payload["settings"]) if payload.get("settings") else None
+        ),
+        chi_squared=(
+            ChiSquaredTest(**payload["chi_squared"])
+            if payload.get("chi_squared")
+            else None
+        ),
         job_id=job_id,
     )
 
@@ -332,8 +470,10 @@ async def generate_se_measurements(
             "model": ProblemDetails,
             "description": (
                 "Either: (a) the measurement set is under-determined (insufficient "
-                "redundancy; gain matrix singular), or (b) the WLS Gauss-Newton "
-                "did not converge within ``config.max_iter``."
+                "redundancy; gain matrix singular), (b) the estimator did not "
+                "converge within ``config.max_iter``, or (c) an invalid option "
+                "(``SeOptionError``: unknown algorithm, non-positive tol, "
+                "max_iter below 1, negative seed)."
             ),
         },
     },
@@ -356,14 +496,24 @@ async def run_se(
     Failure modes mapped to 422:
 
     - Under-determined measurement set (gain matrix singular).
-    - WLS non-convergent within ``config.max_iter``.
+    - Estimator non-convergent within ``config.max_iter``.
+    - An invalid run option (``SeOptionError``).
     """
     mgr = _manager(request)
+    args: dict[str, object] = {}
+    if body.algorithm is not None:
+        args["algorithm"] = body.algorithm
+    if body.tol is not None:
+        args["tol"] = body.tol
+    if body.max_iter is not None:
+        args["max_iter"] = body.max_iter
+    if body.noise_seed is not None:
+        args["noise_seed"] = body.noise_seed
     try:
         async with _run_as_job(
             mgr, session_id, "se", request_summary=body.model_dump()
         ) as job_id:
-            payload = await mgr.invoke(session_id, "run_se", {})
+            payload = await mgr.invoke(session_id, "run_se", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -172,6 +172,22 @@ class ElementNotFoundError(AndesAppError):
     recovery_kind: str | None = "none"
 
 
+class ModelDocError(AndesAppError):
+    """Raised when ``model_doc(model)`` names no model ANDES ships: a name that
+    is not in ``supported_models()``, a routine such as ``PFlow`` or any other
+    attribute of a System included. Surfaced as HTTP 404."""
+
+    recovery_kind: str | None = "none"
+
+
+class ModelDocUnavailableError(AndesAppError):
+    """Raised when ANDES fails to write the documentation of a model it ships
+    (its ``doc()`` raised). Surfaced as HTTP 422; the session is untouched, so
+    there is nothing to recover."""
+
+    recovery_kind: str | None = "none"
+
+
 class SystemAlreadyLoadedError(AndesAppError):
     """Raised when ``create_blank()`` is called on a session that already has
     a loaded System. The caller must reload or open a fresh session."""
@@ -260,6 +276,21 @@ class SePrerequisiteError(AndesAppError):
     """
 
     recovery_kind: str | None = "run-pflow"
+
+
+class SeOptionError(AndesAppError):
+    """Raised when a state-estimation run option is not one ANDES can use:
+    an algorithm other than ``wls`` or ``lav``, a tolerance that is not a
+    positive finite number, an iteration limit below 1, or a negative noise
+    seed.
+
+    Like :class:`PflowRequestError`, the check runs before anything is
+    written to the System, so there is nothing to recover from: the caller
+    fixes the request and sends it again. The response is a 422 without a
+    recovery action.
+    """
+
+    recovery_kind: str | None = "none"
 
 
 class SeNonConvergentError(AndesAppError):
@@ -389,6 +420,83 @@ class CloneEditError(AndesAppError):
     """
 
     recovery_kind: str | None = "none"
+
+
+class YbusTooLargeError(AndesAppError):
+    """Raised when the bus admittance matrix of the loaded case has more nonzero
+    entries than one answer carries (``MAX_YBUS_ENTRIES`` in
+    ``tensa.core.wrapper.ybus``). Surfaced as HTTP 422; the case is as it was,
+    so there is nothing to recover.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, entries: int, cap: int) -> None:
+        super().__init__(
+            f"the bus admittance matrix has {entries} nonzero entries, more than "
+            f"the {cap} one answer carries"
+        )
+        self.entries = entries
+        self.cap = cap
+
+
+class EngineUnsupportedError(AndesAppError):
+    """Raised when a session's worker is asked for an op its engine does not have.
+
+    The op exists (another engine answers it), so this is not ``unknown op``: the
+    message names the engines that have it, and the reply carries them as
+    structured extra for the routes layer. Surfaced as HTTP 409.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, op: str, engine: str, engines_with_op: list[str]) -> None:
+        super().__init__(
+            f"{op!r} is not available with the {engine} engine; "
+            f"engines that have it: {', '.join(engines_with_op)}"
+        )
+        self.op = op
+        self.engine = engine
+        self.engines_with_op = engines_with_op
+
+
+class EngineUnavailableError(AndesAppError):
+    """Raised when a session is asked for an engine this build cannot start.
+
+    The engine is declared (``tensa.engines`` knows its name) but has no runtime
+    here; ``reason`` says why. Raised before anything is spawned. Surfaced as
+    HTTP 409.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, engine: str, reason: str) -> None:
+        super().__init__(f"the {engine} engine is not available: {reason}")
+        self.engine = engine
+        self.reason = reason
+
+
+class SiennaError(AndesAppError):
+    """Raised when the Sienna engine's Julia side refuses a request.
+
+    The message is the first line of the Julia error, with the exception type
+    prefix of the module's own messages (``ArgumentError: ``,
+    ``ErrorException: ``) removed, and the server's own paths scrubbed the way
+    the worker scrubs ANDES's messages. The full Julia text goes to the
+    ``tensa.sienna`` logger at debug level. Surfaced as HTTP 422; the caller
+    fixes the request and sends it again, so there is no recovery action.
+
+    ``stage`` is the stage a dynamics function of the Julia side named when it
+    refused (``not_ready``, ``arguments``, ``disturbances``, ``matrix``,
+    ``build``, ``eig``, ``internal``), as Julia gave it; ``None`` for a refusal
+    that is a Julia exception rather than an answer.
+    """
+
+    recovery_kind: str | None = "none"
+
+    def __init__(self, message: str, stage: str | None = None) -> None:
+        super().__init__(message)
+        self.stage = stage
 
 
 class WorkerDiedError(AndesAppError):

@@ -10,8 +10,11 @@ import { useSessionStore } from '@/store/session';
 export function useCreateSession(): UseMutationResult<SessionDescriptor, Error, void> {
   return useMutation({
     mutationFn: async () => {
+      // Ask for the engine the store holds; with none the server picks its
+      // default.
+      const engine = useSessionStore.getState().engine;
       return await andesClient.post<SessionDescriptor>('/sessions', {
-        body: {},
+        body: engine === null ? {} : { engine },
         timeoutMs: TIMEOUTS.sessionLifecycle,
       });
     },
@@ -19,6 +22,7 @@ export function useCreateSession(): UseMutationResult<SessionDescriptor, Error, 
       // The workspace first: what is kept by case is looked up under it as
       // soon as a case is opened, which a session is needed for.
       useSessionStore.getState().setWorkspaceId(data.workspace_id ?? null);
+      useSessionStore.getState().setEngine(data.engine ?? null);
       useSessionStore.getState().setSessionId(parseSessionId(data.session_id));
     },
   });

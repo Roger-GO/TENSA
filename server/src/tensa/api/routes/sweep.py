@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from tensa.api.schemas import ProblemDetails
+from tensa.core.errors import EngineUnsupportedError
 from tensa.core.session import (
     SessionExpiredError,
     SessionManager,
@@ -188,6 +189,12 @@ async def start_sweep(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
             headers={"Retry-After": "5"},
+        ) from exc
+    except EngineUnsupportedError as exc:
+        # 409: the session's engine has no sweep; the detail names the ones that do.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         ) from exc
 
     # v3.1 Unit 5c: ``job_id`` aliases ``sweep_id`` (same value across both

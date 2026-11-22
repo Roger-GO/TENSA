@@ -73,6 +73,7 @@ from tensa.core.session import (
 from tensa.core.stream import DEFAULT_VARS, VAR_GROUPS
 from tensa.core.tds_controllers import parse_controllers
 from tensa.core.wrapper import validate_step_size
+from tensa.core.wrapper.tds import validate_integrator
 
 router = APIRouter()
 log = logging.getLogger("tensa.ws")
@@ -175,6 +176,18 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
 
+    # How loads behave in the run (spec section 6.3); the engine refuses what
+    # it does not take (ANDES takes only ``impedance``, which is what it does).
+    load_model_raw = cfg.get("load_model")
+    if load_model_raw is not None and load_model_raw not in ("impedance", "power", "as-case"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown load_model {short_repr(load_model_raw)}; expected 'impedance', "
+            "'power' or 'as-case'",
+        )
+        return
+
     # Optional decimation controls. Defaults match the v0.1 baseline: every
     # callpert step is one row in its own one-row Arrow batch (algorithm
     # "none"). ``decimation="mean"`` requires ``max_rate_hz``; the worker
@@ -247,15 +260,12 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
     # default to the trapezoidal-fixed-step path so existing clients see
     # no change. Validation is light-touch here (literal + dict shape);
     # the wrapper raises ``TdsRequestError`` on unknown override keys
-    # which the WS path surfaces as a worker_error close.
-    integrator_raw = cfg.get("integrator", "trapezoidal")
-    if integrator_raw not in ("trapezoidal", "qndf"):
-        await _close_with_error(
-            websocket,
-            WS_CLOSE_INTERNAL_ERROR,
-            f"unknown integrator {short_repr(integrator_raw)}; "
-            "expected 'trapezoidal' or 'qndf'",
-        )
+    # which the WS path surfaces as a worker_error close. The integrator is
+    # held to the literal the REST body takes (``IntegratorName``).
+    try:
+        integrator_raw = validate_integrator(cfg.get("integrator", "trapezoidal"))
+    except TdsRequestError as exc:
+        await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
     overrides_raw = cfg.get("tds_config_overrides")
     if overrides_raw is not None and not isinstance(overrides_raw, dict):
@@ -263,7 +273,7 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
             websocket,
             WS_CLOSE_INTERNAL_ERROR,
             "'tds_config_overrides' must be an object of {string → number}; "
-            "keys are canonical aliases (rtol/atol/max_step) or real "
+            "keys are canonical aliases (rtol/atol/max_step/min_step) or real "
             "ss.TDS.config field names, validated by the substrate",
         )
         return
@@ -278,6 +288,20 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
 
+    # Optional ``names``: ``engine`` (the default, the columns as ANDES names
+    # them) or ``neutral`` (``<quantity>|<key>``, with the relative quantities;
+    # spec section 6.5). The same style of error as the other literals. A frame
+    # without the field forwards nothing, so the stream's metadata stays
+    # exactly what a request without ``names`` always got (no ``names`` key).
+    names_raw = cfg.get("names")
+    if names_raw is not None and names_raw not in ("engine", "neutral"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown names mode {short_repr(names_raw)}; expected 'engine' or 'neutral'",
+        )
+        return
+
     # Start the streaming run as a background task; the run survives WS
     # disconnect and can be resumed via {"type":"resume",...}.
     run_args: dict[str, Any] = {
@@ -289,6 +313,10 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         "vars": vars_raw,
         "integrator": integrator_raw,
     }
+    if names_raw is not None:
+        run_args["names"] = names_raw
+    if load_model_raw is not None:
+        run_args["load_model"] = load_model_raw
     if dae_vars_raw:
         run_args["dae_vars"] = dae_vars_raw
     if overrides_raw is not None:

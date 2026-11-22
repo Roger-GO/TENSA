@@ -111,6 +111,20 @@ def test_the_hint_for_an_install_without_the_desktop_extra_asks_for_the_same_pyw
     assert named.specifier == _requirements("desktop")["pywebview"].specifier
 
 
+def test_sienna_extra_is_the_juliacall_of_the_pythoncall_the_manifest_holds() -> None:
+    """Each juliacall release asks for the PythonCall of its own version exactly, and a
+    Sienna worker starts juliacall offline on the PythonCall the shipped Manifest pins,
+    so the extra admits that one juliacall and nothing else."""
+    from tensa.engines.sienna.setup import packaged_project
+
+    manifest = (packaged_project() / "Manifest.toml").read_text(encoding="utf-8")
+    entry = re.search(r'^\[\[deps\.PythonCall\]\]\n(?:.+\n)*?version = "([^"]+)"', manifest, re.M)
+    assert entry is not None, "the shipped Manifest holds no PythonCall"
+    requirement = _requirements("sienna")["juliacall"]
+    assert set(_requirements("sienna")) == {"juliacall"}
+    assert [(s.operator, s.version) for s in requirement.specifier] == [("==", entry.group(1))]
+
+
 def _package_json() -> dict[str, Any]:
     path = WEB_DIR / "package.json"
     if not path.is_file():

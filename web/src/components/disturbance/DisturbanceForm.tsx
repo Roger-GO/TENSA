@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DisturbanceSpec } from '@/api/types';
 import { blankAlterSpec, blankFaultSpec, blankToggleSpec } from '@/store/disturbance';
+import { useSessionStore } from '@/store/session';
+import {
+  allowedSpecKinds,
+  allowedToggleTargets,
+  engineDisturbanceKinds,
+  engineLabel,
+} from '@/lib/engines';
 import { cn } from '@/lib/cn';
 import { FaultSpecForm } from './FaultSpecForm';
 import { ToggleSpecForm } from './ToggleSpecForm';
@@ -43,6 +50,15 @@ export function DisturbanceForm({
 }: DisturbanceFormProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // What the session's engine accepts: null (ANDES, or a list not loaded)
+  // offers every kind as today.
+  const engine = useSessionStore((s) => s.engine);
+  const engines = useSessionStore((s) => s.engines);
+  const disturbanceKinds = engineDisturbanceKinds(engines, engine);
+  const allowed = allowedSpecKinds(disturbanceKinds);
+  const toggleTargets = allowedToggleTargets(disturbanceKinds);
+  const kindAllowed = allowed.has(spec.kind);
+
   // Memoize the validity callback so the sub-forms' useEffect doesn't fire
   // on every parent render.
   const handleValidity = useMemo(() => (next: Record<string, string>) => setErrors(next), []);
@@ -71,7 +87,7 @@ export function DisturbanceForm({
             onChange={(e) => onKindChange(e.target.value as DisturbanceSpec['kind'])}
             className="bg-background border-border h-8 rounded border px-2 text-sm"
           >
-            {KIND_OPTIONS.map((k) => (
+            {KIND_OPTIONS.filter((k) => allowed.has(k.value) || k.value === spec.kind).map((k) => (
               <option key={k.value} value={k.value}>
                 {k.label}
               </option>
@@ -80,21 +96,30 @@ export function DisturbanceForm({
         </div>
       ) : null}
 
-      {spec.kind === 'fault' ? (
+      {!kindAllowed ? (
+        <p
+          data-testid="disturbance-kind-not-available"
+          className="text-muted-foreground text-[10px] leading-snug"
+        >
+          This disturbance kind is not available with the {engineLabel(engine ?? '')} engine.
+        </p>
+      ) : null}
+      {kindAllowed && spec.kind === 'fault' ? (
         <FaultSpecForm
           spec={spec}
           onChange={(next) => onChange(next)}
           onValidityChange={handleValidity}
         />
       ) : null}
-      {spec.kind === 'toggle' ? (
+      {kindAllowed && spec.kind === 'toggle' ? (
         <ToggleSpecForm
           spec={spec}
           onChange={(next) => onChange(next)}
           onValidityChange={handleValidity}
+          allowedTargets={toggleTargets ?? undefined}
         />
       ) : null}
-      {spec.kind === 'alter' ? (
+      {kindAllowed && spec.kind === 'alter' ? (
         <AlterSpecForm
           spec={spec}
           onChange={(next) => onChange(next)}

@@ -106,6 +106,10 @@ class BundleInputs:
     andes_version: str
     #: ``tensa`` package version (the substrate).
     tensa_version: str
+    #: The engine that wrote the bundle. Defaults to ``"andes"`` so the
+    #: worker-side caller, which only ever assembles an ANDES bundle today,
+    #: needs no change; a future engine passes its own name explicitly.
+    engine: str = "andes"
     #: The diagram's layout as a plain dict (a validated ``SidecarLayout``),
     #: written as ``layout.json``. ``None`` when the session has none.
     layout: dict[str, Any] | None = None
@@ -149,6 +153,7 @@ def build_manifest(inputs: BundleInputs, *, exported_at: str | None = None) -> d
     return {
         "andes_version": inputs.andes_version,
         "tensa_version": inputs.tensa_version,
+        "engine": inputs.engine,
         "case_filename": case_filename,
         "case_sha256": case_sha256,
         "case_canonical_export": inputs.case_canonical_export,
@@ -464,6 +469,10 @@ class BundleImportPlan:
     case_files: tuple[str, ...]
     #: Conflicts the user must acknowledge. May be empty (clean import).
     conflicts: tuple[BundleConflict, ...] = field(default_factory=tuple)
+    #: The engine the bundle's manifest stamps; ``"andes"`` for a bundle
+    #: written before the stamp existed. Defaults so a construction that
+    #: predates the stamp keeps working.
+    engine: str = "andes"
     #: True when at least one conflict has ``severity="blocker"``.
     blocked: bool = False
 
@@ -514,6 +523,9 @@ class BundleValidationError(_AndesAppError):
       blocker conflicts unresolved).
     - ``unsafe-path`` → 422 (a case file cannot be written inside the
       workspace: its target resolves outside it, or is a symlink).
+    - ``engine-mismatch`` → 409 (the bundle was written by another engine;
+      the recovery is opening the case file under the engine that wrote
+      the bundle).
 
     A case entry whose name is not portable (Windows device name, ``:``,
     trailing dot or space) is rejected as ``manifest-malformed``. Export
@@ -782,6 +794,8 @@ def validate_bundle(
     """
     with _safe_open_bundle(zip_bytes) as zf:
         manifest = _read_manifest_or_raise(zf)
+        bundle_engine = manifest.get("engine")
+        engine = bundle_engine if isinstance(bundle_engine, str) else "andes"
         case_files_in_zip = _case_entries(zf)
         # Verify every case file referenced in the manifest's ``files``
         # list is actually present (the bundle could be tampered with
@@ -910,6 +924,7 @@ def validate_bundle(
     return BundleImportPlan(
         manifest=manifest,
         case_files=case_files_in_zip,
+        engine=engine,
         conflicts=tuple(conflicts),
         blocked=blocked,
     )
@@ -1108,6 +1123,7 @@ def bundle_plan_to_dict(plan: BundleImportPlan) -> dict[str, Any]:
     return {
         "manifest": dict(plan.manifest),
         "case_files": list(plan.case_files),
+        "engine": plan.engine,
         "conflicts": [_conflict(c) for c in plan.conflicts],
         "blocked": plan.blocked,
         "has_conflicts": plan.has_conflicts,

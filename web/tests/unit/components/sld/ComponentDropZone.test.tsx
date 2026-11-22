@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
-import { COMPONENT_DND_MIME } from '@/components/shell/ComponentLibrary';
+import { COMPONENT_DND_MIME } from '@/components/shell/componentDnd';
 
 /**
  * ComponentDropZone is the fix for "drag-and-drop not really working" on

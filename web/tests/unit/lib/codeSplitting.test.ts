@@ -48,11 +48,11 @@ interface Reach {
   packages: Set<string>;
 }
 
-/** Every source file and npm package reachable from the entry. */
-function reachableFromEntry(includeDynamic: boolean): Reach {
+/** Every source file and npm package reachable from the entry (or from `start`). */
+function reachableFromEntry(includeDynamic: boolean, start: string = ENTRY): Reach {
   const files = new Set<string>();
   const packages = new Set<string>();
-  const queue = [ENTRY];
+  const queue = [start];
   while (queue.length > 0) {
     const file = queue.pop()!;
     if (files.has(file)) continue;
@@ -83,16 +83,25 @@ const LAZY_MODULES = [
   'components/analyze/AnalyzePanel.tsx',
   'components/pflow/PflowPanel.tsx',
   'components/pflow/PflowComparePanel.tsx',
+  'components/compare/CompareView.tsx',
   'lib/pflowCompare.ts',
   'lib/resultsArchive.ts',
   'lib/exportHtmlReport.ts',
   'lib/htmlReport.ts',
   'components/plots/TimeSeriesPlot.tsx',
+  'components/plots/ExternalResultsDialog.tsx',
   'components/plots/ResponseMetricsPanel.tsx',
   'components/sld/SldCanvas.tsx',
   // Reading, fitting and capturing a layout, which only the diagram does:
   // what the first screen reads of one is in `sidecarCore.ts`.
   'components/sld/sidecar.ts',
+  // The per-element power-flow overlay helpers, which only the diagram uses;
+  // the App root's frame-overlay hook is in `frameOverlay.ts`.
+  'components/sld/overlay.ts',
+  // The Components tab of the left sidebar, fetched the first time its tab is
+  // shown; what a drop target reads of it is in `componentDnd.ts`.
+  'components/shell/ComponentLibrary.tsx',
+  'components/case/SaveAsCustomCaseDialog.tsx',
   'components/snapshot/SaveSnapshotDialog.tsx',
   'components/snapshot/LoadSnapshotDialog.tsx',
   'components/bundle/BundleExportDialog.tsx',
@@ -121,6 +130,11 @@ const LAZY_MODULES = [
   'components/case/SaveSystemDialog.tsx',
   'components/examples/ExampleCasesDialog.tsx',
   'components/examples/ExampleCard.tsx',
+  'components/ybus/YbusDialog.tsx',
+  'components/networkMatrix/NetworkMatrixDialog.tsx',
+  'components/models/ModelDocDialog.tsx',
+  'components/shell/SwitchEngineConfirmDialog.tsx',
+  'components/tds/TdsInitResultDialog.tsx',
   'components/disturbance/AddEventDialog.tsx',
   'components/disturbance/DisturbanceForm.tsx',
   // What answers a failed run, fetched once a case is open.
@@ -130,6 +144,15 @@ const LAZY_MODULES = [
   'components/error/ProblemDetailsErrorSurface.tsx',
   'components/error/RecoveryActionButton.tsx',
   'streaming/arrow.ts',
+];
+
+/**
+ * Lazy modules that the lazy module which opens them must not import
+ * statically either, so they are a chunk of their own and not part of the
+ * opener's: `[opener, module]`.
+ */
+const LAZY_WITHIN_LAZY: readonly (readonly [string, string])[] = [
+  ['components/plots/TimeSeriesPlot.tsx', 'components/plots/ExternalResultsDialog.tsx'],
 ];
 
 /** Heavy packages whose only importers are lazy modules. */
@@ -169,10 +192,34 @@ describe('code splitting', () => {
     ).toBe(false);
   });
 
+  it.each(LAZY_WITHIN_LAZY)('keeps %s from importing %s statically', (opener, module) => {
+    const fromOpener = reachableFromEntry(false, path.join(SRC, opener));
+    const reached = new Set([...fromOpener.files].map(rel));
+    expect(allFiles.has(module), `${module} is no longer imported anywhere`).toBe(true);
+    expect(
+      reached.has(module),
+      `${module} is statically imported from ${opener}; load it with lazyNamed(() => import(...))`,
+    ).toBe(false);
+  });
+
   it.each(LAZY_PACKAGES)('keeps the %s package out of the entry chunk', (pkg) => {
     expect(
       eager.packages.has(pkg),
       `${pkg} is statically imported from code that loads eagerly`,
     ).toBe(false);
+  });
+
+  it('reaches the Model documentation dialog only through import()', () => {
+    // Its button sits in the element form, which loads late too, so a static
+    // import of the dialog there would not reach the entry: it would load the
+    // dialog with every form instead of the first time it is opened.
+    const dialog = path.join(SRC, 'components/models/ModelDocDialog.tsx');
+    const importers = [...all.files].filter((file) =>
+      [...readFileSync(file, 'utf8').matchAll(STATIC_IMPORT)].some(
+        (m) => resolveSource(file, m[1]!) === dialog,
+      ),
+    );
+    expect(importers.map(rel)).toEqual([]);
+    expect(allFiles.has('components/models/ModelDocDialog.tsx')).toBe(true);
   });
 });

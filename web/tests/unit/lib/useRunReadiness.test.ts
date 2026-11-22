@@ -8,7 +8,9 @@
  * We use ``renderHook`` from React Testing Library to drive the hook
  * inside a real React tree (Zustand selectors are subscription-based
  * and need a reactive context). Stores are reset between tests so the
- * cascade in ``store/index.ts`` doesn't leak state.
+ * cascade in ``store/index.ts`` doesn't leak state. The hook reads the
+ * engines list from the session store (mirrored there by
+ * ``useEnginesSync``), so the engine-gate tests seed it with ``setEngines``.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -50,13 +52,54 @@ import { useSessionStore } from '@/store/session';
 import { useSweepStore } from '@/store/sweep';
 import { useRunsStore } from '@/store/runs';
 import { parseSessionId, parseWorkspacePath } from '@/api/types';
-import type { EigResult, PflowResult } from '@/api/types';
+import type { EigResult, EngineList, PflowResult } from '@/api/types';
 
 const ALL_ROUTINES: RunRoutine[] = ['pflow', 'tds', 'eig', 'cpf', 'se', 'sweep'];
+
+const ANDES_ONLY: EngineList = {
+  engines: [
+    {
+      name: 'andes',
+      available: true,
+      unavailable_reason: null,
+      versions: {},
+      formats: { read: [], write: [] },
+      routines: ['pflow', 'tds', 'eig', 'cpf', 'se'],
+      ops: [],
+      editing: true,
+    },
+  ],
+};
+
+const SIENNA_PFLOW_ONLY: EngineList = {
+  engines: [
+    {
+      name: 'sienna',
+      available: true,
+      unavailable_reason: null,
+      versions: {},
+      formats: { read: [], write: [] },
+      routines: ['pflow'],
+      ops: [],
+      editing: false,
+    },
+  ],
+};
+
+/**
+ * Mount `useRunReadiness`. The hook is a pure store reader, so no provider
+ * is needed; the engines list, where a test wants one, is seeded in the
+ * session store with ``setEngines``.
+ */
+function renderReadiness(routine: RunRoutine) {
+  return renderHook(() => useRunReadiness(routine));
+}
 
 function resetStores(): void {
   useSessionStore.setState({
     sessionId: null,
+    engine: null,
+    engines: null,
     recoveryInProgress: false,
     recoveryFailed: false,
     recoveryAttempts: [],
@@ -150,7 +193,7 @@ describe('useRunReadiness — no case loaded', () => {
   it.each(ALL_ROUTINES)(
     '%s: returns disabledReason "No case loaded." with no recovery',
     (routine) => {
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe('No case loaded.');
       expect(result.current.recovery).toBeNull();
@@ -163,7 +206,7 @@ describe('useRunReadiness — a case is loading', () => {
     '%s: names the file being loaded instead of "No case loaded."',
     (routine) => {
       useCaseStore.setState({ loadingPath: parseWorkspacePath('wscc9.xlsx') });
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe('Loading wscc9.xlsx…');
       expect(result.current.recovery).toBeNull();
@@ -173,7 +216,7 @@ describe('useRunReadiness — a case is loading', () => {
   it('holds the runs back while a second case loads over an open one', () => {
     seedReadyBaseline();
     useCaseStore.setState({ loadingPath: parseWorkspacePath('kundur_full.xlsx') });
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toBe('Loading kundur_full.xlsx…');
   });
@@ -186,7 +229,7 @@ describe('useRunReadiness — dynamic via a synchronous machine (no controllers)
       seedReadyBaseline();
       usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
       useCaseStore.setState({ topology: TOPOLOGY_GENCLS_ONLY });
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(true);
       expect(result.current.disabledReason).toBeNull();
     },
@@ -197,7 +240,7 @@ describe('useRunReadiness — dynamic via a synchronous machine (no controllers)
     (routine) => {
       seedReadyBaseline();
       useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toMatch(/requires dynamic-model data/i);
     },
@@ -219,7 +262,7 @@ describe('useRunReadiness — post-TDS dae-dirty gate', () => {
       useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
       useRunsStore.setState({ activeRunId: 'run-tds-1' });
 
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toMatch(/Reset the run first/i);
       expect(result.current.recovery).toEqual({ kind: 'reload-case', label: 'Reset run' });
@@ -230,7 +273,7 @@ describe('useRunReadiness — post-TDS dae-dirty gate', () => {
     seedReadyBaseline();
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
     useRunsStore.setState({ activeRunId: 'run-tds-1' });
-    const { result } = renderHook(() => useRunReadiness('tds'));
+    const { result } = renderReadiness('tds');
     // TDS stays ready (null reason) — the post-TDS gate excludes it.
     expect(result.current.disabledReason ?? '').not.toMatch(/Reset the run first/i);
   });
@@ -249,7 +292,7 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
       });
       usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
       useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toMatch(/requires dynamic-model data/i);
     },
@@ -268,7 +311,7 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
       usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
       useAnalyzeStore.setState({ seMeasurementsCount: 5 });
       useCaseStore.setState({ topology: TOPOLOGY_STATIC_ONLY });
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       // With PF converged + (for SE) measurements, a static-only case is ready
       // — the dynamic-content reason must never appear for these routines.
       expect(result.current.disabledReason ?? '').not.toMatch(/requires dynamic-model data/i);
@@ -284,7 +327,7 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
       recoveryAttempts: [],
     });
     useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
-    const { result } = renderHook(() => useRunReadiness('tds'));
+    const { result } = renderReadiness('tds');
     expect(result.current.ready).toBe(true);
   });
 
@@ -297,7 +340,7 @@ describe('useRunReadiness — dynamic-content gate (R18, Unit 24)', () => {
       recoveryAttempts: [],
     });
     useCaseStore.setState({ topology: null });
-    const { result } = renderHook(() => useRunReadiness('tds'));
+    const { result } = renderReadiness('tds');
     expect(result.current.disabledReason ?? '').not.toMatch(/requires dynamic-model data/i);
   });
 });
@@ -316,7 +359,7 @@ describe('useRunReadiness — no session', () => {
       pendingDependents: [],
     });
     for (const routine of ALL_ROUTINES) {
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe('Connecting to substrate…');
     }
@@ -344,7 +387,7 @@ describe('useRunReadiness — no auth gate', () => {
     });
     // pflow has no further prerequisites, so it is ready with no token
     // machinery anywhere in sight.
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.ready).toBe(true);
     expect(result.current.disabledReason).toBeNull();
   });
@@ -358,7 +401,7 @@ describe('useRunReadiness — happy path (PF converged)', () => {
   });
 
   it.each(ALL_ROUTINES)('%s is ready with no disabledReason and no recovery', (routine) => {
-    const { result } = renderHook(() => useRunReadiness(routine));
+    const { result } = renderReadiness(routine);
     expect(result.current.ready).toBe(true);
     expect(result.current.disabledReason).toBeNull();
     expect(result.current.recovery).toBeNull();
@@ -375,7 +418,7 @@ describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
   it.each<RunRoutine>(['eig', 'cpf', 'se'])(
     '%s returns the PF-required reason and an open-pf recovery',
     (routine) => {
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toMatch(/Run PFlow first/);
       expect(result.current.disabledReason).toMatch(/requires a converged operating point/);
@@ -387,17 +430,17 @@ describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
   );
 
   it('the routine name appears in the reason text (EIG)', () => {
-    const { result } = renderHook(() => useRunReadiness('eig'));
+    const { result } = renderReadiness('eig');
     expect(result.current.disabledReason).toContain('EIG');
   });
 
   it('the routine name appears in the reason text (CPF)', () => {
-    const { result } = renderHook(() => useRunReadiness('cpf'));
+    const { result } = renderReadiness('cpf');
     expect(result.current.disabledReason).toContain('CPF');
   });
 
   it('the routine name appears in the reason text (SE)', () => {
-    const { result } = renderHook(() => useRunReadiness('se'));
+    const { result } = renderReadiness('se');
     expect(result.current.disabledReason).toContain('SE');
   });
 
@@ -407,14 +450,14 @@ describe('useRunReadiness — PF prerequisite (pre-PF)', () => {
       isRunning: false,
       error: null,
     });
-    const { result } = renderHook(() => useRunReadiness('eig'));
+    const { result } = renderReadiness('eig');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toMatch(/Run PFlow first/);
   });
 
   it('PF and TDS themselves are NOT gated by the PF prerequisite', () => {
-    const pf = renderHook(() => useRunReadiness('pflow'));
-    const tds = renderHook(() => useRunReadiness('tds'));
+    const pf = renderReadiness('pflow');
+    const tds = renderReadiness('tds');
     expect(pf.result.current.ready).toBe(true);
     expect(tds.result.current.ready).toBe(true);
   });
@@ -428,7 +471,7 @@ describe('useRunReadiness — EIG mutated dae state', () => {
   });
 
   it('PF returns the EIG-mutated reason with reload-case recovery', () => {
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toBe(
       'EIG initialised the dynamic state; reload case to re-run PF.',
@@ -442,7 +485,7 @@ describe('useRunReadiness — EIG mutated dae state', () => {
   it('TDS / EIG / CPF / SE are NOT gated by the EIG-mutated check (only PF cares)', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: 5 });
     for (const routine of ['tds', 'eig', 'cpf', 'se'] as const) {
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(true);
     }
   });
@@ -451,7 +494,7 @@ describe('useRunReadiness — EIG mutated dae state', () => {
     useAnalyzeStore.setState({
       eigResult: { ...EIG_AFTER_RUN, tds_initialized: false },
     });
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.ready).toBe(true);
   });
 });
@@ -509,7 +552,7 @@ describe('useRunReadiness — sweep in progress', () => {
   it.each(ALL_ROUTINES)(
     '%s returns the sweep-in-progress reason with the id + progress',
     (routine) => {
-      const { result } = renderHook(() => useRunReadiness(routine));
+      const { result } = renderReadiness(routine);
       expect(result.current.ready).toBe(false);
       expect(result.current.disabledReason).toBe(
         'Sweep sweep-42 in progress (3/10); wait or abort.',
@@ -520,7 +563,7 @@ describe('useRunReadiness — sweep in progress', () => {
 
   it('falls back to no-progress text when the sweep record is missing', () => {
     useSweepStore.setState({ activeSweepId: 'sweep-orphan', sweeps: {} });
-    const { result } = renderHook(() => useRunReadiness('eig'));
+    const { result } = renderReadiness('eig');
     expect(result.current.disabledReason).toBe('Sweep sweep-orphan in progress; wait or abort.');
   });
 });
@@ -533,28 +576,109 @@ describe('useRunReadiness — SE measurement gate', () => {
 
   it('SE without measurements returns "Generate measurements first."', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: null });
-    const { result } = renderHook(() => useRunReadiness('se'));
+    const { result } = renderReadiness('se');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toBe('Generate measurements first.');
   });
 
   it('SE with zero measurements still gates', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: 0 });
-    const { result } = renderHook(() => useRunReadiness('se'));
+    const { result } = renderReadiness('se');
     expect(result.current.ready).toBe(false);
     expect(result.current.disabledReason).toBe('Generate measurements first.');
   });
 
   it('SE with positive measurement count is ready', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: 12 });
-    const { result } = renderHook(() => useRunReadiness('se'));
+    const { result } = renderReadiness('se');
     expect(result.current.ready).toBe(true);
   });
 
   it('the SE measurement gate does NOT affect EIG / CPF', () => {
     useAnalyzeStore.setState({ seMeasurementsCount: null });
-    expect(renderHook(() => useRunReadiness('eig')).result.current.ready).toBe(true);
-    expect(renderHook(() => useRunReadiness('cpf')).result.current.ready).toBe(true);
+    expect(renderReadiness('eig').result.current.ready).toBe(true);
+    expect(renderReadiness('cpf').result.current.ready).toBe(true);
+  });
+});
+
+describe('useRunReadiness — engine gate', () => {
+  it('a routine the engine lacks is not ready, with the reason and no recovery', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    const { result } = renderReadiness('tds');
+    expect(result.current.ready).toBe(false);
+    expect(result.current.disabledReason).toBe(
+      'Time-domain simulation is not available with the Sienna engine.',
+    );
+    expect(result.current.recovery).toBeNull();
+  });
+
+  it('does not fire when the engines list is not loaded (engineRoutines null)', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    const { result } = renderReadiness('tds');
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('does not fire when the list does not name the engine', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('psse');
+    useSessionStore.getState().setEngines(ANDES_ONLY);
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    const { result } = renderReadiness('tds');
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('does not fire when the engine lists the routine', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('andes');
+    useSessionStore.getState().setEngines(ANDES_ONLY);
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    const { result } = renderReadiness('tds');
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('sweep is never gated by it', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    const { result } = renderReadiness('sweep');
+    expect(result.current.ready).toBe(true);
+  });
+
+  it('comes after the "no case" reason', () => {
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    const { result } = renderReadiness('tds');
+    expect(result.current.disabledReason).toBe('No case loaded.');
+  });
+
+  it('runReadinessNow reads the engines list from the store', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    expect(runReadinessNow('tds')).toMatchObject({
+      ready: false,
+      disabledReason: 'Time-domain simulation is not available with the Sienna engine.',
+    });
+  });
+
+  it('runReadinessNow applies the gate with no hook mounted', () => {
+    seedReadyBaseline();
+    useSessionStore.getState().setEngine('sienna');
+    useSessionStore.getState().setEngines(SIENNA_PFLOW_ONLY);
+    useCaseStore.setState({ topology: TOPOLOGY_WITH_CONTROLLER });
+    // No renderHook here: the non-hook reader sees the same store.
+    expect(runReadinessNow('eig')).toMatchObject({
+      ready: false,
+      disabledReason: 'Eigenvalue analysis is not available with the Sienna engine.',
+    });
+    expect(runReadinessNow('pflow').ready).toBe(true);
   });
 });
 
@@ -567,14 +691,14 @@ describe('useRunReadiness — gate ordering', () => {
       sweeps: {},
     });
     useAnalyzeStore.setState({ eigResult: EIG_AFTER_RUN });
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.disabledReason).toBe('No case loaded.');
   });
 
   it('sweep-in-progress shadows the PF-prerequisite reason', () => {
     seedReadyBaseline();
     useSweepStore.setState({ activeSweepId: 'sweep-1', sweeps: {} });
-    const { result } = renderHook(() => useRunReadiness('eig'));
+    const { result } = renderReadiness('eig');
     expect(result.current.disabledReason).toMatch(/Sweep sweep-1 in progress/);
   });
 
@@ -583,7 +707,7 @@ describe('useRunReadiness — gate ordering', () => {
     usePflowStore.setState({ lastRun: FAKE_PFLOW_OK, isRunning: false, error: null });
     useAnalyzeStore.setState({ eigResult: EIG_AFTER_RUN });
     useSweepStore.setState({ activeSweepId: 'sweep-1', sweeps: {} });
-    const { result } = renderHook(() => useRunReadiness('pflow'));
+    const { result } = renderReadiness('pflow');
     expect(result.current.disabledReason).toMatch(/Sweep sweep-1 in progress/);
   });
 });
@@ -619,7 +743,7 @@ describe('runReadinessNow', () => {
       resetStores();
       seed();
       for (const routine of ALL_ROUTINES) {
-        const { result, unmount } = renderHook(() => useRunReadiness(routine));
+        const { result, unmount } = renderReadiness(routine);
         expect(runReadinessNow(routine), routine).toEqual(result.current);
         unmount();
       }

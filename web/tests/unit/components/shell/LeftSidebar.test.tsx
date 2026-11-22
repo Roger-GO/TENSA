@@ -10,6 +10,8 @@
  *    after a reload, and a value the store should not hold shows Project.
  *  - The panel that is not shown stays mounted and hidden, so what it holds
  *    (the search of the palette, a load in flight) is there on the way back.
+ *    The palette's code is fetched the first time its tab is shown, so it is
+ *    not in the tree before that, and stays in it from then on.
  *  - A tab opened from inside the other panel takes the keyboard focus, which
  *    the hidden panel cannot keep.
  *
@@ -106,14 +108,20 @@ describe('<LeftSidebar />', () => {
       expect(componentsTab()).toBe(screen.getByTestId('left-sidebar-tab-components'));
     });
 
-    it('opens on Project, with the palette mounted but hidden', () => {
+    it('opens on Project, with the palette not fetched before its tab is shown', async () => {
       render(withClient(<LeftSidebar />));
       expect(projectTab()).toHaveAttribute('aria-selected', 'true');
       expect(componentsTab()).toHaveAttribute('aria-selected', 'false');
       expect(projectPanel()).toBeVisible();
       expect(screen.getByTestId('saved-cases-list')).toBeVisible();
       expect(componentsPanel()).not.toBeVisible();
-      expect(screen.getByTestId('component-library')).not.toBeVisible();
+      // The palette's module resolved (as it would have, had it been asked
+      // for), and still nothing of it is in the tree: it was not mounted.
+      await act(async () => {
+        await import('@/components/shell/ComponentLibrary');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.queryByTestId('component-library')).toBeNull();
     });
 
     it('shows the palette, and hides the project, on a click of Components', async () => {
@@ -122,13 +130,14 @@ describe('<LeftSidebar />', () => {
       await user.click(componentsTab());
       expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
       expect(projectTab()).toHaveAttribute('aria-selected', 'false');
-      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(await screen.findByTestId('component-library')).toBeVisible();
       expect(screen.getByRole('textbox', { name: 'Search components' })).toBeVisible();
       expect(projectPanel()).not.toBeVisible();
       expect(screen.getByTestId('saved-cases-list')).not.toBeVisible();
 
       await user.click(projectTab());
       expect(screen.getByTestId('saved-cases-list')).toBeVisible();
+      // Mounted from its first show on, and hidden with its panel.
       expect(screen.getByTestId('component-library')).not.toBeVisible();
     });
 
@@ -175,18 +184,18 @@ describe('<LeftSidebar />', () => {
       expect(kept.state?.leftSidebarTab).toBe('components');
     });
 
-    it('opens on the tab that was kept', () => {
+    it('opens on the tab that was kept', async () => {
       useLayoutStore.setState({ leftSidebarTab: 'components' });
       render(withClient(<LeftSidebar />));
       expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
-      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(await screen.findByTestId('component-library')).toBeVisible();
       expect(projectPanel()).not.toBeVisible();
     });
 
-    it('follows the store when something else sends the user to a tab', () => {
+    it('follows the store when something else sends the user to a tab', async () => {
       render(withClient(<LeftSidebar />));
       act(() => useLayoutStore.getState().showLeftSidebarTab('components'));
-      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(await screen.findByTestId('component-library')).toBeVisible();
       act(() => useLayoutStore.getState().showLeftSidebarTab('project'));
       expect(screen.getByTestId('saved-cases-list')).toBeVisible();
     });
@@ -205,7 +214,7 @@ describe('<LeftSidebar />', () => {
       const user = userEvent.setup();
       render(withClient(<LeftSidebar />));
       await user.click(componentsTab());
-      await user.type(screen.getByTestId('component-library-search'), 'exciter');
+      await user.type(await screen.findByTestId('component-library-search'), 'exciter');
       await user.click(projectTab());
       await user.click(componentsTab());
       expect(screen.getByTestId('component-library-search')).toHaveValue('exciter');
@@ -245,13 +254,18 @@ describe('<LeftSidebar />', () => {
       );
     });
 
-    it('holds the case card and the saved cases, and not the palette', () => {
+    it('holds the case card and the saved cases, and not the palette', async () => {
+      const user = userEvent.setup();
       render(withClient(<LeftSidebar />));
       // CaseNav (no case loaded) renders its hint; SavedCasesList renders
       // its own EmptyState ("No case files").
       expect(projectPanel()).toContainElement(screen.getByTestId('case-nav-empty'));
       expect(projectPanel()).toContainElement(screen.getByTestId('saved-cases-list'));
-      expect(projectPanel()).not.toContainElement(screen.getByTestId('component-library'));
+      // The palette, once fetched, is in the other panel.
+      await user.click(componentsTab());
+      const palette = await screen.findByTestId('component-library');
+      await user.click(projectTab());
+      expect(projectPanel()).not.toContainElement(palette);
       expect(screen.queryByTestId('left-sidebar-section-component-library')).toBeNull();
     });
 
@@ -260,7 +274,7 @@ describe('<LeftSidebar />', () => {
       render(withClient(<LeftSidebar />));
       await user.click(screen.getByRole('button', { name: 'Components tab' }));
       expect(componentsTab()).toHaveAttribute('aria-selected', 'true');
-      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(await screen.findByTestId('component-library')).toBeVisible();
     });
   });
 
@@ -281,7 +295,7 @@ describe('<LeftSidebar />', () => {
       useLayoutStore.setState({ leftSidebarTab: 'components' });
       const user = userEvent.setup();
       render(withClient(<LeftSidebar />));
-      const link = screen.getByRole('button', { name: 'Project tab' });
+      const link = await screen.findByRole('button', { name: 'Project tab' });
       act(() => link.focus());
       await user.keyboard('{Enter}');
       expect(link).not.toBeVisible();
@@ -290,16 +304,16 @@ describe('<LeftSidebar />', () => {
       expect(screen.getByTestId('saved-cases-list')).toBeVisible();
     });
 
-    it('goes to the tab something else opened while the focus was in the other panel', () => {
+    it('goes to the tab something else opened while the focus was in the other panel', async () => {
       useLayoutStore.setState({ leftSidebarTab: 'components' });
       render(withClient(<LeftSidebar />));
-      const search = screen.getByTestId('component-library-search');
+      const search = await screen.findByTestId('component-library-search');
       act(() => search.focus());
       act(() => useLayoutStore.getState().showLeftSidebarTab('project'));
       expect(projectTab()).toHaveFocus();
     });
 
-    it('stays where it is when it was not in the panel that was hidden', () => {
+    it('stays where it is when it was not in the panel that was hidden', async () => {
       render(
         withClient(
           <>
@@ -311,7 +325,7 @@ describe('<LeftSidebar />', () => {
       const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
       act(() => elsewhere.focus());
       act(() => useLayoutStore.getState().showLeftSidebarTab('components'));
-      expect(screen.getByTestId('component-library')).toBeVisible();
+      expect(await screen.findByTestId('component-library')).toBeVisible();
       expect(elsewhere).toHaveFocus();
     });
 
@@ -326,9 +340,11 @@ describe('<LeftSidebar />', () => {
   });
 
   describe('Components', () => {
-    it('holds the palette', () => {
+    it('holds the palette once its tab has been shown', async () => {
+      const user = userEvent.setup();
       render(withClient(<LeftSidebar />));
-      expect(componentsPanel()).toContainElement(screen.getByTestId('component-library'));
+      await user.click(componentsTab());
+      expect(componentsPanel()).toContainElement(await screen.findByTestId('component-library'));
     });
   });
 

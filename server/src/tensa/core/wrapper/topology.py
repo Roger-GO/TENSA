@@ -41,7 +41,7 @@ class TopologyMixin(WrapperBase):
         )
         all_lines = _collect_models(ss, ["Line"])
         lines, transformers = _split_lines_transformers(all_lines, _marked_as_transformers(ss))
-        return TopologySnapshot(
+        snapshot = TopologySnapshot(
             state=state,
             buses=_collect_models(ss, ["Bus"]),
             lines=lines,
@@ -60,6 +60,21 @@ class TopologyMixin(WrapperBase):
             undo=step_of(self._edit_log[-1]) if self._edit_log else None,
             redo=step_of(self._redo_log[-1]) if self._redo_log else None,
         )
+        book = self.keys()
+        for entry in (
+            *snapshot.buses,
+            *snapshot.lines,
+            *snapshot.transformers,
+            *snapshot.generators,
+            *snapshot.loads,
+            *snapshot.shunts,
+            *snapshot.controllers,
+        ):
+            entry.key = book.key_of(entry.kind, entry.idx)
+        snapshot.has_dynamics = any(
+            entry.bucket == "dynamic" for entry in book.entries()
+        )
+        return snapshot
 
     def _lookup_topology_entry(
         self, model: str, idx: int | str
@@ -97,7 +112,11 @@ class TopologyMixin(WrapperBase):
         all_params = _extract_params(model_obj, params_metas) if params_metas else []
         params = all_params[i] if i < len(all_params) else {}
         return TopologyEntry(
-            idx=idx_values[i], name=name, kind=model, params=params
+            idx=idx_values[i],
+            name=name,
+            kind=model,
+            params=params,
+            key=self.keys().key_of(model, idx_values[i]),
         )
 
 

@@ -42,6 +42,12 @@ _WHEEL_FILES = {
     "tensa/static/THIRD-PARTY-LICENSES.txt": "licenses",
     "tensa/examples/catalog.json": _CATALOG,
     "tensa/examples/NOTICE.md": "notice",
+    "tensa/engines/sienna/envs/dyn/Project.toml": "[deps]",
+    "tensa/engines/sienna/envs/dyn/Manifest.toml": 'julia_version = "1.13.4"',
+    "tensa/engines/sienna/julia/TensaSienna.jl": "module TensaSienna end",
+    "tensa/engines/sienna/julia/TensaSiennaDyn.jl": "module TensaSiennaDyn end",
+    "tensa/engines/sienna/julia/TensaSiennaNet.jl": "module TensaSiennaNet end",
+    "tensa/engines/sienna/julia/TensaSiennaOps.jl": "module TensaSiennaOps end",
     "tensa-{v}.dist-info/licenses/LICENSE": "license",
 }
 _SDIST_FILES = {
@@ -51,6 +57,12 @@ _SDIST_FILES = {
     "src/tensa/static/THIRD-PARTY-LICENSES.txt": "licenses",
     "src/tensa/examples/catalog.json": _CATALOG,
     "src/tensa/examples/NOTICE.md": "notice",
+    "src/tensa/engines/sienna/envs/dyn/Project.toml": "[deps]",
+    "src/tensa/engines/sienna/envs/dyn/Manifest.toml": 'julia_version = "1.13.4"',
+    "src/tensa/engines/sienna/julia/TensaSienna.jl": "module TensaSienna end",
+    "src/tensa/engines/sienna/julia/TensaSiennaDyn.jl": "module TensaSiennaDyn end",
+    "src/tensa/engines/sienna/julia/TensaSiennaNet.jl": "module TensaSiennaNet end",
+    "src/tensa/engines/sienna/julia/TensaSiennaOps.jl": "module TensaSiennaOps end",
     "LICENSE": "license",
     "hatch_build.py": "",
     "pyproject.toml": "",
@@ -410,3 +422,34 @@ def test_the_file_that_holds_a_licence_notice_must_be_beside_the_data_in_both_ar
         },
     )
     assert _script().check(out) == []
+
+_SIENNA = (
+    "engines/sienna/envs/dyn/Project.toml",
+    "engines/sienna/envs/dyn/Manifest.toml",
+    "engines/sienna/julia/TensaSienna.jl",
+    "engines/sienna/julia/TensaSiennaDyn.jl",
+    "engines/sienna/julia/TensaSiennaNet.jl",
+    "engines/sienna/julia/TensaSiennaOps.jl",
+)
+
+
+@pytest.mark.parametrize("missing", _SIENNA)
+def test_a_wheel_without_the_sienna_julia_files_is_refused(tmp_path: Path, missing: str) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out, drop=(f"tensa/{missing}",))
+    _sdist(out)
+    (problem,) = _script().check(out)
+    assert ".whl" in problem
+    assert f"tensa/{missing}" in problem
+
+
+@pytest.mark.parametrize("missing", _SIENNA)
+def test_an_sdist_without_the_sienna_julia_files_is_refused(tmp_path: Path, missing: str) -> None:
+    out = tmp_path / "dist"
+    out.mkdir()
+    _wheel(out)
+    _sdist(out, drop=(f"src/tensa/{missing}",))
+    (problem,) = _script().check(out)
+    assert ".tar.gz" in problem
+    assert f"src/tensa/{missing}" in problem

@@ -131,6 +131,49 @@ def test_frames_carry_the_values_of_the_columns_stream_start_names(wrapper: Wrap
 
 
 @pytest.mark.integration
+def test_stream_start_keys_and_first_frame_schema_are_stable(wrapper: Wrapper) -> None:
+    """The byte-identity regression of the engine-plan refactor: the envelope
+    sequence of a short streamed run keeps its shape. ``stream_start`` carries
+    exactly these metadata keys, in this order, and the first frame decodes to
+    the ``t`` plus fixed-size-list schema; a reordering or a renamed key fails
+    here."""
+    import io
+
+    import pyarrow.ipc
+
+    pipe = _stream(wrapper, tf=0.5, vars=["bus_v", "gen_state"], decimation="none")
+    start = next(m for m in pipe.sent if m["type"] == "stream_start")
+    assert list(start["metadata"]) == [
+        "schema_version",
+        "decimation",
+        "vars",
+        "dae_vars",
+        "var_columns",
+        "bus_idx_values",
+        "syngen_idx_values",
+        "line_idx_values",
+        "pq_idx_values",
+    ]
+    assert start["metadata"]["schema_version"] == "2.0"
+    assert start["metadata"]["vars"] == ["bus_v", "gen_state"]
+    assert start["metadata"]["dae_vars"] == []
+
+    frames = pipe.frames()
+    assert frames
+    assert [f["frame_seq"] for f in frames] == list(range(1, len(frames) + 1))
+    reader = pyarrow.ipc.open_stream(io.BytesIO(frames[0]["payload"]))
+    n_columns = len(start["metadata"]["var_columns"])
+    assert reader.schema.names == ["t", "v"]
+    assert reader.schema.field("v").type.list_size == n_columns
+
+    # One row per solved step and one for t = 0: 0.5 s in steps of 1/120 s is
+    # 60 steps (by hand), the last of which only the clock's end sees.
+    assert sum(f["row_count"] for f in frames) == 61
+    last_t, _ = decode_batch(frames[-1]["payload"])
+    assert float(last_t[-1]) == pytest.approx(0.5)
+
+
+@pytest.mark.integration
 def test_a_frame_is_far_smaller_than_the_one_column_per_variable_layout(
     wrapper: Wrapper,
 ) -> None:

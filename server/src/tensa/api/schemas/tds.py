@@ -14,6 +14,8 @@ from tensa.core.tds_controllers import (
     MAX_SAMPLE_VALUES,
     ControllerSpec,
 )
+from tensa.core.wrapper.tds import IntegratorName
+from tensa.engines.sienna.ext import SiennaExtSpec
 
 
 class TdsRunRequest(BaseModel):
@@ -35,13 +37,23 @@ class TdsRunRequest(BaseModel):
         description=(
             "Integration step size, in seconds, applied as ANDES "
             "``TDS.config.tstep``. With the default ``trapezoidal`` "
-            "integrator this is the fixed step; ``None`` keeps the ANDES "
-            "default (1/30 s). The ``qndf`` integrator picks its own step "
-            "and ignores it; bound its step with "
-            "``tds_config_overrides.max_step`` instead."
+            "integrator this is the fixed step, and so it is with ``backeuler``; "
+            "``None`` keeps the ANDES default (1/30 s). The ``trap_adapt`` and "
+            "``qndf`` integrators pick their own steps and ignore it; bound "
+            "their steps with ``tds_config_overrides.max_step`` and "
+            "``min_step`` instead."
         ),
         gt=0.0,
         allow_inf_nan=False,
+    )
+    load_model: Literal["impedance", "power", "as-case"] | None = Field(
+        default=None,
+        description=(
+            "How loads behave in the run: ``impedance`` (the default), "
+            "``power`` or ``as-case``. A Sienna session takes all three; an "
+            "ANDES session takes it left out or ``impedance``, which is what "
+            "ANDES does, and refuses the other two with 422."
+        ),
     )
     vars: list[Literal["bus_v", "gen_state", "gen_power", "line_flow", "load_pq"]] | None = Field(
         None,
@@ -79,17 +91,45 @@ class TdsRunRequest(BaseModel):
             "exactly so."
         ),
     )
-    integrator: Literal["trapezoidal", "qndf"] = Field(
+    names: Literal["engine", "neutral"] = Field(
+        "engine",
+        description=(
+            "How the series are named (spec section 6.5). ``engine`` (the "
+            "default) is the names as the engine gives them, byte for byte "
+            "what a request without the field answers. ``neutral`` names each "
+            "series ``<quantity>|<key>`` (``voltage|bus:7``, "
+            "``rotor_speed|gen:1-1``, a ``dae_vars`` variable "
+            "``state|<key>#<variable>``), and a streamed run adds the "
+            "relative quantities: ``angle_rel|<bus key>`` for every bus "
+            "against the reference bus when ``bus_v`` is streamed, and "
+            "``rotor_angle_rel|<unit key>`` for every machine, against the "
+            "inertia-weighted mean, when ``gen_state`` is. A series that has "
+            "no neutral name is refused with 422 before anything runs. A "
+            "Sienna session's names are already neutral; the field is "
+            "accepted there and changes nothing. The streaming ``start_tds`` "
+            "frame takes the same field."
+        ),
+    )
+    integrator: IntegratorName = Field(
         "trapezoidal",
         description=(
-            "DAE integrator. ``\"trapezoidal\"`` (default) maps "
-            "to ANDES's fixed-step Implicit Trapezoidal Method "
-            "(``ss.TDS.config.method = \"trapezoid\"``). ``\"qndf\"`` "
-            "selects the variable-order, variable-step QNDF (NDF) method "
-            "and forces ``fixt = 0`` so ANDES enables LTE-driven step "
-            "control. Combine ``integrator=\"qndf\"`` with the Auto "
-            "preset (``rtol=1e-3, atol=1e-6, max_step=0.05``) by passing "
-            "the values via ``tds_config_overrides``."
+            "DAE integrator. ``\"trapezoidal\"`` (default) is ANDES's "
+            "fixed-step Implicit Trapezoidal Method "
+            "(``ss.TDS.config.method = \"trapezoid\"``), stepping at ``h``. "
+            "``\"backeuler\"`` is fixed-step backward Euler "
+            "(``method = \"backeuler\"``), first order and so more damped, "
+            "also stepping at ``h``. ``\"trap_adapt\"`` is the trapezoidal "
+            "method with a variable step (``method = \"trap_adapt\"``) chosen "
+            "from an estimate of the local error, one step against two half "
+            "steps, held to ``rtol`` and ``atol``. ``\"qndf\"`` is the "
+            "variable-order, variable-step QNDF (NDF) method "
+            "(``method = \"qndf\"``). The two variable-step integrators run "
+            "with ``fixt = 0``, ignore ``h`` and take ``rtol``, ``atol``, "
+            "``max_step`` and ``min_step`` from ``tds_config_overrides`` (the "
+            "Auto preset is ``rtol=1e-3, atol=1e-6, max_step=0.05``). Any "
+            "integrator can follow any other on the same System except "
+            "``qndf``, which keeps a history: after a run with another "
+            "integrator it is refused with 422 until the case is reloaded."
         ),
     )
     controllers: list[ControllerSpec] | None = Field(
@@ -116,20 +156,35 @@ class TdsRunRequest(BaseModel):
             "take controllers."
         ),
     )
+    ext_sienna: SiennaExtSpec | None = Field(
+        None,
+        description=(
+            "Sienna-native dynamic components for this run (spec section 6.2): "
+            "``dynamic_branches`` marks branches to simulate dynamically "
+            "(PSID's DynamicBranch) and ``inverters`` attaches a PSID inverter "
+            "model from a published parameter set to a generator that has no "
+            "dynamic record. An ANDES session refuses the field with 422, as "
+            "does the streaming ``start_tds`` frame. ``GET /engines`` lists "
+            "the parameter sets under the Sienna engine's tds routine options."
+        ),
+    )
     tds_config_overrides: dict[str, float] | None = Field(
         None,
         description=(
             "Optional adaptive-integrator tolerance overrides. "
             "Supported keys are ``rtol`` (→ ``ss.TDS.config.reltol``), "
-            "``atol`` (→ ``ss.TDS.config.abstol``) and ``max_step`` (→ "
-            "``ss.TDS.config.dtmax``), or the name of any ``ss.TDS.config`` "
+            "``atol`` (→ ``ss.TDS.config.abstol``), ``max_step`` (→ "
+            "``ss.TDS.config.dtmax``) and ``min_step`` (→ "
+            "``ss.TDS.config.dtmin_adapt``, the smallest step a variable-step "
+            "integrator may shrink to), or the name of any ``ss.TDS.config`` "
             "field. An unknown key is refused with 422. So is a value that "
             "ANDES would take and then misbehave on: ``tstep`` must be "
-            "finite and greater than 0, ``max_step`` (``dtmax``) finite "
-            "and not negative (0 lets ANDES choose), ``fixt`` 0 or 1, and "
-            "every other value a finite number. The tolerances have no "
-            "effect when ``integrator=\"trapezoidal\"`` (the fixed-step "
-            "path ignores ``reltol/abstol`` and uses ``h`` for stepping)."
+            "finite and greater than 0, ``max_step`` (``dtmax``) and "
+            "``min_step`` (``dtmin_adapt``) finite and not negative (0 lets "
+            "ANDES choose), ``fixt`` 0 or 1, and every other value a finite "
+            "number. The tolerances and the two bounds apply to "
+            "``trap_adapt`` and ``qndf`` only: the fixed-step integrators "
+            "ignore ``reltol/abstol`` and use ``h`` for stepping."
         ),
     )
 
@@ -283,6 +338,16 @@ class TdsBatchResult(BaseModel):
             "the run. Useful as a sanity check that streaming is wired."
         ),
     )
+    integrator: IntegratorName | Literal["ida"] | None = Field(
+        default=None,
+        description=(
+            "The integrator the run used. An ANDES session answers the one the "
+            "request named (the default ``trapezoidal`` when it named none); a "
+            "Sienna session answers ``ida``, Sundials' IDA on the residual "
+            "model, which is the one it runs. ``null`` only on responses from "
+            "before this field existed."
+        ),
+    )
     job_id: str | None = Field(
         default=None,
         description=(
@@ -297,8 +362,21 @@ class TdsBatchResult(BaseModel):
     traces: TdsTraces | None = Field(
         default=None,
         description=(
-            "The values of the request's ``dae_vars``, every step of the run. "
-            "``null`` when the request named none."
+            "The recorded series, every step of the run. An ANDES session "
+            "answers the values of the request's ``dae_vars`` (``null`` when "
+            "the request named none); a Sienna session answers its column plan "
+            "under neutral names (``voltage|bus:7``, ``rotor_speed|gen:1-1``, "
+            "``angle_rel|bus:7``)."
+        ),
+    )
+    post: TdsTraces | None = Field(
+        default=None,
+        description=(
+            "Series read from the engine's own results after the run, on their "
+            "own time base, which can hold an instant twice at a disturbance: "
+            "a Sienna session answers each generating unit's electrical power "
+            "(``p|gen:1-1`` in MW, ``q|gen:1-1`` in MVAr). ``null`` for an "
+            "ANDES session and when none could be read."
         ),
     )
     controllers: list[TdsControllerResult] | None = Field(
@@ -436,6 +514,122 @@ class DaeVariableList(BaseModel):
     )
     items: list[DaeVariableInfo] = Field(
         ..., description="The requested page, in the models' own order."
+    )
+
+
+class TdsInitRequest(BaseModel):
+    """Request body for ``POST /sessions/{id}/tds/init``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_init: bool = Field(
+        True,
+        description=(
+            "Whether ANDES checks the initialisation residuals against "
+            "``TDS.config.tol``, gives its verdict in ``test_ok`` and logs the "
+            "clamped limits and mismatched equations to the session messages "
+            "when the check fails. ``false`` initialises without the check: "
+            "``test_ok`` is then ``null``, and ``clamped`` and ``residuals`` "
+            "still list what the System shows. Applies to this call only; the "
+            "case's own setting is put back."
+        ),
+    )
+
+
+class TdsInitClamp(BaseModel):
+    """One variable clamped at a limit during TDS initialisation."""
+
+    model: str = Field(..., description="ANDES model of the clamped variable.")
+    idx: str = Field(..., description="Idx of the device, as a string.")
+    var: str = Field(..., description="The clamped variable's name within the model.")
+    limit_name: str = Field(..., description="The name of the limit parameter.")
+    limit_val: float = Field(..., description="The limit's value.")
+    unconstr: float = Field(
+        ..., description="The unconstrained value ANDES computed for the variable."
+    )
+
+
+class TdsInitResidual(BaseModel):
+    """One equation with a non-zero residual after TDS initialisation."""
+
+    name: str = Field(..., description="The variable's ``dae.xy_name`` name.")
+    mismatch: float | None = Field(
+        ...,
+        description="The equation's residual; ``null`` when the residual is NaN.",
+    )
+    equation: str = Field(
+        ...,
+        description="ANDES's equation string, empty where the model gives none.",
+    )
+
+
+class TdsInitResult(BaseModel):
+    """Result of ``POST /sessions/{id}/tds/init``."""
+
+    initialized: bool = Field(
+        ...,
+        description=(
+            "``true`` means the System is ready for a time-domain run and a "
+            "later ``POST /tds`` (or a streamed run) continues from this "
+            "initialisation, with the integrator it names (QNDF included): its "
+            "record starts at the first step rather than at 0 s, and it is "
+            "reported as not converged when ``test_ok`` is ``false``. With a "
+            "fixed step it solves the steps a run from scratch does; the two "
+            "variable-step integrators choose other steps before the first "
+            "event, and the same steps after it."
+        ),
+    )
+    test_ok: bool | None = Field(
+        default=None,
+        description=(
+            "``null`` when the request's ``test_init`` was false and ANDES did "
+            "not check (it does not mean the case initialised cleanly: read "
+            "``residuals``); otherwise the verdict of ANDES's residual test. "
+            "``false`` means initialisation residuals reach ``TDS.config.tol`` "
+            "or are NaN, and the two lists name the causes (clamped variables) "
+            "and the effects (equations with nonzero residuals), the same "
+            "tables ANDES logs."
+        ),
+    )
+    test_init: bool = Field(
+        ...,
+        description="The ``test_init`` setting the call used, as the pflow result's ``settings`` does.",
+    )
+    n_states: int = Field(..., description="Number of state variables (``dae.n``).")
+    n_algeb: int = Field(..., description="Number of algebraic variables (``dae.m``).")
+    max_residual: float = Field(
+        ...,
+        description=(
+            "The largest absolute initialisation residual that is a number, over "
+            "the equations ANDES checks; 0 when there are none."
+        ),
+    )
+    nan_residuals: int = Field(
+        ..., description="How many initialisation residuals are NaN."
+    )
+    clamped: list[TdsInitClamp] = Field(
+        default_factory=list,
+        description=(
+            "Variables clamped at limits during initialisation, read from the "
+            "limiters whether or not the test ran. A clamp can stand on a case "
+            "that passes the test. Empty when nothing clamped."
+        ),
+    )
+    residuals: list[TdsInitResidual] = Field(
+        default_factory=list,
+        description=(
+            "Equations whose initialisation residual reaches ``TDS.config.tol`` "
+            "or is NaN, by the rule of ANDES's test, listed whether or not the "
+            "test ran. Empty when the case initialised to a steady state."
+        ),
+    )
+    diagnostics_truncated: bool = Field(
+        ...,
+        description=(
+            "``true`` when ``clamped`` or ``residuals`` was cut at 500 rows; "
+            "when the test ran and failed, the full tables are in the session "
+            "messages."
+        ),
     )
 
 

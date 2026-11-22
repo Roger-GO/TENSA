@@ -377,6 +377,13 @@ class SnapshotMetadataModel(BaseModel):
     tensa_version: str = Field(
         ..., description="tensa version that produced the snapshot."
     )
+    engine: str = Field(
+        "andes",
+        description=(
+            "Engine that saved the snapshot. ``andes`` for a snapshot "
+            "saved before the stamp existed."
+        ),
+    )
     case_filename: str | None = Field(
         ..., description="Workspace-relative case filename loaded when the snapshot was saved."
     )
@@ -531,6 +538,14 @@ class SnapshotListEntry(BaseModel):
     andes_version: str = Field(
         ..., description="ANDES version that produced the snapshot."
     )
+    engine: str = Field(
+        "andes",
+        description=(
+            "Engine that saved the snapshot. ``andes`` for a snapshot saved "
+            "before the stamp existed. The UI marks a foreign one before a "
+            "restore is attempted."
+        ),
+    )
     disturbance_count: int = Field(
         ..., description="Number of disturbance specs recorded in the snapshot metadata."
     )
@@ -552,12 +567,24 @@ def _map_snapshot_error(exc: WorkerError) -> HTTPException:
 
     - ``SnapshotNotFoundError`` → 404 (snapshot doesn't exist).
     - ``SnapshotCollisionError`` → 409 (name already taken).
+    - ``SnapshotEngineMismatchError`` → 409 (the snapshot belongs to another
+      engine; the detail points at opening the case file under the engine
+      that saved it).
     - ``SnapshotMetadataError`` / ``SnapshotVersionMismatchError`` /
       ``SetupFailedError`` → 422 (corrupt metadata, version mismatch on
       forced dill load, save-time failure inside ANDES).
     - ``no-case-loaded`` → 409 (snapshot ops scope to a loaded case).
+    - ``EngineUnsupportedError`` and ``EngineUnavailableError`` → what the shared
+      mapper answers (409): the session's engine has no snapshots.
     - Anything else → 500.
     """
+    if exc.category in {"EngineUnsupportedError", "EngineUnavailableError"}:
+        return map_worker_error(exc)
+    if exc.category == "SnapshotEngineMismatchError":
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.detail,
+        )
     if exc.category == "SnapshotNotFoundError":
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -677,7 +704,12 @@ async def save_snapshot(
         404: {"model": ProblemDetails, "description": "Session or snapshot not found."},
         409: {
             "model": ProblemDetails,
-            "description": "No case loaded — restore needs a case to scope the snapshot directory.",
+            "description": (
+                "No case loaded — restore needs a case to scope the "
+                "snapshot directory. OR the snapshot was written by another "
+                "engine (the detail points at opening the case file under "
+                "the engine that saved it)."
+            ),
         },
         422: {
             "model": ProblemDetails,
