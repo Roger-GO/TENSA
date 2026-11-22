@@ -95,7 +95,7 @@ jobs:
       # was resolved for Julia 1.13, and the setup refuses another major.minor.
       # A test holds this version to the Manifest's julia_version.
       - name: Set up Julia 1.13.4
-        uses: julia-actions/setup-julia@v2
+        uses: julia-actions/setup-julia@v3
         with:
           version: "1.13.4"
 
