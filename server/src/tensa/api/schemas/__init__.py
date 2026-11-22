@@ -54,6 +54,8 @@ from tensa.api.schemas.comtrade import (
     ComtradeExportRequest,
 )
 from tensa.api.schemas.dispatch import (
+    DispatchBranchSchema,
+    DispatchBusSchema,
     DispatchDualRowSchema,
     DispatchDualSchema,
     DispatchGeneratorSchema,
@@ -262,6 +264,8 @@ __all__ = [
     "DeleteBlockedResponse",
     "DeleteElementResponse",
     "DeletedDisturbance",
+    "DispatchBranchSchema",
+    "DispatchBusSchema",
     "DispatchDualRowSchema",
     "DispatchDualSchema",
     "DispatchGeneratorSchema",
