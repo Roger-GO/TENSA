@@ -165,6 +165,13 @@ from tensa.api.schemas.sessions import (
     SessionDescriptor,
     SessionList,
 )
+from tensa.api.schemas.studies import (
+    EngineStudyOutcome,
+    StudyCaseRef,
+    StudyRequest,
+    StudyResponse,
+    StudyTolerances,
+)
 from tensa.api.schemas.tds import (
     AbortResponse,
     DaeVariableInfo,
@@ -273,6 +280,7 @@ __all__ = [
     "EngineCapabilities",
     "EngineFormats",
     "EngineList",
+    "EngineStudyOutcome",
     "ExampleList",
     "ExampleListEntry",
     "ExternalResultsResponse",
@@ -338,6 +346,10 @@ __all__ = [
     "SessionMessages",
     "SidecarLayout",
     "SkippedSeries",
+    "StudyCaseRef",
+    "StudyRequest",
+    "StudyResponse",
+    "StudyTolerances",
     "SupportedModels",
     "TableRowDifferenceOut",
     "TdsBatchResult",

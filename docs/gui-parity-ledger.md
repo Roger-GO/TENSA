@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 10 |
+| `none` | 11 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **84** |
+| **total** | **85** |
 
 ## OpenAPI routes
 
@@ -116,6 +116,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |
 | `GET` | `/api/sessions/{session_id}/ybus` | `ybus-dialog` |  |
+| `POST` | `/api/studies` | `none` | No web surface yet; the comparison overlay of the Phase 6 web unit adds it. |
 | `GET` | `/api/topology/schema` | `inspector` |  |
 | `GET` | `/api/version` | `about-dialog` |  |
 | `GET` | `/api/workspace/files` | `left-sidebar` |  |

@@ -70,6 +70,7 @@ from tensa.api.routes.results_doc import router as results_doc_router
 from tensa.api.routes.se import router as se_router
 from tensa.api.routes.sessions import router as sessions_router
 from tensa.api.routes.snapshot import router as snapshot_router
+from tensa.api.routes.studies import router as studies_router
 from tensa.api.routes.sweep import router as sweep_router
 from tensa.api.routes.tds import router as tds_router
 from tensa.api.routes.version import router as version_router
@@ -384,6 +385,7 @@ def make_app(
     app.include_router(metrics_router, prefix="/api", tags=["tds"])
     app.include_router(results_doc_router, prefix="/api", tags=["results"])
     app.include_router(compare_router, prefix="/api", tags=["results"])
+    app.include_router(studies_router, prefix="/api", tags=["results"])
     app.include_router(external_results_router, prefix="/api", tags=["external-results"])
     app.include_router(comtrade_router, prefix="/api", tags=["tds"])
     app.include_router(workspace_router, prefix="/api", tags=["workspace"])
