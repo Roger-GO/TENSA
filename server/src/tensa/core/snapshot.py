@@ -284,26 +284,6 @@ def validate_existing_snapshot_name(name: str) -> str:
     return name
 
 
-def validate_on_disk_snapshot_name(name: str) -> str:
-    """Validate the name of a snapshot file that is already on disk.
-
-    Restore and delete use this where the listing does: a name refused only by
-    the portable-name rule (a pre-rule save such as ``aux``) is accepted, since
-    the file's presence on disk proves the platform holds it. A name refused by
-    the shape rule (a traversal vector) is still refused, so the paths built
-    from the name stay inside the snapshot directory.
-    """
-    try:
-        return validate_existing_snapshot_name(name)
-    except SnapshotMetadataError:
-        from tensa.security.names import portable_name_problem
-
-        shape_problem = user_name_problem(name, legacy=True)
-        if shape_problem is not None and shape_problem != portable_name_problem(name):
-            raise
-        return name
-
-
 # ---- version-stamp check ----------------------------------------------------
 
 
@@ -465,19 +445,7 @@ def list_snapshots_on_disk(
     entries: list[SnapshotEntry] = []
     for json_path in sorted(base.glob("*.json")):
         try:
-            # The file is on disk, so a name refused only by the portable-name
-            # rules (a pre-rule save such as ``aux``) still lists: restore and
-            # delete accept it through the same fallback. A name refused by the
-            # shape rule (a traversal vector) is skipped. A file named like a
-            # Windows device is kept when it is on disk: its existence proves
-            # the platform holds it, whatever the portable-name rule says.
-            validate_on_disk_snapshot_name(json_path.stem)
-        except SnapshotError as exc:
-            log.warning(
-                "snapshot listing skipping %s: %s", json_path.name, exc
-            )
-            continue
-        try:
+            validate_existing_snapshot_name(json_path.stem)
             meta = read_snapshot_metadata(json_path)
         except SnapshotError as exc:
             log.warning(
@@ -508,7 +476,7 @@ def delete_snapshot_files(
     delete). Raises :class:`SnapshotNotFoundError` if NEITHER file
     exists — the routes layer maps that to 404.
     """
-    validate_on_disk_snapshot_name(name)
+    validate_existing_snapshot_name(name)
     dill_path, json_path = snapshot_paths(workspace, case_filename, name)
     removed = False
     for p in (dill_path, json_path):
@@ -560,7 +528,6 @@ __all__ = [
     "snapshot_dir",
     "snapshot_paths",
     "validate_existing_snapshot_name",
-    "validate_on_disk_snapshot_name",
     "validate_snapshot_name",
     "versions_compatible",
     "write_snapshot_files",

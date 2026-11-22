@@ -246,7 +246,7 @@ class SnapshotMixin(CaseMixin):
             SnapshotMetadataError,
             read_snapshot_metadata,
             snapshot_paths,
-            validate_on_disk_snapshot_name,
+            validate_existing_snapshot_name,
         )
 
         if self._workspace is None:
@@ -254,7 +254,7 @@ class SnapshotMixin(CaseMixin):
                 "snapshot restore requires a workspace; the substrate "
                 "was launched without one"
             )
-        validated = validate_on_disk_snapshot_name(name)
+        validated = validate_existing_snapshot_name(name)
         if self._ss is None and self._case_path is None:
             raise NoCaseLoadedError(
                 "snapshot restore requires a loaded case to scope the "

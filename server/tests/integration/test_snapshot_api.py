@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -486,6 +487,13 @@ async def test_snapshot_save_windows_unsafe_name_returns_422(
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "on Windows the legacy exemption is off, so such a file is not listed: "
+        "tests/unit/test_snapshot.py::test_listing_skips_a_name_that_restore_and_delete_refuse"
+    ),
+)
 async def test_snapshot_saved_under_a_now_refused_name_stays_restorable_and_deletable(
     client: httpx.AsyncClient,
     workspace: Path,
