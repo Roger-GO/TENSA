@@ -120,6 +120,8 @@ async def run_tds(
     }
     if body.tds_config_overrides is not None:
         args["tds_config_overrides"] = body.tds_config_overrides
+    if body.load_model is not None:
+        args["load_model"] = body.load_model
     if body.dae_vars:
         args["dae_vars"] = body.dae_vars
     if body.controllers:

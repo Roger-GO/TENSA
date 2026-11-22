@@ -176,6 +176,18 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
 
+    # How loads behave in the run (spec section 6.3); the engine refuses what
+    # it does not take (ANDES takes only ``impedance``, which is what it does).
+    load_model_raw = cfg.get("load_model")
+    if load_model_raw is not None and load_model_raw not in ("impedance", "power", "as-case"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown load_model {short_repr(load_model_raw)}; expected 'impedance', "
+            "'power' or 'as-case'",
+        )
+        return
+
     # Optional decimation controls. Defaults match the v0.1 baseline: every
     # callpert step is one row in its own one-row Arrow batch (algorithm
     # "none"). ``decimation="mean"`` requires ``max_rate_hz``; the worker
@@ -287,6 +299,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         "vars": vars_raw,
         "integrator": integrator_raw,
     }
+    if load_model_raw is not None:
+        run_args["load_model"] = load_model_raw
     if dae_vars_raw:
         run_args["dae_vars"] = dae_vars_raw
     if overrides_raw is not None:

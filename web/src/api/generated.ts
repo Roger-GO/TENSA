@@ -7431,6 +7431,11 @@ export interface components {
              */
             h?: number | null;
             /**
+             * Load Model
+             * @description How loads behave in the run: ``impedance`` (the default), ``power`` or ``as-case``. A Sienna session takes all three; an ANDES session takes it left out or ``impedance``, which is what ANDES does, and refuses the other two with 422.
+             */
+            load_model?: ("impedance" | "power" | "as-case") | null;
+            /**
              * Vars
              * @description Optional selector for which variable groups appear as columns in each per-step Arrow record batch on the streaming path. ``bus_v`` covers bus voltage magnitudes and angles; ``gen_state`` adds generator rotor angle ``delta`` and per-unit speed ``omega`` for every member of the ANDES ``SynGen`` group (GENROU / GENCLS / PLBVFU1); ``gen_power`` adds their electrical ``Pe`` / ``Qe``; ``line_flow`` adds active and reactive power at each line's bus1 terminal; ``load_pq`` adds each PQ load's consumption. Unknown values are rejected with 422; an empty list is rejected with 422. The batch path (``POST /tds``) ignores this field at runtime: it returns the values of ``dae_vars`` instead, and accepts this field for symmetry with the WebSocket ``start_tds`` config so generated clients can share one request shape. Defaults to ``["bus_v", "gen_state"]`` when omitted on the streaming path.
              */

@@ -45,6 +45,15 @@ class TdsRunRequest(BaseModel):
         gt=0.0,
         allow_inf_nan=False,
     )
+    load_model: Literal["impedance", "power", "as-case"] | None = Field(
+        default=None,
+        description=(
+            "How loads behave in the run: ``impedance`` (the default), "
+            "``power`` or ``as-case``. A Sienna session takes all three; an "
+            "ANDES session takes it left out or ``impedance``, which is what "
+            "ANDES does, and refuses the other two with 422."
+        ),
+    )
     vars: list[Literal["bus_v", "gen_state", "gen_power", "line_flow", "load_pq"]] | None = Field(
         None,
         description=(

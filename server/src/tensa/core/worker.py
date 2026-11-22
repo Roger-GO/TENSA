@@ -1802,6 +1802,14 @@ def _handle_run_tds(
     # client then sees fail, nor leave a bridge thread polling (a refusal sets
     # no ``abort_flag``). The route layers validate ``h`` and the integrator
     # too; the worker does not rely on that.
+    # ANDES turns loads into constant impedance for a time-domain run
+    # (PQ.config.p2z), which is what ``impedance`` asks for; it has no other.
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise TdsRequestError(
+            "the ANDES engine converts loads to constant impedance for a "
+            f"time-domain run; load_model {load_model} is not available with it"
+        )
     stream = bool(args.get("stream"))
     prep: _AndesStreamPrep | None = None
     if stream:
