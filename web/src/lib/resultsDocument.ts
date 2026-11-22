@@ -17,21 +17,32 @@ import type {
 } from '@/api/queries/compare';
 import type { RunRecord } from '@/store/runs';
 
-/** The tolerance defaults of ``engines/compare.py``, as text for the fields. */
+/**
+ * The tolerance defaults the view shows, as text for the fields. The quantity
+ * values are those of ``DEFAULT_TOLERANCES`` in
+ * ``server/src/tensa/engines/compare.py``, so a quantity field left at its
+ * default text asks the server for exactly what it would apply on its own.
+ * The quantities the server defaults but the view does not show (``p_to``,
+ * ``q_to``, ``angle_rel``, ``rotor_angle_rel``) are left to the server's own
+ * defaults. The frequency, damping and mode distance defaults are the server's
+ * ``DEFAULT_FREQ_TOLERANCE_HZ``, ``DEFAULT_DAMPING_TOLERANCE`` and
+ * ``DEFAULT_MAX_MODE_DISTANCE``, and the compare view store starts its fields
+ * at these texts.
+ */
 export const DEFAULT_QUANTITY_TOLERANCES: Readonly<
   Record<string, { value: number; text: string; unit: string }>
 > = {
-  voltage: { value: 1e-3, text: '0.001', unit: 'pu' },
-  angle: { value: 1e-2, text: '0.01', unit: 'rad' },
-  rotor_speed: { value: 1e-3, text: '0.001', unit: 'pu' },
+  voltage: { value: 1e-4, text: '0.0001', unit: 'pu' },
+  angle: { value: 1e-4, text: '0.0001', unit: 'rad' },
+  rotor_speed: { value: 1e-4, text: '0.0001', unit: 'pu' },
   rotor_angle: { value: 1e-2, text: '0.01', unit: 'rad' },
-  p: { value: 1.0, text: '1', unit: 'MW' },
-  q: { value: 1.0, text: '1', unit: 'MVAr' },
-  p_from: { value: 1.0, text: '1', unit: 'MW' },
-  q_from: { value: 1.0, text: '1', unit: 'MVAr' },
+  p: { value: 0.1, text: '0.1', unit: 'MW' },
+  q: { value: 0.1, text: '0.1', unit: 'MVAr' },
+  p_from: { value: 0.1, text: '0.1', unit: 'MW' },
+  q_from: { value: 0.1, text: '0.1', unit: 'MVAr' },
 };
-export const DEFAULT_FREQ_TOLERANCE_HZ_TEXT = '0.02';
-export const DEFAULT_DAMPING_TOLERANCE_TEXT = '0.02';
+export const DEFAULT_FREQ_TOLERANCE_HZ_TEXT = '0.001';
+export const DEFAULT_DAMPING_TOLERANCE_TEXT = '0.001';
 export const DEFAULT_MAX_MODE_DISTANCE_TEXT = '0.05';
 
 /** What a run is called in a picker and the verdict, with its case when it has one. */
@@ -84,10 +95,11 @@ function seriesProblem(index: number, entry: unknown): string | null {
 }
 
 /**
- * Parse a results document file (``tensa_results: 1``). The fields the compare
- * request refuses (``engine``, ``status``, ``tensa_results``, ``study``) are
- * accepted and stripped here, so a file the results-document unit writes does
- * not 422. ``tables`` passes through with its ``pflow`` and ``eig`` only.
+ * Parse a results document file (``tensa_results: 1``). A loaded document
+ * keeps its own ``engine`` (name and versions) and ``status``, which the
+ * results document of spec section 6.5 requires: a file that lacks either is
+ * refused with a message naming the field. ``tables`` passes through with its
+ * ``pflow`` and ``eig`` only.
  */
 export function parseResultsDocumentFile(text: string, fileName: string): CompareSide {
   let parsed: unknown;
@@ -97,6 +109,12 @@ export function parseResultsDocumentFile(text: string, fileName: string): Compar
     throw new Error(`${fileName} is not a JSON file`);
   }
   if (!isRecord(parsed)) throw new Error(`${fileName} is not a results document: not an object`);
+  if (!isRecord(parsed.engine) || typeof parsed.engine.name !== 'string') {
+    throw new Error(`${fileName} is not a results document: no engine block with a name`);
+  }
+  if (typeof parsed.status !== 'string') {
+    throw new Error(`${fileName} is not a results document: no status`);
+  }
   if (!Array.isArray(parsed.series)) {
     throw new Error(`${fileName} is not a results document: no series array`);
   }
@@ -106,13 +124,16 @@ export function parseResultsDocumentFile(text: string, fileName: string): Compar
       throw new Error(`${fileName} is not a results document: ${problem}`);
     }
   }
-  // The document model carries the fields the compare request refuses; the
-  // file's own are dropped and these stand in for them, and the view strips
-  // them again when it packs the request.
+  // The document keeps the file's own engine and status; the view strips the
+  // fields the compare request refuses when it packs the request.
+  const engine: ResultsDocument['engine'] = { name: parsed.engine.name };
+  if (isRecord(parsed.engine.versions)) {
+    engine.versions = parsed.engine.versions as NonNullable<ResultsDocument['engine']>['versions'];
+  }
   const document: ResultsDocument = {
     tensa_results: 1,
-    engine: { name: 'andes' },
-    status: 'completed',
+    engine,
+    status: parsed.status as ResultsDocument['status'],
     series: parsed.series as NonNullable<ResultsDocument['series']>,
   };
   if (isRecord(parsed.tables)) {
@@ -130,41 +151,46 @@ export function parseResultsDocumentFile(text: string, fileName: string): Compar
 }
 
 /**
- * The request body. A tolerance left at its default text is not sent, so the
- * server applies its own defaults; when nothing differs the body has no
- * ``tolerances`` key at all. Numbers are parsed with ``Number``; the caller
- * validates the text first.
+ * The request body. A tolerance is sent only when its text differs from the
+ * default the view shows; a field left at its default is omitted, and the
+ * server then applies its own default. For the quantities the shown defaults
+ * are the server's own (``DEFAULT_TOLERANCES`` in
+ * ``server/src/tensa/engines/compare.py``), so an untouched quantity field
+ * asks for exactly what the server would apply. Numbers are parsed with
+ * ``Number``; the caller validates the text first.
  */
 export function buildCompareRequest(
   reference: CompareSide,
   comparison: CompareSide,
   tolerances: CompareTolerancesInput,
 ): CompareRequest {
+  const quantities: Record<string, number> = {};
+  for (const [quantity, def] of Object.entries(DEFAULT_QUANTITY_TOLERANCES)) {
+    const text = tolerances.quantities[quantity] ?? def.text;
+    if (text !== def.text) {
+      quantities[quantity] = Number(text);
+    }
+  }
   const body: CompareRequest = {
     reference: reference.document,
     comparison: comparison.document,
   };
-  const out: {
-    quantities?: Record<string, number>;
-    frequency_hz?: number;
-    damping_ratio?: number;
-    max_mode_distance?: number;
-  } = {};
-  const quantities: Record<string, number> = {};
-  for (const [quantity, def] of Object.entries(DEFAULT_QUANTITY_TOLERANCES)) {
-    const text = tolerances.quantities[quantity];
-    if (text !== undefined && text !== def.text) quantities[quantity] = Number(text);
-  }
-  if (Object.keys(quantities).length > 0) out.quantities = quantities;
+  const extra: Record<string, number> = {};
   if (tolerances.frequency_hz !== DEFAULT_FREQ_TOLERANCE_HZ_TEXT) {
-    out.frequency_hz = Number(tolerances.frequency_hz);
+    extra.frequency_hz = Number(tolerances.frequency_hz);
   }
   if (tolerances.damping_ratio !== DEFAULT_DAMPING_TOLERANCE_TEXT) {
-    out.damping_ratio = Number(tolerances.damping_ratio);
+    extra.damping_ratio = Number(tolerances.damping_ratio);
   }
   if (tolerances.max_mode_distance !== DEFAULT_MAX_MODE_DISTANCE_TEXT) {
-    out.max_mode_distance = Number(tolerances.max_mode_distance);
+    extra.max_mode_distance = Number(tolerances.max_mode_distance);
   }
-  if (Object.keys(out).length > 0) body.tolerances = out as Tolerances;
+  if (Object.keys(quantities).length > 0 || Object.keys(extra).length > 0) {
+    const tolerancesOut: Record<string, unknown> = { ...extra };
+    if (Object.keys(quantities).length > 0) {
+      tolerancesOut.quantities = quantities;
+    }
+    body.tolerances = tolerancesOut as Tolerances;
+  }
   return body;
 }

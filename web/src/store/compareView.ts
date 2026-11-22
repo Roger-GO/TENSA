@@ -41,8 +41,11 @@ export const useCompareViewStore = create<CompareViewState>((set) => ({
   referenceSource: null,
   comparisonSource: null,
   quantityTolerances: {},
-  frequencyHz: '0.02',
-  dampingRatio: '0.02',
+  // The server's DEFAULT_FREQ_TOLERANCE_HZ and DEFAULT_DAMPING_TOLERANCE, as
+  // DEFAULT_FREQ_TOLERANCE_HZ_TEXT and DEFAULT_DAMPING_TOLERANCE_TEXT of
+  // lib/resultsDocument.ts hold them (not imported: this store loads first).
+  frequencyHz: '0.001',
+  dampingRatio: '0.001',
   maxModeDistance: '0.05',
   selectedSeriesKey: null,
   openCompareView: () => set({ open: true }),

@@ -102,8 +102,8 @@ describe('CompareView', () => {
       referenceSource: null,
       comparisonSource: null,
       quantityTolerances: {},
-      frequencyHz: '0.02',
-      dampingRatio: '0.02',
+      frequencyHz: '0.001',
+      dampingRatio: '0.001',
       maxModeDistance: '0.05',
       selectedSeriesKey: null,
     });
