@@ -45,12 +45,37 @@ concurrency:
 
 jobs:
   sienna:
-    name: Sienna engine (Julia, Linux)
+    name: Sienna engine (Julia, Linux, ${{ matrix.part }})
     runs-on: ubuntu-latest
-    # A cold depot downloads about 0.8 GB and precompiles the Sienna packages,
-    # which can take 30 minutes on a runner; the tests then take about 15 more,
-    # and a few more each time a test file starts its own workers.
-    timeout-minutes: 90
+    # The tests are split into parts that run side by side, each from the
+    # cached depot: in one job the model audits (about 40 minutes), the
+    # known-difference tests (about 30) and the operations tests outran any
+    # sensible limit. Every test marked sienna is in exactly one part (a test
+    # of test_ci_config.py holds the split), and the Julia module tests are a
+    # part of their own. A cold depot downloads about 0.8 GB and precompiles
+    # the Sienna packages, which can take 30 minutes on a runner.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: julia
+          - part: audits-a
+            tests: tests/integration/test_model_audits.py -k "genrou or gencls or sexs or ieeest or esst1a or esac1a"
+          - part: audits-b
+            tests: tests/integration/test_model_audits.py -k "not (genrou or gencls or sexs or ieeest or esst1a or esac1a)"
+          - part: known-differences
+            tests: tests/integration/test_known_differences.py
+          - part: operations
+            tests: tests/integration/test_sienna_dispatch.py tests/integration/test_sienna_uc.py tests/integration/test_sienna_sim.py
+          - part: others
+            tests: >-
+              tests/integration
+              --ignore=tests/integration/test_model_audits.py
+              --ignore=tests/integration/test_known_differences.py
+              --ignore=tests/integration/test_sienna_dispatch.py
+              --ignore=tests/integration/test_sienna_uc.py
+              --ignore=tests/integration/test_sienna_sim.py
     defaults:
       run:
         # Named explicitly so that bash runs with -o pipefail: the Julia tests
@@ -114,6 +139,7 @@ jobs:
       # run, which needs PythonCall to load: it is given this job's Python, and
       # no conda environment of its own (it would skip the check otherwise).
       - name: Julia module tests
+        if: matrix.part == 'julia'
         run: |
           export JULIA_PYTHONCALL_EXE="$(command -v python)" JULIA_CONDAPKG_BACKEND=Null
           cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
@@ -156,12 +182,13 @@ jobs:
       # assertion) and the end of the traceback, and the end of what the test
       # wrote to stderr, which the report holds because of junit_logging.
       - name: Sienna tests, with no skip allowed
+        if: matrix.part != 'julia'
         working-directory: server
         env:
           TENSA_SIENNA_PROJECT: ${{ runner.temp }}/sienna/dyn
         run: |
           status=0
-          python -m pytest -m sienna tests/integration -rs -o junit_logging=system-err --junitxml="$RUNNER_TEMP/sienna-junit.xml" || status=$?
+          python -m pytest -m sienna ${{ matrix.tests }} -rs -o junit_logging=system-err --junitxml="$RUNNER_TEMP/sienna-junit.xml" || status=$?
           report=0
           python - "$RUNNER_TEMP/sienna-junit.xml" "$status" <<'EOF' || report=$?
           import sys

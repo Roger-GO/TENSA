@@ -727,6 +727,44 @@ def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> N
     assert "TENSA_SIENNA_SKIP_STAMP" not in _read_required(_SIENNA_WORKFLOW)
 
 
+def test_every_test_marked_sienna_is_in_exactly_one_part_of_the_sienna_matrix() -> None:
+    """The Sienna tests run as parts side by side. A file left out of every
+    part never runs on CI, and one in two parts runs twice; the audits are
+    split by test id, and the two halves must cover every audit once."""
+    include = _sienna_workflow()["jobs"]["sienna"]["strategy"]["matrix"]["include"]
+    parts = [entry for entry in include if entry["part"] != "julia"]
+    assert [entry["part"] for entry in include].count("julia") == 1
+    marked = sorted(
+        path.relative_to(REPO_ROOT / "server").as_posix()
+        for path in (REPO_ROOT / "server" / "tests" / "integration").glob("test_*.py")
+        if "pytest.mark.sienna" in path.read_text(encoding="utf-8")
+    )
+    named: dict[str, int] = {}
+    catch_all = None
+    for entry in parts:
+        words = str(entry["tests"]).split()
+        files = [w for w in words if w.startswith("tests/integration/") and w.endswith(".py")]
+        if "tests/integration" in words:
+            catch_all = entry
+        for name in files:
+            named[name] = named.get(name, 0) + 1
+    assert catch_all is not None
+    ignored = {w.removeprefix("--ignore=") for w in str(catch_all["tests"]).split() if w.startswith("--ignore=")}
+    for name in marked:
+        explicit = named.get(name, 0)
+        if name in ignored:
+            assert explicit >= 1, name
+        else:
+            assert explicit == 0, name
+    # The audits are the one file split in two, by complementary -k filters.
+    audits = [entry["tests"] for entry in parts if str(entry["tests"]).startswith("tests/integration/test_model_audits.py")]
+    assert len(audits) == 2
+    filters = [re.search(r'-k "(.+)"', str(a)).group(1) for a in audits]  # type: ignore[union-attr]
+    assert filters[1] == f"not ({filters[0]})"
+    for name, count in named.items():
+        assert count == (2 if name.endswith("test_model_audits.py") else 1), name
+
+
 def test_the_sienna_job_passes_pytest_no_option_of_a_plugin_the_dev_extra_lacks() -> None:
     """``--timeout`` is pytest-timeout's, which is not a dependency of the
     project: on a runner pytest would stop on the unknown option."""
