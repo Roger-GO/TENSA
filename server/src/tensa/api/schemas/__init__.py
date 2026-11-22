@@ -53,6 +53,14 @@ from tensa.api.schemas.comtrade import (
     ComtradeChannelSeries,
     ComtradeExportRequest,
 )
+from tensa.api.schemas.dispatch import (
+    DispatchDualRowSchema,
+    DispatchDualSchema,
+    DispatchGeneratorSchema,
+    DispatchRequest,
+    DispatchResponse,
+    DispatchSlackSchema,
+)
 from tensa.api.schemas.disturbances import (
     AddDisturbancesRequest,
     AddDisturbancesResponse,
@@ -243,6 +251,12 @@ __all__ = [
     "DeleteBlockedResponse",
     "DeleteElementResponse",
     "DeletedDisturbance",
+    "DispatchDualRowSchema",
+    "DispatchDualSchema",
+    "DispatchGeneratorSchema",
+    "DispatchRequest",
+    "DispatchResponse",
+    "DispatchSlackSchema",
     "DisturbanceAck",
     "DynamicRecord",
     "EditElementRequest",

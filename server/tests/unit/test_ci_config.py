@@ -713,6 +713,7 @@ def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> N
         "runtests_dyn.jl",
         "runtests_edit.jl",
         "runtests_net.jl",
+        "runtests_ops.jl",
     ]
     loop = re.search(r"for file in ([^;]+);", steps[julia_tests]["run"])
     assert loop is not None

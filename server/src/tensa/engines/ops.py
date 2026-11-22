@@ -101,6 +101,7 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "delete_element",
             "undo_last_edit",
             "redo_edit",
+            "run_dispatch",
             # Special-cased by the dispatch (it needs the abort event and the
             # data pipe): a batch run or a streamed one.
             "run_tds",

@@ -99,6 +99,14 @@ Case document:   GET /sessions/{id}/case/neutral  (the loaded case in the engine
                  events, ext; what the case does not give is null, never an engine default; both engines answer
                  it; 409 when no case has been loaded)
 Power flow:      POST /sessions/{id}/pflow · GET /sessions/{id}/operating-point
+Dispatch:        POST /sessions/{id}/dispatch  (Sienna only; body {"network_model": "copper_plate"|"dc"|"ptdf",
+                 optional "duals": false} -> the one-period economic dispatch: objective_per_h (the solver's
+                 objective, the true cost in $/h: the gencost curves are read in $ of MW, and the one period has
+                 no ramp limits) and objective_check_per_h (recomputed from the dispatch in MW and the file's gencost;
+                 the two agree), generators keyed by neutral key gen:<bus>-<id> each with p_mw, bus, id and idx,
+                 slacks (every slack variable past 1e-6 MW), duals only when asked, parameters and expressions
+                 as PowerSimulations names them; 422 for a bad network_model or a case with no generator cost
+                 data (a PSS/E .raw case carries none: dispatch takes a MATPOWER .m case), 409 on an ANDES session)
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |
                  qndf (variable step, error control from tds_config_overrides rtol/atol, bounds max_step/min_step; h

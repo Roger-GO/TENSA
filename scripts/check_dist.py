@@ -64,6 +64,7 @@ SIENNA_FILES = (
     "engines/sienna/julia/TensaSienna.jl",
     "engines/sienna/julia/TensaSiennaDyn.jl",
     "engines/sienna/julia/TensaSiennaNet.jl",
+    "engines/sienna/julia/TensaSiennaOps.jl",
 )
 
 

@@ -119,6 +119,7 @@ end"""
 # the one ``start`` runs for the first module.
 _INCLUDE_DYN_GUARD = "isdefined(Main, :TensaSiennaDyn)"
 _INCLUDE_NET_GUARD = "isdefined(Main, :TensaSiennaNet)"
+_INCLUDE_OPS_GUARD = "isdefined(Main, :TensaSiennaOps)"
 
 
 def _first_line(text: str, fallback: str) -> str:
@@ -186,6 +187,7 @@ class JuliaBridge:
         self._ts: Any = None
         self._ts_dyn: Any = None
         self._ts_net: Any = None
+        self._ts_ops: Any = None
         self._julia_error: type[Exception] | None = None
 
     @property
@@ -202,6 +204,11 @@ class JuliaBridge:
     def network_started(self) -> bool:
         """Whether :meth:`start_network` has run to the end."""
         return self._ts_net is not None
+
+    @property
+    def ops_started(self) -> bool:
+        """Whether :meth:`start_ops` has run to the end."""
+        return self._ts_ops is not None
 
     def start(self) -> None:
         """Start Julia and include the engine's module. Safe to call again.
@@ -319,6 +326,39 @@ class JuliaBridge:
         self._log_printed(out.getvalue() + err.getvalue())
         self._ts_net = jl.TensaSiennaNet
 
+    def start_ops(self) -> None:
+        """Include the operations module. Safe to call again.
+
+        Starts Julia first when it is not started. Raises
+        :class:`EngineUnavailableError` when Julia cannot start or the include
+        of the operations module fails (its packages, PowerSimulations and
+        HiGHS, are in the same shipped environment).
+        """
+        if self.ops_started:
+            return
+        self.start()
+        jl = self._jl
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                if not bool(jl.seval(_INCLUDE_OPS_GUARD)):
+                    printed, failure = jl.seval(
+                        _INCLUDE.replace("{module}", str(environment.ops_module_path()))
+                    )
+                    self._log_printed(str(printed))
+                    if failure is not None:
+                        raise RuntimeError(str(failure))
+        except Exception as exc:
+            self._log_printed(out.getvalue() + err.getvalue())
+            text = self._scrub(str(exc))
+            log.debug("Julia could not load the operations module: %s", text)
+            first = _first_line(text, type(exc).__name__)
+            raise EngineUnavailableError(
+                "sienna", f"Julia could not load the operations module: {first}"
+            ) from exc
+        self._log_printed(out.getvalue() + err.getvalue())
+        self._ts_ops = jl.TensaSiennaOps
+
     @staticmethod
     def _set_environment(executable: Path, project: Path) -> None:
         """Set what ``juliacall`` and ``juliapkg`` read when they are imported."""
@@ -405,6 +445,24 @@ class JuliaBridge:
                 _module=self._ts_net,
                 kind=kind,
                 file=str(file),
+            )
+        )
+
+    def dispatch(
+        self,
+        session: Any,
+        network_model: str,
+        duals: bool = False,
+    ) -> dict[str, Any]:
+        """Solve the one-period economic dispatch; loads the ops module on first call."""
+        self.start_ops()
+        return self._json(
+            self._call(
+                "dispatch_json",
+                session,
+                _module=self._ts_ops,
+                network_model=network_model,
+                duals=duals,
             )
         )
 

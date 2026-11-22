@@ -72,6 +72,7 @@ _SIENNA_OPS = [
     "operating_point",
     "redo_edit",
     "reload_case",
+    "run_dispatch",
     "run_eig",
     "run_pflow",
     "run_tds",
@@ -292,7 +293,7 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["unavailable_reason"] is None
     assert sienna["ops"] == _SIENNA_OPS
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
-    assert sienna["routines"] == ["matrices", "pflow", "eig", "tds"]
+    assert sienna["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch"]
     assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
     assert sienna["routine_options"]["tds"]["streaming"] is True
     assert sienna["editing"] is True
@@ -511,11 +512,13 @@ def _session_routes(spec: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]
 
 _SPEC_ROUTES = _session_routes(_SPEC)
 
-# The edit routes reach the Sienna engine, which refuses what the sweep's
-# placeholder body asks for with a 422 of its own (no model ``x``, no field,
-# a bus to delete, nothing to undo or redo); ``test_sienna_edits.py`` holds
-# what they do with a real edit.
+# The edit routes and the dispatch reach the Sienna engine, which refuses
+# what the sweep asks for with a 422 of its own (no model ``x``, no field, a
+# bus to delete, nothing to undo or redo, a case with no cost data or a
+# network model it does not know); ``test_sienna_edits.py`` and
+# ``test_sienna_dispatch.py`` hold what they do with a real request.
 _REFUSED_BY_THE_ENGINE = {
+    ("POST", "/api/sessions/{session_id}/dispatch"),
     ("POST", "/api/sessions/{session_id}/elements"),
     ("PUT", "/api/sessions/{session_id}/elements/{model}/{idx}"),
     ("DELETE", "/api/sessions/{session_id}/elements/{model}/{idx}"),

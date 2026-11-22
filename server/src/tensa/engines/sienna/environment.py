@@ -60,6 +60,11 @@ def network_module_path() -> Path:
     return Path(__file__).resolve().parent / "julia" / "TensaSiennaNet.jl"
 
 
+def ops_module_path() -> Path:
+    """The Julia operations module, included only when a session asks for one."""
+    return Path(__file__).resolve().parent / "julia" / "TensaSiennaOps.jl"
+
+
 def _juliacall_found() -> bool:
     """Whether ``juliacall`` can be imported, found without importing it.
 
@@ -79,6 +84,9 @@ def sienna_unavailable_reason() -> str | None:
     In order: no ``juliacall``; no Julia; no Manifest in the project folder; no
     stamp of this TENSA's Manifest there (skipped when ``TENSA_SIENNA_SKIP_STAMP``
     is ``1``, for a project managed by hand); no Julia module in the package.
+    The operations module's packages (PowerSimulations, HiGHS) are in the same
+    shipped environment and are checked lazily by the bridge's ``start_ops``,
+    whose include failure already raises ``EngineUnavailableError``.
     """
     if not _juliacall_found():
         return 'juliacall is not installed (pip install "tensa[sienna]")'

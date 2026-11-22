@@ -39,6 +39,7 @@ _SIENNA_OPS = [
     "operating_point",
     "redo_edit",
     "reload_case",
+    "run_dispatch",
     "run_eig",
     "run_pflow",
     "run_tds",
@@ -101,7 +102,7 @@ async def test_list_engines(client: httpx.AsyncClient) -> None:
             "read": ["psse-raw", "psse-dyr", "matpower"],
             "write": [],
         }
-        assert sienna["routines"] == ["matrices", "pflow", "eig", "tds"]
+        assert sienna["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch"]
         assert sienna["ops"] == _SIENNA_OPS
         assert sienna["editing"] is True
     else:

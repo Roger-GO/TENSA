@@ -3,7 +3,7 @@
 Shaped like the worker's own table (``tensa.core.worker.HANDLERS``): each
 handler takes the state and the op's args and answers the payload the worker
 sends back, serialised with the worker's ``_serialize_dataclass``. The ops
-are exactly the fifteen the engine has; an op outside the table is refused
+are exactly the sixteen the engine has; an op outside the table is refused
 by the worker before dispatch. ``run_tds`` is dispatched directly, as the
 ANDES table special-cases it: it needs the abort event.
 """
@@ -452,6 +452,15 @@ def _handle_undo_last_edit(state: SiennaState, args: dict[str, Any]) -> Any:
 
 def _handle_redo_edit(state: SiennaState, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(state.redo_edit())
+def _handle_run_dispatch(state: SiennaState, args: dict[str, Any]) -> Any:
+    # A missing network_model reaches the state's validation as None, which it
+    # refuses by name, as a missing pflow method is handled there.
+    return _serialize_dataclass(
+        state.run_dispatch(
+            network_model=args.get("network_model"),
+            duals=bool(args.get("duals", False)),
+        )
+    )
 
 
 def _handle_case_document(state: SiennaState, args: dict[str, Any]) -> Any:
@@ -510,6 +519,7 @@ _HANDLERS: dict[str, Any] = {
     "delete_element": _handle_delete_element,
     "undo_last_edit": _handle_undo_last_edit,
     "redo_edit": _handle_redo_edit,
+    "run_dispatch": _handle_run_dispatch,
 }
 
 
@@ -580,7 +590,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the fifteen ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the sixteen ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(

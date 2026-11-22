@@ -47,6 +47,7 @@ from tensa.api.routes.clone import router as clone_router
 from tensa.api.routes.compare import router as compare_router
 from tensa.api.routes.comtrade import router as comtrade_router
 from tensa.api.routes.cpf import router as cpf_router
+from tensa.api.routes.dispatch import router as dispatch_router
 from tensa.api.routes.disturbances import router as disturbances_router
 from tensa.api.routes.eig import router as eig_router
 from tensa.api.routes.elements import router as elements_router
@@ -373,6 +374,7 @@ def make_app(
     app.include_router(keys_router, prefix="/api", tags=["keys"])
     app.include_router(case_document_router, prefix="/api", tags=["case-document"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
+    app.include_router(dispatch_router, prefix="/api", tags=["dispatch"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(clone_router, prefix="/api", tags=["clone"])

@@ -62,7 +62,7 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
-def test_sienna_ops_are_the_literal_twenty() -> None:
+def test_sienna_ops_are_the_literal_twenty_one() -> None:
     """The Sienna set is held to the literal ops the engine has."""
     assert ENGINE_OPS["sienna"] == frozenset(
         {
@@ -85,6 +85,7 @@ def test_sienna_ops_are_the_literal_twenty() -> None:
             "delete_element",
             "undo_last_edit",
             "redo_edit",
+            "run_dispatch",
             "run_tds",
         }
     )
@@ -259,9 +260,10 @@ def test_engine_capabilities_sienna_available(
         "read": ["psse-raw", "psse-dyr", "matpower"],
         "write": [],
     }
-    assert caps["routines"] == ["matrices", "pflow", "eig", "tds"]
+    assert caps["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch"]
     assert caps["routine_options"] == {
         "pflow": {"methods": ["ac", "dc", "ptdf-dc"]},
+        "dispatch": {"network_models": ["copper_plate", "dc", "ptdf"]},
         "tds": {
             "streaming": True,
             "abort": True,

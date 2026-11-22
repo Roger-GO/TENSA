@@ -69,6 +69,13 @@ from tensa.engines.sienna.convert import (
     report_messages,
     topology_snapshot,
 )
+from tensa.engines.sienna.dispatch import (
+    NO_COST_DATA_MESSAGE,
+    DispatchRequestError,
+    DispatchResult,
+    check_network_model,
+    dispatch_result,
+)
 from tensa.engines.sienna.disturbances import (
     PendingDisturbance,
     run_json_entries,
@@ -1043,6 +1050,49 @@ class SiennaState:
         self._edit_log = log_ops
         self._redo_log = redo
         return snapshot
+
+    # ---- run_dispatch ---------------------------------------------------------
+
+    def run_dispatch(
+        self,
+        network_model: Any,
+        duals: bool = False,
+    ) -> DispatchResult:
+        """Solve the one-period economic dispatch of the loaded case.
+
+        ``network_model`` is ``"copper_plate"``, ``"dc"`` or ``"ptdf"``; any
+        other value raises :class:`DispatchRequestError` before any Julia
+        call, mirroring the ``run_pflow`` validation messages. With no case
+        loaded raises :class:`NoCaseLoadedError`, and for a case that is not a
+        MATPOWER file (no gencost) :class:`DispatchRequestError` before any
+        Julia call. A :class:`SiennaError` from
+        the bridge (a case with no cost data, a build or solve that failed)
+        propagates unchanged; the route maps it. The notes the Julia side
+        captured are logged on ``tensa.notice`` exactly as ``run_pflow`` does.
+        """
+        self._require_session()
+        check_network_model(network_model)
+        # A PSS/E .raw file has no cost data, and PowerSystems gives each of
+        # its generators a placeholder cost of 1 $/MWh, which the Julia check
+        # cannot tell from a real one; only a MATPOWER file carries gencost.
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        bridge = self._require_bridge()
+        payload = bridge.dispatch(self._session, network_model, duals=duals)
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return dispatch_result(payload, self._key_book)
 
     # ---- network_matrix -------------------------------------------------------
 

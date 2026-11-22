@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 8 |
+| `none` | 9 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **82** |
+| **total** | **83** |
 
 ## OpenAPI routes
 
@@ -68,6 +68,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/cpf` | `analysis-panel` |  |
 | `POST` | `/api/sessions/{session_id}/cpf/qv` | `analysis-panel` |  |
 | `GET` | `/api/sessions/{session_id}/dae-variables` | `run-controls` |  |
+| `POST` | `/api/sessions/{session_id}/dispatch` | `none` | No web surface runs an economic dispatch yet; the route is for scripts and agents. A later operations unit adds it to the run drawer. |
 | `POST` | `/api/sessions/{session_id}/disturbances` | `disturbance-panel` |  |
 | `GET` | `/api/sessions/{session_id}/disturbances` | `none` | Recorded disturbances are mirrored in the disturbance-panel Zustand store and rehydrated from snapshot restore; the web client never re-reads them via this GET (read-back endpoint kept for API/agent parity). |
 | `POST` | `/api/sessions/{session_id}/eig` | `analysis-panel` |  |
