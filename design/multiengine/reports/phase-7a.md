@@ -60,3 +60,33 @@ Not filed; listed for the project owner to decide.
 3. `system2mpc` keeps only the last PQ or Shunt of a bus, ignores `u`, and fails on text bus idx and on a System before setup.
 4. `CPF` with a numeric `stop_at` past the nose continues down the lower branch to negative load levels.
 5. A PSS/E two-winding transformer's ratio is read as `WINDV1` alone; `WINDV2` is ignored unless `CW` is 2 (decision 27).
+
+## Web surfaces
+
+The web units named as in progress above are done. One row per surface, in the order the commits landed.
+
+| Surface | Where | Route it uses |
+|---|---|---|
+| Power flow options | The options form offers the solver (the case's own, Newton-Raphson, dishonest Newton-Raphson, Newton-Krylov), the refactorisation count and the line search; a setting left alone is not sent. Under Newton-Krylov the toast, the summary line, the CSV comment, the HTML report and the convergence banner say the run converged, or did not, by Newton-Krylov, since the tolerance, the iteration limit and the line search are not read and no iteration count is reported. | `POST /sessions/{id}/pflow` with `method`, `n_factorize`, `linesearch` |
+| Integrators | The time-domain panel offers six choices in two groups, fixed step (trapezoidal, backward Euler) and variable step (adaptive trapezoidal and QNDF, each with the preset or hand-set tolerances), and a smallest-step input for the hand-set ones. The frames for the three choices it had are unchanged. | `integrator: "backeuler" \| "trap_adapt"`, `min_step` on the time-domain run |
+| State estimation options | The controls offer weighted least squares or least absolute value, a tolerance, an iteration limit and a seed for this run's noise only, kept apart from the seed of the generate step. The result shows the chi-squared bad-data test, only for the result it belongs to; the residuals CSV names the estimator and the test. | `POST /sessions/{id}/se` with `algorithm`, `tol`, `max_iter`, `noise_seed` |
+| Continuation power flow options | The form asks where to stop as one choice of three (the nose, the full curve, a load level) and takes the parameterisation, the corrector's tolerance and iteration limit and the step bounds under Advanced; a field left blank keeps the case's setting and is not sent. The chart, the note under it and the CSV say whether the run stopped at the target as asked or the nose came first. | `POST /sessions/{id}/cpf` with `parameterization`, `tol`, `corrector_max_iter`, `step_min`, `step_max`, a number as `stop_at` |
+| Check initialisation | Beside the run control; asks the server to initialise the run without stepping it and shows which equations do not balance and which variables started against a limit, with a Reset run button. After a check the topology is read again as set up, so every surface that locks edits after a run does so here. | `POST /sessions/{id}/tds/init` |
+| Save system as MATPOWER | The dialog lists the formats the session's engine reports under `formats.write`, `m` among them when the server has it; a selection the engine does not write falls back to the first it does, and Save is disabled when it writes none. | `POST /sessions/{id}/save` with `format: "m"` |
+| Model documentation, the admittance matrix and the eigenvalue sweep's root locus | A dialog with ANDES's documentation of each model it ships, a dialog with the bus admittance matrix of the loaded case, and the root locus of a parameter sweep in the analysis panel (`b29c7ee2`). | `GET /sessions/{id}/models`, `GET /sessions/{id}/models/{model}/doc`, `GET /sessions/{id}/ybus`, `POST /sessions/{id}/eig/sweep` |
+| External results over a run | A TSAT or PSS/E result workbook read as series and laid over a run in the plot (`403c50cc`). | `POST /external-results?source=tsat\|psse` |
+
+What the review found and changed, from the commit messages:
+
+- A stored integrator choice from before, or one the app does not know, is read on every load: the tolerances gain the new field and an unknown integrator falls back to trapezoidal. The first candidate did that in a version migration, which never runs for a payload of the current version.
+- A run to a CPF target used to read as a truncated curve; the chart, the note under it and the CSV now say which happened.
+- `POST /sessions/{id}/tds/init` was tagged for the run controls once Check initialisation used it. A power flow refused because the time-domain run is initialised said an eigenvalue analysis had changed the state, whatever had initialised it; it now says the run has been initialised, by an eigenvalue analysis, an initialisation check or a run, and that the case must be reloaded. The error class, the status and the recovery are unchanged.
+- PowerSystems reports a file it cannot parse by logging the reason and throwing the value nothing, so TensaSienna's message read `could not read junk.raw: nothing`. The reason is now the exception's first line, else the first error it logged, else that the file is not one this version understands.
+- The top bar no longer fit once Check initialisation was added: it moved into a menu beside Run, the engine picker lost its chevron, and the thresholds were re-measured. The margins are now held with text 5 percent wider.
+- The first screen's load is limited to 500 kB, and the day's UI units took it to 501.1 kB, which fails the production build: the initialisation check's result dialog added 8.8 kB and the engine picker 4.5 kB. Both now load the first time they open, the way the app's other dialogs do; the first load is 494.1 kB.
+- A save name is refused only when nothing is left of it without its extension. The old length check refused `a.raw` and would have refused `abc.m`.
+- The API types were regenerated twice (`1d2bdd0a`, then `1fe78bbf` for the state estimation options and the TDS initialise).
+
+What is still open:
+
+- The open points of the server side above stand; the eigenvalue sweep still has no cancel short of the job machinery, and its new root locus surface does not change that.
