@@ -3,7 +3,7 @@
 Shaped like the worker's own table (``tensa.core.worker.HANDLERS``): each
 handler takes the state and the op's args and answers the payload the worker
 sends back, serialised with the worker's ``_serialize_dataclass``. The ops
-are exactly the thirteen the engine has; an op outside the table is refused
+are exactly the fourteen the engine has; an op outside the table is refused
 by the worker before dispatch. ``run_tds`` is dispatched directly, as the
 ANDES table special-cases it: it needs the abort event.
 """
@@ -125,6 +125,10 @@ def _handle_init_tds(state: SiennaState, args: dict[str, Any]) -> Any:
     return state.init_tds(test_init=args.get("test_init", True))
 
 
+def _handle_network_matrix(state: SiennaState, args: dict[str, Any]) -> Any:
+    return state.network_matrix(args["kind"])
+
+
 def _handle_list_keys(state: SiennaState, args: dict[str, Any]) -> Any:
     """The keys of the loaded case's elements, in assignment order, with the
     problems the assignment noted. A listing is a read: with no case loaded
@@ -155,6 +159,7 @@ _HANDLERS: dict[str, Any] = {
     "operating_point": _handle_operating_point,
     "run_pflow": _handle_run_pflow,
     "list_keys": _handle_list_keys,
+    "network_matrix": _handle_network_matrix,
     "run_eig": _handle_run_eig,
     "eig_participation": _handle_eig_participation,
     "add_disturbance": _handle_add_disturbance,
@@ -229,7 +234,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the thirteen ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the fourteen ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(

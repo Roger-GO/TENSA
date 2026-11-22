@@ -28,6 +28,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from tensa.core.disturbance import DisturbanceSpec, FaultSpec, ToggleSpec
 from tensa.core.eig_math import (
     _ZERO_EIGENVALUE_TOL,
@@ -39,6 +41,7 @@ from tensa.core.eig_math import (
 )
 from tensa.core.eig_result import ComplexNumber, EigResult
 from tensa.core.errors import (
+    AndesAppError,
     CaseLoadError,
     EigComputationError,
     EigPrerequisiteError,
@@ -53,6 +56,7 @@ from tensa.core.messages import PathScrubber
 from tensa.core.pflow_options import PflowSettings
 from tensa.core.session_dirs import SESSIONS_DIRNAME, write_owner_marker
 from tensa.core.wrapper.results import PflowResult, TopologySnapshot
+from tensa.core.wrapper.ybus import MAX_YBUS_ENTRIES
 from tensa.engines.case_facts import corrections_document, read_case_facts
 from tensa.engines.identity import _matpower_rows, read_identity
 from tensa.engines.keys import KeyBook
@@ -82,6 +86,29 @@ if TYPE_CHECKING:
     from tensa.engines.identity import CaseIdentity
 
 log = logging.getLogger("tensa.notice")
+
+# The network matrix kinds the engine builds (spec section 6.1, ``matrices``).
+NETWORK_MATRIX_KINDS = frozenset({"ptdf", "lodf", "ybus", "incidence"})
+
+
+class NetworkMatrixKindError(AndesAppError):
+    """A network matrix kind the Sienna engine does not build."""
+
+    def __init__(self, kind: object) -> None:
+        super().__init__(
+            f"unknown network matrix kind: {short_repr(kind)}; "
+            f"the kinds are ptdf, lodf, ybus, incidence"
+        )
+
+
+class NetworkMatrixTooLargeError(AndesAppError):
+    """A network matrix with more entries than one answer carries."""
+
+    def __init__(self, kind: str, entries: int, cap: int) -> None:
+        super().__init__(
+            f"the {kind} matrix has {entries} entries, more than the {cap} "
+            f"one answer carries"
+        )
 
 # The ops the Sienna engine does not take, named for the error message.
 _ANDES_ONLY_PFLOW_OPTIONS = ("method", "n_factorize", "linesearch")
@@ -756,6 +783,121 @@ class SiennaState:
         """The keys of the loaded case's elements."""
         self._require_session()
         return self._key_book
+
+    # ---- network_matrix -------------------------------------------------------
+
+    def _bus_axis_key(self, number: Any) -> str:
+        """The key of one bus axis entry. The book holds every bus of the loaded
+        case; a bus it does not hold (a reduced bus, say) falls back to the raw
+        ``bus:<n>`` key so the answer stays well-formed."""
+        from tensa.engines.keys import bus_key
+
+        n = int(number)
+        return self._key_book.key_of("Bus", n) or bus_key(n)
+
+    def _arc_axis_entry(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+        """One arc axis entry as ``{"from", "to", "keys"}``: the bus numbers of
+        the arc and the key of every branch of the topology on that arc
+        (parallel circuits share an arc)."""
+        from_bus = int(entry["from"])
+        to_bus = int(entry["to"])
+        pair = (min(from_bus, to_bus), max(from_bus, to_bus))
+        keys: list[str] = []
+        assert self._topology_json is not None  # noqa: S101
+        for branch in self._topology_json.get("branches", []):
+            ends = (int(branch["from"]), int(branch["to"]))
+            if (min(ends), max(ends)) != pair:
+                continue
+            key = self._key_book.key_of("Line", str(branch.get("name")))
+            if key is not None:
+                keys.append(key)
+        return {"from": from_bus, "to": to_bus, "keys": keys}
+
+    def _matrix_axis(self, axis: list[Any]) -> list[Any]:
+        """One axis of the descriptor with its entries keyed: arc entries as
+        ``{"from", "to", "keys"}``, bus entries as ``{"bus", "key"}``."""
+        out: list[Any] = []
+        for entry in axis:
+            if isinstance(entry, Mapping):
+                out.append(self._arc_axis_entry(entry))
+            else:
+                n = int(entry)
+                out.append({"bus": n, "key": self._bus_axis_key(n)})
+        return out
+
+    def network_matrix(self, kind: str) -> dict[str, Any]:
+        """One network matrix of the loaded case.
+
+        ``kind`` is ``"ptdf"``, ``"lodf"``, ``"ybus"`` or ``"incidence"``; any
+        other value raises :class:`NetworkMatrixKindError` before any Julia
+        call. The answer is the descriptor the route serialises: the axes with
+        TENSA keys, the shape, the entry count, and either the values inline
+        (``values``) or, for ``ybus``, the sparse triplets (``entries``). A
+        matrix with more entries than one answer carries raises
+        :class:`NetworkMatrixTooLargeError` after the build.
+        """
+        self._require_session()
+        if kind not in NETWORK_MATRIX_KINDS:
+            raise NetworkMatrixKindError(kind)
+        assert self._case_path is not None  # noqa: S101 - a session has a case
+        workspace = self._require_workspace(self._case_path)
+        scratch = self._scratch_dir(workspace, "network-matrix")
+        file = scratch / f"{kind}.bin"
+        descriptor = self._require_bridge().network_matrix(self._session, kind, file)
+
+        n_rows = int(descriptor["n_rows"])
+        n_cols = int(descriptor["n_cols"])
+        rows_axis: list[Any] = list(descriptor["rows"])
+        cols_axis: list[Any] = list(descriptor["cols"])
+        rows = self._matrix_axis(rows_axis)
+        cols = self._matrix_axis(cols_axis)
+        answer: dict[str, Any] = {
+            "kind": kind,
+            "n_rows": n_rows,
+            "n_cols": n_cols,
+            "complex": bool(descriptor["complex"]),
+            "base_mva": float((self._topology_json or {}).get("base_mva", 100.0)),
+            "rows": rows,
+            "cols": cols,
+            "distributed_slack": False,
+        }
+        if "ref_buses" in descriptor:
+            answer["ref_buses"] = [
+                self._bus_axis_key(number) for number in descriptor["ref_buses"]
+            ]
+
+        what = f"{kind} matrix"
+        files = [Path(str(file) + ".re"), Path(str(file) + ".im")] if kind == "ybus" else [file]
+        try:
+            if kind == "ybus":
+                re = read_matrix(files[0], n_rows, n_cols, what=what, error=SiennaError)
+                im = read_matrix(files[1], n_rows, n_cols, what=what, error=SiennaError)
+                # The nonzero entries, row by row, as the ANDES route lists them.
+                nonzero_rows, nonzero_cols = np.nonzero((re != 0.0) | (im != 0.0))
+                if nonzero_rows.size > MAX_YBUS_ENTRIES:
+                    raise NetworkMatrixTooLargeError(
+                        kind, int(nonzero_rows.size), MAX_YBUS_ENTRIES
+                    )
+                answer["n_entries"] = int(nonzero_rows.size)
+                answer["entries"] = [
+                    {"row": int(r), "col": int(c), "re": float(re[r, c]), "im": float(im[r, c])}
+                    for r, c in zip(nonzero_rows, nonzero_cols, strict=True)
+                ]
+            else:
+                # A dense answer: refused by its size before the file is read.
+                n_entries = n_rows * n_cols
+                if n_entries > MAX_YBUS_ENTRIES:
+                    raise NetworkMatrixTooLargeError(kind, n_entries, MAX_YBUS_ENTRIES)
+                matrix = read_matrix(file, n_rows, n_cols, what=what, error=SiennaError)
+                answer["n_entries"] = n_entries
+                answer["values"] = matrix.tolist()
+        finally:
+            for path in files:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    log.debug("the matrix file %s could not be removed", path.name)
+        return answer
 
     # ---- disturbances ---------------------------------------------------------
 

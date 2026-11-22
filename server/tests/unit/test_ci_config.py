@@ -699,10 +699,18 @@ def test_the_sienna_job_sets_the_environment_up_and_runs_both_test_suites() -> N
     job = _sienna_workflow()["jobs"]["sienna"]
     steps = job["steps"]
     warm = _step_index(steps, "tensa warm-cache --engine sienna")
-    julia_tests = _step_index(steps, "server/tests/julia/runtests.jl")
+    julia_tests = _step_index(steps, "server/tests/julia/$file")
     pytest_tests = _step_index(steps, "pytest -m sienna")
     assert warm < julia_tests < pytest_tests
-    assert (REPO_ROOT / "server" / "tests" / "julia" / "runtests.jl").is_file()
+    # Every Julia test file of the folder runs, so a module's new file cannot
+    # be left out of CI.
+    julia_files = sorted(
+        path.name for path in (REPO_ROOT / "server" / "tests" / "julia").glob("runtests*.jl")
+    )
+    assert julia_files == ["runtests.jl", "runtests_dyn.jl", "runtests_net.jl"]
+    loop = re.search(r"for file in ([^;]+);", steps[julia_tests]["run"])
+    assert loop is not None
+    assert sorted(loop.group(1).split()) == julia_files
     assert "TENSA_SIENNA_PROJECT" in steps[pytest_tests]["env"]
     assert "--junitxml" in steps[pytest_tests]["run"]
     assert '.find("skipped")' in steps[pytest_tests]["run"]
@@ -945,12 +953,14 @@ def test_the_sienna_report_reader_keeps_an_annotation_short(tmp_path: Path) -> N
 
 
 def test_the_julia_test_step_writes_a_failure_as_an_error_annotation(tmp_path: Path) -> None:
-    """The Julia step keeps julia's status the same way, and a failure or a SKIP
-    line becomes an ``::error`` that carries the end of the log."""
-    run = _sienna_step_running("server/tests/julia/runtests.jl")
-    (julia_line,) = [line for line in run.splitlines() if "runtests.jl" in line]
-    assert "2>&1 | tee" in julia_line
-    assert julia_line.rstrip().endswith("|| status=$?")
+    """The Julia step keeps each julia's status (the first failure's is the
+    step's), and a failure or a SKIP line becomes an ``::error`` that carries
+    the end of the log."""
+    run = _sienna_step_running("server/tests/julia/$file")
+    (julia_line,) = [line for line in run.splitlines() if "server/tests/julia/$file" in line]
+    assert "2>&1 | tee -a" in julia_line
+    assert julia_line.rstrip().endswith("|| one=$?")
+    assert 'if [ "$status" -eq 0 ] && [ "$one" -ne 0 ]; then status=$one; fi' in run
     script = _heredoc_after(run, "\"$status\" <<'EOF'")
     log = tmp_path / "julia.log"
 

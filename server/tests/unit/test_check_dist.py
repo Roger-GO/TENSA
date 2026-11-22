@@ -45,6 +45,8 @@ _WHEEL_FILES = {
     "tensa/engines/sienna/envs/dyn/Project.toml": "[deps]",
     "tensa/engines/sienna/envs/dyn/Manifest.toml": 'julia_version = "1.13.4"',
     "tensa/engines/sienna/julia/TensaSienna.jl": "module TensaSienna end",
+    "tensa/engines/sienna/julia/TensaSiennaDyn.jl": "module TensaSiennaDyn end",
+    "tensa/engines/sienna/julia/TensaSiennaNet.jl": "module TensaSiennaNet end",
     "tensa-{v}.dist-info/licenses/LICENSE": "license",
 }
 _SDIST_FILES = {
@@ -57,6 +59,8 @@ _SDIST_FILES = {
     "src/tensa/engines/sienna/envs/dyn/Project.toml": "[deps]",
     "src/tensa/engines/sienna/envs/dyn/Manifest.toml": 'julia_version = "1.13.4"',
     "src/tensa/engines/sienna/julia/TensaSienna.jl": "module TensaSienna end",
+    "src/tensa/engines/sienna/julia/TensaSiennaDyn.jl": "module TensaSiennaDyn end",
+    "src/tensa/engines/sienna/julia/TensaSiennaNet.jl": "module TensaSiennaNet end",
     "LICENSE": "license",
     "hatch_build.py": "",
     "pyproject.toml": "",
@@ -421,6 +425,8 @@ _SIENNA = (
     "engines/sienna/envs/dyn/Project.toml",
     "engines/sienna/envs/dyn/Manifest.toml",
     "engines/sienna/julia/TensaSienna.jl",
+    "engines/sienna/julia/TensaSiennaDyn.jl",
+    "engines/sienna/julia/TensaSiennaNet.jl",
 )
 
 

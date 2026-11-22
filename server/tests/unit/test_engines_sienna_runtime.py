@@ -88,7 +88,7 @@ def kundur(workspace: Path) -> Path:
     return dst
 
 
-def test_the_handler_table_is_exactly_the_thirteen_ops() -> None:
+def test_the_handler_table_is_exactly_the_fourteen_ops() -> None:
     assert set(_HANDLERS) == {
         "load_case",
         "reload_case",
@@ -96,6 +96,7 @@ def test_the_handler_table_is_exactly_the_thirteen_ops() -> None:
         "operating_point",
         "run_pflow",
         "list_keys",
+        "network_matrix",
         "run_eig",
         "eig_participation",
         "add_disturbance",

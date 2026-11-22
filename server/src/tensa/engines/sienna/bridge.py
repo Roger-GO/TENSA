@@ -115,9 +115,10 @@ let path = tempname(), failure = nothing
     end
 end"""
 
-# The guard for the dynamics module's include, the counterpart of the one
-# ``start`` runs for the first module.
+# The guards for the includes of the lazily loaded modules, the counterpart of
+# the one ``start`` runs for the first module.
 _INCLUDE_DYN_GUARD = "isdefined(Main, :TensaSiennaDyn)"
+_INCLUDE_NET_GUARD = "isdefined(Main, :TensaSiennaNet)"
 
 
 def _first_line(text: str, fallback: str) -> str:
@@ -184,6 +185,7 @@ class JuliaBridge:
         self._jl: Any = None
         self._ts: Any = None
         self._ts_dyn: Any = None
+        self._ts_net: Any = None
         self._julia_error: type[Exception] | None = None
 
     @property
@@ -195,6 +197,11 @@ class JuliaBridge:
     def dynamics_started(self) -> bool:
         """Whether :meth:`start_dynamics` has run to the end."""
         return self._ts_dyn is not None
+
+    @property
+    def network_started(self) -> bool:
+        """Whether :meth:`start_network` has run to the end."""
+        return self._ts_net is not None
 
     def start(self) -> None:
         """Start Julia and include the engine's module. Safe to call again.
@@ -280,6 +287,38 @@ class JuliaBridge:
         self._log_printed(out.getvalue() + err.getvalue())
         self._ts_dyn = jl.TensaSiennaDyn
 
+    def start_network(self) -> None:
+        """Include the network matrix module. Safe to call again.
+
+        Starts Julia first when it is not started. Raises
+        :class:`EngineUnavailableError` when Julia cannot start or the include
+        of the network module fails.
+        """
+        if self.network_started:
+            return
+        self.start()
+        jl = self._jl
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                if not bool(jl.seval(_INCLUDE_NET_GUARD)):
+                    printed, failure = jl.seval(
+                        _INCLUDE.replace("{module}", str(environment.network_module_path()))
+                    )
+                    self._log_printed(str(printed))
+                    if failure is not None:
+                        raise RuntimeError(str(failure))
+        except Exception as exc:
+            self._log_printed(out.getvalue() + err.getvalue())
+            text = self._scrub(str(exc))
+            log.debug("Julia could not load the network module: %s", text)
+            first = _first_line(text, type(exc).__name__)
+            raise EngineUnavailableError(
+                "sienna", f"Julia could not load the network module: {first}"
+            ) from exc
+        self._log_printed(out.getvalue() + err.getvalue())
+        self._ts_net = jl.TensaSiennaNet
+
     @staticmethod
     def _set_environment(executable: Path, project: Path) -> None:
         """Set what ``juliacall`` and ``juliapkg`` read when they are imported."""
@@ -342,6 +381,19 @@ class JuliaBridge:
     def versions(self) -> dict[str, Any]:
         """The Julia and Sienna package versions of the environment."""
         return self._json(self._call("versions_json"))
+
+    def network_matrix(self, session: Any, kind: str, file: Path) -> dict[str, Any]:
+        """Build the matrix and write it to ``file``; answer the JSON descriptor."""
+        self.start_network()
+        return self._json(
+            self._call(
+                "network_matrix_json",
+                session,
+                _module=self._ts_net,
+                kind=kind,
+                file=str(file),
+            )
+        )
 
     def dyn_plan(self, session: Any, load_model: str = "impedance") -> dict[str, Any]:
         """What a dynamic run of this session would be made of.

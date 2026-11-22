@@ -16,6 +16,7 @@ on:
       - "server/tests/integration/test_sienna_*.py"
       - "server/tests/julia/**"
       - "server/pyproject.toml"
+      - "scripts/make_sienna_samples.py"
       - ".github/workflows/sienna.yml"
   pull_request:
     paths:
@@ -24,6 +25,7 @@ on:
       - "server/tests/integration/test_sienna_*.py"
       - "server/tests/julia/**"
       - "server/pyproject.toml"
+      - "scripts/make_sienna_samples.py"
       - ".github/workflows/sienna.yml"
   workflow_dispatch:
 
@@ -96,11 +98,21 @@ jobs:
       # can, so a failure is also written as an error annotation that carries the
       # end of the log. Julia's status is kept rather than left to -e, which would
       # end the step before the annotation is written.
+      # Three files, one per module: runtests.jl (TensaSienna), runtests_dyn.jl
+      # (TensaSiennaDyn) and runtests_net.jl (TensaSiennaNet, on a case built in
+      # code, which takes no folder). Every one runs; the status is the first
+      # failure's.
       - name: Julia module tests
         run: |
           cases="$(python -c 'import andes, pathlib; print(pathlib.Path(andes.__file__).parent / "cases")')"
           status=0
-          julia --project="$RUNNER_TEMP/sienna/dyn" server/tests/julia/runtests.jl "$cases" 2>&1 | tee "$RUNNER_TEMP/julia-tests.log" || status=$?
+          : > "$RUNNER_TEMP/julia-tests.log"
+          for file in runtests.jl runtests_dyn.jl runtests_net.jl; do
+            echo "== $file" | tee -a "$RUNNER_TEMP/julia-tests.log"
+            one=0
+            julia --project="$RUNNER_TEMP/sienna/dyn" "server/tests/julia/$file" "$cases" 2>&1 | tee -a "$RUNNER_TEMP/julia-tests.log" || one=$?
+            if [ "$status" -eq 0 ] && [ "$one" -ne 0 ]; then status=$one; fi
+          done
           python - "$RUNNER_TEMP/julia-tests.log" "$status" <<'EOF'
           import sys
           from pathlib import Path

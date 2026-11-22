@@ -48,6 +48,7 @@ def test_sienna_ops_match_the_handler_table() -> None:
 
 def test_engines_with_op() -> None:
     assert engines_with_op("run_pflow") == ["andes", "sienna"]
+    assert engines_with_op("network_matrix") == ["sienna"]
     assert engines_with_op("run_eig") == ["andes", "sienna"]
     assert engines_with_op("eig_participation") == ["andes", "sienna"]
     assert engines_with_op("run_eig_sweep") == ["andes"]
@@ -61,7 +62,7 @@ def test_engines_with_op() -> None:
     assert list(ENGINE_NAMES) == ["andes", "sienna"]
 
 
-def test_sienna_ops_are_the_literal_thirteen() -> None:
+def test_sienna_ops_are_the_literal_fourteen() -> None:
     """The Sienna set is held to the literal ops the engine has."""
     assert ENGINE_OPS["sienna"] == frozenset(
         {
@@ -71,6 +72,7 @@ def test_sienna_ops_are_the_literal_thirteen() -> None:
             "operating_point",
             "run_pflow",
             "list_keys",
+            "network_matrix",
             "run_eig",
             "eig_participation",
             "add_disturbance",
@@ -242,7 +244,7 @@ def test_engine_capabilities_sienna_available(
         "read": ["psse-raw", "psse-dyr", "matpower"],
         "write": [],
     }
-    assert caps["routines"] == ["pflow", "eig", "tds"]
+    assert caps["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert caps["routine_options"] == {
         "tds": {
             "streaming": False,
@@ -287,6 +289,7 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
         "load_case": {"path": "case.raw"},
         "run_tds": {"tf": 1.0},
         "eig_participation": {"mode_idx": "0"},
+        "network_matrix": {"kind": "ptdf"},
         "add_disturbance": {
             "spec": {
                 "kind": "fault",

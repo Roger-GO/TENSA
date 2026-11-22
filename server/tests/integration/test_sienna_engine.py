@@ -64,6 +64,7 @@ _SIENNA_OPS = [
     "list_disturbances",
     "list_keys",
     "load_case",
+    "network_matrix",
     "operating_point",
     "reload_case",
     "run_eig",
@@ -285,7 +286,7 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["unavailable_reason"] is None
     assert sienna["ops"] == _SIENNA_OPS
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
-    assert sienna["routines"] == ["pflow", "eig", "tds"]
+    assert sienna["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
     assert sienna["editing"] is False
     # Read from the project's Manifest without starting Julia.
@@ -496,7 +497,7 @@ def _session_routes(spec: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]
 
 _SPEC_ROUTES = _session_routes(_SPEC)
 
-# The routes that work on a Sienna session: the six ops' and the ones no
+# The routes that work on a Sienna session: its ops' and the ones no
 # worker op answers. Every other session route answers 409 naming the engines
 # that have its op.
 _WORKS = {
@@ -505,6 +506,7 @@ _WORKS = {
     ("GET", "/api/sessions/{session_id}/topology"),
     ("POST", "/api/sessions/{session_id}/reload"),
     ("GET", "/api/sessions/{session_id}/keys"),
+    ("GET", "/api/sessions/{session_id}/network-matrix"),
     ("POST", "/api/sessions/{session_id}/pflow"),
     ("GET", "/api/sessions/{session_id}/operating-point"),
     ("POST", "/api/sessions/{session_id}/eig"),
@@ -656,8 +658,8 @@ async def _abort_while_idle_is_spent_by_the_next_run(c: Any, sid: str) -> None:
 async def test_every_session_route_works_or_is_refused(
     world: World, method: str, path: str, operation: dict[str, Any]
 ) -> None:
-    """The seam holds: a session route on a Sienna session either works (the
-    six ops' routes, and the ones no worker op answers) or answers 409 naming
+    """The seam holds: a session route on a Sienna session either works (its
+    ops' routes, and the ones no worker op answers) or answers 409 naming
     the engines that have its op. None answers 500 or hangs."""
     c, sid = world.client, world.sienna
     if (method, path) == ("DELETE", "/api/sessions/{session_id}"):

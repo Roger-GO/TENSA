@@ -55,6 +55,11 @@ def dynamics_module_path() -> Path:
     return Path(__file__).resolve().parent / "julia" / "TensaSiennaDyn.jl"
 
 
+def network_module_path() -> Path:
+    """The Julia network matrix module, included only when a session asks for one."""
+    return Path(__file__).resolve().parent / "julia" / "TensaSiennaNet.jl"
+
+
 def _juliacall_found() -> bool:
     """Whether ``juliacall`` can be imported, found without importing it.
 

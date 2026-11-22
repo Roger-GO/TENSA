@@ -79,6 +79,12 @@ Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /
                  on base_mva, row and column i being the bus bus_idx[i] / bus_key[i]; it reflects device status at
                  the time of the call and needs no power flow, but sets the case up, which closes it to disturbances;
                  422 past 500000 nonzeros)
+                 GET /sessions/{id}/network-matrix?kind=ptdf|lodf|ybus|incidence  (Sienna only, default ptdf; the
+                 matrix PowerNetworkMatrices builds, per unit on base_mva: {kind, n_rows, n_cols, n_entries, complex,
+                 base_mva, rows, cols, ref_buses (absent for ybus), distributed_slack (always false), values (row by
+                 row, dense kinds) or entries (the nonzeros of ybus as {row, col, re, im})}; each axis entry is an arc
+                 {from, to, keys} (the keys of every branch on the arc) or a bus {bus, key}; 422 for an unknown kind
+                 or past 250000 entries, 409 on an ANDES session, which has GET /sessions/{id}/ybus)
 Keys:            GET /sessions/{id}/keys  (every element's key, each with bucket, model, idx and source, plus
                  "problems"; empty lists when no case is loaded. Every TopologyEntry also carries "key", the
                  topology carries "has_dynamics", and a pflow result carries "keys": per kind (bus, line,

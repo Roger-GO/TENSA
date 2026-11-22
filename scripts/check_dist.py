@@ -56,11 +56,14 @@ UI_LICENSES = "THIRD-PARTY-LICENSES.txt"
 WHEEL_EXAMPLES = "tensa/examples"
 SDIST_EXAMPLES = "src/tensa/examples"
 # The Sienna engine's Julia side: the environment ``tensa warm-cache --engine
-# sienna`` installs and the module the worker loads.
+# sienna`` installs and the modules the worker loads (the static one, the
+# dynamics one and the network matrices one).
 SIENNA_FILES = (
     "engines/sienna/envs/dyn/Project.toml",
     "engines/sienna/envs/dyn/Manifest.toml",
     "engines/sienna/julia/TensaSienna.jl",
+    "engines/sienna/julia/TensaSiennaDyn.jl",
+    "engines/sienna/julia/TensaSiennaNet.jl",
 )
 
 

@@ -43,7 +43,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "unavailable_reason": None,
             "versions": sienna_versions(),
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
-            "routines": ["pflow", "eig", "tds"],
+            "routines": ["matrices", "pflow", "eig", "tds"],
             "routine_options": {
                 "tds": {
                     "streaming": False,

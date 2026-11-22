@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 6 |
+| `none` | 7 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **80** |
+| **total** | **81** |
 
 ## OpenAPI routes
 
@@ -84,6 +84,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `DELETE` | `/api/sessions/{session_id}/messages` | `messages-panel` |  |
 | `GET` | `/api/sessions/{session_id}/models` | `model-doc-dialog` |  |
 | `GET` | `/api/sessions/{session_id}/models/{model}/doc` | `model-doc-dialog` |  |
+| `GET` | `/api/sessions/{session_id}/network-matrix` | `none` | No web surface reads the network matrices yet; the route is for scripts and agents. A later unit adds it to the network-analysis results panel. |
 | `GET` | `/api/sessions/{session_id}/operating-point` | `data-grid` |  |
 | `POST` | `/api/sessions/{session_id}/pflow` | `run-controls` |  |
 | `POST` | `/api/sessions/{session_id}/pmu` | `pmu-dialog` |  |

@@ -58,6 +58,7 @@ from tensa.api.routes.keys import router as keys_router
 from tensa.api.routes.messages import router as messages_router
 from tensa.api.routes.metrics import router as metrics_router
 from tensa.api.routes.models import router as models_router
+from tensa.api.routes.network_matrix import router as network_matrix_router
 from tensa.api.routes.pflow import router as pflow_router
 from tensa.api.routes.pmu import router as pmu_router
 from tensa.api.routes.profiles import router as profiles_router
@@ -367,6 +368,7 @@ def make_app(
     app.include_router(sessions_router, prefix="/api", tags=["sessions"])
     app.include_router(cases_router, prefix="/api", tags=["cases"])
     app.include_router(ybus_router, prefix="/api", tags=["ybus"])
+    app.include_router(network_matrix_router, prefix="/api", tags=["network-matrix"])
     app.include_router(keys_router, prefix="/api", tags=["keys"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
