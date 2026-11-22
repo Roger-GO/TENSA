@@ -168,7 +168,12 @@ Clone editing:   POST /sessions/{id}/case/clone (start copy-on-write edit)
                  PUT /sessions/{id}/case/clone/params/{model}/{idx}/{param} (edit one param)
                  POST .../case/clone/undo · .../case/clone/redo · .../case/clone/reset · .../case/clone/save-as
                  GET .../case/clone/diff/{model}/{idx}
-Eigenanalysis:   POST /sessions/{id}/eig · GET .../eig/modes/{mode_idx}/participation · GET .../eig/state-matrix.mat
+Eigenanalysis:   POST /sessions/{id}/eig (optional body {"load_model": "impedance" | "power" | "as-case"}:
+                 how loads behave in the analysis; a Sienna session takes all three, default impedance, and its
+                 result echoes "load_model" and carries "notes" with the PSID small-signal validation note; an
+                 ANDES session takes it left out or "impedance", which is what ANDES does, and refuses the other
+                 two with 422) · GET .../eig/modes/{mode_idx}/participation (a Sienna session answers it from its
+                 last run_eig) · GET .../eig/state-matrix.mat (ANDES only)
                  POST /sessions/{id}/eig/sweep {"model": "GENROU", "idx": "1", "param": "M", "values": [4, 6, 8]} (root loci data;
                  needs a converged pflow; 1 to 200 finite values, on the base the case file holds the param in) → "points", one per
                  value in order, each {value, eigenvalues: [{real, imag}], damping_ratios, frequencies_hz} (index-aligned), mode_count.

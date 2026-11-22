@@ -26,7 +26,7 @@ plan's Approach addendum.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response
@@ -57,6 +57,16 @@ class EigRunRequest(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    load_model: Literal["impedance", "power", "as-case"] | None = Field(
+        default=None,
+        description=(
+            "How loads behave in the analysis: ``impedance`` (the default), "
+            "``power`` or ``as-case``. A Sienna session takes all three; an "
+            "ANDES session takes it left out or ``impedance``, which is what "
+            "ANDES does, and refuses the other two with 422."
+        ),
+    )
 
 
 class EigSweepRequest(BaseModel):
@@ -172,6 +182,23 @@ class EigResultResponse(BaseModel):
             "if not already initialised — the substrate surfaces this so "
             "the UI can warn that subsequent TDS / re-run PF will start "
             "from this initialised dae."
+        ),
+    )
+    load_model: str | None = Field(
+        default=None,
+        description=(
+            "The load model the analysis used (``impedance``, ``power`` or "
+            "``as-case``). Set by the Sienna engine; ``null`` for ANDES, "
+            "whose loads behave as the case and its own defaults leave them."
+        ),
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Standing notes on the result. A Sienna result carries the note "
+            "that PSID's small-signal results are work in progress in "
+            "validation, by PSID's own documentation (spec section 13). "
+            "Empty for ANDES."
         ),
     )
     job_id: str | None = Field(
@@ -375,7 +402,10 @@ async def run_eig(
         async with _run_as_job(
             mgr, session_id, "eig", request_summary=body.model_dump()
         ) as job_id:
-            payload = await mgr.invoke(session_id, "run_eig", {})
+            args: dict[str, Any] = {}
+            if body.load_model is not None:
+                args["load_model"] = body.load_model
+            payload = await mgr.invoke(session_id, "run_eig", args)
     except SessionExpiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -404,6 +434,10 @@ async def run_eig(
         state_count=int(payload.get("state_count", 0)),
         state_names=[str(n) for n in payload.get("state_names") or []],
         tds_initialized=bool(payload.get("tds_initialized", False)),
+        load_model=(
+            None if payload.get("load_model") is None else str(payload.get("load_model"))
+        ),
+        notes=[str(n) for n in payload.get("notes") or []],
         job_id=job_id,
     )
 

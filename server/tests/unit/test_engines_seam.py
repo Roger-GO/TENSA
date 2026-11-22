@@ -46,6 +46,10 @@ def test_sienna_ops_match_the_handler_table() -> None:
 
 def test_engines_with_op() -> None:
     assert engines_with_op("run_pflow") == ["andes", "sienna"]
+    assert engines_with_op("run_eig") == ["andes", "sienna"]
+    assert engines_with_op("eig_participation") == ["andes", "sienna"]
+    assert engines_with_op("run_eig_sweep") == ["andes"]
+    assert engines_with_op("eig_state_matrix") == ["andes"]
     assert engines_with_op("run_tds") == ["andes"]
     assert engines_with_op("no-such-op") == []
     # ENGINE_NAMES order, in case a later engine shares an op.
@@ -197,11 +201,13 @@ def test_engine_capabilities_sienna_unavailable(
 
 
 def test_engine_capabilities_sienna_available(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from tensa.engines.sienna import environment
 
     monkeypatch.setattr(environment, "sienna_unavailable_reason", lambda: None)
+    # A project folder with no Manifest: the versions are what it holds, none.
+    monkeypatch.setattr(environment, "sienna_project", lambda: tmp_path)
     caps = engine_capabilities("sienna")
     assert caps["available"] is True
     assert caps["unavailable_reason"] is None
@@ -210,7 +216,8 @@ def test_engine_capabilities_sienna_available(
         "read": ["psse-raw", "psse-dyr", "matpower"],
         "write": [],
     }
-    assert caps["routines"] == ["pflow"]
+    assert caps["routines"] == ["pflow", "eig"]
+    assert "run_eig" in caps["ops"]
     assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
     assert caps["editing"] is False
 

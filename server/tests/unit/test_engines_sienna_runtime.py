@@ -88,7 +88,7 @@ def kundur(workspace: Path) -> Path:
     return dst
 
 
-def test_the_handler_table_is_exactly_the_six_ops() -> None:
+def test_the_handler_table_is_exactly_the_eight_ops() -> None:
     assert set(_HANDLERS) == {
         "load_case",
         "reload_case",
@@ -96,6 +96,8 @@ def test_the_handler_table_is_exactly_the_six_ops() -> None:
         "operating_point",
         "run_pflow",
         "list_keys",
+        "run_eig",
+        "eig_participation",
     }
     assert set(_HANDLERS) == ENGINE_OPS["sienna"]
 
@@ -221,6 +223,60 @@ def test_load_case_passes_on_unsupported(state: SiennaState, workspace: Path, ku
         _HANDLERS["load_case"](state, args)
     payload = _HANDLERS["load_case"](state, {**args, "on_unsupported": "drop"})
     assert payload["has_dynamics"] is True
+
+
+def test_run_eig_handler_echoes_load_model_and_notes(state: SiennaState) -> None:
+    """The payload is the dataclass's fields plus ``load_model`` and the
+    standing note; the state's ``run_eig`` saw the load model it was given."""
+    from tensa.core.eig_result import ComplexNumber, EigResult
+    from tensa.engines.sienna.state import SIENNA_EIG_NOTE
+
+    seen: list[str] = []
+    result = EigResult(
+        eigenvalues=[ComplexNumber(-1.0, 2.0)],
+        damping_ratios=[0.4472],
+        frequencies_hz=[0.3183],
+        mode_count=1,
+        state_count=1,
+        state_names=["gen:1-1 δ"],
+        tds_initialized=True,
+    )
+
+    class _Double:
+        def run_eig(self, load_model: str = "impedance") -> EigResult:
+            seen.append(load_model)
+            return result
+
+    double = _Double()
+    payload = _HANDLERS["run_eig"](double, {})
+    assert seen == ["impedance"]
+    assert payload["load_model"] == "impedance"
+    assert payload["notes"] == [SIENNA_EIG_NOTE]
+    assert payload["mode_count"] == 1
+    assert payload["eigenvalues"] == [{"real": -1.0, "imag": 2.0}]
+    payload = _HANDLERS["run_eig"](double, {"load_model": "power"})
+    assert seen == ["impedance", "power"]
+    assert payload["load_model"] == "power"
+
+
+def test_eig_participation_handler_passes_an_int(state: SiennaState) -> None:
+    seen: list[int] = []
+    answer = {"mode_idx": 2, "participation": [{"state_name": "s", "factor": 1.0}]}
+
+    class _Double:
+        def eig_participation(self, mode_idx: int) -> dict[str, object]:
+            assert isinstance(mode_idx, int)
+            seen.append(mode_idx)
+            return answer
+
+    assert _HANDLERS["eig_participation"](_Double(), {"mode_idx": "2"}) == answer
+    assert seen == [2]
+
+
+def test_dispatch_of_an_op_outside_the_table_is_a_key_error(state: SiennaState) -> None:
+    runtime = sienna_runtime()
+    with pytest.raises(KeyError):
+        runtime.dispatch(state, "run_cpf", {}, None, None, None)
 
 
 def test_list_keys_with_no_case_is_empty(state: SiennaState) -> None:

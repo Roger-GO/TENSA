@@ -3,7 +3,7 @@
 Shaped like the worker's own table (``tensa.core.worker.HANDLERS``): each
 handler takes the state and the op's args and answers the payload the worker
 sends back, serialised with the worker's ``_serialize_dataclass``. The ops
-are exactly the six the engine has; an op outside the table is refused by
+are exactly the eight the engine has; an op outside the table is refused by
 the worker before dispatch.
 """
 
@@ -69,6 +69,21 @@ def _handle_run_pflow(state: SiennaState, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(state.run_pflow(**options))
 
 
+def _handle_run_eig(state: SiennaState, args: dict[str, Any]) -> Any:
+    from tensa.engines.sienna.state import SIENNA_EIG_NOTE
+
+    load_model = args.get("load_model")
+    result = state.run_eig(load_model=load_model if load_model is not None else "impedance")
+    payload = _serialize_dataclass(result)
+    payload["load_model"] = load_model if load_model is not None else "impedance"
+    payload["notes"] = [SIENNA_EIG_NOTE]
+    return payload
+
+
+def _handle_eig_participation(state: SiennaState, args: dict[str, Any]) -> Any:
+    return state.eig_participation(int(args["mode_idx"]))
+
+
 def _handle_list_keys(state: SiennaState, args: dict[str, Any]) -> Any:
     """The keys of the loaded case's elements, in assignment order, with the
     problems the assignment noted. A listing is a read: with no case loaded
@@ -99,6 +114,8 @@ _HANDLERS: dict[str, Any] = {
     "operating_point": _handle_operating_point,
     "run_pflow": _handle_run_pflow,
     "list_keys": _handle_list_keys,
+    "run_eig": _handle_run_eig,
+    "eig_participation": _handle_eig_participation,
 }
 
 
@@ -165,7 +182,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the six ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the eight ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(

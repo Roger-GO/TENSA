@@ -381,3 +381,52 @@ async def test_eig_unknown_session_returns_404(
         json={},
     )
     assert resp.status_code == 404, resp.text
+
+
+# ---- load_model on an ANDES session -----------------------------------------
+
+
+@pytest.mark.integration
+async def test_eig_load_model_impedance_is_what_andes_does(
+    client: httpx.AsyncClient,
+) -> None:
+    """ANDES converts loads to constant impedance for the analysis, so a
+    request that asks for exactly that is accepted and answered as today."""
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    resp = await client.post(f"/api/sessions/{sid}/eig", json={"load_model": "impedance"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode_count"] > 0
+    # The new fields stay at their defaults on an ANDES result.
+    assert body["load_model"] is None
+    assert body["notes"] == []
+
+
+@pytest.mark.integration
+async def test_eig_load_model_power_is_refused_on_andes(
+    client: httpx.AsyncClient,
+) -> None:
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    pf = await client.post(f"/api/sessions/{sid}/pflow", json={})
+    assert pf.status_code == 200, pf.text
+    for value in ("power", "as-case"):
+        resp = await client.post(f"/api/sessions/{sid}/eig", json={"load_model": value})
+        assert resp.status_code == 422, resp.text
+        assert (
+            "the ANDES engine converts loads to constant impedance for the "
+            f"eigenvalue analysis; load_model {value} is not available with it"
+            in resp.json()["detail"]
+        )
+
+
+@pytest.mark.integration
+async def test_eig_load_model_validation(client: httpx.AsyncClient) -> None:
+    sid = await _create_session_and_load(client, "ieee14.raw", "ieee14.dyr")
+    resp = await client.post(f"/api/sessions/{sid}/eig", json={"load_model": "bad"})
+    assert resp.status_code == 422, resp.text
+    resp = await client.post(
+        f"/api/sessions/{sid}/eig", json={"load_model": "power", "extra": 1}
+    )
+    assert resp.status_code == 422, resp.text

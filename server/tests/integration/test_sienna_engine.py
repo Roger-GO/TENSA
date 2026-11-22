@@ -56,7 +56,16 @@ _LONG = httpx.Timeout(600.0, connect=10.0)
 # Any one request of the route sweep; a route that hangs fails the test.
 _SWEEP_REQUEST_SECONDS = 120.0
 
-_SIX_OPS = ["list_keys", "load_case", "operating_point", "reload_case", "run_pflow", "topology"]
+_SIENNA_OPS = [
+    "eig_participation",
+    "list_keys",
+    "load_case",
+    "operating_point",
+    "reload_case",
+    "run_eig",
+    "run_pflow",
+    "topology",
+]
 
 # The case files the module loads, from ANDES's cases folder, by the name they
 # have in the workspace.
@@ -269,11 +278,13 @@ async def test_engines_lists_sienna(world: World) -> None:
     sienna = next(e for e in body["engines"] if e["name"] == "sienna")
     assert sienna["available"] is True
     assert sienna["unavailable_reason"] is None
-    assert sienna["ops"] == _SIX_OPS
+    assert sienna["ops"] == _SIENNA_OPS
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
-    assert sienna["routines"] == ["pflow"]
+    assert sienna["routines"] == ["pflow", "eig"]
     assert sienna["editing"] is False
-    assert sienna["versions"] == {}
+    # Read from the project's Manifest without starting Julia.
+    assert sienna["versions"]["julia"].startswith("1.")
+    assert sienna["versions"]["PowerSystems"]
 
 
 async def test_a_whole_session(world: World) -> None:
@@ -490,6 +501,8 @@ _WORKS = {
     ("GET", "/api/sessions/{session_id}/keys"),
     ("POST", "/api/sessions/{session_id}/pflow"),
     ("GET", "/api/sessions/{session_id}/operating-point"),
+    ("POST", "/api/sessions/{session_id}/eig"),
+    ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"),
     ("POST", "/api/sessions/{session_id}/abort"),
     ("GET", "/api/sessions/{session_id}/jobs"),
     ("GET", "/api/sessions/{session_id}/messages"),
@@ -519,6 +532,7 @@ _PATH_VALUES = {
 _BODIES: dict[tuple[str, str], Any] = {
     ("POST", "/api/sessions/{session_id}/case"): {"primary_path": "kundur.raw"},
     ("POST", "/api/sessions/{session_id}/pflow"): {},
+    ("POST", "/api/sessions/{session_id}/eig"): {},
     ("POST", "/api/sessions/{session_id}/save"): {"filename": "copy.xlsx", "format": "xlsx"},
 }
 
@@ -625,6 +639,22 @@ async def test_every_session_route_works_or_is_refused(
     topology = await c.get(f"/api/sessions/{sid}/topology")
     if topology.status_code != 200 and sid == world.sienna:
         await _ok(_load(c, sid, "kundur.raw"))
+    if (method, path) in (
+        ("POST", "/api/sessions/{session_id}/eig"),
+        ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"),
+    ):
+        # The eig routes need a case with dynamic models and a solved power
+        # flow; the sweep's shared session loads Kundur without its .dyr.
+        descriptor = await _ok(c.get(f"/api/sessions/{sid}"))
+        del descriptor
+        topo = await c.get(f"/api/sessions/{sid}/topology")
+        if topo.status_code != 200 or not topo.json().get("has_dynamics"):
+            await _ok(_load(c, sid, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+        point = await c.get(f"/api/sessions/{sid}/operating-point")
+        if point.status_code != 200 or not point.json().get("converged"):
+            await _ok(c.post(f"/api/sessions/{sid}/pflow", json={}))
+        if (method, path) == ("GET", "/api/sessions/{session_id}/eig/modes/{mode_idx}/participation"):
+            await _ok(c.post(f"/api/sessions/{sid}/eig", json={}))
     request = _request_for(method, path, operation, sid, _SPEC)
     resp = await asyncio.wait_for(c.request(**request), timeout=_SWEEP_REQUEST_SECONDS)
     where = f"{method} {path}: {resp.status_code} {resp.text[:400]}"
@@ -638,6 +668,87 @@ async def test_every_session_route_works_or_is_refused(
         detail = resp.json()["detail"]
         assert "is not available with the sienna engine" in detail, where
         assert "engines that have it: andes" in detail, where
+
+
+# ---- the eigenvalue analysis -------------------------------------------------
+
+async def test_eig_against_andes(world: World) -> None:
+    """Kundur with its .dyr in both engines: the four oscillatory modes of the
+    P5-A table match within the tolerance, the Sienna result carries the PSID
+    validation note, and the participation route answers on both."""
+    c = world.client
+    await _ok(_load(c, world.sienna, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+    await _ok(c.post(f"/api/sessions/{world.sienna}/pflow", json={}))
+    await _ok(_load(c, world.andes, "kundur.raw", ["kundur_full.dyr"]))
+    await _ok(c.post(f"/api/sessions/{world.andes}/pflow", json={}))
+
+    started = time.monotonic()
+    sienna = await _ok(c.post(f"/api/sessions/{world.sienna}/eig", json={"load_model": "impedance"}))
+    world.times["first eig (kundur)"] = time.monotonic() - started
+    andes = await _ok(c.post(f"/api/sessions/{world.andes}/eig", json={}))
+    assert sienna["mode_count"] == 32
+    assert sienna["load_model"] == "impedance"
+    assert sienna["notes"] == [
+        "PSID's small-signal results are work in progress in validation, "
+        "by PSID's own documentation."
+    ]
+    assert andes["load_model"] is None
+    assert andes["notes"] == []
+
+    def has_mode(result: dict[str, Any], frequency: float, damping: float) -> bool:
+        return any(
+            abs(result["frequencies_hz"][i] - frequency) <= 5e-4
+            and abs(result["damping_ratios"][i] - damping) <= 5e-4
+            for i in range(result["mode_count"])
+        )
+
+    # The spike's four modes are those of four GENROU with TGOV1 and impedance
+    # loads, which is what Sienna simulates of this file (PowerSystems leaves
+    # the EXDC2 exciters out). ANDES keeps the exciters, so its modes are not
+    # these; the like-for-like comparison builds a .dyr without them.
+    for frequency, damping in (
+        (0.0684, 0.6295),
+        (0.6540, 0.0458),
+        (1.1077, 0.0921),
+        (1.1411, 0.0941),
+    ):
+        assert has_mode(sienna, frequency, damping), (frequency, damping)
+    assert andes["mode_count"] > 32
+
+    for sid, modes in ((world.sienna, 32), (world.andes, andes["mode_count"])):
+        part = await _ok(c.get(f"/api/sessions/{sid}/eig/modes/0/participation"))
+        assert part["mode_idx"] == 0
+        assert len(part["participation"]) == modes
+
+
+async def test_eig_refusals(world: World) -> None:
+    c = world.client
+    await _ok(_load(c, world.sienna, "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop"))
+    resp = await c.post(f"/api/sessions/{world.sienna}/eig", json={})
+    assert resp.status_code == 409, resp.text
+    assert "PFlow" in resp.json()["detail"]
+    resp = await c.get(f"/api/sessions/{world.sienna}/eig/modes/0/participation")
+    assert resp.status_code == 409, resp.text
+
+    await _ok(_load(c, world.andes, "kundur.raw", ["kundur_full.dyr"]))
+    await _ok(c.post(f"/api/sessions/{world.andes}/pflow", json={}))
+    resp = await c.post(f"/api/sessions/{world.andes}/eig", json={"load_model": "power"})
+    assert resp.status_code == 422, resp.text
+    assert (
+        "the ANDES engine converts loads to constant impedance for the "
+        "eigenvalue analysis; load_model power is not available with it"
+        in resp.json()["detail"]
+    )
+    for sid in (world.sienna, world.andes):
+        resp = await c.post(f"/api/sessions/{sid}/eig", json={"load_model": "bad"})
+        assert resp.status_code == 422, resp.text
+
+    # A case with no dynamic models is refused with the Julia answer's stage.
+    await _ok(_load(c, world.sienna, "kundur.raw"))
+    await _ok(c.post(f"/api/sessions/{world.sienna}/pflow", json={}))
+    resp = await c.post(f"/api/sessions/{world.sienna}/eig", json={})
+    assert resp.status_code == 422, resp.text
+    assert "eigenvalue analysis failed at" in resp.json()["detail"]
 
 
 # ---- a second session: two Julias, a quiet worker, a close -------------------

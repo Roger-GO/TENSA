@@ -87,6 +87,8 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "operating_point",
             "run_pflow",
             "list_keys",
+            "run_eig",
+            "eig_participation",
         }
     ),
 }

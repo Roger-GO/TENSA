@@ -27,10 +27,23 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from tensa.core.eig_math import (
+    _ZERO_EIGENVALUE_TOL,
+    _compute_damping_ratio,
+    _compute_frequency_hz,
+    _settle_axis,
+    _settle_zero,
+    eigen_decomposition,
+)
+from tensa.core.eig_result import ComplexNumber, EigResult
 from tensa.core.errors import (
     CaseLoadError,
+    EigComputationError,
+    EigPrerequisiteError,
+    ElementNotFoundError,
     NoCaseLoadedError,
     PflowRequestError,
+    SiennaError,
     short_repr,
 )
 from tensa.core.messages import PathScrubber
@@ -48,6 +61,7 @@ from tensa.engines.sienna.convert import (
     topology_snapshot,
 )
 from tensa.engines.sienna.keys import assign_sienna_keys
+from tensa.engines.sienna.matrix_io import read_matrix
 from tensa.security.paths import (
     WorkspacePathError,
     canonical_directory,
@@ -61,6 +75,17 @@ log = logging.getLogger("tensa.notice")
 
 # The ops the Sienna engine does not take, named for the error message.
 _ANDES_ONLY_PFLOW_OPTIONS = ("method", "n_factorize", "linesearch")
+
+# The load models a dynamic analysis takes (spec section 6.3).
+_LOAD_MODELS = ("impedance", "power", "as-case")
+
+# The note every Sienna eigenvalue result carries (spec section 13: PSID's own
+# docs call the validation of its small-signal results work in progress, and
+# every cross-engine eig comparison shows that note).
+SIENNA_EIG_NOTE = (
+    "PSID's small-signal results are work in progress in validation, "
+    "by PSID's own documentation."
+)
 
 
 def _case_stamp(case_path: Path) -> tuple[Path, int, int]:
@@ -182,6 +207,8 @@ class SiennaState:
         self._pflow_settings: PflowSettings | None = None
         self._document: dict[str, Any] | None = None
         self._versions: dict[str, str] | None = None
+        self._eig_result: EigResult | None = None
+        self._eig_participation: list[list[float]] | None = None
 
     # ---- the bridge ---------------------------------------------------------
 
@@ -235,6 +262,8 @@ class SiennaState:
         self._pflow_json = None
         self._pflow_settings = None
         self._document = None
+        self._eig_result = None
+        self._eig_participation = None
 
     # ---- load_case ----------------------------------------------------------
 
@@ -357,6 +386,8 @@ class SiennaState:
         self._pflow_json = None
         self._pflow_settings = None
         self._document = document
+        self._eig_result = None
+        self._eig_participation = None
 
         book = assign_sienna_keys(topology, identity, self._key_book)
 
@@ -479,6 +510,9 @@ class SiennaState:
             max_iterations=max_iterations,
         )
         self._pflow_json = pflow
+        # A new operating point is not the one the last analysis linearised at.
+        self._eig_result = None
+        self._eig_participation = None
 
         for note in pflow.get("notes", []):
             if isinstance(note, str):
@@ -555,6 +589,132 @@ class SiennaState:
             summary=None,
             keys={"bus": bus_keys, "line": {}, "generator": {}, "load": {}},
         )
+
+    # ---- run_eig ------------------------------------------------------------
+
+    def run_eig(self, load_model: str = "impedance") -> EigResult:
+        """Small-signal analysis at the solved operating point.
+
+        ``load_model`` is ``"impedance"`` (the default), ``"power"`` or
+        ``"as-case"`` (spec section 6.3); any other value raises
+        :class:`EigComputationError`. Without a converged power flow in this
+        session raises :class:`EigPrerequisiteError` with the message the ANDES
+        engine uses. A failure the Julia side reports (``ok`` false) arrives as
+        :class:`SiennaError` carrying the answer's ``stage`` and becomes
+        :class:`EigComputationError` with the stage and the message, so a case
+        with no dynamic models or no solved power flow is a 422 that says why.
+        """
+        self._require_session()
+        # The same gate as the ANDES engine's, on this session's own record.
+        if self._pflow_json is None or not self._pflow_json.get("converged"):
+            raise EigPrerequisiteError(
+                "Run PFlow first; EIG requires a converged operating point."
+            )
+        if load_model not in _LOAD_MODELS:
+            raise EigComputationError(
+                f'load_model must be "impedance", "power" or "as-case", got '
+                f"{short_repr(load_model)}"
+            )
+
+        assert self._case_path is not None  # noqa: S101 - a session has a case
+        workspace = self._require_workspace(self._case_path)
+        scratch = self._scratch_dir(workspace, "eig")
+        sim_dir = scratch / "sim"
+        sim_dir.mkdir(parents=True, exist_ok=True)
+        matrix_file = sim_dir / "eig-state-matrix.bin"
+
+        bridge = self._require_bridge()
+        try:
+            answer = bridge.eig(self._session, load_model=load_model, matrix_file=matrix_file)
+        except SiennaError as exc:
+            stage = getattr(exc, "stage", "eig")
+            raise EigComputationError(
+                f"eigenvalue analysis failed at {stage}: {exc}"
+            ) from exc
+
+        # State names: the unit key of the machine the state belongs to, then
+        # the state as PSID names it (``gen:1-1 δ``). A device the key book has
+        # no entry for (one PowerSystems renamed) falls back to the name Julia
+        # gave, so a name is never empty.
+        from tensa.engines.keys import generator_key
+
+        state_names: list[str] = []
+        for row in answer["states"]:
+            key = generator_key(int(row["bus"]), str(row["id"]))
+            entry = self._key_book.entry_of(key)
+            prefix = entry.key if entry is not None else str(row["device"])
+            state_names.append(f"{prefix} {row['state']}")
+
+        n_states = int(answer["n_states"])
+        matrix = read_matrix(matrix_file, n_states, n_states)
+        try:
+            matrix_file.unlink()
+        except OSError:
+            log.debug("the state matrix file %s could not be removed", matrix_file.name)
+        # The eigenvalues and their factors come from one decomposition of the
+        # matrix, as ANDES pairs them: PSID lists the same eigenvalues, but not
+        # necessarily in the order a decomposition of ours would, and a factor
+        # row must belong to the eigenvalue at its position.
+        eigenvalues, self._eig_participation = eigen_decomposition(matrix)
+        reported = int(len(answer["eigenvalues"]))
+        if len(eigenvalues) != reported:
+            raise EigComputationError(
+                f"the state matrix has {len(eigenvalues)} eigenvalues and the "
+                f"analysis reported {reported}"
+            )
+        settled = [
+            _settle_axis(_settle_zero(z, _ZERO_EIGENVALUE_TOL)) for z in eigenvalues
+        ]
+
+        loads = answer.get("loads") or {}
+        log.info(
+            "Sienna eig: load model %s, %d load(s) converted",
+            load_model,
+            int(loads.get("converted", 0)),
+        )
+        for note in answer.get("notes", []):
+            log.info("%s", note)
+        log.info("%s", SIENNA_EIG_NOTE)
+
+        result = EigResult(
+            eigenvalues=[ComplexNumber.from_complex(z) for z in settled],
+            damping_ratios=[_compute_damping_ratio(z) for z in settled],
+            frequencies_hz=[_compute_frequency_hz(z) for z in settled],
+            mode_count=len(settled),
+            state_count=len(settled),
+            state_names=state_names,
+            tds_initialized=True,
+        )
+        self._eig_result = result
+        return result
+
+    def eig_participation(self, mode_idx: int) -> dict[str, object]:
+        """Per-mode participation factors, the same dict the ANDES engine answers.
+
+        Served from the matrix of the session's last ``run_eig``, kept in
+        memory. Without a prior ``run_eig`` raises :class:`EigPrerequisiteError`
+        with the ANDES message; a ``mode_idx`` out of range raises
+        :class:`ElementNotFoundError` as the ANDES engine's does.
+        """
+        self._require_session()
+        if self._eig_result is None or self._eig_participation is None:
+            raise EigPrerequisiteError(
+                "EIG has not been run on this session; run /eig first"
+            )
+        n_modes = self._eig_result.mode_count
+        if mode_idx < 0 or mode_idx >= n_modes:
+            raise ElementNotFoundError(
+                f"mode_idx {mode_idx} out of range [0, {n_modes - 1}]"
+            )
+        participation = [
+            {"state_name": name, "factor": factor}
+            for name, factor in zip(
+                self._eig_result.state_names,
+                self._eig_participation[mode_idx],
+                strict=False,
+            )
+        ]
+        return {"mode_idx": mode_idx, "participation": participation}
 
     def keys(self) -> KeyBook:
         """The keys of the loaded case's elements."""

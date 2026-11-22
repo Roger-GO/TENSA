@@ -41,7 +41,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "unavailable_reason": None,
             "versions": sienna_versions(),
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
-            "routines": ["pflow"],
+            "routines": ["pflow", "eig"],
             "ops": sorted(ENGINE_OPS[name]),
             "editing": False,
         }

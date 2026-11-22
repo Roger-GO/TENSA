@@ -6,6 +6,24 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from tensa.core.edit_log import device_position
+from tensa.core.eig_math import (
+    _AXIS_NOISE as _AXIS_NOISE,
+)
+from tensa.core.eig_math import (
+    _ZERO_EIGENVALUE_TOL as _ZERO_EIGENVALUE_TOL,
+)
+from tensa.core.eig_math import (
+    _compute_damping_ratio as _compute_damping_ratio,
+)
+from tensa.core.eig_math import (
+    _compute_frequency_hz as _compute_frequency_hz,
+)
+from tensa.core.eig_math import (
+    _settle_axis as _settle_axis,
+)
+from tensa.core.eig_math import (
+    _settle_zero as _settle_zero,
+)
 from tensa.core.eig_result import ComplexNumber, EigResult, EigSweepPoint, EigSweepResult
 from tensa.core.errors import EigComputationError, EigPrerequisiteError, ElementNotFoundError
 from tensa.core.pflow_options import pflow_options_applied
@@ -326,15 +344,8 @@ class EigMixin(CaseMixin):
 # ---- EIG helpers (Unit 6) --------------------------------------------------
 
 
-# What ANDES counts as zero when its routine has no bound to give.
-_ZERO_EIGENVALUE_TOL = 1e-6
 # The most values one sweep may name. Each is a System read, set up, solved and analysed.
 _SWEEP_MAX_POINTS = 200
-# How small the real part of an oscillating eigenvalue is, next to the eigenvalue itself,
-# for it to be rounding noise (see ``_settle_axis``). The noise of a solver is some 1e-16 of
-# the size of the matrix it works on; a mode with real part this small has no damping that
-# means anything.
-_AXIS_NOISE = 1e-12
 
 
 def _zero_tolerance(ss: System) -> float:
@@ -345,67 +356,6 @@ def _zero_tolerance(ss: System) -> float:
     except (AttributeError, TypeError, ValueError):
         return _ZERO_EIGENVALUE_TOL
     return tol if math.isfinite(tol) and tol >= 0.0 else _ZERO_EIGENVALUE_TOL
-
-
-def _settle_zero(z: complex, tol: float) -> complex:
-    """``z``, or exactly zero when it is zero to within ``tol``.
-
-    A system with no fixed angle reference has a zero eigenvalue, and what the
-    solver returns for it is rounding noise of either sign: ``-3e-14`` on one
-    processor and ``+1e-14`` on another, for the same case and the same ANDES.
-    Left as it came, the sign decided whether the mode was reported as decaying
-    (a damping ratio of 1) or as growing (-1, with a positive real part), so one
-    machine showed a stable system and the next an unstable one. ANDES counts
-    such an eigenvalue among its zeros and so does the result.
-    """
-    return 0j if abs(z) <= tol else z
-
-
-def _settle_axis(z: complex) -> complex:
-    """``z``, or its imaginary part alone when the real part is rounding noise beside it.
-
-    A system with no damping at all, such as machines on the classical model with ``D = 0``,
-    has eigenvalues on the imaginary axis, and the solver returns them with a real part of
-    some 1e-16 of either sign. Left as it came, the sign again decided whether the mode was
-    undamped (a damping ratio of 0) or growing (a positive real part, which the scatter and
-    the report count as unstable), and it can differ from one processor to the next, as for
-    the zero eigenvalue. An oscillating eigenvalue whose real part is under ``_AXIS_NOISE``
-    of its size is reported on the axis, with a damping ratio of exactly 0.
-    """
-    if z.imag != 0.0 and abs(z.real) <= _AXIS_NOISE * abs(z):
-        return complex(0.0, z.imag)
-    return z
-
-
-def _compute_damping_ratio(z: complex) -> float:
-    """Per-mode damping ratio.
-
-    Convention used by power-systems texts (and ANDES's own
-    plotting): ``zeta = -Re(z) / |z|``. A zero eigenvalue has none by
-    that formula and is given 1.0: it neither oscillates nor grows, so
-    it is listed with the real modes that decay and not with the poorly
-    damped ones. NaN guards collapse to 0.0 so the wire payload never
-    carries non-finite floats (which would fail JSON serialization in
-    the routes layer).
-    """
-    magnitude = (z.real * z.real + z.imag * z.imag) ** 0.5
-    if magnitude == 0.0:
-        return 1.0
-    if not math.isfinite(magnitude):
-        return 0.0
-    zeta = -z.real / magnitude
-    if not math.isfinite(zeta):
-        return 0.0
-    # ``+ 0.0`` turns a negative zero (the ratio of an eigenvalue on the axis) into zero.
-    return float(zeta + 0.0)
-
-
-def _compute_frequency_hz(z: complex) -> float:
-    """Per-mode oscillation frequency in Hz.
-
-    ``f = |Im(z)| / (2*pi)``. Returns 0 for purely real eigenvalues.
-    """
-    return float(abs(z.imag) / (2.0 * math.pi))
 
 
 def _eig_state_names(ss: System, mode_count: int) -> list[str]:

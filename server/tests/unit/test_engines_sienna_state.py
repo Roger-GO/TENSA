@@ -5,15 +5,103 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
-from tensa.core.errors import CaseLoadError, NoCaseLoadedError, PflowRequestError
-from tensa.engines.sienna.state import SiennaState, julia_corrections
+from tensa.core.eig_result import ComplexNumber
+from tensa.core.errors import (
+    CaseLoadError,
+    EigComputationError,
+    EigPrerequisiteError,
+    ElementNotFoundError,
+    NoCaseLoadedError,
+    PflowRequestError,
+    SiennaError,
+)
+from tensa.engines.sienna.state import SIENNA_EIG_NOTE, SiennaState, julia_corrections
 
 _SAMPLES = Path(__file__).parent / "sienna_samples"
+
+# The four oscillatory modes the P5-A spike measured for Kundur with its .dyr
+# and impedance loads, (frequency Hz, damping ratio).
+_SPIKE_MODES = (
+    (0.0684, 0.6295),
+    (0.6540, 0.0458),
+    (1.1077, 0.0921),
+    (1.1411, 0.0941),
+)
+
+# The states PSID reports for one GENROU + TGOV1 machine, in its order.
+_MACHINE_STATES = ("δ", "ω", "eqp", "edp", "pskd", "pskq", "pss", "tg")
+
+
+def _pole(frequency: float, damping: float) -> complex:
+    """The pole of a mode of ``frequency`` Hz damped at ``damping``.
+
+    With wd = 2 * pi * f and wn = wd / sqrt(1 - d^2), z = -d * wn + j * wd has
+    |z| = wn, so |Im(z)| / (2 pi) = f and -Re(z) / |z| = d exactly.
+    """
+    wd = 2 * math.pi * frequency
+    wn = wd / math.sqrt(1 - damping**2)
+    return complex(-damping * wn, wd)
+
+
+def _eig_sample() -> dict[str, Any]:
+    """The recorded ``eig_json`` answer for Kundur with its .dyr, built in code.
+
+    32 states over the four machines (8 each), the four spike modes plus 28
+    real poles, and ``loads`` as the impedance conversion reports it. The
+    sample files of the other kinds are recorded JSON; this one is built here
+    because the matrix beside it must have exactly these eigenvalues, which a
+    constructed block-diagonal matrix guarantees.
+    """
+    eigenvalues: list[list[float]] = []
+    for frequency, damping in _SPIKE_MODES:
+        z = _pole(frequency, damping)
+        eigenvalues.append([z.real, z.imag])
+        eigenvalues.append([z.real, -z.imag])
+    for index in range(24):
+        eigenvalues.append([-(2.0 + index), 0.0])
+    states = [
+        {"device": f"generator-{bus}-1", "bus": bus, "id": "1", "state": state}
+        for bus in (1, 2, 3, 4)
+        for state in _MACHINE_STATES
+    ]
+    return {
+        "ok": True,
+        "n_states": 32,
+        "stable": True,
+        "eigenvalues": eigenvalues,
+        "states": states,
+        "loads": {"converted": 2, "left": []},
+        "notes": [],
+    }
+
+
+def _eig_matrix_bytes() -> bytes:
+    """A 32 by 32 matrix whose eigenvalues are the sample's, column-major.
+
+    One 2 by 2 block [[re, -im], [im, re]] per oscillatory mode (its
+    eigenvalues are re +/- im*j) and one diagonal entry per real pole, so the
+    matrix is block-diagonal and its eigenvalues are exactly the sample's.
+    """
+    blocks: list[np.ndarray] = []
+    for frequency, damping in _SPIKE_MODES:
+        z = _pole(frequency, damping)
+        blocks.append(np.array([[z.real, -z.imag], [z.imag, z.real]]))
+    for index in range(24):
+        blocks.append(np.array([[-(2.0 + index)]]))
+    matrix = np.zeros((32, 32))
+    offset = 0
+    for block in blocks:
+        size = block.shape[0]
+        matrix[offset : offset + size, offset : offset + size] = block
+        offset += size
+    return matrix.tobytes(order="F")
 
 
 class FakeBridge:
@@ -31,6 +119,8 @@ class FakeBridge:
         self._started = True
 
     def _sample(self, name: str, kind: str) -> dict[str, Any]:
+        if kind == "eig":
+            return _eig_sample()
         return json.loads((_SAMPLES / f"{name}.{kind}.json").read_text("utf-8"))
 
     def load_case(
@@ -72,6 +162,24 @@ class FakeBridge:
 
     def versions(self) -> dict[str, Any]:
         return json.loads((_SAMPLES / "versions.json").read_text("utf-8"))
+
+    def eig(
+        self,
+        session: Any,
+        load_model: str = "impedance",
+        matrix_file: Path | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            ("eig", (session,), {"load_model": load_model, "matrix_file": matrix_file})
+        )
+        answer = self._sample(session["case"], "eig")
+        if answer.get("ok") is False:
+            error = SiennaError(str(answer.get("error", "eig failed")))
+            error.stage = str(answer.get("stage", "eig"))  # type: ignore[attr-defined]
+            raise error
+        assert matrix_file is not None
+        matrix_file.write_bytes(_eig_matrix_bytes())
+        return answer
 
 
 def _andes_cases_dir() -> Path:
@@ -335,6 +443,219 @@ def test_reload_passes_the_same_on_unsupported(
     assert snap.has_dynamics is True
 
 
+def _kundur_dyr(workspace: Path) -> tuple[Path, Path]:
+    raw = _kundur(workspace)
+    dyr = workspace / "kundur_full.dyr"
+    dyr.write_bytes((_andes_cases_dir() / "kundur" / "kundur_full.dyr").read_bytes())
+    return raw, dyr
+
+
+def _loaded_dyr(state: SiennaState, workspace: Path) -> None:
+    raw, dyr = _kundur_dyr(workspace)
+    state.load_case(raw, addfiles=[dyr], on_unsupported="drop")
+    state.run_pflow()
+
+
+def test_run_eig_before_a_power_flow_is_refused(state: SiennaState, workspace: Path) -> None:
+    raw, dyr = _kundur_dyr(workspace)
+    state.load_case(raw, addfiles=[dyr], on_unsupported="drop")
+    with pytest.raises(EigPrerequisiteError, match="Run PFlow first"):
+        state.run_eig()
+
+
+def test_run_eig_result_shape(state: SiennaState, workspace: Path) -> None:
+    _loaded_dyr(state, workspace)
+    result = state.run_eig()
+    assert result.mode_count == 32
+    assert result.state_count == 32
+    assert len(result.eigenvalues) == 32
+    assert len(result.damping_ratios) == 32
+    assert len(result.frequencies_hz) == 32
+    assert len(result.state_names) == 32
+    assert result.tds_initialized is True
+
+
+def test_run_eig_keeps_the_recorded_modes(state: SiennaState, workspace: Path) -> None:
+    """The four oscillatory modes of the P5-A table appear; the Python cleaning
+    does not move them. The expected values are the spike's measurements."""
+    _loaded_dyr(state, workspace)
+    result = state.run_eig()
+    for frequency, damping in (
+        (0.0684, 0.6295),
+        (0.6540, 0.0458),
+        (1.1077, 0.0921),
+        (1.1411, 0.0941),
+    ):
+        assert any(
+            abs(result.frequencies_hz[i] - frequency) <= 5e-4
+            and abs(result.damping_ratios[i] - damping) <= 5e-4
+            for i in range(result.mode_count)
+        ), (frequency, damping)
+
+
+def test_run_eig_state_names_carry_the_unit_key(state: SiennaState, workspace: Path) -> None:
+    _loaded_dyr(state, workspace)
+    result = state.run_eig()
+    assert len(result.state_names) == 32
+    for unit in ("gen:1-1", "gen:2-1", "gen:3-1", "gen:4-1"):
+        prefixed = [n for n in result.state_names if n.startswith(unit + " ")]
+        assert any("δ" in n for n in prefixed), (unit, prefixed)
+        assert any("ω" in n for n in prefixed), (unit, prefixed)
+    # The raw Julia device string is not shown.
+    assert not [n for n in result.state_names if n.startswith("generator-")]
+
+
+def test_run_eig_settles_the_zero_eigenvalue(
+    state: SiennaState, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A system with no fixed angle reference has an eigenvalue at zero, which a
+    decomposition returns as rounding noise of either sign; it is reported as
+    exactly zero with a damping ratio of 1, and no eigenvalue is left within
+    the zero tolerance and not settled. The last real pole of the recorded
+    matrix is replaced by such noise."""
+    noisy = np.frombuffer(_eig_matrix_bytes(), dtype=np.float64).reshape((32, 32), order="F").copy()
+    noisy[31, 31] = 3e-14
+    monkeypatch.setattr(
+        f"{__name__}._eig_matrix_bytes", lambda: noisy.tobytes(order="F")
+    )
+    _loaded_dyr(state, workspace)
+    result = state.run_eig()
+    zeros = [i for i, z in enumerate(result.eigenvalues) if z == ComplexNumber(0.0, 0.0)]
+    assert zeros, "no eigenvalue was settled to zero"
+    for i in zeros:
+        assert result.damping_ratios[i] == 1.0
+        assert result.frequencies_hz[i] == 0.0
+    unsettled = [
+        z for z in result.eigenvalues if 0.0 < math.hypot(z.real, z.imag) <= 1e-6
+    ]
+    assert unsettled == []
+
+
+def test_run_eig_a_matrix_that_disagrees_with_the_count_is_refused(
+    state: SiennaState, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The matrix file and the answer that named it must describe one analysis:
+    PSID reports 32 eigenvalues, so a matrix whose decomposition gives another
+    count is a failed analysis, not a result."""
+    _loaded_dyr(state, workspace)
+    bridge = state._bridge  # noqa: SLF001
+    assert isinstance(bridge, FakeBridge)
+    original = FakeBridge._sample
+
+    def _one_short(self: FakeBridge, name: str, kind: str) -> dict[str, Any]:
+        answer = original(self, name, kind)
+        if kind == "eig":
+            answer["eigenvalues"] = answer["eigenvalues"][:-1]
+        return answer
+
+    monkeypatch.setattr(FakeBridge, "_sample", _one_short)
+    with pytest.raises(EigComputationError, match="32 eigenvalues and the analysis reported 31"):
+        state.run_eig()
+
+
+def test_run_eig_participation_is_gone_after_a_new_power_flow(
+    state: SiennaState, workspace: Path
+) -> None:
+    """A new operating point is not the one the analysis linearised at, so the
+    participation of the old analysis is no longer served."""
+    _loaded_dyr(state, workspace)
+    state.run_eig()
+    assert state.eig_participation(0)["mode_idx"] == 0
+    state.run_pflow()
+    with pytest.raises(EigPrerequisiteError, match="EIG has not been run"):
+        state.eig_participation(0)
+
+
+def test_run_eig_load_model(state: SiennaState, workspace: Path) -> None:
+    _loaded_dyr(state, workspace)
+    state.run_eig(load_model="power")
+    bridge = state._bridge  # noqa: SLF001
+    assert isinstance(bridge, FakeBridge)
+    eig_calls = [c for c in bridge.calls if c[0] == "eig"]
+    assert eig_calls[-1][2]["load_model"] == "power"
+    with pytest.raises(EigComputationError, match="impedance"):
+        state.run_eig(load_model="bad")
+    state.run_eig()
+    eig_calls = [c for c in bridge.calls if c[0] == "eig"]
+    assert eig_calls[-1][2]["load_model"] == "impedance"
+
+
+def test_run_eig_matrix_file_under_the_scratch(state: SiennaState, workspace: Path) -> None:
+    _loaded_dyr(state, workspace)
+    state.run_eig()
+    bridge = state._bridge  # noqa: SLF001
+    assert isinstance(bridge, FakeBridge)
+    matrix_file = [c for c in bridge.calls if c[0] == "eig"][-1][2]["matrix_file"]
+    assert isinstance(matrix_file, Path)
+    assert matrix_file.parent == workspace / ".sessions" / ("a" * 32) / "sienna" / "sim"
+    # The file is removed once it is read.
+    assert not matrix_file.exists()
+
+
+def test_run_eig_a_julia_refusal_names_the_stage(
+    state: SiennaState, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _loaded_dyr(state, workspace)
+    bridge = state._bridge  # noqa: SLF001
+    assert isinstance(bridge, FakeBridge)
+
+    def _refuse(session: Any, load_model: str = "impedance", matrix_file: Any = None) -> Any:
+        error = SiennaError("no dynamic injector found")
+        error.stage = "build"  # type: ignore[attr-defined]
+        raise error
+
+    monkeypatch.setattr(bridge, "eig", _refuse)
+    with pytest.raises(EigComputationError, match="build"):
+        state.run_eig()
+
+
+def test_eig_participation(state: SiennaState, workspace: Path) -> None:
+    _loaded_dyr(state, workspace)
+    with pytest.raises(EigPrerequisiteError, match="run /eig first"):
+        state.eig_participation(0)
+    result = state.run_eig()
+    answer = state.eig_participation(0)
+    assert answer["mode_idx"] == 0
+    rows = answer["participation"]
+    assert isinstance(rows, list)
+    assert len(rows) == 32
+    assert [row["state_name"] for row in rows] == result.state_names  # type: ignore[index]
+    total = sum(float(row["factor"]) for row in rows)  # type: ignore[index]
+    assert abs(total - 1.0) <= 1e-4  # each factor is rounded to 5 decimals
+    with pytest.raises(ElementNotFoundError, match=r"out of range \[0, 31\]"):
+        state.eig_participation(32)
+    with pytest.raises(ElementNotFoundError, match=r"out of range \[0, 31\]"):
+        state.eig_participation(-1)
+
+
+def test_a_new_load_and_a_new_power_flow_drop_the_analysis(
+    state: SiennaState, workspace: Path
+) -> None:
+    raw, dyr = _kundur_dyr(workspace)
+    state.load_case(raw, addfiles=[dyr], on_unsupported="drop")
+    state.run_pflow()
+    state.run_eig()
+    state.load_case(raw, addfiles=[dyr], on_unsupported="drop")
+    with pytest.raises(EigPrerequisiteError, match="run /eig first"):
+        state.eig_participation(0)
+    state.run_pflow()
+    state.run_eig()
+    state.run_pflow()
+    with pytest.raises(EigPrerequisiteError, match="run /eig first"):
+        state.eig_participation(0)
+
+
+def test_the_standing_note_is_logged(
+    state: SiennaState, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _loaded_dyr(state, workspace)
+    with caplog.at_level(logging.INFO, logger="tensa.notice"):
+        state.run_eig()
+    noted = [r for r in caplog.records if "work in progress in validation" in r.getMessage()]
+    assert len(noted) == 1
+    assert noted[0].getMessage() == SIENNA_EIG_NOTE
+
+
 def test_no_case_raises(state: SiennaState) -> None:
     with pytest.raises(NoCaseLoadedError):
         state.topology()
@@ -346,6 +667,10 @@ def test_no_case_raises(state: SiennaState) -> None:
         state.operating_point()
     with pytest.raises(NoCaseLoadedError):
         state.keys()
+    with pytest.raises(NoCaseLoadedError):
+        state.run_eig()
+    with pytest.raises(NoCaseLoadedError):
+        state.eig_participation(0)
 
 
 def _document(path: Path) -> dict[str, Any]:

@@ -83,6 +83,7 @@ from tensa.core.disturbance import AlterSpec, FaultSpec, ToggleSpec
 from tensa.core.errors import (
     AndesAppError,
     DisturbanceCommitError,
+    EigComputationError,
     ElementHasDependentsError,
     EngineUnsupportedError,
     NoCaseLoadedError,
@@ -520,6 +521,21 @@ def _install_strict_fs_audit_hook(
     sys.addaudithook(_hook)
 
 
+def _run_eig_andes(wrapper: Any, args: dict[str, Any]) -> Any:
+    """The ANDES ``run_eig`` handler: ``EIG.run()`` takes no public arguments,
+    so a ``load_model`` that is not ``None`` is refused as an option the ANDES
+    engine does not have (it converts loads to constant impedance for the
+    analysis, which is what ``impedance`` asks for; the other two it cannot
+    do)."""
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise EigComputationError(
+            "the ANDES engine converts loads to constant impedance for the "
+            f"eigenvalue analysis; load_model {load_model} is not available with it"
+        )
+    return wrapper.run_eig()
+
+
 def _serialize_dataclass(obj: Any) -> Any:
     """Convert a dataclass (or list/dict thereof) to a plain Python object
     that can be pickled across the Pipe and re-built on the parent side.
@@ -812,7 +828,19 @@ def _handle_run_eig(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     Returns the serialized :class:`EigResult` dict (eigenvalues split
     into ``{real, imag}`` pairs, damping ratios, frequencies, mode
     count, state names, ``tds_initialized`` flag).
+
+    ANDES's ``EIG.run()`` takes no public arguments, so a ``load_model``
+    that is not ``None`` and not ``impedance`` is refused as an option the
+    ANDES engine does not have: it converts loads to constant impedance
+    for the analysis, which is what ``impedance`` asks for, and the other
+    two it cannot do.
     """
+    load_model = args.get("load_model")
+    if load_model is not None and load_model != "impedance":
+        raise EigComputationError(
+            "the ANDES engine converts loads to constant impedance for the "
+            f"eigenvalue analysis; load_model {load_model} is not available with it"
+        )
     return _serialize_dataclass(wrapper.run_eig())
 
 
