@@ -1,6 +1,6 @@
 # TENSA
 
-**T**ransients, **E**igenvalues & **N**etwork **S**imulation **A**pplication: an interactive, web-based workbench for power system modeling, simulation, and analysis. You build a system visually, run power flow and dynamic studies with one click, watch the results stream in live, and drive the whole thing from a scriptable API. It runs locally in your browser. TENSA is built on the [ANDES](https://github.com/CURENT/andes) power system simulator. (This project was briefly shared as "ANDES App" during its beta; same tool, new name.)
+TENSA (Transients, Eigenvalues & Network Simulation Application) is a power system workbench that runs in your browser. You draw or open a case, run power flow and dynamic studies, watch the results come in, and can script all of it through an API. It is built on the [ANDES](https://github.com/CURENT/andes) simulator and can also run NREL's Sienna packages. During its beta it was called ANDES App.
 
 [![PyPI](https://img.shields.io/pypi/v/tensa)](https://pypi.org/project/tensa/)
 [![server tests](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml)
@@ -35,11 +35,9 @@ pip install tensa
 tensa serve --open
 ```
 
-`tensa serve` starts the server on a free port, and `--open` opens your browser there. The first time, it fills its workspace (`~/.tensa/cases`, or the directory you give with `--workspace`) with five example cases, IEEE 14, Kundur, WSCC 9-bus, IEEE 39 and NPCC 140-bus, so there is something to open right away. Load one, run a power flow, add a fault, and stream a time-domain simulation. The [quick start](https://roger-go.github.io/TENSA/quickstart/) in the documentation walks through exactly that.
+That starts the server on a free port and opens your browser. The first run puts five example cases in the workspace (`~/.tensa/cases`, or wherever `--workspace` points): IEEE 14, Kundur, WSCC 9-bus, IEEE 39 and NPCC 140-bus. Open one, run a power flow, add a fault and watch a time-domain run. The [quick start](https://roger-go.github.io/TENSA/quickstart/) goes through it step by step. Use `--port 8000` if you want the same address (and the browser's saved runs) every time.
 
-The browser keeps your finished runs and recent cases for the address it loaded the page from. Add `--port 8000` to get the same address every time.
-
-To use your own cases, drop `.xlsx`, `.raw`, `.dyr`, `.m` or `.json` files onto the browser window, or put them in the workspace directory. A `.raw` dropped together with its `.dyr` opens as the pair.
+Your own cases can be dropped on the window or put in the workspace: `.xlsx`, `.raw` with its `.dyr`, `.m` or `.json`.
 
 To get the app in a window of its own instead of a browser tab, add the desktop extra:
 
@@ -48,107 +46,21 @@ pip install "tensa[desktop]"
 tensa desktop
 ```
 
-On Linux the window also needs a GUI toolkit, which the extra does not bring: use `pip install "tensa[desktop]" "pywebview[qt]"`. The command checks what it needs before it starts anything and says what is missing. [Install](https://roger-go.github.io/TENSA/install/#a-window-of-its-own) has the details for every system.
+On Linux the window also needs a GUI toolkit: `pip install "tensa[desktop]" "pywebview[qt]"`. [Install](https://roger-go.github.io/TENSA/install/#a-window-of-its-own) covers each system.
 
-TENSA runs on Linux, macOS (Apple silicon) and Windows, with Python 3.12 and 3.13. Windows on ARM is not supported, because two of the packages it needs publish no wheels for it. To build from source, follow [Install from source](https://roger-go.github.io/TENSA/install/#install-from-source).
+It runs on Linux, macOS (Apple silicon) and Windows with Python 3.12 or 3.13. Windows on ARM is not supported, since two dependencies publish no wheels for it. Building from source is described in [Install from source](https://roger-go.github.io/TENSA/install/#install-from-source).
 
 ## Example cases
 
-Beyond the five that start in an empty workspace, TENSA has a catalog of example cases to add from the app (**Example cases** in the Project tab) or with `tensa examples add <id>`: dynamic cases with machines, exciters and governors (IEEE 14 with a fault, with solar and with wind, Kundur with a stabiliser, WECC 179-bus, the PJM 5-bus system) and steady-state cases for power flow, from the 24-bus IEEE RTS to the 2,000-bus Texas synthetic grid. Each says where its data comes from, how to cite it, what licence it is under and how its results were checked, and some entries are only links, to data TENSA does not hold or cannot redistribute. See [Example cases](https://roger-go.github.io/TENSA/examples/) in the documentation.
+Beyond the five that start in an empty workspace, you can add more from the app (**Example cases** in the Project tab) or with `tensa examples add <id>`: dynamic cases (Kundur with a stabiliser, WECC 179-bus, the PJM 5-bus system) and steady-state cases up to the 2,000-bus Texas synthetic grid. Each entry says where its data comes from and how to cite it; some are only links to data TENSA cannot redistribute. See [Example cases](https://roger-go.github.io/TENSA/examples/) in the documentation.
 
 ## See it in action
 
-A scripted walkthrough of the real UI builds the WSCC 9-bus system from scratch. It places every bus, line, transformer, machine, exciter, and governor on the one-line, saves the case to a file and reloads it, then runs power flow, a three-phase fault with a streaming time-domain simulation, continuation power flow, and eigenvalue analysis.
+A scripted walkthrough of the real UI builds the WSCC 9-bus system from scratch. It places every component on the one-line, saves the case and reloads it, then runs every analysis.
 
 [![Demo: a scripted walkthrough builds WSCC 9-bus and runs every analysis](docs/img/demo.gif)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4)
 
-The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4). The script that drives it, [`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs), calls no model: it clicks and drags through the UI with Playwright, at positions written in the script. Each step is a request that a script or an agent can send to the same HTTP API, and you can [record it yourself](#run-the-demo-yourself).
-
-## What you can do
-
-**Build and edit**
-
-- **Build a system visually.** Add buses, lines, transformers, generators, machines, exciters, governors, loads, shunts and a battery from the Components tab, or open a case file (`.xlsx`, `.raw` with its `.dyr`, `.m`, `.json`). You can build a complete dynamic case without touching a file.
-- **Draw on the diagram.** Drop a component where you want it, and it stands there as a draft until you have filled it in. Drop it on a bus to connect it, or draw a line from one bus to another.
-- **A one-line diagram that stays tidy.** Nothing is drawn over anything else: lines route around symbols and labels as you drag, **Tidy diagram** cleans up a whole drawing, and you can still move any line by hand.
-- **Edit without fear.** Change values in the tables or the Inspector, paste a block from a spreadsheet, delete any element, and undo or redo every edit and every move.
-
-**Analyze**
-
-- **One click each.** The five analyses above each run as a job with live progress and a cancel button.
-- **A power flow you can tune and check.** Set the tolerance, the iteration limit, a flat start and reactive limits, read the system summary, and get a Violations table of every limit the solution breaks.
-- **Watch a simulation while it runs.** Results stream into the plots as the run goes. Add faults, line trips and parameter changes, record any ANDES variable by name, and read nadir, rate of change, settling time, overshoot and damping off the plot.
-- **Find the loading margin.** Continuation power flow with generator reactive limits, a choice of what grows, and every generator's reactive power along the curve.
-- **Batteries and frequency control.** Add a battery (ANDES's ESD1) and close a frequency loop on it with a droop or a fast frequency response.
-
-**Read and share the results**
-
-- **Read the network at a glance.** Voltages, flows and loading on the diagram, with a color and a marker when a bus, a line or a generator nears or passes a limit.
-- **Compare and report.** Set two power flows side by side, and save a self-contained HTML report of your runs that opens in any browser.
-- **Take the results with you.** CSV from the tables and the plots, a COMTRADE record of a time-domain run, a figure of the diagram for a paper (SVG, PDF or PNG), and a bundle that reproduces the study.
-
-**Run it your way**
-
-- **In the browser, or in a window of its own.** The app opens in your browser, or `tensa desktop` gives it a native window.
-- **Automate it.** A documented REST and WebSocket API with an OpenAPI schema. Anything you can do in the UI, a script or an AI agent can do too.
-- **Keep it local.** Everything runs on your machine. The server binds to loopback by default, there is no account, and nothing phones home.
-- **Easy to look after.** `GET /api/health` for a health check, and `--log-level`, `--log-file` and `--log-json` on `tensa serve` when you need to see what the server did.
-
-The [changelog](./CHANGELOG.md) lists everything that is new in this release.
-
-## Documentation
-
-The documentation site is at **<https://roger-go.github.io/TENSA/>**.
-
-| If you want to | Read |
-|---|---|
-| Install TENSA on Linux, macOS or Windows | [Install](https://roger-go.github.io/TENSA/install/) |
-| Load a case, run a power flow and a fault study | [Quick start](https://roger-go.github.io/TENSA/quickstart/) |
-| Know what each part of the window does | [UI tour](https://roger-go.github.io/TENSA/ui-tour/) |
-| Understand sessions, the workspace and why a run locks the case | [Concepts](https://roger-go.github.io/TENSA/concepts/) |
-| Drive TENSA from a script or an AI assistant | [API guide](https://roger-go.github.io/TENSA/api/) and [Agents and MCP](https://roger-go.github.io/TENSA/agents/) |
-| Look up a `tensa` command or option | [Command line reference](https://roger-go.github.io/TENSA/reference/cli/) |
-| Fix something that does not work | [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/) |
-
-## Getting help
-
-TENSA has one maintainer, so replies are best effort. [SUPPORT.md](./SUPPORT.md) has the details, including which versions are supported and what TENSA promises about ANDES versions.
-
-- **A question:** ask in the Q&A category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a).
-- **A bug or a feature request:** open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) with the template that fits.
-- **A security problem:** report it privately through [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new), not in a public issue. [SECURITY.md](./SECURITY.md) explains what counts.
-- **Something that does not work:** [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/) covers the usual causes, and the [documentation](https://roger-go.github.io/TENSA/) the rest.
-
-## For agents and scripts
-
-The whole app is driven by a documented HTTP and WebSocket API. Anything the UI can do, a script or an LLM agent can do.
-
-- The OpenAPI schema is at `GET /openapi.json`, with interactive docs at `/docs` (Swagger) and `/redoc`.
-- The [API guide](https://roger-go.github.io/TENSA/api/) explains the routes, the errors and the streaming protocol, and the [route reference](https://roger-go.github.io/TENSA/reference/api/) lists every one of them.
-- [llms.txt](./llms.txt) is a condensed API map written for LLM consumption: endpoints, workflow ordering, enums, and the gotchas worth knowing.
-- [examples/](./examples/) has a curl walkthrough (a bash script) and a self-contained Python client, and [`examples/contingency_screening/`](./examples/contingency_screening/) holds a study that drives the API with scripted and LLM agents to screen N-2 contingencies on IEEE 39-bus, scored against an exhaustive oracle. It needs `httpx`, and its README lists the steps.
-- The MCP server exposes sessions, case loading, power flow, time-domain simulation and disturbances as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant like Claude can run simulations directly ([Agents and MCP](https://roger-go.github.io/TENSA/agents/) shows how to connect one):
-  ```bash
-  pip install "tensa[mcp]"
-  tensa mcp --workspace ~/tensa-cases
-  ```
-
-A typical programmatic flow:
-
-```
-POST /api/sessions                         -> session_id
-POST /api/sessions/{id}/case               -> load a case (xlsx/raw/dyr/json/m)
-POST /api/sessions/{id}/disturbances       -> add faults/toggles/alters (pre-setup)
-POST /api/sessions/{id}/pflow              -> solve power flow (optional tolerance, iterations, flat start, Q limits)
-POST /api/sessions/{id}/tds                -> batch TDS, or stream via WS /api/ws/{id}
-GET  /api/sessions/{id}/operating-point    -> bus voltages and angles
-```
-
-A request with a JSON body needs the `Content-Type: application/json` header.
-
-## Run the demo yourself
-
-[`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs) records the demo above. It is a fixed script that drives the real UI with Playwright: it builds WSCC 9-bus from scratch, then runs every analysis. It needs a source checkout with the UI built ([CONTRIBUTING.md](./CONTRIBUTING.md) has the setup).
+The clip above is sped up. [Watch the full 2-minute walkthrough (MP4)](https://github.com/Roger-GO/TENSA/raw/main/docs/demo/ieee9-agent-demo.mp4). The script that drives it, [`web/scripts/agent-demo.mjs`](web/scripts/agent-demo.mjs), calls no model: it clicks and drags through the UI with Playwright, at positions written in the script. You can record it yourself:
 
 ```bash
 # Terminal 1: serve on a fixed port
@@ -160,31 +72,44 @@ pnpm exec playwright install chromium
 node scripts/agent-demo.mjs http://127.0.0.1:18800
 ```
 
+It needs a source checkout with the UI built ([CONTRIBUTING.md](./CONTRIBUTING.md) has the setup).
+
+## Simulation engines
+
+Besides ANDES, TENSA can run NREL's Sienna packages (PowerSystems, PowerFlows, PowerNetworkMatrices, PowerSimulationsDynamics and PowerSimulations) through an embedded Julia. It's the optional `sienna` extra, and it needs Julia 1.13:
+
+```bash
+pip install "tensa[sienna]"
+tensa warm-cache --engine sienna
+```
+
+Each session runs one engine. Run the same study in two sessions and TENSA will compare the results for you. Sienna reads PSS/E `.raw`/`.dyr` and MATPOWER `.m` files and adds network matrices, a DC power flow, economic dispatch, unit commitment and a day-ahead plus real-time simulation. ANDES stays the default, and it's the one with continuation power flow and state estimation. [Engines](https://roger-go.github.io/TENSA/engines/) says how closely the two agree and how to open an ANDES case under Sienna.
+
+## Documentation
+
+Everything else, from installation to the API, is at **<https://roger-go.github.io/TENSA/>**.
+
+## For agents and scripts
+
+The UI talks to the server through a documented HTTP and WebSocket API, and scripts and LLM agents can use the same one. The [API guide](https://roger-go.github.io/TENSA/api/) explains the routes, the errors and the streaming protocol, the OpenAPI schema is at `GET /openapi.json`, and [llms.txt](./llms.txt) is a condensed API map written for LLM consumption. [examples/](./examples/) has a curl walkthrough, a Python client, and an N-2 contingency screening study driven by scripted and LLM agents. The MCP server exposes sessions, case loading and the analyses as [Model Context Protocol](https://modelcontextprotocol.io) tools, so an assistant like Claude can run simulations directly ([Agents and MCP](https://roger-go.github.io/TENSA/agents/) shows how to connect one):
+
+```bash
+pip install "tensa[mcp]"
+tensa mcp --workspace ~/tensa-cases
+```
+
 ## Security
 
-TENSA has no authentication. It binds to `127.0.0.1` (loopback) by default and trusts the local OS user, and loading a case file can run code, so load only case files you trust. Binding to another address with `--bind` opens the API to everyone who can reach it: do that only on a network you trust. [SECURITY.md](./SECURITY.md) has the details, and [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/#reaching-the-server-from-another-machine) shows how to reach the server from another machine.
+TENSA has no authentication. It binds to `127.0.0.1` (loopback) by default and trusts the local OS user, and loading a case file can run code, so load only case files you trust and use `--bind` only on a network you trust.
 
-## Architecture
+## Getting help
 
-```
-┌──────────────┐  REST + WebSocket   ┌───────────────────┐  multiprocessing  ┌──────────────┐
-│ React 19 SPA │ ◄────────────────►  │ FastAPI substrate │ ◄──────────────►  │ ANDES worker │
-│ (or any HTTP │     /api/* + /ws    │  sessions, jobs,  │   data + control  │  one System  │
-│  client)     │                     │  Arrow streaming  │       pipes       │  per session │
-└──────────────┘                     └───────────────────┘                   └──────────────┘
-```
+TENSA has one maintainer, so replies are best effort. [SUPPORT.md](./SUPPORT.md) has the details, including which versions are supported and what TENSA promises about ANDES versions.
 
-Each session gets its own `andes.System` in a separate subprocess. The API process never blocks on a running simulation, and a crash in one run cannot take the server down.
-
-## Project layout
-
-| Path | What is there |
-|---|---|
-| [`server/`](./server) | Python backend. FastAPI routers, per-session subprocess workers, Arrow streaming, clone-on-write editing, and the `tensa` CLI. |
-| [`web/`](./web) | React 19 and TypeScript UI. Interactive SLD (React Flow), uPlot result plots, Radix UI, Tailwind v4, Zustand. |
-| [`examples/`](./examples) | curl and Python client walkthroughs for the API, and the N-2 contingency screening study. |
-| [`llms.txt`](./llms.txt) | API map written for LLMs. |
-| [`docs/`](./docs) | The source of the [documentation site](https://roger-go.github.io/TENSA/) (MkDocs, configured in [`mkdocs.yml`](./mkdocs.yml)), and the images and the demo video this README uses. |
+- **A question:** ask in the Q&A category of [GitHub Discussions](https://github.com/Roger-GO/TENSA/discussions/categories/q-a).
+- **A bug or a feature request:** open an [issue](https://github.com/Roger-GO/TENSA/issues/new/choose) with the template that fits.
+- **A security problem:** report it privately through [private vulnerability reporting](https://github.com/Roger-GO/TENSA/security/advisories/new), not in a public issue. [SECURITY.md](./SECURITY.md) explains what counts.
+- **Something that does not work:** [Troubleshooting](https://roger-go.github.io/TENSA/troubleshooting/) covers the usual causes, and the [documentation](https://roger-go.github.io/TENSA/) the rest.
 
 ## Citation
 
@@ -196,10 +121,10 @@ TENSA runs on ANDES, which does the underlying power system computation. If you 
 
 ## Contributing
 
-PRs are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for a source checkout, the UI with hot reload, the test commands, and the conventions, and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) for what is expected of everyone who takes part. For anything bigger than a small fix, open an issue or a discussion first, so that the work is not lost on a change that cannot be merged. Notes for AI coding agents live in [AGENTS.md](./AGENTS.md), and notable changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
+PRs are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) explains the setup, the tests and the conventions, and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) applies to everyone. For anything bigger than a small fix, open an issue or a discussion first. Notes for AI coding agents are in [AGENTS.md](./AGENTS.md), and the [changelog](./CHANGELOG.md) lists what changed.
 
 ## License
 
 TENSA is licensed under the [GNU General Public License v3.0 or later](./LICENSE) (SPDX identifier `GPL-3.0-or-later`), the same license as ANDES.
 
-The web UI is built with libraries that keep their own licenses: MIT for most of them (React, Radix, React Flow, uPlot and others), ISC and BSD-3-Clause for the d3 modules, Apache-2.0 for Apache Arrow, and EPL-2.0 or GPL-3.0-or-later for elkjs. The build writes the name, version, license and license text of each one, with the NOTICE of those that have one, into `THIRD-PARTY-LICENSES.txt` beside the UI. An installed package has it in `tensa/static/`, a checkout in `web/dist/` once the UI is built, and a running server serves it at `/THIRD-PARTY-LICENSES.txt`.
+The web UI bundles third-party libraries under their own licenses; each build writes their names, versions and license texts into `THIRD-PARTY-LICENSES.txt` beside the UI.
