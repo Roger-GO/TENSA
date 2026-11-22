@@ -88,7 +88,7 @@ def kundur(workspace: Path) -> Path:
     return dst
 
 
-def test_the_handler_table_is_exactly_the_twenty_one_ops() -> None:
+def test_the_handler_table_is_exactly_the_twenty_two_ops() -> None:
     assert set(_HANDLERS) == {
         "load_case",
         "reload_case",
@@ -111,6 +111,7 @@ def test_the_handler_table_is_exactly_the_twenty_one_ops() -> None:
         "undo_last_edit",
         "redo_edit",
         "run_dispatch",
+        "run_uc",
     }
     assert set(_HANDLERS) | {"run_tds"} == ENGINE_OPS["sienna"]
 

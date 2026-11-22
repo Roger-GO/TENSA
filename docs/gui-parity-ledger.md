@@ -23,7 +23,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `left-sidebar` | 3 |
 | `messages-panel` | 2 |
 | `model-doc-dialog` | 2 |
-| `none` | 11 |
+| `none` | 12 |
 | `pmu-dialog` | 4 |
 | `profile-dialog` | 4 |
 | `report-dialog` | 1 |
@@ -32,7 +32,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `sweep-dialog` | 1 |
 | `workspace` | 4 |
 | `ybus-dialog` | 1 |
-| **total** | **85** |
+| **total** | **86** |
 
 ## OpenAPI routes
 
@@ -114,6 +114,7 @@ Every substrate capability must be reachable from a GUI surface, or be explicitl
 | `POST` | `/api/sessions/{session_id}/tds/init` | `run-controls` |  |
 | `GET` | `/api/sessions/{session_id}/topology` | `workspace` |  |
 | `GET` | `/api/sessions/{session_id}/topology/models/{model}/alterable_params` | `disturbance-panel` |  |
+| `POST` | `/api/sessions/{session_id}/uc` | `none` | No web surface runs a unit commitment yet; the route is for scripts and agents. A later operations unit adds it to the run drawer. |
 | `POST` | `/api/sessions/{session_id}/undo-last-edit` | `command-palette` |  |
 | `GET` | `/api/sessions/{session_id}/ybus` | `ybus-dialog` |  |
 | `POST` | `/api/studies` | `none` | No web surface yet; the comparison overlay of the Phase 6 web unit adds it. |

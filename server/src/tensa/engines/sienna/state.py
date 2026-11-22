@@ -94,6 +94,12 @@ from tensa.engines.sienna.edit_log import (
 from tensa.engines.sienna.ext import SiennaExtSpec, ext_to_json, validate_ext
 from tensa.engines.sienna.keys import assign_sienna_keys
 from tensa.engines.sienna.matrix_io import read_matrix
+from tensa.engines.sienna.uc import (
+    UcResult,
+    check_uc_overrides,
+    check_uc_request,
+    uc_result,
+)
 from tensa.security.paths import (
     WorkspacePathError,
     canonical_directory,
@@ -1099,6 +1105,60 @@ class SiennaState:
                 else:
                     log.info("%s", text)
         return dispatch_result(payload, self._key_book)
+
+    # ---- run_uc ---------------------------------------------------------------
+
+    def run_uc(
+        self,
+        network_model: Any,
+        horizon_h: Any,
+        resolution_min: Any,
+        series: Any,
+        overrides: Mapping[str, Any] | None = None,
+    ) -> UcResult:
+        """Solve the unit commitment of the loaded case.
+
+        All request validation is ``check_uc_request`` and
+        ``check_uc_overrides``, before any Julia call, mirroring the
+        ``run_pflow`` validation messages. With no case loaded raises
+        :class:`NoCaseLoadedError`, and for a case that is not a MATPOWER
+        file (no gencost) :class:`DispatchRequestError` before any Julia
+        call: a PSS/E .raw case has no cost data and PowerSystems gives its
+        generators a placeholder curve of 1 $/MWh. A :class:`SiennaError`
+        from the bridge propagates unchanged; the route maps it. The notes
+        the Julia side captured are logged on ``tensa.notice`` exactly as
+        ``run_dispatch`` does.
+        """
+        self._require_session()
+        check_uc_request(network_model, horizon_h, resolution_min, series)
+        if self._case_path is not None and self._case_path.suffix.lower() != ".m":
+            raise DispatchRequestError(
+                f"{NO_COST_DATA_MESSAGE}, which a PSS/E .raw case does not carry; "
+                f"use a MATPOWER .m case"
+            )
+        named = check_uc_overrides(overrides or {}, self._key_book)
+        ops = (self._document or {}).get("generator_ops")
+        bridge = self._require_bridge()
+        payload = bridge.uc(
+            self._session,
+            str(network_model),
+            int(horizon_h),
+            int(resolution_min),
+            [float(f) for f in series],
+            named,
+            ops if isinstance(ops, list) else None,
+        )
+        for note in payload.get("notes", []):
+            if isinstance(note, str):
+                log.info("%s", note)
+            elif isinstance(note, dict):
+                text = note.get("text", "")
+                level = note.get("level", "info")
+                if level in ("warning", "error"):
+                    log.warning("%s", text)
+                else:
+                    log.info("%s", text)
+        return uc_result(payload, self._key_book)
 
     # ---- network_matrix -------------------------------------------------------
 

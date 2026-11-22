@@ -475,6 +475,32 @@ class JuliaBridge:
             )
         )
 
+    def uc(
+        self,
+        session: Any,
+        network_model: str,
+        horizon_h: int,
+        resolution_min: int,
+        series: Sequence[float],
+        overrides: Mapping[str, Mapping[str, Any]],
+        ops: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Solve the unit commitment; loads the ops module on first call."""
+        self.start_ops()
+        return self._json(
+            self._call(
+                "uc_json",
+                session,
+                _module=self._ts_ops,
+                network_model=network_model,
+                horizon_h=horizon_h,
+                resolution_min=resolution_min,
+                series_json=json.dumps(list(series)),
+                overrides_json=json.dumps(dict(overrides)),
+                ops_json=json.dumps(list(ops) if ops is not None else None),
+            )
+        )
+
     def apply_series(
         self,
         session: Any,

@@ -469,6 +469,20 @@ def _handle_run_dispatch(state: SiennaState, args: dict[str, Any]) -> Any:
     )
 
 
+def _handle_run_uc(state: SiennaState, args: dict[str, Any]) -> Any:
+    # Missing fields reach the state's validation as None, which it refuses
+    # by name, as a missing network_model is handled there.
+    return _serialize_dataclass(
+        state.run_uc(
+            network_model=args.get("network_model"),
+            horizon_h=args.get("horizon_h"),
+            resolution_min=args.get("resolution_min"),
+            series=args.get("series"),
+            overrides=args.get("overrides"),
+        )
+    )
+
+
 def _handle_fidelity(state: SiennaState, args: dict[str, Any]) -> Any:
     """The fidelity entries of the loaded case. With no case loaded the
     state's :class:`NoCaseLoadedError` propagates, as ``topology``'s does."""
@@ -542,6 +556,7 @@ _HANDLERS: dict[str, Any] = {
     "undo_last_edit": _handle_undo_last_edit,
     "redo_edit": _handle_redo_edit,
     "run_dispatch": _handle_run_dispatch,
+    "run_uc": _handle_run_uc,
 }
 
 
@@ -612,7 +627,7 @@ def _warm_up() -> None:
 
 
 def sienna_runtime() -> EngineRuntime:
-    """The Sienna engine: a ``SiennaState`` per session, the sixteen ops."""
+    """The Sienna engine: a ``SiennaState`` per session, the seventeen ops."""
     return EngineRuntime(
         name="sienna",
         make_state=lambda workspace, session_id, owner_pid: SiennaState(

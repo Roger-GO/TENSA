@@ -73,6 +73,7 @@ from tensa.api.routes.snapshot import router as snapshot_router
 from tensa.api.routes.studies import router as studies_router
 from tensa.api.routes.sweep import router as sweep_router
 from tensa.api.routes.tds import router as tds_router
+from tensa.api.routes.uc import router as uc_router
 from tensa.api.routes.version import router as version_router
 from tensa.api.routes.workspace import router as workspace_router
 from tensa.api.routes.ws import router as ws_router
@@ -378,6 +379,7 @@ def make_app(
     app.include_router(fidelity_router, prefix="/api", tags=["fidelity"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(dispatch_router, prefix="/api", tags=["dispatch"])
+    app.include_router(uc_router, prefix="/api", tags=["uc"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])
     app.include_router(elements_router, prefix="/api", tags=["elements"])
     app.include_router(clone_router, prefix="/api", tags=["clone"])

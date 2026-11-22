@@ -198,6 +198,14 @@ from tensa.api.schemas.topology import (
     TopologyEntry,
     TopologySummary,
 )
+from tensa.api.schemas.uc import (
+    UcCostSchema,
+    UcGeneratorSchema,
+    UcOverrideSchema,
+    UcRequest,
+    UcResponse,
+    UcSlackSchema,
+)
 from tensa.api.schemas.version import (
     VersionInfo,
 )
@@ -372,6 +380,12 @@ __all__ = [
     "ToggleSpec",
     "Tolerances",
     "TopologyEntry",
+    "UcCostSchema",
+    "UcGeneratorSchema",
+    "UcOverrideSchema",
+    "UcRequest",
+    "UcResponse",
+    "UcSlackSchema",
     "TopologyParamMeta",
     "TopologySchema",
     "TopologySummary",

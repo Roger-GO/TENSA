@@ -120,6 +120,17 @@ Dispatch:        POST /sessions/{id}/dispatch  (Sienna only; body {"network_mode
                  total_losses_mw, which are null or empty for the lossless models; 422 for a bad network_model
                  or a case with no generator cost
                  data (a PSS/E .raw case carries none: dispatch takes a MATPOWER .m case), 409 on an ANDES session)
+Unit commitment: POST /sessions/{id}/uc  (Sienna only; body {"network_model": "copper_plate"|"dc"|"ptdf",
+                 "horizon_h": 1..168, "resolution_min": 15|30|60, "series": one positive load factor per period
+                 (horizon_h * 60 / resolution_min of them, applied to every load's max active power), optional
+                 "overrides": {gen:<bus>-<id>: {"startup_cost": $, "min_up_h": h, "min_down_h": h, "must_run": bool}}}
+                 -> the multi-period commitment with HiGHS: every generator starts off, so one on in the first
+                 period pays its start-up (the gencost row's STARTUP, its second number); per generator on and
+                 p_mw per period, keyed by neutral key gen:<bus>-<id>, the cost split {energy, startup, fixed,
+                 total} in $, objective beside objective_check (recomputed from the file's gencost), periods,
+                 total_load_mw per period, slacks (every slack variable past 1e-6 MW, with its period); 422 for
+                 a bad request or a case with no generator cost data (a PSS/E .raw case carries none), 409 on
+                 an ANDES session)
 TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
                  integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |
                  qndf (variable step, error control from tds_config_overrides rtol/atol, bounds max_step/min_step; h

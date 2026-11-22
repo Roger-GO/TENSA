@@ -48,13 +48,19 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "unavailable_reason": None,
             "versions": sienna_versions(),
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
-            "routines": ["matrices", "pflow", "eig", "tds", "dispatch"],
+            "routines": ["matrices", "pflow", "eig", "tds", "dispatch", "uc"],
             "routine_options": {
                 "pflow": {
                     "methods": ["ac", "dc", "ptdf-dc"],
                 },
                 "dispatch": {
                     "network_models": ["copper_plate", "dc", "ptdf", "ac"],
+                },
+                "uc": {
+                    "network_models": ["copper_plate", "dc", "ptdf"],
+                    "resolutions_min": [15, 30, 60],
+                    "horizon_h": {"min": 1, "max": 168},
+                    "overrides": ["startup_cost", "min_up_h", "min_down_h", "must_run"],
                 },
                 "tds": {
                     "streaming": True,

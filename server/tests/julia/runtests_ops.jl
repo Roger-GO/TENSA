@@ -415,6 +415,265 @@ end
               occursin("economic dispatch did not", message)
     end
 
+    # ---- uc_json ---------------------------------------------------------------
+
+    # The hand-worked unit commitment case: generator A (bus 1), 10 $/MWh,
+    # PMIN 50 MW, PMAX 200 MW, start-up 500 $ (the gencost row's second
+    # number), no fixed term; generator B (bus 2), 30 $/MWh, PMIN 0,
+    # PMAX 200 MW, no start-up cost; a load of 100 MW at bus 3 whose profile
+    # is 40, 120, 150, 40 MW over four hours (factors 0.4, 1.2, 1.5, 0.4).
+    # Every generator starts off, so one on in period 1 pays a start-up.
+    #
+    # A cannot run in an hour of 40 MW: its minimum is 50 and nothing can
+    # absorb the surplus (copper plate, no sink), so every pattern with A on
+    # in period 1 or 4 is infeasible: {1}, {4}, {1,2}, {1,3}, {1,4}, {2,4},
+    # {3,4}, {1,2,3}, {1,2,4}, {1,3,4}, {2,3,4}, {1,2,3,4}. Of the rest, B
+    # serves hours 1 and 4 at 30 $/MWh: 30 * (40 + 40) = 2400 $.
+    #   {}:      B alone: 30 * (40+120+150+40) = 10500 $
+    #   {2}:     one start; A at 120, B at 40+150+40:
+    #            500 + 10*120 + 30*230 = 500 + 1200 + 6900 = 8600 $
+    #   {3}:     one start; A at 150, B at 40+120+40:
+    #            500 + 10*150 + 30*200 = 500 + 1500 + 6000 = 8000 $
+    #   {2,3}:   one start; A at 120 and 150, B at 40+40:
+    #            500 + 10*(120+150) + 30*80 = 500 + 2700 + 2400 = 5600 $
+    # The optimum is A on in hours 2 and 3 with one start-up: 5600 $, split
+    # energy 10*270 + 30*80 = 5100 $, start-up 500 $, fixed 0 $.
+    function uc_case(dir; startup_a = 500.0)
+        lines = [
+            "function mpc = uc_case",
+            "mpc.version = '2';",
+            "mpc.baseMVA = 100.0;",
+            "mpc.bus = [",
+            "  1  3  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "  2  2  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "  3  1  100.0  30.0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;",
+            "];",
+            "mpc.gen = [",
+            "  1  0  0  9999  -9999  1.0  100.0  1  200.0  50.0  0  0  0  0  0  0  0  0  0  0  0;",
+            "  2  0  0  9999  -9999  1.0  100.0  1  200.0  0  0  0  0  0  0  0  0  0  0  0  0;",
+            "];",
+            "mpc.branch = [",
+            "  1  2  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "  1  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "  2  3  0.0  0.1  0.0  0  0  0  0  0  1  -360  360;",
+            "];",
+            "mpc.gencost = [",
+            "  2  $(startup_a)  0  3  0.0  10.0  0.0;",
+            "  2  0  0  3  0.0  30.0  0.0;",
+            "];",
+        ]
+        path = joinpath(dir, "uc_case.m")
+        write(path, join(lines, "\n") * "\n")
+        return path
+    end
+
+    # The case facts' generator_ops rows for the case: the start-up cost the
+    # Python side reads from the gencost row's second number and sends
+    # because PowerSystems does not carry it into ThermalGenerationCost.
+    function uc_ops(startup_a)
+        return JSON3.write([
+            Dict("bus" => 1, "gen_id" => "1", "startup_usd" => startup_a),
+            Dict("bus" => 2, "gen_id" => "1", "startup_usd" => 0.0),
+        ])
+    end
+
+    function uc_of(answer)
+        return Dict(String(row[:name]) => row for row in answer[:generators])
+    end
+
+    @testset "uc: the hand-worked optimum" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        answer = JSON3.read(TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 4,
+            resolution_min = 60,
+            series_json = "[0.4, 1.2, 1.5, 0.4]",
+            overrides_json = "{}",
+            ops_json = uc_ops(500.0),
+        ))
+        @test answer[:status] == "completed"
+        @test answer[:horizon_h] == 4
+        @test answer[:resolution_min] == 60
+        @test length(answer[:periods]) == 4
+        gens = uc_of(answer)
+        @test [Bool(v) for v in gens["gen-1"][:on]] == [false, true, true, false]
+        # B (no minimum, no start-up, no fixed cost) on at 0 MW costs nothing,
+        # so its on/off pattern in hours 2 and 3 is not unique: only its MW is.
+        @test all(abs.(Float64.(gens["gen-1"][:p_mw]) .- [0.0, 120.0, 150.0, 0.0]) .<= 1e-4)
+        @test all(abs.(Float64.(gens["gen-2"][:p_mw]) .- [40.0, 0.0, 0.0, 40.0]) .<= 1e-4)
+        @test abs(Float64(answer[:cost][:energy]) - 5100.0) <= 1e-6 * 5100.0
+        @test abs(Float64(answer[:cost][:startup]) - 500.0) <= 1e-6 * 500.0
+        @test abs(Float64(answer[:cost][:fixed]) - 0.0) <= 1e-6
+        @test abs(Float64(answer[:cost][:total]) - 5600.0) <= 1e-6 * 5600.0
+        @test abs(Float64(answer[:objective]) - 5600.0) <= 1e-6 * 5600.0
+        @test abs(Float64(answer[:objective_check]) - 5600.0) <= 1e-6 * 5600.0
+        @test isempty(answer[:slacks])
+        @test Float64.(answer[:total_load_mw]) == [40.0, 120.0, 150.0, 40.0]
+        # The per-generator split: A's energy 10 * 270 = 2700 $, one start
+        # 500 $; B's energy 30 * 80 = 2400 $.
+        @test abs(Float64(gens["gen-1"][:energy]) - 2700.0) <= 1e-6 * 2700.0
+        @test abs(Float64(gens["gen-1"][:startup]) - 500.0) <= 1e-6 * 500.0
+        @test abs(Float64(gens["gen-2"][:energy]) - 2400.0) <= 1e-6 * 2400.0
+        @test abs(Float64(gens["gen-2"][:startup]) - 0.0) <= 1e-6
+    end
+
+    @testset "uc: start-up from an override when the gencost row has none" begin
+        # The same case with A's STARTUP column 0: the request's override
+        # adds what the column would have given, and the answer is the same
+        # 5600 $ optimum. A wrong implementation that drops the override
+        # answers a different cost.
+        path = uc_case(dir; startup_a = 0.0)
+        s = load_session(path)
+        answer = JSON3.read(TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 4,
+            resolution_min = 60,
+            series_json = "[0.4, 1.2, 1.5, 0.4]",
+            overrides_json = "{\"gen-1\": {\"startup_cost\": 500.0}}",
+            ops_json = uc_ops(0.0),
+        ))
+        gens = uc_of(answer)
+        @test [Bool(v) for v in gens["gen-1"][:on]] == [false, true, true, false]
+        @test abs(Float64(answer[:cost][:total]) - 5600.0) <= 1e-6 * 5600.0
+        @test abs(Float64(answer[:cost][:startup]) - 500.0) <= 1e-6 * 500.0
+    end
+
+    @testset "uc: a must-run override that cannot be met is an error" begin
+        # A must run in every period, but hour 1's load is 40 MW and A's
+        # minimum is 50: infeasible.
+        path = uc_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.uc_json(
+                s;
+                network_model = "copper_plate",
+                horizon_h = 4,
+                resolution_min = 60,
+                series_json = "[0.4, 1.2, 1.5, 0.4]",
+                overrides_json = "{\"gen-1\": {\"must_run\": true}}",
+                ops_json = uc_ops(500.0),
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin("unit commitment did not", sprint(showerror, err))
+    end
+
+    @testset "uc: a minimum up time keeps A off" begin
+        # With a minimum up time of 3 hours, A started in hour 2 (its only
+        # useful start) would have to run hours 2 to 4, all inside the
+        # horizon, and in hour 4 it cannot run (40 MW < PMIN 50); started in
+        # hour 1 it cannot run either. So A stays off and B serves the whole
+        # 350 MWh at 30 $/MWh: 10500 $, against the 5600 $ optimum an
+        # implementation that drops the override answers.
+        path = uc_case(dir)
+        s = load_session(path)
+        answer = JSON3.read(TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 4,
+            resolution_min = 60,
+            series_json = "[0.4, 1.2, 1.5, 0.4]",
+            overrides_json = "{\"gen-1\": {\"min_up_h\": 3.0}}",
+            ops_json = uc_ops(500.0),
+        ))
+        gens = uc_of(answer)
+        @test [Bool(v) for v in gens["gen-1"][:on]] == [false, false, false, false]
+        @test all(abs.(Float64.(gens["gen-2"][:p_mw]) .- [40.0, 120.0, 150.0, 40.0]) .<= 1e-4)
+        @test abs(Float64(answer[:cost][:total]) - 10500.0) <= 1e-6 * 10500.0
+    end
+
+    @testset "uc: a series of the wrong length is refused" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.uc_json(
+                s;
+                network_model = "copper_plate",
+                horizon_h = 4,
+                resolution_min = 60,
+                series_json = "[1.0, 1.0]",
+                overrides_json = "{}",
+                ops_json = uc_ops(500.0),
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin(
+            "the series block must give one positive finite factor per period",
+            sprint(showerror, err),
+        )
+    end
+
+    @testset "uc: an override of a generator the case lacks is refused" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.uc_json(
+                s;
+                network_model = "copper_plate",
+                horizon_h = 4,
+                resolution_min = 60,
+                series_json = "[0.4, 1.2, 1.5, 0.4]",
+                overrides_json = "{\"gen-9\": {\"must_run\": true}}",
+                ops_json = uc_ops(500.0),
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("no generator named gen-9", sprint(showerror, err))
+    end
+
+    @testset "uc: the session's system is unchanged" begin
+        path = uc_case(dir)
+        s = load_session(path)
+        before = TensaSienna.topology_json(s)
+        TensaSiennaOps.uc_json(
+            s;
+            network_model = "copper_plate",
+            horizon_h = 4,
+            resolution_min = 60,
+            series_json = "[0.4, 1.2, 1.5, 0.4]",
+            overrides_json = "{}",
+            ops_json = uc_ops(500.0),
+        )
+        @test TensaSienna.topology_json(s) == before
+        @test !PSY.has_time_series(first(collect(PSY.get_components(PSY.PowerLoad, s.sys))))
+    end
+
+    @testset "uc: a case with no cost data is refused" begin
+        path = no_cost_case(dir)
+        s = load_session(path)
+        err = try
+            TensaSiennaOps.uc_json(
+                s;
+                network_model = "copper_plate",
+                horizon_h = 4,
+                resolution_min = 60,
+                series_json = "[1.0, 1.0, 1.0, 1.0]",
+                overrides_json = "{}",
+                ops_json = "null",
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException
+        @test occursin(
+            "the case has no generator cost data; economic dispatch needs gencost records",
+            sprint(showerror, err),
+        )
+    end
+
     @testset "a four-period profile becomes the load's series and one four-period forecast" begin
         # A four-period profile on the two-generator case's load (PowerSystems
         # names a MATPOWER load after its bus: bus3): factors 1.0, 1.1, 0.9,

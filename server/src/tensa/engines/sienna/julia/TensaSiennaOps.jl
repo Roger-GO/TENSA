@@ -21,7 +21,7 @@ const PSI = PowerSimulations
 
 import Main.TensaSienna as TS
 
-export dispatch_json, apply_series!
+export dispatch_json, uc_json, apply_series!
 
 # The message of a case with no cost data. The Python side
 # (tensa.engines.sienna.dispatch.NO_COST_DATA_MESSAGE) holds the same string
@@ -433,6 +433,371 @@ function dispatch_json(
         ))
     end
     return TS._to_json(answer)
+end
+
+# The message of a request whose series block does not fit the case or the
+# horizon.
+const UC_BAD_SERIES = "the series block must give one positive finite factor per period"
+
+# The ramp limit of a generator in MW/min, or nothing when the file gives
+# none. PowerSystems stores ramp limits as a named tuple in MW/min on the
+# device base; a limit of 0 is MATPOWER's "no data" (the RAMP_10 column),
+# which as a limit would pin the generator, so it is answered as nothing.
+function _ramp_mw_per_min(g)
+    limits = PSY.get_ramp_limits(g)
+    limits === nothing && return nothing
+    up = Float64(limits.up)
+    up == 0.0 && return nothing
+    return up
+end
+
+# Set every generator's initial state to off: MATPOWER carries no commitment
+# state, and the unit's rule is that a generator on in the first period pays
+# its start-up.
+function _initial_state_off!(sys)
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        PSY.set_status!(g, false)
+        PSY.set_active_power!(g, 0.0)
+        PSY.set_time_at_status!(g, 10000.0)
+    end
+    return nothing
+end
+
+# The start-up cost of the gencost rows, keyed by generator component name:
+# the operations data's startup_usd of each generator, in the order of the
+# file's rows on each bus, matched to the generators PowerSystems holds on
+# that bus in the order of their rows (it names a MATPOWER generator
+# gen-<row of mpc.gen>, so the row number orders them). PowerSystems 5.12.5
+# does not carry the STARTUP column into ThermalGenerationCost.start_up, so
+# uc_json sets it on the copy from this.
+function _startup_costs(sys, ops)
+    out = Dict{String, Float64}()
+    ops === nothing && return out
+    on_bus = Dict{Int, Vector{Any}}()
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        push!(get!(on_bus, PSY.get_number(PSY.get_bus(g)), Any[]), g)
+    end
+    row_of(g) = something(tryparse(Int, last(split(PSY.get_name(g), "-"))), typemax(Int))
+    for gens in values(on_bus)
+        sort!(gens; by = row_of)
+    end
+    seen = Dict{Int, Int}()
+    for row in ops
+        bus = Int(row["bus"])
+        seen[bus] = get(seen, bus, 0) + 1
+        startup = row["startup_usd"]
+        startup === nothing && continue
+        gens = get(on_bus, bus, Any[])
+        seen[bus] <= length(gens) || continue
+        out[PSY.get_name(gens[seen[bus]])] = Float64(startup)
+    end
+    return out
+end
+
+# Apply the per-generator overrides: a JSON object keyed by component name,
+# values objects with optional fields startup_cost, min_up_h, min_down_h,
+# must_run. Answer the names that matched no generator (the caller throws).
+function _apply_uc_overrides!(sys, overrides_json::AbstractString)
+    overrides = JSON3.read(overrides_json)
+    missed = String[]
+    for (name_key, fields) in overrides
+        name = String(name_key)
+        g = PSY.get_component(PSY.ThermalStandard, sys, name)
+        if g === nothing
+            push!(missed, name)
+            continue
+        end
+        cost = PSY.get_operation_cost(g)
+        for (field, value) in fields
+            field = String(field)
+            if field == "startup_cost"
+                cost isa PSY.ThermalGenerationCost &&
+                    PSY.set_start_up!(cost, Float64(value))
+            elseif field == "min_up_h"
+                limits = PSY.get_time_limits(g)
+                down = limits === nothing ? 0.0 : Float64(limits.down)
+                PSY.set_time_limits!(g, (up = Float64(value), down = down))
+            elseif field == "min_down_h"
+                limits = PSY.get_time_limits(g)
+                up = limits === nothing ? 0.0 : Float64(limits.up)
+                PSY.set_time_limits!(g, (up = up, down = Float64(value)))
+            elseif field == "must_run"
+                value == true && PSY.set_must_run!(g, true)
+            end
+        end
+    end
+    return missed
+end
+
+# The cost of one generator over the horizon, split into energy (the
+# quadratic and linear terms at the dispatched MW), start-up (one start per
+# period the generator comes on, the initial state being off) and fixed (the
+# constant term per committed hour).
+function _commitment_cost_parts(g, on_mw::Vector{Float64}, p_mw::Vector{Float64}, resolution_h::Float64)
+    coefficients = _cost_coefficients(g)
+    coefficients === nothing && return (energy = 0.0, startup = 0.0, fixed = 0.0)
+    a, b, c = coefficients
+    energy = sum(a * p^2 + b * p for p in p_mw)
+    fixed = c * resolution_h * count(==(1.0), on_mw)
+    starts = count(t -> on_mw[t] == 1.0 && (t == 1 || on_mw[t - 1] == 0.0), 1:length(on_mw))
+    startup = Float64(PSY.get_start_up(PSY.get_operation_cost(g))) * starts
+    return (energy = energy, startup = startup, fixed = fixed)
+end
+
+"""
+    uc_json(s::TS.Session; network_model, horizon_h, resolution_min, series_json, overrides_json, ops_json) -> String
+
+Solve the unit commitment of the loaded case: `template_unit_commitment` over
+`horizon_h` hours at a resolution of `resolution_min` minutes, with HiGHS at
+a MIP gap of 1e-9, on a deep copy of the system. `series_json` is a JSON
+array of one positive factor per period; the Python side lists every load of
+the case with those factors in the series payload. `overrides_json` is a
+JSON object of per-generator additions (start-up cost, minimum up and down
+times, must-run) keyed by component name. `ops_json` carries the case facts'
+`startup_usd` per generator, which PowerSystems does not read from the
+gencost row, so the start-up cost is set on the copy from it. Every
+generator starts off, so one committed in the first period pays a start-up.
+The answer lists, per period, each generator's on/off and MW, the cost split
+into energy, start-up and fixed, and every slack variable past 1e-6 MW.
+"""
+function uc_json(
+    s::TS.Session;
+    network_model::AbstractString,
+    horizon_h::Int,
+    resolution_min::Int,
+    series_json::AbstractString,
+    overrides_json::AbstractString,
+    ops_json::AbstractString = "null",
+)::String
+    network = _network_model(network_model)
+    sys = deepcopy(s.sys)
+    base_mva = PSY.get_base_power(sys)
+
+    factors = JSON3.read(series_json, Vector{Float64})
+    n = length(factors)
+    if n * resolution_min != horizon_h * 60 || any(f -> !isfinite(f) || f <= 0.0, factors)
+        bad = findfirst(f -> !isfinite(f) || f <= 0.0, factors)
+        throw(ArgumentError(
+            UC_BAD_SERIES * ": got $(n) factor(s) over $(horizon_h) hours at " *
+            "$(resolution_min) minutes" *
+            (bad === nothing ? "" : ", factor $(factors[bad]) at period $(bad)"),
+        ))
+    end
+
+    has_cost = any(
+        g -> _cost_coefficients(g) !== nothing,
+        PSY.get_components(PSY.ThermalStandard, sys),
+    )
+    has_cost || throw(ErrorException(NO_COST_DATA))
+
+    _costs_in_natural_units!(sys)
+
+    # A ramp of 0 from the file (no data) becomes no limit; a real one is
+    # kept as PowerSystems read it. Never 0, which would pin the generator.
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        limit = _ramp_mw_per_min(g)
+        PSY.set_ramp_limits!(g, limit === nothing ? nothing : (up = limit, down = limit))
+    end
+
+    # Every generator starts off, so one committed in the first period pays
+    # its start-up (MATPOWER carries no commitment state).
+    _initial_state_off!(sys)
+
+    # The start-up cost of the gencost rows, which PowerSystems does not
+    # carry into ThermalGenerationCost.start_up, set on the copy from the
+    # case facts.
+    ops = JSON3.read(ops_json)
+    for (name, startup) in _startup_costs(sys, ops)
+        g = PSY.get_component(PSY.ThermalStandard, sys, name)
+        cost = PSY.get_operation_cost(g)
+        cost isa PSY.ThermalGenerationCost && PSY.set_start_up!(cost, startup)
+    end
+
+    missed = _apply_uc_overrides!(sys, overrides_json)
+    isempty(missed) || throw(ArgumentError("no generator named " * join(missed, ", ")))
+
+    # The load profile, through the operations data's own mechanism: every
+    # load of the case listed with the request's factors, one forecast window
+    # over the whole profile.
+    resolution = Second(resolution_min * 60)
+    loads = Any[]
+    for T in (PSY.PowerLoad, PSY.StandardLoad)
+        for l in PSY.get_components(T, sys)
+            push!(loads, Dict("name" => PSY.get_name(l), "factors" => factors))
+        end
+    end
+    payload = Dict(
+        "start" => "2026-01-01T00:00:00",
+        "resolution_s" => resolution_min * 60,
+        "steps" => n,
+        "loads" => loads,
+    )
+    apply_series!(sys, JSON3.write(payload))
+
+    logger = TS._NoteLogger()
+    res = Logging.with_logger(logger) do
+        # The keyword is `network`: the template takes any keyword and keeps
+        # the copper plate for one it does not know, so the model is checked.
+        template = PSI.template_unit_commitment(; network = PSI.NetworkModel(network))
+        # The template's ThermalBasicUnitCommitment has no minimum up and down
+        # times; ThermalStandardUnitCommitment holds a generator's time_limits.
+        PSI.set_device_model!(template, PSY.ThermalStandard, PSI.ThermalStandardUnitCommitment)
+        PSI.get_network_model(template) isa PSI.NetworkModel{network} || throw(
+            ErrorException("unit commitment was built without the $(network_model) network model"),
+        )
+        # The template models PowerLoad alone; a case read from PSS/E holds
+        # StandardLoad, which would otherwise be left out of the balance.
+        PSI.set_device_model!(template, PSY.StandardLoad, PSI.StaticPowerLoad)
+        model = PSI.DecisionModel(
+            template,
+            sys;
+            optimizer = PSI.optimizer_with_attributes(
+                HiGHS.Optimizer,
+                "mip_rel_gap" => 1e-9,
+            ),
+            horizon = Hour(horizon_h),
+            resolution = Hour(resolution_min / 60),
+            name = "tensa_uc",
+            store_variable_names = true,
+        )
+        dir = mktempdir()
+        built = PSI.build!(model; output_dir = dir)
+        built == PSI.ModelBuildStatus.BUILT || throw(
+            ErrorException("unit commitment did not build: $(built)"),
+        )
+        solved = PSI.solve!(model)
+        solved == PSI.RunStatus.SUCCESSFULLY_FINALIZED || throw(
+            ErrorException("unit commitment did not solve: $(solved)"),
+        )
+        PSI.OptimizationProblemResults(model)
+    end
+    notes = [
+        Dict{String, Any}("level" => TS._level_name(l), "text" => TS._scrub(t, (s.raw, s.dyr))) for
+        (l, t) in logger.records
+    ]
+
+    objective = PSI.get_objective_value(res)
+
+    t0 = DateTime("2026-01-01T00:00:00")
+    periods = [string(t0 + resolution * k) for k in 0:(n - 1)]
+
+    # The commitment and the dispatch, per period and generator. The on/off
+    # variable is binary; a value not within 1e-3 of an integer means HiGHS
+    # solved the relaxation, which is an error, not an answer.
+    power = PSI.read_variable(res, "ActivePowerVariable__ThermalStandard")
+    commitment = PSI.read_variable(res, "OnVariable__ThermalStandard")
+    p_of = Dict{Tuple{String, String}, Float64}()
+    for row in eachrow(power)
+        p_of[(String(row[:name]), string(row[:DateTime]))] = Float64(row[:value])
+    end
+    on_of = Dict{Tuple{String, String}, Float64}()
+    for row in eachrow(commitment)
+        name = String(row[:name])
+        stamp = string(row[:DateTime])
+        value = Float64(row[:value])
+        rounded = round(value)
+        abs(value - rounded) <= 1e-3 || throw(ErrorException(
+            "the commitment is not integral: $(name) in period $(stamp) is $(value)",
+        ))
+        on_of[(name, stamp)] = rounded
+    end
+
+    resolution_h = resolution_min / 60
+    generators = Any[]
+    cost_energy = 0.0
+    cost_startup = 0.0
+    cost_fixed = 0.0
+    for g in PSY.get_components(PSY.ThermalStandard, sys)
+        name = PSY.get_name(g)
+        bus = PSY.get_number(PSY.get_bus(g))
+        on = [get(on_of, (name, periods[t]), 0.0) for t in 1:n]
+        p_mw = [get(p_of, (name, periods[t]), 0.0) for t in 1:n]
+        parts = _commitment_cost_parts(g, on, p_mw, resolution_h)
+        cost_energy += parts.energy
+        cost_startup += parts.startup
+        cost_fixed += parts.fixed
+        push!(generators, (
+            name = name,
+            bus = bus,
+            id = TS._generator_id(name, bus),
+            on = [v == 1.0 for v in on],
+            p_mw = p_mw,
+            energy = parts.energy,
+            startup = parts.startup,
+            fixed = parts.fixed,
+        ))
+    end
+    sort!(generators; by = x -> (x.bus, x.id, x.name))
+
+    # Slack variables past 1e-6 MW, with the period of each.
+    slacks = Any[]
+    for variable_name in PSI.list_variable_names(res)
+        occursin("Slack", String(variable_name)) || continue
+        for row in eachrow(PSI.read_variable(res, variable_name))
+            value = Float64(row[:value])
+            abs(value) > 1e-6 || continue
+            push!(slacks, (
+                variable = String(variable_name),
+                element = string(row[:name]),
+                time = string(row[:DateTime]),
+                value = value,
+            ))
+        end
+    end
+
+    parameters = [String(name) for name in PSI.list_parameter_names(res)]
+    expressions = [String(name) for name in PSI.list_expression_names(res)]
+
+    base_load_mw = 0.0
+    PSY.with_units_base(sys, PSY.UnitSystem.SYSTEM_BASE) do
+        for T in (PSY.PowerLoad, PSY.StandardLoad)
+            for l in PSY.get_components(T, sys)
+                base_load_mw += PSY.get_max_active_power(l) * base_mva
+            end
+        end
+    end
+    total_load_mw = [base_load_mw * factors[t] for t in 1:n]
+
+    # The dispatch must meet the load in every period, unless a slack
+    # variable made up the difference (reported in slacks).
+    slack_by_period = Dict{String, Float64}()
+    for row in slacks
+        slack_by_period[row.time] = get(slack_by_period, row.time, 0.0) + abs(row.value)
+    end
+    for t in 1:n
+        dispatched = sum(row.p_mw[t] for row in generators)
+        if abs(dispatched - total_load_mw[t]) > 1e-6 * max(1.0, total_load_mw[t]) &&
+           get(slack_by_period, periods[t], 0.0) == 0.0
+            throw(ErrorException(
+                "unit commitment did not meet the load in period $(t): " *
+                "$(dispatched) MW dispatched for $(total_load_mw[t]) MW of load",
+            ))
+        end
+    end
+
+    cost_total = cost_energy + cost_startup + cost_fixed
+    return TS._to_json((
+        status = "completed",
+        network_model = String(network_model),
+        horizon_h = horizon_h,
+        resolution_min = resolution_min,
+        periods = periods,
+        base_mva = base_mva,
+        objective = objective,
+        objective_check = cost_total,
+        cost = (
+            energy = cost_energy,
+            startup = cost_startup,
+            fixed = cost_fixed,
+            total = cost_total,
+        ),
+        total_load_mw = total_load_mw,
+        generators = generators,
+        slacks = slacks,
+        parameters = parameters,
+        expressions = expressions,
+        notes = notes,
+    ))
 end
 
 """
