@@ -91,6 +91,25 @@ class TdsRunRequest(BaseModel):
             "exactly so."
         ),
     )
+    names: Literal["engine", "neutral"] = Field(
+        "engine",
+        description=(
+            "How the series are named (spec section 6.5). ``engine`` (the "
+            "default) is the names as the engine gives them, byte for byte "
+            "what a request without the field answers. ``neutral`` names each "
+            "series ``<quantity>|<key>`` (``voltage|bus:7``, "
+            "``rotor_speed|gen:1-1``, a ``dae_vars`` variable "
+            "``state|<key>#<variable>``), and a streamed run adds the "
+            "relative quantities: ``angle_rel|<bus key>`` for every bus "
+            "against the reference bus when ``bus_v`` is streamed, and "
+            "``rotor_angle_rel|<unit key>`` for every machine, against the "
+            "inertia-weighted mean, when ``gen_state`` is. A series that has "
+            "no neutral name is refused with 422 before anything runs. A "
+            "Sienna session's names are already neutral; the field is "
+            "accepted there and changes nothing. The streaming ``start_tds`` "
+            "frame takes the same field."
+        ),
+    )
     integrator: IntegratorName = Field(
         "trapezoidal",
         description=(

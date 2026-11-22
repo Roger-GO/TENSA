@@ -67,6 +67,7 @@ __all__ = [
     "neutral_names_andes",
     "parse_name",
     "parse_state_name",
+    "state_name_andes",
 ]
 
 SEPARATOR = "|"
@@ -290,3 +291,24 @@ def neutral_name_andes(column: str, book: KeyBook) -> str | None:
 def neutral_names_andes(columns: list[str], book: KeyBook) -> list[str | None]:
     """``neutral_name_andes`` over a list, order kept."""
     return [neutral_name_andes(column, book) for column in columns]
+
+
+def state_name_andes(name: str, book: KeyBook) -> str | None:
+    """The neutral name of an ANDES ``dae_vars`` variable, or ``None``.
+
+    ``name`` is a variable name as ``dae.x_name`` / ``dae.y_name`` spell it:
+    ``<variable> <Model> <idx>`` (``omega GENROU 1``; see
+    ``tensa.core.dae_vars``). The key of the device the variable belongs to is
+    ``book.key_of(model, idx)``, and the neutral name is
+    ``state|<key>#<variable>`` (:func:`build_state_name`). Returns ``None``
+    for a name that does not split into three parts and for a device the book
+    does not key.
+    """
+    parts = name.split(" ")
+    if len(parts) != 3 or not all(parts):
+        return None
+    variable, model, idx = parts
+    key = book.key_of(model, idx)
+    if key is None:
+        return None
+    return build_state_name(key, variable)

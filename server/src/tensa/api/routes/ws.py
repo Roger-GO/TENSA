@@ -288,6 +288,20 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         await _close_with_error(websocket, WS_CLOSE_INTERNAL_ERROR, str(exc))
         return
 
+    # Optional ``names``: ``engine`` (the default, the columns as ANDES names
+    # them) or ``neutral`` (``<quantity>|<key>``, with the relative quantities;
+    # spec section 6.5). The same style of error as the other literals. A frame
+    # without the field forwards nothing, so the stream's metadata stays
+    # exactly what a request without ``names`` always got (no ``names`` key).
+    names_raw = cfg.get("names")
+    if names_raw is not None and names_raw not in ("engine", "neutral"):
+        await _close_with_error(
+            websocket,
+            WS_CLOSE_INTERNAL_ERROR,
+            f"unknown names mode {short_repr(names_raw)}; expected 'engine' or 'neutral'",
+        )
+        return
+
     # Start the streaming run as a background task; the run survives WS
     # disconnect and can be resumed via {"type":"resume",...}.
     run_args: dict[str, Any] = {
@@ -299,6 +313,8 @@ async def ws_tds_stream(websocket: WebSocket, session_id: str) -> None:
         "vars": vars_raw,
         "integrator": integrator_raw,
     }
+    if names_raw is not None:
+        run_args["names"] = names_raw
     if load_model_raw is not None:
         run_args["load_model"] = load_model_raw
     if dae_vars_raw:

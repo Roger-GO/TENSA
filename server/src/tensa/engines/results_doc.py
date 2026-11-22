@@ -14,7 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from tensa.core.eig_result import EigResult
 from tensa.core.wrapper.results import PflowResult
 from tensa.engines.keys import KeyBook, is_key
-from tensa.engines.series_names import QUANTITY_BY_NAME, neutral_name_andes, parse_state_name
+from tensa.engines.series_names import (
+    QUANTITY_BY_NAME,
+    neutral_name_andes,
+    parse_name,
+    parse_state_name,
+)
 
 if TYPE_CHECKING:
     # Only a type here: importing the API schemas package from this engines module
@@ -453,6 +458,25 @@ def tds_document(
             if spec is None:
                 skipped.append(SkippedSeries(name=name, reason="no neutral mapping for the name"))
                 continue
+            unit = spec.unit
+        elif "|" in name:
+            # A column that is already a neutral name (it parses with
+            # ``series_names.parse_name``) is taken as it is for an ANDES
+            # result too: a run made with ``names: "neutral"`` converts to
+            # the same document as an engine-named one.
+            try:
+                quantity, of = parse_name(name)
+            except ValueError:
+                quantity, of = "", ""
+            if not quantity:
+                skipped.append(
+                    SkippedSeries(name=name, reason="no neutral mapping for the ANDES column")
+                )
+                continue
+            if quantity == "state":
+                key, state = parse_state_name(name)
+                of = f"{key}#{state}"
+            spec = QUANTITY_BY_NAME[quantity]
             unit = spec.unit
         else:
             if key_book is None:

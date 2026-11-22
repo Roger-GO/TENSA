@@ -122,9 +122,15 @@ from tensa.core.tds_controllers import log_notices as log_controller_notices
 from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 from tensa.core.wrapper.tds import validate_integrator
+from tensa.engines import frames
 from tensa.engines.base import EngineRuntime, TdsStreamPlan
 from tensa.engines.ops import ENGINE_OPS, engines_with_op
 from tensa.engines.registry import load_runtime
+from tensa.engines.series_names import (
+    build_name,
+    neutral_name_andes,
+    state_name_andes,
+)
 
 
 def _set_parent_death_signal() -> None:
@@ -1590,7 +1596,8 @@ class _AndesStreamPrep:
 
     ``plan`` is what the engine-neutral driver streams from; the handler keeps
     the rest (the controllers, the clock, the request's checked values) for the
-    run itself and for the payload afterwards.
+    run itself and for the payload afterwards. ``names`` is the request's
+    naming mode, ``"engine"`` or ``"neutral"`` (spec section 6.5).
     """
 
     plan: TdsStreamPlan
@@ -1600,11 +1607,28 @@ class _AndesStreamPrep:
     integrator_raw: Any
     tds_config_overrides: dict[str, float] | None
     dae_names: list[str]
+    names: str
     decimation: str
     max_rate_hz: float | None
     fixed_step: bool
     # The row of the step the run ended on, which no call of the hook saw.
     final_row: Callable[[], tuple[float, Any] | None]
+
+
+def _check_names_arg(args: dict[str, Any]) -> str:
+    """The request's ``names`` mode, ``"engine"`` (the default) or ``"neutral"``.
+
+    The route layers hold the field to the two values; the worker does not rely
+    on that, whoever sent the frame.
+    """
+    names_raw = args.get("names")
+    if names_raw is None:
+        return "engine"
+    if names_raw not in ("engine", "neutral"):
+        raise TdsRequestError(
+            f"unknown names mode {short_repr(names_raw)}; expected 'engine' or 'neutral'"
+        )
+    return str(names_raw)
 
 
 def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStreamPrep:
@@ -1616,7 +1640,8 @@ def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStre
     System's state is checked here, before any stream metadata goes out and
     before the abort bridge starts: the step size, the integrator and overrides
     (``Wrapper.check_tds_request``), the ``dae_vars`` names against the case,
-    the controllers against their devices, and the ``vars`` selector. A refusal
+    the controllers against their devices, the ``vars`` selector, and, with
+    ``names: "neutral"``, that every column has a neutral name. A refusal
     raises before the driver sends anything.
     """
     h = validate_step_size(args.get("h"))
@@ -1742,6 +1767,20 @@ def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStre
     var_columns = var_column_names(var_groups, ss, dae_names)
     collector = StreamCollector(ss, var_groups, dae_names)
 
+    # The request's naming mode (spec section 6.5): ``engine`` is the columns
+    # as ANDES names them, byte for byte what the stream always sent;
+    # ``neutral`` renames every column ``<quantity>|<key>`` and adds the two
+    # relative quantities as extra columns after the renamed ones.
+    names = _check_names_arg(args)
+    rel: _AndesRelFrames | None = None
+    if names == "neutral":
+        var_columns, rel = _neutral_stream_columns(
+            wrapper, ss, var_groups, var_columns, dae_names
+        )
+    # ``"names"`` is reported only when the request carried the field: a
+    # request without it keeps the metadata's keys exactly as they were.
+    names_extra: dict[str, str] = {"names": names} if args.get("names") is not None else {}
+
     # The hook is called before the step it names is solved, so a row is the
     # step before, under that step's time (``tensa.core.tds_steps``).
     clock = StepClock()
@@ -1753,14 +1792,20 @@ def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStre
         # As ANDES solved the step, not as an event at its time left it, and
         # under the time of that step.
         with stored_step(ss, solved):
-            return solved, collector.collect()
+            row = collector.collect()
+            if rel is not None:
+                row = rel.append(row)
+            return solved, row
 
     def final_row() -> tuple[float, Any] | None:
         last = clock.end(ss)
         if last is None:
             return None
         with stored_step(ss, last):
-            return last, collector.collect()
+            row = collector.collect()
+            if rel is not None:
+                row = rel.append(row)
+            return last, row
 
     plan = TdsStreamPlan(
         var_columns=var_columns,
@@ -1773,6 +1818,10 @@ def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStre
             "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
             "line_idx_values": [str(idx) for idx in line_idx_values],
             "pq_idx_values": [str(idx) for idx in pq_idx_values],
+            # Last, and only when the request named a mode: the keys above are
+            # the stream's byte-identity schema, which a request without
+            # ``names`` keeps exactly.
+            **names_extra,
         },
         collect=collect,
     )
@@ -1784,11 +1833,173 @@ def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStre
         integrator_raw=integrator_raw,
         tds_config_overrides=tds_config_overrides,
         dae_names=dae_names,
+        names=names,
         decimation=decimation_raw,
         max_rate_hz=max_rate_hz,
         fixed_step=fixed_step,
         final_row=final_row,
     )
+
+
+def _neutral_stream_columns(
+    wrapper: Wrapper,
+    ss: Any,
+    var_groups: list[VarGroup],
+    var_columns: list[str],
+    dae_names: list[str],
+) -> tuple[list[str], _AndesRelFrames]:
+    """The neutral names of a stream's columns, and the relative frames to add.
+
+    Every column is renamed with ``tensa.engines.series_names``: a group
+    column by ``neutral_name_andes``, a ``dae_vars`` column by
+    ``state_name_andes`` (``state|<key>#<variable>``). A column that has no
+    neutral name (an element the book does not key) raises
+    :class:`TdsRequestError` naming the columns, before the run starts: never
+    a stream with a column silently renamed or dropped.
+
+    The relative quantities follow the renamed columns: ``angle_rel|<bus
+    key>`` for every bus when the ``bus_v`` group is streamed, against the
+    reference bus (the bus of the first ``Slack`` device), and
+    ``rotor_angle_rel|<unit key>`` for every machine when the ``gen_state``
+    group is streamed, weighted by ``H * Sn`` (ANDES's ``M`` is ``2H`` on the
+    machine base ``Sn``, so ``M / 2 * Sn`` is the specification's inertia on a
+    common base).
+    """
+    book = wrapper.keys()
+    renamed: list[str] = []
+    unnamed: list[str] = []
+    for column in var_columns[: len(var_columns) - len(dae_names)]:
+        neutral = neutral_name_andes(column, book)
+        if neutral is None:
+            unnamed.append(column)
+        else:
+            renamed.append(neutral)
+    for name in dae_names:
+        neutral = state_name_andes(name, book)
+        if neutral is None:
+            unnamed.append(name)
+        else:
+            renamed.append(neutral)
+    if unnamed:
+        raise TdsRequestError(
+            f"no neutral name for column(s) {short_repr(unnamed, 80)}: the book "
+            "does not key the element; run with names 'engine' to stream them "
+            "as ANDES names them"
+        )
+
+    bus_angles: tuple[list[str], int] | None = None
+    if "bus_v" in var_groups:
+        bus_idx_values = bus_idx_values_from_system(ss)
+        bus_keys: list[str] = []
+        for idx in bus_idx_values:
+            key = book.key_of("Bus", idx)
+            if key is None:  # the columns above were renamed, so this cannot happen
+                raise TdsRequestError(f"the book does not key Bus {short_repr(idx)}")
+            bus_keys.append(key)
+        slack = getattr(ss, "Slack", None)
+        slack_idx = list(getattr(getattr(slack, "idx", None), "v", []))
+        if not slack_idx:
+            raise TdsRequestError(
+                "names 'neutral' streams angle_rel against the reference bus, "
+                "and the case has no Slack device to take it from"
+            )
+        try:
+            reference = bus_idx_values.index(slack_idx[0])
+        except ValueError as exc:
+            raise TdsRequestError(
+                f"the reference bus {short_repr(slack_idx[0])} of the first Slack "
+                "device is not a bus of the case"
+            ) from exc
+        bus_angles = (bus_keys, reference)
+        renamed += [build_name("angle_rel", key) for key in bus_keys]
+
+    rotor: tuple[list[str], Any] | None = None
+    if "gen_state" in var_groups:
+        syngen_idx_values = syngen_idx_values_from_system(ss)
+        unit_keys: list[str] = []
+        weights: list[float] = []
+        for idx in syngen_idx_values:
+            model = ss.SynGen.idx2model(idx)
+            entry = next(
+                (
+                    e
+                    for e in book.entries()
+                    if e.bucket == "dynamic" and e.model == model.class_name and str(e.idx) == str(idx)
+                ),
+                None,
+            )
+            if entry is None:  # the columns above were renamed, so this cannot happen
+                raise TdsRequestError(
+                    f"the book does not key {model.class_name} {short_repr(idx)}"
+                )
+            unit_keys.append(entry.key.partition("/")[0])
+            # ANDES's M is 2H on the machine base Sn; the weight is H * Sn.
+            weights.append(float(model.M.v[model.idx2uid(idx)]) / 2.0 * float(model.Sn.v[model.idx2uid(idx)]))
+        import numpy as np
+
+        rotor = (unit_keys, np.asarray(weights, dtype=np.float64))
+        renamed += [build_name("rotor_angle_rel", key) for key in unit_keys]
+
+    return renamed, _AndesRelFrames(ss, bus_angles, rotor)
+
+
+class _AndesRelFrames:
+    """Computes the relative quantities of one neutral-named stream's rows.
+
+    Reads the bus angles (``Bus.a.v``) and the machine rotor angles and
+    in-service flags (``delta`` and ``u`` of each SynGen member's model) off
+    the System at each step, under the same ``stored_step`` as the rest of the
+    row, so the relative values cross the pipe in the same row as the angles
+    they come from. One row is a ``(1, n)`` array for the ``frames``
+    functions.
+    """
+
+    def __init__(
+        self,
+        ss: Any,
+        bus_angles: tuple[list[str], int] | None,
+        rotor: tuple[list[str], Any] | None,
+    ) -> None:
+        self._bus = getattr(ss, "Bus", None) if bus_angles is not None else None
+        self._reference = bus_angles[1] if bus_angles is not None else 0
+        self._n_buses = len(bus_angles[0]) if bus_angles is not None else 0
+        self._rotor_parts: list[tuple[Any, Any]] = []
+        self._weights: Any = None
+        if rotor is not None:
+            unit_keys, weights = rotor
+            self._weights = weights
+            syngen = ss.SynGen
+            for idx in syngen.get_all_idxes():
+                model = syngen.idx2model(idx)
+                self._rotor_parts.append((model, model.idx2uid(idx)))
+            self._n_machines = len(unit_keys)
+        else:
+            self._n_machines = 0
+
+    def append(self, row: Any) -> Any:
+        """``row`` with the relative quantities of this step appended."""
+        import numpy as np
+
+        extra: list[float] = []
+        if self._bus is not None:
+            angles = np.asarray(self._bus.a.v, dtype=np.float64).reshape(1, self._n_buses)
+            extra.extend(float(v) for v in frames.angle_rel(angles, self._reference)[0])
+        if self._rotor_parts:
+            import numpy as np
+
+            angles = np.asarray(
+                [np.asarray(m.delta.v, dtype=np.float64)[uid] for m, uid in self._rotor_parts],
+                dtype=np.float64,
+            ).reshape(1, self._n_machines)
+            in_service = np.asarray(
+                [bool(np.asarray(m.u.v)[uid]) for m, uid in self._rotor_parts],
+                dtype=np.bool_,
+            ).reshape(1, self._n_machines)
+            rel = frames.rotor_angle_rel(angles, self._weights, in_service)[0]
+            extra.extend(float(v) for v in rel)
+        if not extra:
+            return row
+        return np.concatenate([row, np.asarray(extra, dtype=np.float64)])
 
 
 def _handle_run_tds(
@@ -1835,6 +2046,7 @@ def _handle_run_tds(
         tds_config_overrides = prep.tds_config_overrides
         dae_names = prep.dae_names
         controllers = prep.controllers
+        trace_names: list[str] | None = None
     else:
         h = validate_step_size(args.get("h"))
 
@@ -1880,6 +2092,31 @@ def _handle_run_tds(
         # The run's controllers (``tensa.core.tds_controllers``).
         controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
 
+        # The names the recorded traces carry: with ``names: "neutral"`` each
+        # variable is renamed ``state|<key>#<variable>``, and a name that
+        # cannot be renamed fails the request before the run, as the stream's
+        # rule 3 does. No relative quantities are added to the batch traces.
+        names = _check_names_arg(args)
+        if names == "neutral":
+            book = wrapper.keys()
+            renamed_traces: list[str] = []
+            unnamed = []
+            for name in dae_names:
+                neutral = state_name_andes(name, book)
+                if neutral is None:
+                    unnamed.append(name)
+                else:
+                    renamed_traces.append(neutral)
+            if unnamed:
+                raise TdsRequestError(
+                    f"no neutral name for variable(s) {short_repr(unnamed, 80)}: "
+                    "the book does not key the device; run with names 'engine' "
+                    "to record them as ANDES names them"
+                )
+            trace_names = renamed_traces
+        else:
+            trace_names = None
+
     abort_flag = threading.Event()
     if abort_event.is_set():
         abort_flag.set()
@@ -1890,7 +2127,10 @@ def _handle_run_tds(
     record_step: Callable[[float], None] | None = None
     if not stream and dae_names:
         loaded = wrapper._require_loaded()  # noqa: SLF001
-        recorder = TraceRecorder(StreamCollector(loaded, [], dae_names), dae_names)
+        recorder = TraceRecorder(
+            StreamCollector(loaded, [], dae_names),
+            trace_names if trace_names is not None else dae_names,
+        )
         kept = recorder
 
         def _keep(t: float) -> None:

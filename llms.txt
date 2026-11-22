@@ -143,7 +143,13 @@ Simulation:      POST /sessions/{id}/sim  (Sienna only; body {"load_profile": 96
                  2026-01-01T00:00:00, step j of RT is 15 minutes times j; "slacks" lists every slack variable
                  of either stage past 1e-6 MW with its step; 422 for a bad profile or a case with no generator
                  cost data (a PSS/E .raw case carries none), 409 on an ANDES session)
-TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers)
+TDS:             POST /sessions/{id}/tds  (batch; body: tf, optional h, integrator, tds_config_overrides, dae_vars, controllers, names)
+                 names: "engine" (default, the series named as the engine names them) or "neutral" (each series
+                 <quantity>|<key>: voltage|bus:7, rotor_speed|gen:1-1, a dae_vars variable state|<key>#<variable>;
+                 a streamed run then also carries angle_rel|<bus key> of every bus against the reference bus when
+                 bus_v is streamed and rotor_angle_rel|<unit key> of every machine when gen_state is; a series with
+                 no neutral name is 422 before anything runs; a Sienna session's names are already neutral and the
+                 field changes nothing). The start_tds frame takes the same field.
                  integrator: trapezoidal (default, fixed step h) | backeuler (fixed step h, first order) | trap_adapt |
                  qndf (variable step, error control from tds_config_overrides rtol/atol, bounds max_step/min_step; h
                  ignored). Same values in the start_tds frame. qndf after steps taken with another integrator: 422,
@@ -370,7 +376,10 @@ first command frame. Close codes: 4404 unknown session, 4500 worker error.
 
 WS /api/ws/{session_id}              TDS live stream. Send {"type":"start_tds","tf":5.0}, optionally with
                                      "vars" (groups bus_v gen_state gen_power line_flow load_pq), "dae_vars" (ANDES
-                                     variable names, each one more column named as given) and "controllers" (as on
+                                     variable names, each one more column named as given), "names" ("engine" or
+                                     "neutral", as on POST /tds: neutral renames every column <quantity>|<key> and
+                                     adds angle_rel and rotor_angle_rel columns; the metadata's "names" echoes the
+                                     field when it was sent, and is absent when it was not) and "controllers" (as on
                                      POST /tds; the "done" frame then carries "controllers" without the traces);
                                      server replies {"type":"stream_start",...} (metadata.var_columns
                                      names the columns once) then BINARY Apache Arrow IPC chunks, one

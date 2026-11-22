@@ -118,6 +118,12 @@ async def run_tds(
         "h": body.h,
         "integrator": body.integrator,
     }
+    # ``names`` is forwarded only when the body carried it: the schema's
+    # default is "engine", and a request without the field must answer byte
+    # for byte what it always did (the stream's metadata gains no "names"
+    # key). ``model_fields_set`` tells the two apart.
+    if "names" in body.model_fields_set:
+        args["names"] = body.names
     if body.ext_sienna is not None:
         record = mgr._sessions.get(session_id)  # noqa: SLF001 - the route reads the engine off the session record; the manager exposes no public getter for it
         engine = getattr(record, "engine", "andes") if record is not None else "andes"

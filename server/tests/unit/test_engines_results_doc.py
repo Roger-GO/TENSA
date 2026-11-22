@@ -281,6 +281,47 @@ def test_tds_document_andes_unknown_column_is_skipped() -> None:
     assert "no neutral mapping" in skipped[0].reason
 
 
+def test_tds_document_andes_neutral_names_taken_as_they_are() -> None:
+    # A column that is already a neutral name (it parses with parse_name) is
+    # taken as it is for an ANDES result too: a run made with names "neutral"
+    # converts to the same document as an engine-named one.
+    traces = TdsTraces(
+        t=[0.0, 0.1],
+        variables=[
+            TdsTraceSeries(name="voltage|bus:7", values=[1.0, 0.9]),
+            TdsTraceSeries(name="rotor_speed|gen:1-1", values=[1.0, 1.001]),
+            TdsTraceSeries(name="state|gen:1-1/machine#omega", values=[1.0, 1.002]),
+        ],
+        truncated=False,
+    )
+
+    doc, skipped, notes = tds_document(traces, engine=ENGINE, study=None, key_book=KeyBook())
+
+    assert skipped == []
+    assert notes == []
+    assert [(s.quantity, s.of, s.unit) for s in doc.series] == [
+        ("voltage", "bus:7", "pu"),
+        ("rotor_speed", "gen:1-1", "pu"),
+        ("state", "gen:1-1/machine#omega", "engine's own"),
+    ]
+    assert doc.series[2].y == [1.0, 1.002]
+
+
+def test_tds_document_andes_neutral_name_unknown_quantity_is_skipped() -> None:
+    traces = TdsTraces(
+        t=[0.0],
+        variables=[TdsTraceSeries(name="slip|gen:1-1", values=[0.01])],
+        truncated=False,
+    )
+
+    doc, skipped, _notes = tds_document(traces, engine=ENGINE, study=None, key_book=KeyBook())
+
+    assert doc.series == []
+    assert [(s.name, s.reason) for s in skipped] == [
+        ("slip|gen:1-1", "no neutral mapping for the ANDES column")
+    ]
+
+
 def test_tds_document_dae_vars_are_skipped_with_the_reason() -> None:
     traces = TdsTraces(
         t=[0.0, 0.1],
