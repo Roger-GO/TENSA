@@ -54,6 +54,7 @@ from tensa.api.routes.elements import router as elements_router
 from tensa.api.routes.engines import router as engines_router
 from tensa.api.routes.examples import router as examples_router
 from tensa.api.routes.external_results import router as external_results_router
+from tensa.api.routes.fidelity import router as fidelity_router
 from tensa.api.routes.health import router as health_router
 from tensa.api.routes.jobs import router as jobs_router
 from tensa.api.routes.keys import router as keys_router
@@ -373,6 +374,7 @@ def make_app(
     app.include_router(network_matrix_router, prefix="/api", tags=["network-matrix"])
     app.include_router(keys_router, prefix="/api", tags=["keys"])
     app.include_router(case_document_router, prefix="/api", tags=["case-document"])
+    app.include_router(fidelity_router, prefix="/api", tags=["fidelity"])
     app.include_router(pflow_router, prefix="/api", tags=["pflow"])
     app.include_router(dispatch_router, prefix="/api", tags=["dispatch"])
     app.include_router(disturbances_router, prefix="/api", tags=["disturbances"])

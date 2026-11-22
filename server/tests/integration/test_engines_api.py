@@ -31,6 +31,7 @@ _SIENNA_OPS = [
     "delete_element",
     "edit_element",
     "eig_participation",
+    "fidelity",
     "init_tds",
     "list_disturbances",
     "list_keys",

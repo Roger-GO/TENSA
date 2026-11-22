@@ -1,0 +1,12 @@
+[
+  {
+    "id": "tgov1-torque",
+    "model": "TGOV1",
+    "engines": ["andes", "sienna"],
+    "summary": "Sienna hands the machine a torque of P_m / omega; ANDES hands it P_m.",
+    "effect": "Sienna is more damped: equivalent to D raised by P_m0 (machine base) on the unit in ANDES.",
+    "small_signal": true,
+    "evidence": "Kundur, GENROU + TGOV1: ANDES with D = P_m0 reproduces Sienna's eigenvalues to four digits.",
+    "check": "server/tests/integration/test_known_differences.py::test_tgov1_torque"
+  }
+]

@@ -97,6 +97,10 @@ from tensa.api.schemas.external_results import (
     ExternalResultsResponse,
     ExternalSeries,
 )
+from tensa.api.schemas.fidelity import (
+    FidelityEntry,
+    FidelityReport,
+)
 from tensa.api.schemas.jobs import (
     JobKindSchema,
     JobRecordSchema,
@@ -274,6 +278,8 @@ __all__ = [
     "ExternalResultsResponse",
     "ExternalSeries",
     "FaultSpec",
+    "FidelityEntry",
+    "FidelityReport",
     "GeneratorOutput",
     "GeneratorRecord",
     "JobKindSchema",

@@ -88,6 +88,11 @@ Case+topology:   POST /sessions/{id}/case · POST /sessions/{id}/reload · GET /
                  row, dense kinds) or entries (the nonzeros of ybus as {row, col, re, im})}; each axis entry is an arc
                  {from, to, keys} (the keys of every branch on the arc) or a bus {bus, key}; 422 for an unknown kind
                  or past 250000 entries, 409 on an ANDES session, which has GET /sessions/{id}/ybus)
+Fidelity:        GET /sessions/{id}/fidelity  (the elements of the loaded case whose fidelity is not exact,
+                 spec section 8: one entry per dynamic model that is known-difference:<id>, unverified or
+                 unsupported (with handling and reason), sorted by key; ANDES is the reference engine, so an
+                 ANDES session whose dynamics are all common models answers an empty list; 409 when no case
+                 has been loaded)
 Keys:            GET /sessions/{id}/keys  (every element's key, each with bucket, model, idx and source, plus
                  "problems"; empty lists when no case is loaded. Every TopologyEntry also carries "key", the
                  topology carries "has_dynamics", and a pflow result carries "keys": per kind (bus, line,

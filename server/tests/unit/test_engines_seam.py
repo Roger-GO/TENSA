@@ -70,6 +70,7 @@ def test_sienna_ops_are_the_literal_twenty_one() -> None:
             "reload_case",
             "topology",
             "operating_point",
+            "fidelity",
             "run_pflow",
             "list_keys",
             "network_matrix",
@@ -89,6 +90,12 @@ def test_sienna_ops_are_the_literal_twenty_one() -> None:
             "run_tds",
         }
     )
+
+
+def test_fidelity_is_an_op_of_both_engines() -> None:
+    assert "fidelity" in ENGINE_OPS["andes"]
+    assert "fidelity" in ENGINE_OPS["sienna"]
+    assert engines_with_op("fidelity") == ["andes", "sienna"]
 
 
 def test_case_document_is_an_op_of_both_engines() -> None:
@@ -204,6 +211,7 @@ def test_engine_capabilities_andes() -> None:
         "routines",
         "routine_options",
         "ops",
+        "models",
         "editing",
     }
     # The power flow methods of core/pflow_options.py, by name.
@@ -233,6 +241,7 @@ def test_engine_capabilities_sienna_unavailable(
         "formats",
         "routines",
         "ops",
+        "models",
         "editing",
     }
     assert caps["available"] is False
@@ -241,6 +250,7 @@ def test_engine_capabilities_sienna_unavailable(
     assert caps["formats"] == {"read": [], "write": []}
     assert caps["routines"] == []
     assert caps["ops"] == []
+    assert caps["models"] == {}
     assert caps["editing"] is False
 
 
@@ -283,6 +293,9 @@ def test_engine_capabilities_sienna_available(
     assert "run_eig" in caps["ops"]
     assert "run_tds" in caps["ops"]
     assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
+    assert caps["models"]["TGOV1"] == "known-difference:tgov1-torque"
+    assert caps["models"]["GENROU"] == "unverified"
+    assert len(caps["models"]) == 14
     assert caps["editing"] is True
 
 

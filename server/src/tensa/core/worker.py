@@ -608,6 +608,18 @@ def _handle_operating_point(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     return _serialize_dataclass(wrapper.operating_point())
 
 
+def _handle_fidelity(wrapper: Wrapper, args: dict[str, Any]) -> Any:
+    """The fidelity entries of the loaded case: none. ANDES is the reference
+    engine for every model it holds (spec section 8), and its reader reports no
+    record it left out, so nothing of an ANDES case is other than exact. The
+    case must be loaded: with none the wrapper's :class:`NoCaseLoadedError`
+    propagates, as the ``topology`` op's does."""
+    from tensa.engines.fidelity import fidelity_entries
+
+    wrapper.topology_snapshot()
+    return fidelity_entries("andes", [], [])
+
+
 def _handle_case_document(wrapper: Wrapper, args: dict[str, Any]) -> Any:
     """The neutral case document of the loaded case (spec section 5). With no
     case loaded the wrapper's :class:`NoCaseLoadedError` propagates, as the
@@ -2024,6 +2036,7 @@ HANDLERS: dict[str, Callable[..., Any]] = {
     "topology": _handle_topology,
     "list_keys": _handle_list_keys,
     "operating_point": _handle_operating_point,
+    "fidelity": _handle_fidelity,
     "case_document": _handle_case_document,
     "add_disturbance": _handle_add_disturbance,
     "list_disturbances": _handle_list_disturbances,

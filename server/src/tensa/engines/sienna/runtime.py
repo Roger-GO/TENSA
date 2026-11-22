@@ -463,6 +463,21 @@ def _handle_run_dispatch(state: SiennaState, args: dict[str, Any]) -> Any:
     )
 
 
+def _handle_fidelity(state: SiennaState, args: dict[str, Any]) -> Any:
+    """The fidelity entries of the loaded case. With no case loaded the
+    state's :class:`NoCaseLoadedError` propagates, as ``topology``'s does."""
+    from tensa.engines.fidelity import fidelity_entries
+
+    topology, report, _document, _identity, _book, _path, _addfiles = (
+        state.case_document_parts()
+    )
+    return fidelity_entries(
+        "sienna",
+        list(topology.get("dynamics", [])),
+        list((report or {}).get("unsupported", [])),
+    )
+
+
 def _handle_case_document(state: SiennaState, args: dict[str, Any]) -> Any:
     """The neutral case document of the loaded case. With no case loaded the
     state's :class:`NoCaseLoadedError` propagates, as ``topology``'s does."""
@@ -504,6 +519,7 @@ _HANDLERS: dict[str, Any] = {
     "reload_case": _handle_reload_case,
     "topology": _handle_topology,
     "operating_point": _handle_operating_point,
+    "fidelity": _handle_fidelity,
     "run_pflow": _handle_run_pflow,
     "list_keys": _handle_list_keys,
     "network_matrix": _handle_network_matrix,

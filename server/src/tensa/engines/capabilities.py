@@ -15,6 +15,7 @@ import importlib.metadata
 from typing import Any
 
 from tensa.core.pflow_options import METHODS
+from tensa.engines.fidelity import models_map
 from tensa.engines.ops import ENGINE_NAMES, ENGINE_OPS
 from tensa.engines.registry import engine_unavailable_reason
 
@@ -31,6 +32,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "formats": {"read": [], "write": []},
             "routines": [],
             "ops": [],
+            "models": {},
             "editing": False,
         }
     if name == "sienna":
@@ -69,6 +71,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
                 },
             },
             "ops": sorted(ENGINE_OPS[name]),
+            "models": models_map(name),
             # Edits the fields and adds the kinds ``routine_options.edit`` lists.
             "editing": True,
         }
@@ -88,6 +91,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             },
         },
         "ops": sorted(ENGINE_OPS[name]),
+        "models": models_map(name),
         "editing": True,
     }
 
