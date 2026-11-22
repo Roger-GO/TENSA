@@ -41,6 +41,7 @@ import { useTheme } from '@/lib/useTheme';
 import type { ResolvedTheme } from '@/store/theme';
 import { useExternalOverlaysStore } from '@/store/externalOverlays';
 import type { ExternalOverlayTrace } from '@/store/externalOverlays';
+import { useCompareViewStore } from '@/store/compareView';
 import { LazyMount } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
 import { cn } from '@/lib/cn';
@@ -1138,6 +1139,12 @@ export function TimeSeriesPlot({
                 label: 'Import external result…',
                 hint: 'Overlay a TSAT or PSS/E export (.xlsx) on this plot',
                 onSelect: openExternalDialog,
+              },
+              {
+                id: 'compare-results',
+                label: 'Compare results…',
+                hint: 'Two runs or results files side by side, with tolerances',
+                onSelect: () => useCompareViewStore.getState().openCompareView(),
               },
             ]}
           />

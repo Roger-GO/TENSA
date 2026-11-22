@@ -59,6 +59,7 @@ import { redoTarget, undoTarget, useLayoutHistoryStore } from '@/store/layoutHis
 import { useReportDialogStore } from '@/store/reportDialog';
 import { useYbusDialogStore } from '@/store/ybusDialog';
 import { useNetworkMatrixStore } from '@/store/networkMatrix';
+import { useCompareViewStore } from '@/store/compareView';
 import {
   useAbortRun,
   useCloneRedo,
@@ -1114,6 +1115,27 @@ function useCommandSets(): CommandSets {
           }
           return 'Open a case first: the matrix is of the loaded case.';
         },
+      },
+      // Two results documents side by side: two kept runs, or a results
+      // document file for either side. Always offered: two files need no run.
+      {
+        id: 'view.compareResults',
+        label: 'Compare results…',
+        description:
+          'Two results side by side: the operating point first, then per quantity and element the largest and RMS difference against tolerances you can change, and the eigenvalue modes matched side by side.',
+        group: 'view',
+        keywords: [
+          'compare',
+          'difference',
+          'diff',
+          'delta',
+          'results',
+          'runs',
+          'tolerance',
+          'eigenvalues',
+          'a vs b',
+        ],
+        action: () => useCompareViewStore.getState().openCompareView(),
       },
       // v3.1 — full-space results view. Toggles
       // ``useLayoutStore.resultsViewActive``, which makes the AppShell

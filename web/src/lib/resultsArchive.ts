@@ -35,6 +35,7 @@
  */
 import type { PflowHistoryPayload, PflowSnapshot } from '@/store/pflowHistory';
 import type { RunRecord, RunState } from '@/store/runs';
+import type { KeyEntrySchema } from '@/api/queries/compare';
 import { isFiniteNumber } from '@/lib/finite';
 
 export const RESULTS_DB_NAME = 'tensa-results';
@@ -166,7 +167,32 @@ export function runFromArchive(meta: unknown, data: unknown): RunRecord | null {
     if (!isFloat64Array(column) || column.length !== seqCount) return null;
     columns[name] = column;
   }
-  return { ...(meta as unknown as ArchivedRunMeta), t, columns };
+  const run = { ...(meta as unknown as ArchivedRunMeta), t, columns };
+  // The engine and keys a run records when it starts are optional: a run kept
+  // before they were recorded has none. One that is there but not what this
+  // version writes is dropped, and the run is kept without it.
+  if (run.engine !== undefined && (typeof run.engine !== 'string' || run.engine.length === 0)) {
+    delete run.engine;
+  }
+  if (run.keys !== undefined && !isKeyListing(run.keys)) {
+    delete run.keys;
+  }
+  return run;
+}
+
+/** The key listing as the session's ``GET /sessions/{id}/keys`` answered it. */
+function isKeyListing(value: unknown): value is KeyEntrySchema[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.key === 'string' &&
+        typeof entry.bucket === 'string' &&
+        typeof entry.model === 'string' &&
+        (typeof entry.idx === 'string' || typeof entry.idx === 'number'),
+    )
+  );
 }
 
 function isPflowSnapshot(value: unknown): value is PflowSnapshot {

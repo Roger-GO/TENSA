@@ -56,6 +56,8 @@ import {
   shouldGiveUp,
 } from './reconnect';
 import { useRunsStore } from '@/store/runs';
+import { useSessionStore } from '@/store/session';
+import { fetchKeyListing } from '@/api/queries/compare';
 import type { TdsControllerResult } from '@/api/types';
 import type { TdsControllerSpec } from '@/lib/tdsControllers';
 import type { UnitBases } from '@/lib/units';
@@ -620,6 +622,20 @@ export class RunStream {
         ...(this.opts.disturbedAt === undefined ? {} : { disturbedAt: this.opts.disturbedAt }),
         ...(this.opts.caseName === undefined ? {} : { caseName: this.opts.caseName }),
       });
+      // Record the engine and the session's key listing on the run, so a later
+      // comparison can build its results document. A failed fetch leaves both
+      // unset and is only logged: the run itself does not depend on it.
+      const engine = useSessionStore.getState().engine ?? 'andes';
+      fetchKeyListing(this.opts.sessionId).then(
+        (keys) => {
+          // The record outlives the stream; the store ignores a run it no
+          // longer holds.
+          useRunsStore.getState().setRunIdentity(runId, engine, keys);
+        },
+        (err: unknown) => {
+          log.warn('[RunStream] could not fetch the key listing for the run', err);
+        },
+      );
       this.opts.onStart?.({ runId, metadata });
     } else {
       // Resume: clear "reconnecting" status now that we have a fresh

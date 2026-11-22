@@ -47,6 +47,7 @@ import { useExampleCasesStore } from '@/store/exampleCases';
 import { useYbusDialogStore } from '@/store/ybusDialog';
 import { useNetworkMatrixStore } from '@/store/networkMatrix';
 import { useModelDocStore } from '@/store/modelDoc';
+import { CompareViewHost } from '@/components/compare/CompareViewHost';
 import { ComponentDropZone } from '@/components/sld/ComponentDropZone';
 import { LazyMount, LoadingPanel } from '@/components/ui/Lazy';
 import { lazyNamed } from '@/lib/lazyNamed';
@@ -463,6 +464,7 @@ export function App() {
               <YbusDialogHost />
               <NetworkMatrixHost />
               <ModelDocHost />
+              <CompareViewHost />
             </>
           }
         />

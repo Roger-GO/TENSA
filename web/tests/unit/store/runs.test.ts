@@ -795,6 +795,32 @@ describe('runs store — per-run displayName + colorOverride (Unit 20 v2.0)', ()
   });
 });
 
+describe('runs store — setRunIdentity', () => {
+  beforeEach(reset);
+  afterEach(reset);
+
+  it('records the engine and the key listing on the run', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_7_v'] });
+    const keys = [{ key: 'bus:7', bucket: 'bus', model: 'Bus', idx: 7, source: 'file' }];
+    useRunsStore.getState().setRunIdentity('r1', 'andes', keys);
+    const run = useRunsStore.getState().runs.r1!;
+    expect(run.engine).toBe('andes');
+    expect(run.keys).toEqual(keys);
+  });
+
+  it('is a no-op for an unknown run id', () => {
+    useRunsStore.getState().setRunIdentity('ghost', 'andes', []);
+    expect(useRunsStore.getState().runs.ghost).toBeUndefined();
+  });
+
+  it('leaves a run without them as it was: no engine and no keys', () => {
+    useRunsStore.getState().startRun({ runId: 'r1', tf: 1.0, columnNames: ['Bus_7_v'] });
+    const run = useRunsStore.getState().runs.r1!;
+    expect(run).not.toHaveProperty('engine');
+    expect(run).not.toHaveProperty('keys');
+  });
+});
+
 describe('runs store — dropUnfinishedRuns', () => {
   beforeEach(reset);
   afterEach(reset);

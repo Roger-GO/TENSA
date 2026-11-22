@@ -55,3 +55,4 @@ export * from './clone';
 export * from './externalResults';
 export * from './ybus';
 export * from './networkMatrix';
+export * from './compare';
