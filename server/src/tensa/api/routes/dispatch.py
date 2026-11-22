@@ -60,10 +60,10 @@ def _manager(request: Request) -> SessionManager:
         422: {
             "model": ProblemDetails,
             "description": (
-                "The network model is not one of copper_plate, dc, ptdf, or the "
-                "case has no generator cost data (economic dispatch needs the "
-                "gencost records of a MATPOWER case; a PSS/E .raw case carries "
-                "none)."
+                "The network model is not one of copper_plate, dc, ptdf, ac, "
+                "or the case has no generator cost data (economic dispatch "
+                "needs the gencost records of a MATPOWER case; a PSS/E .raw "
+                "case carries none)."
             ),
         },
     },
@@ -74,14 +74,18 @@ async def run_dispatch(
     request: Request,
 ) -> DispatchResponse:
     """Solve the one-period economic dispatch of the loaded case of a Sienna
-    session, with PowerSimulations and HiGHS: on a deep copy of the system
-    every load is given a one-step forecast, the ramp limits are taken off
-    (one period has nothing to ramp from), and the cost curves are labelled
-    as natural units so the objective is the true cost in $/h of power in MW;
-    the answer carries the solver's objective and the cost recomputed
-    from the dispatch and the file's own gencost coefficients, which agree.
-    The generators are keyed by their neutral key, and every slack variable
-    past 1e-6 MW is reported. Duals are read back only when asked for.
+    session, with PowerSimulations: on a deep copy of the system every load is
+    given a one-step forecast, the ramp limits are taken off (one period has
+    nothing to ramp from), and the cost curves are labelled as natural units
+    so the objective is the true cost in $/h of power in MW; the answer
+    carries the solver's objective and the cost recomputed from the dispatch
+    and the file's own gencost coefficients, which agree. The linear models
+    solve with HiGHS. With network_model ac the model holds the full AC power
+    flow equations and is solved with Ipopt, and the answer also carries the
+    bus voltages and angles, the generator reactive powers, the branch flows
+    at both ends and the losses. The generators are keyed by their neutral
+    key, and every slack variable past 1e-6 MW is reported. Duals are read
+    back only when asked for.
     """
     mgr = _manager(request)
     try:
@@ -110,10 +114,11 @@ async def run_dispatch(
                 detail=exc.detail,
             ) from exc
         raise map_worker_error(exc) from exc
-    # The worker's payload keys the generators by the PowerSystems name (the
+    # The worker's payload keys the elements by the PowerSystems name (the
     # idx); the answer keys them by the neutral key, with the idx inside. The
     # id is the key's (gen:<bus>-<id>): the one the engine reads off the name
-    # is, for a MATPOWER generator, its row in the file.
+    # is, for a MATPOWER generator, its row in the file. A branch's ckt is
+    # the key's for the same reason.
     generators: dict[str, Any] = {}
     by_idx = payload.get("generators", {})
     key_of = payload.get("keys", {}).get("generator", {})
@@ -123,5 +128,25 @@ async def run_dispatch(
             generators[str(idx)] = {**row, "idx": idx}
             continue
         generators[key] = {**row, "idx": idx, "id": key.split(":", 1)[1].split("-", 1)[1]}
-    answer = {**payload, "engine": "sienna", "generators": generators}
+    buses: dict[str, Any] = {}
+    for idx, row in payload.get("buses", {}).items():
+        key = payload.get("keys", {}).get("bus", {}).get(idx)
+        buses[key if key is not None else str(idx)] = {**row, "idx": idx}
+    # The worker answers the state's DispatchResult, whose branches carry
+    # from_bus and to_bus as the response schema names them.
+    branches: dict[str, Any] = {}
+    for idx, row in payload.get("branches", {}).items():
+        renamed = {**row, "idx": idx}
+        key = payload.get("keys", {}).get("branch", {}).get(idx)
+        if key is None:
+            branches[str(idx)] = renamed
+            continue
+        branches[key] = {**renamed, "ckt": key.rsplit("-", 1)[1]}
+    answer = {
+        **payload,
+        "engine": "sienna",
+        "generators": generators,
+        "buses": buses,
+        "branches": branches,
+    }
     return DispatchResponse.model_validate(answer)

@@ -47,6 +47,36 @@ def _payload() -> dict[str, Any]:
     }
 
 
+def _ac_payload() -> dict[str, Any]:
+    """A recorded AC answer: one bus, one branch, one generator with q_mvar,
+    and the total losses. The numbers are a hand example: 90 MW in at the
+    from end, 88.5 MW out at the to end, 1.5 MW of losses."""
+    payload = _payload()
+    payload["network_model"] = "ac"
+    payload["generators"] = [
+        {"name": "gen-1", "bus": 1, "id": "1", "p_mw": 90.0, "q_mvar": 12.5},
+    ]
+    payload["buses"] = [
+        {"name": "bus-1", "bus": 1, "v_pu": 1.05, "angle_rad": 0.0},
+    ]
+    payload["branches"] = [
+        {
+            "name": "branch-1-2-1",
+            "from": 1,
+            "to": 2,
+            "ckt": "1",
+            "p_from_mw": 90.0,
+            "q_from_mvar": 20.0,
+            "p_to_mw": -88.5,
+            "q_to_mvar": -18.0,
+            "losses_mw": 1.5,
+            "losses_mvar": 2.0,
+        },
+    ]
+    payload["total_losses_mw"] = 1.5
+    return payload
+
+
 def _book() -> KeyBook:
     """The book a load of the two-generator case holds: the buses, and each
     generator under its neutral key (the slack at bus 1, a PV at bus 2)."""
@@ -55,6 +85,17 @@ def _book() -> KeyBook:
     book.assign(KeyEntry("bus:2", "bus", "Bus", 2, "engine"))
     book.assign(KeyEntry("gen:1-1", "generator", "Slack", "generator-1-1", "engine"))
     book.assign(KeyEntry("gen:2-1", "generator", "PV", "generator-2-1", "engine"))
+    return book
+
+
+def _ac_book() -> KeyBook:
+    """The book of the recorded AC answer, as assign_sienna_keys fills it: a
+    bus under its number, a line under the ``line`` bucket by its component
+    name, a generator by its component name."""
+    book = KeyBook()
+    book.assign(KeyEntry("bus:1", "bus", "Bus", 1, "engine"))
+    book.assign(KeyEntry("branch:1-2-1", "line", "Line", "branch-1-2-1", "engine"))
+    book.assign(KeyEntry("gen:1-1", "generator", "Slack", "gen-1", "engine"))
     return book
 
 
@@ -91,7 +132,9 @@ def test_generators_and_keys() -> None:
         "generator": {
             "generator-1-1": "gen:1-1",
             "generator-2-1": "gen:2-1",
-        }
+        },
+        "bus": {},
+        "branch": {},
     }
 
 
@@ -118,7 +161,7 @@ def test_a_matpower_generator_is_keyed_by_its_name_not_its_row() -> None:
         {"name": "gen-2", "bus": 2, "id": "2", "p_mw": 120.0},
     ]
     result = dispatch_result(payload, book)
-    assert result.keys == {"generator": {"gen-1": "gen:2-2", "gen-2": "gen:2-1"}}
+    assert result.keys["generator"] == {"gen-1": "gen:2-2", "gen-2": "gen:2-1"}
 
 
 def test_only_a_generator_entry_keys_a_generator() -> None:
@@ -129,7 +172,7 @@ def test_only_a_generator_entry_keys_a_generator() -> None:
     book.assign(KeyEntry("gen:1-1/machine", "dynamic", "GENROU", "generator-1-1", "engine"))
     book.assign(KeyEntry("gen:2-1", "generator", "PV", "generator-2-1", "engine"))
     result = dispatch_result(_payload(), book)
-    assert result.keys == {"generator": {"generator-2-1": "gen:2-1"}}
+    assert result.keys["generator"] == {"generator-2-1": "gen:2-1"}
 
 
 def test_distinct_objectives_are_carried_apart() -> None:
@@ -166,11 +209,71 @@ def test_notes_are_texts() -> None:
 
 def test_check_network_model() -> None:
     assert check_network_model("dc") == "dc"
+
+
+def test_check_network_model_ac() -> None:
+    assert check_network_model("ac") == "ac"
+
+
+def test_check_network_model_rejects_unknown() -> None:
     with pytest.raises(DispatchRequestError) as excinfo:
-        check_network_model("ac")
+        check_network_model("sdp")
     assert str(excinfo.value) == (
-        "network_model must be copper_plate, dc or ptdf, got 'ac'"
+        "network_model must be copper_plate, dc, ptdf or ac, got 'sdp'"
     )
+
+
+def test_dispatch_result_ac_fields() -> None:
+    result = dispatch_result(_ac_payload(), _ac_book())
+    assert result.buses["bus-1"].v_pu == 1.05
+    assert result.buses["bus-1"].bus == 1
+    assert result.buses["bus-1"].angle_rad == 0.0
+    assert result.branches["branch-1-2-1"].losses_mw == 1.5
+    # The losses are the sum of the two ends: 90.0 + (-88.5) = 1.5 MW.
+    assert (
+        result.branches["branch-1-2-1"].p_from_mw
+        + result.branches["branch-1-2-1"].p_to_mw
+        == result.branches["branch-1-2-1"].losses_mw
+    )
+    assert result.branches["branch-1-2-1"].losses_mvar == 2.0
+    assert result.generators["gen-1"].q_mvar == 12.5
+    assert result.total_losses_mw == 1.5
+    assert result.keys == {
+        "generator": {"gen-1": "gen:1-1"},
+        "bus": {"bus-1": "bus:1"},
+        "branch": {"branch-1-2-1": "branch:1-2-1"},
+    }
+
+
+def test_dispatch_result_lossless_has_no_ac_fields() -> None:
+    result = dispatch_result(_payload(), _book())
+    assert result.buses == {}
+    assert result.branches == {}
+    assert result.total_losses_mw is None
+    assert result.generators["generator-1-1"].q_mvar is None
+    assert result.keys["bus"] == {}
+    assert result.keys["branch"] == {}
+
+
+def test_dispatch_result_unmatched_names_have_no_key() -> None:
+    payload = _ac_payload()
+    payload["branches"] = [
+        {
+            "name": "branch-4-5-1",
+            "from": 4,
+            "to": 5,
+            "ckt": "1",
+            "p_from_mw": 10.0,
+            "q_from_mvar": 1.0,
+            "p_to_mw": -9.9,
+            "q_to_mvar": -0.9,
+            "losses_mw": 0.1,
+            "losses_mvar": 0.1,
+        },
+    ]
+    result = dispatch_result(payload, _ac_book())
+    assert result.branches["branch-4-5-1"].losses_mw == 0.1
+    assert result.keys["branch"] == {}
 
 
 class FakeBridge:
@@ -226,13 +329,20 @@ def test_run_dispatch_passes_duals(tmp_path: Path) -> None:
     assert bridge.calls == [(state._session, "dc", True)]  # noqa: SLF001
 
 
+def test_run_dispatch_accepts_ac(tmp_path: Path) -> None:
+    bridge = FakeBridge()
+    state = _loaded_state(tmp_path, bridge)
+    state.run_dispatch("ac")
+    assert bridge.calls == [(state._session, "ac", False)]  # noqa: SLF001
+
+
 def test_run_dispatch_refuses_a_bad_network_model(tmp_path: Path) -> None:
     bridge = FakeBridge()
     state = _loaded_state(tmp_path, bridge)
     with pytest.raises(DispatchRequestError) as excinfo:
-        state.run_dispatch("ac")
+        state.run_dispatch("sdp")
     assert str(excinfo.value) == (
-        "network_model must be copper_plate, dc or ptdf, got 'ac'"
+        "network_model must be copper_plate, dc, ptdf or ac, got 'sdp'"
     )
     assert bridge.calls == []
 

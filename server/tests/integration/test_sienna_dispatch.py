@@ -46,6 +46,29 @@ mpc.gencost = [
 ];
 """
 
+# The two-bus AC hand case: bus 1 the reference with generator A (10 $/MWh),
+# bus 2 with generator B (20 $/MWh) and a load of P = 100 MW, Q = 30 MVAr,
+# one line 1-2 of r = 0.02 pu, x = 0.1 pu, b = 0, no rating, 100 MVA base.
+_TWO_BUS_AC = """function mpc = two_bus
+mpc.version = '2';
+mpc.baseMVA = 100.0;
+mpc.bus = [
+  1  3  0  0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;
+  2  1  100.0  30.0  0  0  1  1.0  0.0  230.0  1  1.1  0.9;
+];
+mpc.gen = [
+  1  0  0  9999  -9999  1.0  100.0  1  200.0  0  0  0  0  0  0  0  0  0  0  0  0;
+  2  0  0  9999  -9999  1.0  100.0  1  200.0  0  0  0  0  0  0  0  0  0  0  0  0;
+];
+mpc.branch = [
+  1  2  0.02  0.1  0.0  0  0  0  0  0  1  -360  360;
+];
+mpc.gencost = [
+  2  0  0  3  0.0  10.0  0.0;
+  2  0  0  3  0.0  20.0  0.0;
+];
+"""
+
 _NO_COST = """function mpc = no_cost
 mpc.version = '2';
 mpc.baseMVA = 100.0;
@@ -115,9 +138,11 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Any, Path
     )
     (workspace / "no_cost.m").write_text(_NO_COST)
     (workspace / "limited.m").write_text(_LIMITED)
+    (workspace / "two_bus.m").write_text(_TWO_BUS_AC)
     cases = _andes_cases_dir()
     assert cases is not None
     (workspace / "kundur.raw").write_bytes((cases / "kundur" / "kundur.raw").read_bytes())
+    (workspace / "case14.m").write_bytes((cases / "matpower" / "case14.m").read_bytes())
     app = make_app(workspace=workspace, bind_host="127.0.0.1", bind_port=8000)
     with TestClient(app, base_url="http://127.0.0.1:8000") as test_client:
         yield test_client, workspace
@@ -259,3 +284,94 @@ def test_duals_opt_in(client: tuple[Any, Path]) -> None:
     response = _dispatch(test_client, session, {"network_model": "dc", "duals": True})
     assert response.status_code == 200, response.text
     assert isinstance(response.json()["duals"], list)
+
+
+def test_ac_two_bus(client: tuple[Any, Path]) -> None:
+    """The two-bus case through the route. B's reactive power costs nothing,
+    so the optimum carries the active power alone over the line at the
+    voltages that make its losses smallest; worked outside PowerSimulations by
+    a direct search over V1 and V2 with the angle that delivers exactly 1.0 pu
+    at bus 2: V1 = 1.1, V2 = 1.0855 pu at -4.887 degrees, losses 1.7099 MW,
+    A at 101.7099 MW for 1017.099 $/h, B at 0."""
+    test_client, _ = client
+    session = _session(test_client, "two_bus.m")
+    response = _dispatch(test_client, session, {"network_model": "ac"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["generators"]["gen:1-1"]["p_mw"] == pytest.approx(101.7099, abs=1e-3)
+    assert body["generators"]["gen:2-1"]["p_mw"] == pytest.approx(0.0, abs=1e-4)
+    assert body["generators"]["gen:1-1"]["q_mvar"] is not None
+    assert body["buses"]["bus:1"]["v_pu"] == pytest.approx(1.1, abs=1e-4)
+    assert body["buses"]["bus:2"]["v_pu"] == pytest.approx(1.0855, abs=1e-4)
+    assert body["buses"]["bus:2"]["angle_rad"] == pytest.approx(
+        -4.887 * 3.141592653589793 / 180, abs=1e-3 * 3.141592653589793 / 180
+    )
+    assert body["branches"]["branch:1-2-1"]["losses_mw"] == pytest.approx(1.7099, abs=1e-3)
+    assert body["branches"]["branch:1-2-1"]["from_bus"] == 1
+    assert body["branches"]["branch:1-2-1"]["to_bus"] == 2
+    assert body["total_losses_mw"] == pytest.approx(1.7099, abs=1e-3)
+    assert body["objective_per_h"] == pytest.approx(1017.099, abs=1e-2)
+    # The losses are the generators' output minus the load.
+    assert body["total_losses_mw"] == pytest.approx(
+        body["generators"]["gen:1-1"]["p_mw"]
+        + body["generators"]["gen:2-1"]["p_mw"]
+        - body["total_load_mw"],
+        abs=1e-3,
+    )
+
+
+def test_dc_case14_is_the_published_optimum(client: tuple[Any, Path]) -> None:
+    """MATPOWER case14's DC OPF optimum is 7642.59 $/h (MATPOWER
+    rundcopf('case14'))."""
+    test_client, _ = client
+    session = _session(test_client, "case14.m")
+    response = _dispatch(test_client, session, {"network_model": "dc"})
+    assert response.status_code == 200, response.text
+    assert response.json()["objective_per_h"] == pytest.approx(7642.5918, rel=1e-6)
+
+
+def test_ac_case14(client: tuple[Any, Path]) -> None:
+    """MATPOWER case14. The published MATPOWER AC OPF objective is
+    8081.53 $/h (MATPOWER runopf('case14')); this engine gives 8088.22 $/h,
+    0.08 percent above, with 0.17 MW more losses (268.45 MW generated
+    against MATPOWER's 268.28). Not the network: the admittance matrix of a
+    Sienna session of this file equals the ANDES one to 1.5e-6 (the single
+    precision PowerNetworkMatrices keeps), the generator, voltage and shunt
+    data equal the file's, the DC optimum is MATPOWER's to the cent, and
+    making every branch rating unlimited does not move the AC result. The
+    difference is in PowerSimulations' AC formulation and is not yet
+    explained; the test holds the measured value within 1e-4 relative."""
+    test_client, _ = client
+    session = _session(test_client, "case14.m")
+    response = _dispatch(test_client, session, {"network_model": "ac"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["objective_per_h"] == pytest.approx(8088.22, rel=1e-4)
+    assert body["objective_check_per_h"] == pytest.approx(8088.22, rel=1e-4)
+    for key in body["branches"]:
+        assert key.startswith("branch:")
+        parts = key.split(":", 1)[1].split("-")
+        assert len(parts) == 3
+
+
+def test_ac_lossless_models_unchanged(client: tuple[Any, Path]) -> None:
+    test_client, _ = client
+    session = _session(test_client, "linear.m")
+    response = _dispatch(test_client, session, {"network_model": "copper_plate"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["buses"] == {}
+    assert body["branches"] == {}
+    assert body["total_losses_mw"] is None
+    for row in body["generators"].values():
+        assert row["q_mvar"] is None
+
+
+def test_ac_pflow_still_solves_after(client: tuple[Any, Path]) -> None:
+    test_client, _ = client
+    session = _session(test_client, "two_bus.m")
+    response = _dispatch(test_client, session, {"network_model": "ac"})
+    assert response.status_code == 200, response.text
+    pflow = test_client.post(f"/api/sessions/{session}/pflow", json={})
+    assert pflow.status_code == 200, pflow.text
+    assert pflow.json()["converged"] is True

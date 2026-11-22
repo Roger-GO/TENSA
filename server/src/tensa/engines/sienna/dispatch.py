@@ -24,7 +24,7 @@ NO_COST_DATA_MESSAGE = (
 )
 
 # The network models the engine takes.
-NETWORK_MODELS = ("copper_plate", "dc", "ptdf")
+NETWORK_MODELS = ("copper_plate", "dc", "ptdf", "ac")
 
 
 class DispatchRequestError(AndesAppError):
@@ -41,11 +41,36 @@ class DispatchRequestError(AndesAppError):
 
 @dataclass
 class DispatchGenerator:
-    """One dispatched generator: its MW, bus and id."""
+    """One dispatched generator: its MW, bus and id, and its MVAr for AC."""
 
     p_mw: float
     bus: int
     id: str
+    q_mvar: float | None = None
+
+
+@dataclass
+class DispatchBus:
+    """One bus of an AC dispatch: voltage and angle."""
+
+    v_pu: float
+    bus: int
+    angle_rad: float
+
+
+@dataclass
+class DispatchBranch:
+    """One branch of an AC dispatch: flows at both ends and the losses."""
+
+    from_bus: int
+    to_bus: int
+    ckt: str
+    p_from_mw: float
+    q_from_mvar: float
+    p_to_mw: float
+    q_to_mvar: float
+    losses_mw: float
+    losses_mvar: float
 
 
 @dataclass
@@ -60,6 +85,9 @@ class DispatchResult:
     total_load_mw: float
     total_dispatch_mw: float
     generators: dict[str, DispatchGenerator]
+    buses: dict[str, DispatchBus]
+    branches: dict[str, DispatchBranch]
+    total_losses_mw: float | None
     duals: list[dict[str, Any]]
     slacks: list[dict[str, Any]]
     parameters: list[str]
@@ -72,13 +100,15 @@ def dispatch_result(dispatch: dict[str, Any], book: KeyBook) -> DispatchResult:
     """The dispatch JSON as a :class:`DispatchResult`.
 
     ``generators`` is keyed by the PowerSystems component name (the idx), as
-    ``pflow_result`` keys ``generator_outputs`` by name. ``keys`` has one
-    entry ``"generator"``: the key of each generator the book holds, found by
-    matching the book's generator entries' idx to the generator name, so the conversion
-    needs no topology JSON (unlike ``pflow_result``, which reads the kind
-    from it). A generator the book has no entry for is still in
-    ``generators`` and simply has no key, the ``pflow_result`` behaviour for
-    unmatched names.
+    ``pflow_result`` keys ``generator_outputs`` by name. ``buses`` and
+    ``branches`` are keyed by the component name as well; they are empty for
+    the lossless models, and ``total_losses_mw`` is ``None`` there. ``keys``
+    has one entry per kind (``"generator"``, ``"bus"``, ``"branch"``): the
+    key of each element the book holds, found by matching the book's entries'
+    idx to the component names, so the conversion needs no topology JSON
+    (unlike ``pflow_result``, which reads the kind from it). An element the
+    book has no entry for is still in the result and simply has no key, the
+    ``pflow_result`` behaviour for unmatched names.
     """
     generators: dict[str, DispatchGenerator] = {}
     for row in _rows(dispatch, "generators"):
@@ -87,20 +117,47 @@ def dispatch_result(dispatch: dict[str, Any], book: KeyBook) -> DispatchResult:
             p_mw=_float(row.get("p_mw")),
             bus=_int(row.get("bus")),
             id=_text(row.get("id")),
+            q_mvar=None if row.get("q_mvar") is None else _float(row.get("q_mvar")),
         )
-    generator_keys: dict[str, str] = {}
-    # The key of each generator the book holds, found by the component name,
-    # which is the idx the book keys a generator under. The bus and id of the
+    buses: dict[str, DispatchBus] = {}
+    for row in _rows(dispatch, "buses"):
+        name = _text(row.get("name"))
+        buses[name] = DispatchBus(
+            v_pu=_float(row.get("v_pu")),
+            bus=_int(row.get("bus")),
+            angle_rad=_float(row.get("angle_rad")),
+        )
+    branches: dict[str, DispatchBranch] = {}
+    for row in _rows(dispatch, "branches"):
+        name = _text(row.get("name"))
+        branches[name] = DispatchBranch(
+            from_bus=_int(row.get("from")),
+            to_bus=_int(row.get("to")),
+            ckt=_text(row.get("ckt")),
+            p_from_mw=_float(row.get("p_from_mw")),
+            q_from_mvar=_float(row.get("q_from_mvar")),
+            p_to_mw=_float(row.get("p_to_mw")),
+            q_to_mvar=_float(row.get("q_to_mvar")),
+            losses_mw=_float(row.get("losses_mw")),
+            losses_mvar=_float(row.get("losses_mvar")),
+        )
+    # The key of each element the book holds, found by the component name,
+    # which is the idx the book keys an element under. The bus and id of the
     # answer are not used: the Julia module reads the id off the name, which
     # for a MATPOWER generator ("gen-<row>") is the row, not the generator's
     # place on its bus.
-    key_by_idx = {
-        str(entry.idx): entry.key for entry in book.entries() if entry.bucket == "generator"
+    # The book keeps a bus under its number, and a branch under the
+    # ``line`` or ``transformer`` bucket by its component name.
+    key_by_idx: dict[str, dict[str, str]] = {"generator": {}, "bus": {}, "branch": {}}
+    for entry in book.entries():
+        bucket = "branch" if entry.bucket in ("line", "transformer") else entry.bucket
+        if bucket in key_by_idx:
+            key_by_idx[bucket][str(entry.idx)] = entry.key
+    generator_keys = {name: key_by_idx["generator"][name] for name in generators if name in key_by_idx["generator"]}
+    bus_keys = {
+        name: key_by_idx["bus"][str(bus.bus)] for name, bus in buses.items() if str(bus.bus) in key_by_idx["bus"]
     }
-    for name in generators:
-        key = key_by_idx.get(name)
-        if key is not None:
-            generator_keys[name] = key
+    branch_keys = {name: key_by_idx["branch"][name] for name in branches if name in key_by_idx["branch"]}
     notes: list[str] = []
     for note in dispatch.get("notes", []):
         if isinstance(note, str):
@@ -116,11 +173,18 @@ def dispatch_result(dispatch: dict[str, Any], book: KeyBook) -> DispatchResult:
         total_load_mw=_float(dispatch.get("total_load_mw")),
         total_dispatch_mw=_float(dispatch.get("total_dispatch_mw")),
         generators=generators,
+        buses=buses,
+        branches=branches,
+        total_losses_mw=(
+            None
+            if dispatch.get("total_losses_mw") is None
+            else _float(dispatch.get("total_losses_mw"))
+        ),
         duals=[dict(row) for row in _rows(dispatch, "duals")],
         slacks=[dict(row) for row in _rows(dispatch, "slacks")],
         parameters=[_text(name) for name in dispatch.get("parameters", [])],
         expressions=[_text(name) for name in dispatch.get("expressions", [])],
-        keys={"generator": generator_keys},
+        keys={"generator": generator_keys, "bus": bus_keys, "branch": branch_keys},
         notes=notes,
     )
 
@@ -129,7 +193,7 @@ def check_network_model(network_model: object) -> str:
     """The network model, validated; anything else is a :class:`DispatchRequestError`."""
     if network_model not in NETWORK_MODELS:
         raise DispatchRequestError(
-            f"network_model must be copper_plate, dc or ptdf, got "
+            f"network_model must be copper_plate, dc, ptdf or ac, got "
             f"{short_repr(network_model)}"
         )
     return str(network_model)

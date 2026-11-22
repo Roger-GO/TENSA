@@ -52,7 +52,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
                     "methods": ["ac", "dc", "ptdf-dc"],
                 },
                 "dispatch": {
-                    "network_models": ["copper_plate", "dc", "ptdf"],
+                    "network_models": ["copper_plate", "dc", "ptdf", "ac"],
                 },
                 "tds": {
                     "streaming": True,

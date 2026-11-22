@@ -1,16 +1,17 @@
 # TensaSiennaOps.jl: the operations of TENSA's Sienna engine, with
-# PowerSimulations (PSI) and HiGHS. Included after TensaSienna.jl, and only
-# when a session first asks for an operation, so a session that only solves
-# power flows never loads PowerSimulations. It reaches the first module as
-# Main.TensaSienna, which is where both files live when the tests and the
-# Python worker include them into Main. The public function answers a JSON
-# string.
+# PowerSimulations (PSI), HiGHS and Ipopt. Included after TensaSienna.jl, and
+# only when a session first asks for an operation, so a session that only
+# solves power flows never loads PowerSimulations. It reaches the first
+# module as Main.TensaSienna, which is where both files live when the tests
+# and the Python worker include them into Main. The public function answers a
+# JSON string.
 
 module TensaSiennaOps
 
 using PowerSystems
 using PowerSimulations
 using HiGHS
+using Ipopt
 using Dates
 using JSON3
 using Logging
@@ -28,14 +29,26 @@ export dispatch_json
 # route test, which sends this exact text through the worker.
 const NO_COST_DATA = "the case has no generator cost data; economic dispatch needs gencost records"
 
-const NETWORK_MODELS = ("copper_plate", "dc", "ptdf")
+const NETWORK_MODELS = ("copper_plate", "dc", "ptdf", "ac")
 
 # The network model type of a name.
 function _network_model(name::AbstractString)
     name == "copper_plate" && return PSI.CopperPlatePowerModel
     name == "dc" && return PSI.DCPPowerModel
     name == "ptdf" && return PSI.PTDFPowerModel
-    throw(ArgumentError("network_model must be copper_plate, dc or ptdf, got $(name)"))
+    name == "ac" && return PSI.ACPPowerModel
+    throw(ArgumentError("network_model must be copper_plate, dc, ptdf or ac, got $(name)"))
+end
+
+# The optimizer of a network model: HiGHS for the linear models, Ipopt for
+# the AC model, which is nonlinear. Ipopt is run quiet; the tolerances are
+# its defaults, which the hand checks' 1e-4 MW and 1e-6 pu sit well inside.
+function _optimizer_for(network)
+    network == PSI.ACPPowerModel && return PSI.optimizer_with_attributes(
+        Ipopt.Optimizer,
+        "print_level" => 0,
+    )
+    return HiGHS.Optimizer
 end
 
 # The quadratic, linear and constant coefficients of a generator's cost curve,
@@ -87,24 +100,124 @@ function _costs_in_natural_units!(sys)
     return nothing
 end
 
+# The variable of a name, or nothing when the results do not hold it.
+function _read_variable_or_nothing(res, name::AbstractString)
+    String(name) in [String(n) for n in PSI.list_variable_names(res)] || return nothing
+    return PSI.read_variable(res, name)
+end
+
+# The AC quantities of the solved model: bus voltages and angles, generator
+# reactive power, branch flows at both ends and the losses. The variables are
+# read from the optimization results, not from a power flow solved again. The
+# variable keys are the ones a trial on this environment (PowerSimulations
+# 0.34.2, ACPPowerModel) listed: VoltageAngle__ACBus and
+# VoltageMagnitude__ACBus for the buses, ReactivePowerVariable__ThermalStandard
+# for the generators, and FlowActivePowerFromToVariable__Line and its three
+# counterparts (ToFrom, ReactivePowerFromTo, ReactivePowerToFrom) per branch
+# type, the same four for __TapTransformer.
+function _ac_quantities(res, sys, generators)
+    names = Set(String(n) for n in PSI.list_variable_names(res))
+
+    buses = Any[]
+    if "VoltageMagnitude__ACBus" in names && "VoltageAngle__ACBus" in names
+        magnitudes = PSI.read_variable(res, "VoltageMagnitude__ACBus")
+        angles = PSI.read_variable(res, "VoltageAngle__ACBus")
+        angle_of = Dict(String(row[:name]) => Float64(row[:value]) for row in eachrow(angles))
+        for row in eachrow(magnitudes)
+            name = String(row[:name])
+            bus = PSY.get_component(PSY.ACBus, sys, name)
+            bus === nothing && continue
+            push!(buses, (
+                name = name,
+                bus = PSY.get_number(bus),
+                v_pu = Float64(row[:value]),
+                angle_rad = get(angle_of, name, 0.0),
+            ))
+        end
+    else
+        throw(ErrorException("the AC results hold no bus voltage variables"))
+    end
+    sort!(buses; by = x -> x.bus)
+
+    # Generator reactive power, matched to the dispatch rows by name.
+    q_of = Dict{String, Float64}()
+    if "ReactivePowerVariable__ThermalStandard" in names
+        for row in eachrow(PSI.read_variable(res, "ReactivePowerVariable__ThermalStandard"))
+            q_of[String(row[:name])] = Float64(row[:value])
+        end
+    end
+
+    branches = Any[]
+    total_losses_mw = 0.0
+    for T in (PSY.Line, PSY.TapTransformer)
+        tag = T === PSY.Line ? "Line" : "TapTransformer"
+        keys = (
+            "FlowActivePowerFromToVariable__$(tag)",
+            "FlowActivePowerToFromVariable__$(tag)",
+            "FlowReactivePowerFromToVariable__$(tag)",
+            "FlowReactivePowerToFromVariable__$(tag)",
+        )
+        all(k -> k in names, keys) || continue
+        p_from = PSI.read_variable(res, keys[1])
+        p_to = PSI.read_variable(res, keys[2])
+        q_from = PSI.read_variable(res, keys[3])
+        q_to = PSI.read_variable(res, keys[4])
+        p_to_of = Dict(String(row[:name]) => Float64(row[:value]) for row in eachrow(p_to))
+        q_from_of = Dict(String(row[:name]) => Float64(row[:value]) for row in eachrow(q_from))
+        q_to_of = Dict(String(row[:name]) => Float64(row[:value]) for row in eachrow(q_to))
+        for row in eachrow(p_from)
+            name = String(row[:name])
+            br = PSY.get_component(T, sys, name)
+            br === nothing && continue
+            f, t = TS._arc_numbers(br)
+            pf = Float64(row[:value])
+            pt = get(p_to_of, name, 0.0)
+            qf = get(q_from_of, name, 0.0)
+            qt = get(q_to_of, name, 0.0)
+            losses_mw = pf + pt
+            total_losses_mw += losses_mw
+            push!(branches, (
+                name = name,
+                from = f,
+                to = t,
+                ckt = TS._branch_ckt(name),
+                p_from_mw = pf,
+                q_from_mvar = qf,
+                p_to_mw = pt,
+                q_to_mvar = qt,
+                losses_mw = losses_mw,
+                losses_mvar = qf + qt,
+            ))
+        end
+    end
+    sort!(branches; by = x -> (x.from, x.to, x.ckt, x.name))
+    return buses, branches, q_of, total_losses_mw
+end
+
 """
     dispatch_json(s::TS.Session; network_model, duals = false) -> String
 
 Solve the one-period economic dispatch of the loaded case. `network_model` is
-"copper_plate", "dc" or "ptdf". The system is deep-copied first: the one-step
-forecast every load needs, the relabelled cost curves and the ramp limits
-taken off (one period has nothing to ramp from) go to the copy, never to the
-session's system. The cost curves are labelled as natural units on the
+"copper_plate", "dc", "ptdf" or "ac". The system is deep-copied first: the
+one-step forecast every load needs, the relabelled cost curves and the ramp
+limits taken off (one period has nothing to ramp from) go to the copy, never
+to the session's system. The cost curves are labelled as natural units on the
 copy so that the objective is the true cost in \$/h of power in MW (see
-`_costs_in_natural_units!`).
+`_costs_in_natural_units!`). The linear models solve with HiGHS; the AC model
+holds the full AC power flow equations and solves with Ipopt.
 
-The answer carries `objective_per_h` (the solver's objective, in \$/h) and `objective_check_per_h` (the cost recomputed from the
-dispatch in MW and the file's own coefficients); the two agree to solver
-tolerance. `generators` lists every dispatched generator with its bus, id and
-MW. `slacks` lists every slack variable whose value is past 1e-6 MW (spec
-section 13: slack variables always read back and reported when non-zero).
-`duals` is empty unless `duals` is true; the copper plate model has no duals,
-the dc and ptdf models may.
+The answer carries `objective_per_h` (the solver's objective, in \$/h) and
+`objective_check_per_h` (the cost recomputed from the dispatch in MW and the
+file's own coefficients); the two agree to solver tolerance. `generators`
+lists every dispatched generator with its bus, id and MW. With
+`network_model = "ac"` the answer also carries `buses` (voltage in pu and
+angle in radians per bus), `branches` (P and Q at both ends and the losses,
+in MW and MVAr), each generator's `q_mvar`, and `total_losses_mw`; the load
+balance is dispatch against load plus losses, since the AC model is not
+lossless. `slacks` lists every slack variable whose value is past 1e-6 MW
+(spec section 13: slack variables always read back and reported when
+non-zero). `duals` is empty unless `duals` is true; the copper plate model
+has no duals, the dc and ptdf models may.
 
 Throws an `ArgumentError` for a network model it does not know, an
 `ErrorException` with the no-cost-data message when no generator of the case
@@ -169,7 +282,7 @@ function dispatch_json(
         model = PSI.DecisionModel(
             template,
             sys;
-            optimizer = HiGHS.Optimizer,
+            optimizer = _optimizer_for(network),
             horizon = Hour(1),
             name = "tensa_ed",
             store_variable_names = true,
@@ -211,6 +324,20 @@ function dispatch_json(
         ))
     end
     sort!(generators; by = x -> (x.bus, x.id, x.name))
+
+    # The AC quantities, only for the AC model: bus voltages and angles,
+    # generator reactive power, branch flows and losses. The linear models'
+    # answers are unchanged, field for field.
+    is_ac = network == PSI.ACPPowerModel
+    buses = Any[]
+    branches = Any[]
+    total_losses_mw = 0.0
+    if is_ac
+        buses, branches, q_of, total_losses_mw = _ac_quantities(res, sys, generators)
+        generators = [
+            merge(row, (q_mvar = get(q_of, row.name, 0.0),)) for row in generators
+        ]
+    end
 
     # The cost recomputed from the dispatch in MW and the file's own
     # coefficients, as PowerSystems holds them: a * P_mw^2 + b * P_mw + c.
@@ -264,18 +391,26 @@ function dispatch_json(
     end
 
     # Copper plate, DC and PTDF are lossless: what is dispatched is the load,
-    # unless a slack variable made up the difference (reported in slacks). A
-    # load the model left out would be dispatched as nothing, so a balance that
-    # does not hold is an error, not an answer.
+    # unless a slack variable made up the difference (reported in slacks). The
+    # AC model is not lossless: what is dispatched is the load plus the
+    # losses. A load the model left out would be dispatched as nothing, so a
+    # balance that does not hold is an error, not an answer.
     slack_mw = sum((abs(row.value) for row in slacks); init = 0.0)
-    if abs(total_dispatch_mw - total_load_mw) > 1e-6 * max(1.0, total_load_mw) && slack_mw == 0.0
+    if is_ac
+        if abs(total_dispatch_mw - total_load_mw - total_losses_mw) > 1e-6 * max(1.0, total_load_mw) && slack_mw == 0.0
+            throw(ErrorException(
+                "economic dispatch did not meet the load: $(total_dispatch_mw) MW dispatched " *
+                "for $(total_load_mw) MW of load and $(total_losses_mw) MW of losses",
+            ))
+        end
+    elseif abs(total_dispatch_mw - total_load_mw) > 1e-6 * max(1.0, total_load_mw) && slack_mw == 0.0
         throw(ErrorException(
             "economic dispatch did not meet the load: $(total_dispatch_mw) MW dispatched " *
             "for $(total_load_mw) MW of load",
         ))
     end
 
-    return TS._to_json((
+    answer = (
         status = "completed",
         network_model = String(network_model),
         objective_per_h = objective_per_h,
@@ -289,7 +424,15 @@ function dispatch_json(
         parameters = parameters,
         expressions = expressions,
         notes = notes,
-    ))
+    )
+    if is_ac
+        answer = merge(answer, (
+            buses = buses,
+            branches = branches,
+            total_losses_mw = total_losses_mw,
+        ))
+    end
+    return TS._to_json(answer)
 end
 
 end # module

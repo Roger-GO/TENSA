@@ -1060,8 +1060,9 @@ class SiennaState:
     ) -> DispatchResult:
         """Solve the one-period economic dispatch of the loaded case.
 
-        ``network_model`` is ``"copper_plate"``, ``"dc"`` or ``"ptdf"``; any
-        other value raises :class:`DispatchRequestError` before any Julia
+        ``network_model`` is ``"copper_plate"``, ``"dc"``, ``"ptdf"`` or
+        ``"ac"``; any other value raises :class:`DispatchRequestError` before
+        any Julia
         call, mirroring the ``run_pflow`` validation messages. With no case
         loaded raises :class:`NoCaseLoadedError`, and for a case that is not a
         MATPOWER file (no gencost) :class:`DispatchRequestError` before any

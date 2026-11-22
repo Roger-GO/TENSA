@@ -273,7 +273,7 @@ def test_engine_capabilities_sienna_available(
     assert caps["routines"] == ["matrices", "pflow", "eig", "tds", "dispatch"]
     assert caps["routine_options"] == {
         "pflow": {"methods": ["ac", "dc", "ptdf-dc"]},
-        "dispatch": {"network_models": ["copper_plate", "dc", "ptdf"]},
+        "dispatch": {"network_models": ["copper_plate", "dc", "ptdf", "ac"]},
         "tds": {
             "streaming": True,
             "abort": True,
