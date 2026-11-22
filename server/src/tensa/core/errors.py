@@ -485,9 +485,18 @@ class SiennaError(AndesAppError):
     the worker scrubs ANDES's messages. The full Julia text goes to the
     ``tensa.sienna`` logger at debug level. Surfaced as HTTP 422; the caller
     fixes the request and sends it again, so there is no recovery action.
+
+    ``stage`` is the stage a dynamics function of the Julia side named when it
+    refused (``not_ready``, ``arguments``, ``disturbances``, ``matrix``,
+    ``build``, ``eig``, ``internal``), as Julia gave it; ``None`` for a refusal
+    that is a Julia exception rather than an answer.
     """
 
     recovery_kind: str | None = "none"
+
+    def __init__(self, message: str, stage: str | None = None) -> None:
+        super().__init__(message)
+        self.stage = stage
 
 
 class WorkerDiedError(AndesAppError):

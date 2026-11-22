@@ -35,7 +35,10 @@ would bind Julia's ``stdout`` and ``stderr`` to the redirect target for the
 life of the process.
 
 ``juliacall`` is one Julia per process, so a second bridge in the same process
-shares the module the first included instead of including it again.
+shares the module the first included instead of including it again. The
+dynamics module (``TensaSiennaDyn.jl``) is included the same way, but only
+when a session first needs dynamics, so a session that only solves power flows
+never loads PowerSimulationsDynamics.
 
 Every call into Julia goes through :meth:`JuliaBridge._call`, which turns a
 ``juliacall.JuliaError`` into :class:`~tensa.core.errors.SiennaError`: the
@@ -45,6 +48,13 @@ scrubbed of the server's paths. A call with arguments the Julia function has
 no method for (a session that is ``None``, say) is the caller's mistake and
 stays a ``TypeError``, with the first line of Julia's message only. Everything
 logged goes through the same scrubber, at debug level.
+
+The dynamics functions answer JSON documents and report a failure a user can
+cause as ``{"ok": false, "stage", "error", "notes"}`` instead of throwing.
+Each such answer becomes one :class:`~tensa.core.errors.SiennaError` whose
+message is the answer's ``error`` and whose ``stage`` attribute carries the
+answer's ``stage`` as Julia gave it; the bridge does not classify stages. Only
+a Julia exception (not an answer) is an engine failure, mapped as above.
 """
 
 from __future__ import annotations
@@ -57,12 +67,14 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy
+
 from tensa.core.errors import EngineUnavailableError, SiennaError
 from tensa.core.messages import PathScrubber
 from tensa.engines.sienna import environment
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
 log = logging.getLogger("tensa.sienna")
 
@@ -84,7 +96,7 @@ _FOREIGN_JULIACALL = (
 )
 
 # Includes the module with Julia's streams sent to a temporary file and answers
-# what was printed and the error, if any, as text.
+# what was printed and the error, if any, as text. Used for both modules.
 _INCLUDE = """\
 let path = tempname(), failure = nothing
     try
@@ -103,11 +115,56 @@ let path = tempname(), failure = nothing
     end
 end"""
 
+# The guard for the dynamics module's include, the counterpart of the one
+# ``start`` runs for the first module.
+_INCLUDE_DYN_GUARD = "isdefined(Main, :TensaSiennaDyn)"
+
 
 def _first_line(text: str, fallback: str) -> str:
     """The first line of ``text``, or ``fallback`` when there is none."""
     lines = text.splitlines()
     return lines[0] if lines and lines[0] else fallback
+
+
+def _float_array(values: Any) -> Any:
+    """The Julia vector as a numpy array of floats, in one crossing.
+
+    The array wrapper PythonCall hands a Python callable for a Julia
+    ``Vector{Float64}`` supports ``__array__``, so numpy copies the whole
+    buffer at once; indexing the wrapper element by element would be a Julia
+    call per element. The list comprehension is the fallback for a wrapper
+    that does not.
+    """
+    try:
+        return numpy.asarray(values, dtype=float)
+    except Exception:
+        return numpy.asarray([float(v) for v in values], dtype=float)
+
+
+class _StepHook:
+    """Wraps the user's ``on_step`` so it can cross into Julia and back.
+
+    Julia calls the instance with ``t`` and a Julia ``Vector{Float64}``. A
+    return of exactly ``False`` from the user's callable stops the run;
+    anything else continues. An exception is stored and ``False`` is returned,
+    so Julia ends the run and reports it, and the bridge re-raises the stored
+    exception in Python after Julia has returned; a Python exception never
+    unwinds through Julia's frames.
+    """
+
+    def __init__(self, on_step: Callable[[float, Any], bool]) -> None:
+        self._on_step = on_step
+        self.error: BaseException | None = None
+
+    def __call__(self, t: Any, values: Any) -> bool:
+        if self.error is not None:
+            return False
+        try:
+            result = self._on_step(float(t), _float_array(values))
+        except BaseException as exc:  # stored, never raised into Julia
+            self.error = exc
+            return False
+        return result is not False
 
 
 class JuliaBridge:
@@ -126,12 +183,18 @@ class JuliaBridge:
         self._scrub: Callable[[str], str] = PathScrubber() if scrub is None else scrub
         self._jl: Any = None
         self._ts: Any = None
+        self._ts_dyn: Any = None
         self._julia_error: type[Exception] | None = None
 
     @property
     def started(self) -> bool:
         """Whether :meth:`start` has run to the end."""
         return self._ts is not None
+
+    @property
+    def dynamics_started(self) -> bool:
+        """Whether :meth:`start_dynamics` has run to the end."""
+        return self._ts_dyn is not None
 
     def start(self) -> None:
         """Start Julia and include the engine's module. Safe to call again.
@@ -184,6 +247,38 @@ class JuliaBridge:
         self._jl = jl
         self._ts = jl.TensaSienna
         self._julia_error = juliacall.JuliaError
+
+    def start_dynamics(self) -> None:
+        """Include the dynamics module. Safe to call again.
+
+        Starts Julia first when it is not started. Raises
+        :class:`EngineUnavailableError` when Julia cannot start or the include
+        of the dynamics module fails.
+        """
+        if self.dynamics_started:
+            return
+        self.start()
+        jl = self._jl
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                if not bool(jl.seval(_INCLUDE_DYN_GUARD)):
+                    printed, failure = jl.seval(
+                        _INCLUDE.replace("{module}", str(environment.dynamics_module_path()))
+                    )
+                    self._log_printed(str(printed))
+                    if failure is not None:
+                        raise RuntimeError(str(failure))
+        except Exception as exc:
+            self._log_printed(out.getvalue() + err.getvalue())
+            text = self._scrub(str(exc))
+            log.debug("Julia could not load the dynamics module: %s", text)
+            first = _first_line(text, type(exc).__name__)
+            raise EngineUnavailableError(
+                "sienna", f"Julia could not load the dynamics module: {first}"
+            ) from exc
+        self._log_printed(out.getvalue() + err.getvalue())
+        self._ts_dyn = jl.TensaSiennaDyn
 
     @staticmethod
     def _set_environment(executable: Path, project: Path) -> None:
@@ -248,6 +343,105 @@ class JuliaBridge:
         """The Julia and Sienna package versions of the environment."""
         return self._json(self._call("versions_json"))
 
+    def dyn_plan(self, session: Any, load_model: str = "impedance") -> dict[str, Any]:
+        """What a dynamic run of this session would be made of.
+
+        A ``ready: false`` answer (no power flow solved, no dynamic models) is
+        returned, not raised: it is an ``ok: true`` document with a ``reason``.
+        """
+        self.start_dynamics()
+        return self._checked(
+            "dyn_plan_json",
+            self._call("dyn_plan_json", session, _module=self._ts_dyn, load_model=load_model),
+        )
+
+    def eig(
+        self,
+        session: Any,
+        load_model: str = "impedance",
+        matrix_file: Path | None = None,
+    ) -> dict[str, Any]:
+        """Small-signal analysis at the solved operating point.
+
+        ``matrix_file`` names a file inside the session's scratch folder the
+        reduced state matrix is written to; only the keywords given are passed.
+        """
+        self.start_dynamics()
+        keywords: dict[str, Any] = {"load_model": load_model}
+        if matrix_file is not None:
+            keywords["matrix_file"] = str(matrix_file)
+        return self._checked(
+            "eig_json", self._call("eig_json", session, _module=self._ts_dyn, **keywords)
+        )
+
+    def tds_init(self, session: Any, load_model: str = "impedance") -> dict[str, Any]:
+        """Build the simulation and report the initialisation without stepping.
+
+        An ``initialized: false`` answer is returned, not raised: it is an
+        ``ok: true`` document with PSID's reason in ``notes``.
+        """
+        self.start_dynamics()
+        return self._checked(
+            "tds_init_json",
+            self._call("tds_init_json", session, _module=self._ts_dyn, load_model=load_model),
+        )
+
+    def tds_run(
+        self,
+        session: Any,
+        tf: float,
+        step: float | None = None,
+        disturbances: Sequence[Mapping[str, Any]] | None = None,
+        load_model: str = "impedance",
+        on_step: Callable[[float, Any], bool] | None = None,
+    ) -> dict[str, Any]:
+        """A time-domain run from 0 to ``tf`` seconds.
+
+        ``disturbances`` is a list of disturbance documents, sent to Julia as
+        one JSON string. ``on_step`` is called once for the initial point and
+        once after every accepted step with ``(t, values)``, the values a numpy
+        array of floats in the column plan's order; returning exactly ``False``
+        stops the run. An exception it raises stops the run and is raised again
+        here after Julia has returned; it never unwinds through Julia's frames.
+        A ``status: "failed"`` answer is returned, not raised: the rows up to
+        there are a result.
+        """
+        self.start_dynamics()
+        keywords: dict[str, Any] = {"load_model": load_model}
+        if step is not None:
+            keywords["step"] = step
+        if disturbances is not None:
+            keywords["disturbances"] = json.dumps(list(disturbances))
+        hook = _StepHook(on_step) if on_step is not None else None
+        if hook is not None:
+            keywords["on_step"] = hook
+        answer: Any = None
+        try:
+            answer = self._call("tds_run_json", session, _module=self._ts_dyn, tf=tf, **keywords)
+        finally:
+            # The user's own exception comes out however the Julia call ended,
+            # and the Julia answer or error is discarded for it.
+            if hook is not None and hook.error is not None:
+                raise hook.error from None
+        return self._checked("tds_run_json", answer)
+
+    def _checked(self, name: str, answer: Any) -> dict[str, Any]:
+        """Parse a dynamics answer and raise on ``ok: false``.
+
+        The Julia side answers ``{"ok": false, "stage", "error", "notes"}``
+        for a failure a user can cause. It becomes one
+        :class:`~tensa.core.errors.SiennaError` with the answer's ``error`` as
+        the message and the answer's ``stage`` carried as an attribute, as
+        Julia gave it; the bridge does not classify stages.
+        """
+        parsed = self._json(answer)
+        if parsed.get("ok", True):
+            return parsed
+        stage = str(parsed.get("stage", ""))
+        message = self._scrub(str(parsed.get("error", "the dynamics call failed")))
+        log.debug("Julia dynamics %s refused at stage %s: %s", name, stage, message)
+        raise SiennaError(message, stage=stage)
+
     @staticmethod
     def _json(answer: Any) -> dict[str, Any]:
         """Parse the JSON text the Julia side answered (a Julia string becomes a
@@ -255,13 +449,20 @@ class JuliaBridge:
         parsed: dict[str, Any] = json.loads(str(answer))
         return parsed
 
-    def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
+    def _call(self, name: str, *args: Any, _module: Any = None, **kwargs: Any) -> Any:
         """Call the module's function ``name`` and turn a Julia error into
-        :class:`SiennaError`. Every call into Julia goes through here."""
-        if self._ts is None:
+        :class:`SiennaError`. Every call into Julia goes through here.
+
+        ``_module`` is the Julia module object to call on; it defaults to the
+        first module and is the dynamics module for the dynamics functions.
+        The keyword is named with a leading underscore so it can never collide
+        with a Julia keyword argument.
+        """
+        module = self._ts if _module is None else _module
+        if module is None:
             raise EngineUnavailableError("sienna", "Julia has not been started")
         try:
-            return getattr(self._ts, name)(*args, **kwargs)
+            return getattr(module, name)(*args, **kwargs)
         except TypeError as exc:
             text = str(exc)
             if not text.startswith(_PYTHONCALL_PREFIX):

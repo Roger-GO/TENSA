@@ -111,6 +111,12 @@ def test_module_path_is_beside_the_package() -> None:
     assert path.parent.parent == Path(environment.__file__).resolve().parent
 
 
+def test_dynamics_module_path_is_beside_the_module() -> None:
+    path = environment.dynamics_module_path()
+    assert path.name == "TensaSiennaDyn.jl"
+    assert path.parent == environment.module_path().parent
+
+
 def _nothing_else(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No Julia project set up and no Julia module, whatever the machine has."""
     monkeypatch.setenv("TENSA_SIENNA_PROJECT", str(tmp_path / "no-project" / "dyn"))
@@ -389,6 +395,30 @@ def test_reason_none_when_all_hold(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     module.touch()
     _stamp_the_project(project)
     monkeypatch.setattr(environment, "module_path", lambda: module)
+    assert environment.sienna_unavailable_reason() is None
+
+
+def test_reason_dynamics_module_missing_is_not_checked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A missing dynamics module is no reason: it surfaces when dynamics are
+    first asked for, as an include failure of ``start_dynamics``."""
+    monkeypatch.setattr(importlib.util, "find_spec", _spec_found)
+    julia = tmp_path / "julia"
+    julia.touch()
+    monkeypatch.setenv("TENSA_JULIA", str(julia))
+    project = tmp_path / "dyn"
+    project.mkdir()
+    (project / "Manifest.toml").touch()
+    monkeypatch.setenv("TENSA_SIENNA_PROJECT", str(project))
+    module = tmp_path / "pkg" / "julia" / "TensaSienna.jl"
+    module.parent.mkdir(parents=True)
+    module.touch()
+    _stamp_the_project(project)
+    monkeypatch.setattr(environment, "module_path", lambda: module)
+    monkeypatch.setattr(
+        environment, "dynamics_module_path", lambda: tmp_path / "no" / "TensaSiennaDyn.jl"
+    )
     assert environment.sienna_unavailable_reason() is None
 
 

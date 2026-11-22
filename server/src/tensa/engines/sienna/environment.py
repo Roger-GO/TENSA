@@ -50,6 +50,11 @@ def module_path() -> Path:
     return Path(__file__).resolve().parent / "julia" / "TensaSienna.jl"
 
 
+def dynamics_module_path() -> Path:
+    """The Julia dynamics module, included only when a session needs dynamics."""
+    return Path(__file__).resolve().parent / "julia" / "TensaSiennaDyn.jl"
+
+
 def _juliacall_found() -> bool:
     """Whether ``juliacall`` can be imported, found without importing it.
 

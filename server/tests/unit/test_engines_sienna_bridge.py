@@ -3,10 +3,10 @@
 ``juliacall`` is replaced by a stand-in that an import hook (a finder first on
 ``sys.meta_path``) makes when the bridge imports it, so the stand-in sees the
 environment at the moment of the import, and a ``juliacall`` that is installed
-is never reached. Its ``Main`` has ``seval`` and, after the include, a
-``TensaSienna`` attribute whose five functions are plain Python callables
-returning strings. The environment functions the bridge calls are
-monkeypatched, so no real Julia or project is needed. ``sys.modules``,
+is never reached. Its ``Main`` has ``seval`` and, after the includes, a
+``TensaSienna`` and a ``TensaSiennaDyn`` attribute whose functions are plain
+Python callables returning strings. The environment functions the bridge calls
+are monkeypatched, so no real Julia or project is needed. ``sys.modules``,
 ``sys.meta_path`` and every environment variable the bridge sets or removes are
 restored after each test.
 """
@@ -24,6 +24,7 @@ import types
 from pathlib import Path
 from typing import Any
 
+import numpy
 import pytest
 
 from tensa.core.errors import EngineUnavailableError, SiennaError
@@ -50,7 +51,7 @@ _REMOVED = (
 
 class _Main:
     """The stand-in's ``juliacall.Main``: ``seval`` answers the bridge's two
-    kinds of code, the check for the module and the include."""
+    kinds of code, the check for a module and the include."""
 
     def __init__(self, stand_in: _StandIn) -> None:
         self._stand_in = stand_in
@@ -60,11 +61,24 @@ class _Main:
         stand_in.sevals += 1
         if code == "isdefined(Main, :TensaSienna)":
             return hasattr(self, "TensaSienna")
+        if code == "isdefined(Main, :TensaSiennaDyn)":
+            return hasattr(self, "TensaSiennaDyn") or stand_in.dyn_guard_answer
         if stand_in.print_lines:
             print("[juliapkg] including")
             print("[juliapkg] include err", file=sys.stderr)
         if stand_in.raise_on_seval is not None:
             raise stand_in.raise_on_seval
+        if "TensaSiennaDyn.jl" in code:
+            stand_in.dyn_includes.append(code)
+            if stand_in.dyn_include_failure is not None:
+                return (stand_in.dyn_include_printed, stand_in.dyn_include_failure)
+            self.TensaSiennaDyn = types.SimpleNamespace(
+                dyn_plan_json=stand_in.fn("dyn_plan_json"),
+                eig_json=stand_in.fn("eig_json"),
+                tds_init_json=stand_in.fn("tds_init_json"),
+                tds_run_json=stand_in.fn("tds_run_json"),
+            )
+            return (stand_in.dyn_include_printed, None)
         stand_in.includes.append(code)
         if stand_in.include_failure is not None:
             return (stand_in.include_printed, stand_in.include_failure)
@@ -92,12 +106,20 @@ class _StandIn:
         self.include_printed = ""
         self.include_failure: str | None = None
         self.includes: list[str] = []
+        self.dyn_include_printed = ""
+        self.dyn_include_failure: str | None = None
+        self.dyn_guard_answer = False
+        self.dyn_includes: list[str] = []
         self.calls: dict[str, list[tuple[tuple[Any, ...], dict[str, Any]]]] = {}
         self.answers: dict[str, Any] = {
             "report_json": '{"buses": 10}',
             "topology_json": '{"branches": 15}',
             "pflow_json": '{"converged": true}',
             "versions_json": '{"julia": "1.11"}',
+            "dyn_plan_json": '{"ok": true, "ready": true}',
+            "eig_json": '{"ok": true, "n_states": 32}',
+            "tds_init_json": '{"ok": true, "initialized": true}',
+            "tds_run_json": '{"ok": true, "status": "completed", "t": [0.0], "rows": [[1.0]]}',
         }
         self.raising: dict[str, Exception] = {}
         self.main = _Main(self)
@@ -136,6 +158,27 @@ class _StandIn:
         return called
 
 
+class _FakeJuliaVector:
+    """What PythonCall hands a Python callable for a Julia ``Vector{Float64}``:
+    a wrapper with ``__len__``, ``__getitem__`` and the numpy ``__array__``
+    interface. ``__getitem__`` is counted so a test can hold that the bridge
+    never indexes per element."""
+
+    def __init__(self, values: list[float]) -> None:
+        self._values = values
+        self.getitems = 0
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __getitem__(self, index: int) -> float:
+        self.getitems += 1
+        return self._values[index]
+
+    def __array__(self, dtype: Any = None) -> Any:
+        return numpy.asarray(self._values, dtype=dtype)
+
+
 @pytest.fixture
 def stand_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StandIn:
     """Install the fake ``juliacall`` and patch the environment functions."""
@@ -154,6 +197,7 @@ def stand_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _StandIn:
     monkeypatch.setattr(environment, "julia_executable", lambda: julia)
     monkeypatch.setattr(environment, "sienna_project", lambda: project)
     monkeypatch.setattr(environment, "module_path", lambda: tmp_path / "TensaSienna.jl")
+    monkeypatch.setattr(environment, "dynamics_module_path", lambda: tmp_path / "TensaSiennaDyn.jl")
     # Registered so monkeypatch restores them; the bridge sets os.environ directly.
     for name in (*_SET, *_REMOVED):
         monkeypatch.delenv(name, raising=False)
@@ -461,10 +505,368 @@ def test_importing_the_bridge_imports_no_julia() -> None:
         [
             sys.executable,
             "-c",
-            "import sys, tensa.engines.sienna.bridge; print('juliacall' in sys.modules)",
+            "import sys, tensa.engines.sienna.bridge as b; "
+            "b.JuliaBridge.tds_run; "
+            "print('juliacall' in sys.modules)",
         ],
         check=True,
         capture_output=True,
         text=True,
     )
     assert out.stdout.strip() == "False"
+
+
+# The dynamics module (unit P5-B).
+
+
+def _dyn_bridge(**kwargs: Any) -> JuliaBridge:
+    bridge = JuliaBridge(**kwargs)
+    bridge.start_dynamics()
+    return bridge
+
+
+def test_start_dynamics_includes_the_second_module_after_the_first(
+    stand_in: _StandIn, tmp_path: Path
+) -> None:
+    bridge = _started_bridge()
+    bridge.start_dynamics()
+    assert bridge.dynamics_started is True
+    assert len(stand_in.includes) == 1
+    assert len(stand_in.dyn_includes) == 1
+    assert f'include(raw"{tmp_path / "TensaSienna.jl"}")' in stand_in.includes[0]
+    assert f'include(raw"{tmp_path / "TensaSiennaDyn.jl"}")' in stand_in.dyn_includes[0]
+
+
+def test_start_dynamics_starts_julia_when_not_started(stand_in: _StandIn) -> None:
+    bridge = JuliaBridge()
+    bridge.start_dynamics()
+    assert stand_in.imports == 1
+    assert len(stand_in.includes) == 1
+    assert len(stand_in.dyn_includes) == 1
+    assert bridge.started is True
+    assert bridge.dynamics_started is True
+
+
+def test_start_dynamics_is_idempotent_and_asks_nothing_the_second_time(
+    stand_in: _StandIn,
+) -> None:
+    bridge = _dyn_bridge()
+    sevals = stand_in.sevals
+    bridge.start_dynamics()
+    assert stand_in.sevals == sevals
+    assert len(stand_in.dyn_includes) == 1
+
+
+def test_a_second_bridge_shares_the_dynamics_module(stand_in: _StandIn) -> None:
+    first = _dyn_bridge()
+    second = JuliaBridge()
+    second.start_dynamics()
+    assert second.dynamics_started is True
+    assert len(stand_in.dyn_includes) == 1
+    assert second.dyn_plan(object()) == {"ok": True, "ready": True}
+    assert first.dyn_plan(object()) == {"ok": True, "ready": True}
+
+
+def test_start_dynamics_prints_nothing_and_logs_what_was_printed(
+    stand_in: _StandIn,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stand_in.dyn_include_printed = "Precompiling PowerSimulationsDynamics\n"
+    with caplog.at_level(logging.DEBUG, logger="tensa.sienna"):
+        _dyn_bridge()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    logged = "\n".join(r.getMessage() for r in caplog.records if r.name == "tensa.sienna")
+    assert "Precompiling PowerSimulationsDynamics" in logged
+    assert all(r.levelno == logging.DEBUG for r in caplog.records if r.name == "tensa.sienna")
+
+
+def test_start_dynamics_include_failure_is_unavailable_with_first_line(
+    stand_in: _StandIn, caplog: pytest.LogCaptureFixture
+) -> None:
+    stand_in.dyn_include_failure = "LoadError: PSID not found\nin expression starting at"
+    bridge = JuliaBridge()
+    with (
+        caplog.at_level(logging.DEBUG, logger="tensa.sienna"),
+        pytest.raises(EngineUnavailableError) as caught,
+    ):
+        bridge.start_dynamics()
+    assert caught.value.reason == "Julia could not load the dynamics module: LoadError: PSID not found"
+    assert bridge.dynamics_started is False
+    logged = "\n".join(r.getMessage() for r in caplog.records if r.name == "tensa.sienna")
+    assert "in expression starting at" in logged
+
+
+def test_start_dynamics_when_julia_cannot_start_propagates(
+    stand_in: _StandIn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(environment, "sienna_unavailable_reason", lambda: "Julia was not found")
+    with pytest.raises(EngineUnavailableError) as caught:
+        JuliaBridge().start_dynamics()
+    assert caught.value.reason == "Julia was not found"
+    assert stand_in.imports == 0
+
+
+def test_dyn_plan_passes_load_model_and_parses(stand_in: _StandIn) -> None:
+    bridge = _dyn_bridge()
+    session = object()
+    assert bridge.dyn_plan(session) == {"ok": True, "ready": True}
+    bridge.dyn_plan(session, "power")
+    received = [kwargs for _, kwargs in stand_in.calls["dyn_plan_json"]]
+    assert received == [{"load_model": "impedance"}, {"load_model": "power"}]
+
+
+def test_dyn_plan_not_ready_is_returned_not_raised(stand_in: _StandIn) -> None:
+    stand_in.answers["dyn_plan_json"] = (
+        '{"ok": true, "ready": false, "reason": "solve the power flow first"}'
+    )
+    bridge = _dyn_bridge()
+    answer = bridge.dyn_plan(object())
+    assert answer["ready"] is False
+    assert answer["reason"] == "solve the power flow first"
+
+
+def test_eig_passes_matrix_file_only_when_given(stand_in: _StandIn, tmp_path: Path) -> None:
+    bridge = _dyn_bridge()
+    session = object()
+    bridge.eig(session)
+    bridge.eig(session, matrix_file=tmp_path / "m.bin")
+    received = [kwargs for _, kwargs in stand_in.calls["eig_json"]]
+    assert received == [
+        {"load_model": "impedance"},
+        {"load_model": "impedance", "matrix_file": str(tmp_path / "m.bin")},
+    ]
+
+
+def test_tds_init_passes_load_model(stand_in: _StandIn) -> None:
+    bridge = _dyn_bridge()
+    assert bridge.tds_init(object(), load_model="as-case") == {"ok": True, "initialized": True}
+    received = [kwargs for _, kwargs in stand_in.calls["tds_init_json"]]
+    assert received == [{"load_model": "as-case"}]
+
+
+def test_tds_run_passes_tf_step_disturbances_as_json(stand_in: _StandIn) -> None:
+    bridge = _dyn_bridge()
+    disturbance = {"kind": "branch_trip", "from": 7, "to": 8, "ckt": "1", "t": 1.0}
+    bridge.tds_run(object(), 5.0, step=0.05, disturbances=[disturbance])
+    _, kwargs = stand_in.calls["tds_run_json"][-1]
+    assert kwargs["tf"] == 5.0
+    assert kwargs["step"] == 0.05
+    assert kwargs["load_model"] == "impedance"
+    assert isinstance(kwargs["disturbances"], str)
+    assert json.loads(kwargs["disturbances"]) == [disturbance]
+    assert "on_step" not in kwargs
+
+
+def test_tds_run_omits_step_and_disturbances_when_none(stand_in: _StandIn) -> None:
+    bridge = _dyn_bridge()
+    bridge.tds_run(object(), 2.0)
+    _, kwargs = stand_in.calls["tds_run_json"][-1]
+    assert set(kwargs) == {"tf", "load_model"}
+
+
+def test_tds_run_failed_status_is_returned_not_raised(stand_in: _StandIn) -> None:
+    stand_in.answers["tds_run_json"] = (
+        '{"ok": true, "status": "failed", "error": "IDA stopped at t = 3.1",'
+        ' "t": [0.0], "rows": [[1.0]]}'
+    )
+    bridge = _dyn_bridge()
+    answer = bridge.tds_run(object(), 5.0)
+    assert answer["status"] == "failed"
+    assert answer["error"] == "IDA stopped at t = 3.1"
+
+
+@pytest.mark.parametrize(
+    "function", ["dyn_plan_json", "eig_json", "tds_init_json", "tds_run_json"]
+)
+def test_ok_false_is_one_sienna_error_with_the_stage(stand_in: _StandIn, function: str) -> None:
+    stand_in.answers[function] = (
+        '{"ok": false, "stage": "disturbances",'
+        ' "error": "disturbance 1 (branch_trip): branch 7-8-1 does not exist", "notes": []}'
+    )
+    bridge = _dyn_bridge()
+    call = {
+        "dyn_plan_json": lambda: bridge.dyn_plan(object()),
+        "eig_json": lambda: bridge.eig(object()),
+        "tds_init_json": lambda: bridge.tds_init(object()),
+        "tds_run_json": lambda: bridge.tds_run(object(), 1.0),
+    }[function]
+    with pytest.raises(SiennaError) as caught:
+        call()
+    assert str(caught.value) == "disturbance 1 (branch_trip): branch 7-8-1 does not exist"
+    assert caught.value.stage == "disturbances"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("stage", ["build", "eig", "matrix", "something-new"])
+def test_ok_false_stage_is_carried_as_julia_gave_it(stand_in: _StandIn, stage: str) -> None:
+    # The bridge does not classify stages: one it has never seen is carried the
+    # same way as one it has.
+    stand_in.answers["eig_json"] = (
+        f'{{"ok": false, "stage": "{stage}", "error": "PSID has no model for EXDC2", "notes": []}}'
+    )
+    bridge = _dyn_bridge()
+    with pytest.raises(SiennaError) as caught:
+        bridge.eig(object())
+    assert str(caught.value) == "PSID has no model for EXDC2"
+    assert caught.value.stage == stage  # type: ignore[attr-defined]
+
+
+def test_ok_false_message_is_scrubbed(stand_in: _StandIn) -> None:
+    stand_in.answers["tds_run_json"] = (
+        '{"ok": false, "stage": "disturbances",'
+        ' "error": "disturbance 1: /secret/case.raw is bad", "notes": []}'
+    )
+    bridge = _dyn_bridge(scrub=lambda text: text.replace("/secret/", ""))
+    with pytest.raises(SiennaError) as caught:
+        bridge.tds_run(object(), 1.0)
+    assert str(caught.value) == "disturbance 1: case.raw is bad"
+    assert "/secret/" not in str(caught.value)
+
+
+def _run_with_hook(stand_in: _StandIn, on_step: Any, calls: int = 1) -> tuple[Any, list[bool]]:
+    """A fake ``tds_run_json`` that calls the hook ``calls`` times and answers."""
+    hook_returns: list[bool] = []
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        stand_in.calls.setdefault("tds_run_json", []).append((args, kwargs))
+        hook = kwargs["on_step"]
+        for index in range(calls):
+            hook_returns.append(hook(float(index) * 0.5, _FakeJuliaVector([1.0, 2.0, 3.0])))
+        return stand_in.answers["tds_run_json"]
+
+    bridge = _dyn_bridge()
+    # The include made the module attribute; its function is replaced now.
+    stand_in.main.TensaSiennaDyn.tds_run_json = run  # type: ignore[attr-defined]
+    return bridge.tds_run(object(), 5.0, on_step=on_step), hook_returns
+
+
+def test_on_step_receives_t_and_an_array_of_floats(stand_in: _StandIn) -> None:
+    received: list[tuple[float, Any]] = []
+    _run_with_hook(stand_in, lambda t, values: received.append((t, values)) or True)
+    (t, values), = received
+    assert t == 0.0
+    assert isinstance(values, numpy.ndarray)
+    assert values.dtype == numpy.float64
+    assert values.shape == (3,)
+    assert list(values) == [1.0, 2.0, 3.0]
+
+
+def test_on_step_values_cross_once(stand_in: _StandIn) -> None:
+    vector = _FakeJuliaVector([1.0, 2.0, 3.0])
+    seen: list[Any] = []
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        kwargs["on_step"](0.0, vector)
+        return stand_in.answers["tds_run_json"]
+
+    bridge = _dyn_bridge()
+    stand_in.main.TensaSiennaDyn.tds_run_json = run  # type: ignore[attr-defined]
+    bridge.tds_run(object(), 5.0, on_step=lambda t, values: seen.append(values) or True)
+    assert len(seen) == 1
+    # The numpy buffer path: not one per-element index.
+    assert vector.getitems == 0
+
+
+def test_on_step_returning_false_stops_and_answer_is_returned(stand_in: _StandIn) -> None:
+    stand_in.answers["tds_run_json"] = (
+        '{"ok": true, "status": "aborted", "t": [0.0, 0.5], "rows": [[1.0], [1.0]]}'
+    )
+    answer, hook_returns = _run_with_hook(stand_in, lambda t, values: t < 0.5, calls=2)
+    # The second call (t = 0.5) returned False to Julia, and the aborted
+    # document is the answer, not an error.
+    assert hook_returns == [True, False]
+    assert answer["status"] == "aborted"
+
+
+def test_on_step_returning_none_continues(stand_in: _StandIn) -> None:
+    _, hook_returns = _run_with_hook(stand_in, lambda t, values: None)
+    assert hook_returns == [True]
+
+
+def test_on_step_exception_is_reraised_after_julia_returns(stand_in: _StandIn) -> None:
+    stand_in.answers["tds_run_json"] = (
+        '{"ok": true, "status": "failed", "error": "boom", "t": [0.0], "rows": [[1.0]]}'
+    )
+    boom = ValueError("boom")
+    calls = 0
+
+    def on_step(t: float, values: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise boom
+        return True
+
+    with pytest.raises(ValueError) as caught:
+        _run_with_hook(stand_in, on_step, calls=3)
+    assert caught.value is boom
+    assert caught.value.__cause__ is None
+    assert not isinstance(caught.value.__context__, SiennaError)
+
+
+def test_on_step_exception_during_a_julia_error_is_still_reraised(stand_in: _StandIn) -> None:
+    boom = ValueError("boom")
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        kwargs["on_step"](0.0, _FakeJuliaVector([1.0]))
+        raise stand_in.julia_error("ErrorException: PSID broke\nStacktrace:\n [1] x")
+
+    bridge = _dyn_bridge()
+    stand_in.main.TensaSiennaDyn.tds_run_json = run  # type: ignore[attr-defined]
+
+    def on_step(t: float, values: Any) -> bool:
+        raise boom
+
+    with pytest.raises(ValueError) as caught:
+        bridge.tds_run(object(), 5.0, on_step=on_step)
+    assert caught.value is boom
+
+
+def test_on_step_is_not_called_again_after_an_exception(stand_in: _StandIn) -> None:
+    calls = 0
+
+    def on_step(t: float, values: Any) -> bool:
+        nonlocal calls
+        calls += 1
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError):
+        _run_with_hook(stand_in, on_step, calls=3)
+    assert calls == 1
+
+
+def test_keyboard_interrupt_in_on_step_is_stored_not_raised_into_julia(stand_in: _StandIn) -> None:
+    def on_step(t: float, values: Any) -> bool:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_with_hook(stand_in, on_step)
+
+
+def test_dynamics_calls_go_through_call_error_mapping(stand_in: _StandIn) -> None:
+    stand_in.raising["eig_json"] = stand_in.julia_error(
+        "ErrorException: PSID broke\nStacktrace:\n [1] x"
+    )
+    stand_in.raising["dyn_plan_json"] = TypeError(
+        "Julia: MethodError: no method matching dyn_plan_json(::Nothing)\nClosest candidates"
+    )
+    bridge = _dyn_bridge()
+    with pytest.raises(SiennaError) as caught:
+        bridge.eig(object())
+    assert str(caught.value) == "PSID broke"
+    with pytest.raises(TypeError) as type_error:
+        bridge.dyn_plan(None)
+    assert not isinstance(type_error.value, SiennaError)
+    assert str(type_error.value).startswith(
+        "dyn_plan_json: MethodError: no method matching dyn_plan_json(::Nothing)"
+    )
+
+
+def test_dynamics_call_before_start_starts_julia(stand_in: _StandIn) -> None:
+    bridge = JuliaBridge()
+    assert bridge.eig(object()) == {"ok": True, "n_states": 32}
+    assert stand_in.imports == 1
+    assert len(stand_in.includes) == 1
+    assert len(stand_in.dyn_includes) == 1
