@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import time
-from typing import Any
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
@@ -150,10 +150,26 @@ def _pflow_args(study: StudyDocument) -> dict[str, Any]:
     return args
 
 
-def _disturbance_spec(
-    disturbance: Disturbance, engine: str, keys: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """The add_disturbance spec of one study disturbance (section 6.4)."""
+def _unit_member_entry(
+    keys: list[dict[str, Any]], unit_key: str, role: str
+) -> dict[str, Any] | None:
+    """The key entry of a member of a generating unit: ``<unit key>/<role>``,
+    or ``<unit key>/<role>:<kind>`` when two models of one role share a unit
+    (``unit_model_key`` in ``tensa.engines.keys``)."""
+    wanted = f"{unit_key}/{role}"
+    for entry in keys:
+        key = entry.get("key")
+        if key == wanted or (isinstance(key, str) and key.startswith(f"{wanted}:")):
+            return entry
+    return None
+
+
+def _disturbance_specs(
+    disturbance: Disturbance,
+    engine: str,
+    keys: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The add_disturbance specs of one study disturbance (section 6.4)."""
     if disturbance.kind == "bus_fault":
         assert disturbance.bus is not None
         # The bus's idx in this engine, from the session's key listing: an
@@ -164,14 +180,16 @@ def _disturbance_spec(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"disturbance bus {disturbance.bus!r} is not a bus of the case",
             )
-        return {
-            "kind": "fault",
-            "bus_idx": bus_entry["idx"],
-            "tf": disturbance.t_on,
-            "tc": disturbance.t_clear,
-            "xf": disturbance.x_pu,
-            "rf": disturbance.r_pu,
-        }
+        return [
+            {
+                "kind": "fault",
+                "bus_idx": bus_entry["idx"],
+                "tf": disturbance.t_on,
+                "tc": disturbance.t_clear,
+                "xf": disturbance.x_pu,
+                "rf": disturbance.r_pu,
+            }
+        ]
     assert disturbance.target is not None
     entry = next((e for e in keys if e.get("key") == disturbance.target), None)
     if entry is None:
@@ -181,37 +199,71 @@ def _disturbance_spec(
         )
     model = str(entry["model"])
     idx = entry["idx"]
-    if disturbance.kind in ("branch_trip", "branch_close", "gen_trip"):
-        return {"kind": "toggle", "model": model, "dev_idx": idx, "t": disturbance.t}
-    if disturbance.kind == "load_step":
-        return {
+    if disturbance.kind in ("branch_trip", "branch_close"):
+        return [{"kind": "toggle", "model": model, "dev_idx": idx, "t": disturbance.t}]
+    if disturbance.kind == "gen_trip":
+        # A generator trip takes the unit's machine out, not the static
+        # generator: a Toggle on the PV leaves every rotor speed at 1.0, and a
+        # Toggle on the machine (the unit's ``/machine`` entry) trips it (on
+        # kundur_full a trip of GENROU 2 at 1 s swings the other three
+        # machines by 9e-3 to 1.1e-2 pu within 2 s; measured against ANDES).
+        machine = _unit_member_entry(keys, disturbance.target, "machine")
+        if machine is not None:
+            return [
+                {
+                    "kind": "toggle",
+                    "model": str(machine["model"]),
+                    "dev_idx": machine["idx"],
+                    "t": disturbance.t,
+                }
+            ]
+        # A unit with no machine (a static case) trips the static generator.
+        return [{"kind": "toggle", "model": model, "dev_idx": idx, "t": disturbance.t}]
+    if disturbance.kind == "load_step" and engine == "andes":
+        # The ANDES engine runs a time-domain study with its loads as constant
+        # impedance, which ANDES works out from p0 and q0 when the run starts:
+        # an Alter of p0 or Ppf at the step's time changes nothing (measured
+        # on kundur_full: every rotor speed identical to the run without it).
+        raise StudyDocError(
+            "a load_step has no effect on the ANDES engine: its time-domain run "
+            "holds loads as constant impedance from the start, so a change of "
+            "the load's power during the run is not applied; a bus fault, a branch "
+            "trip or a generator trip can be studied"
+        )
+    if disturbance.kind == "setpoint" and engine == "andes":
+        # ANDES has no parameter that takes a set-point in MW: a turbine
+        # governor's pref0 is scaled by its droop and paux0 is an auxiliary
+        # signal, and which of them a set-point of the specification means
+        # has not been checked against a reference.
+        raise StudyDocError(
+            f"setpoint {disturbance.signal!r} on {disturbance.target!r} has no "
+            "verified mapping on the ANDES engine; a parameter change "
+            "(kind 'param', naming the model's parameter) can be studied instead"
+        )
+    if disturbance.kind in ("load_step", "setpoint"):
+        # Another engine refuses what it does not take, naming what it takes.
+        return [
+            {
+                "kind": "alter",
+                "model": model,
+                "dev_idx": idx,
+                "src": "p0" if disturbance.kind == "load_step" else str(disturbance.signal),
+                "t": disturbance.t,
+                "method": "=",
+                "amount": disturbance.p_mw if disturbance.kind == "load_step" else disturbance.value,
+            }
+        ]
+    return [
+        {
             "kind": "alter",
             "model": model,
             "dev_idx": idx,
-            "src": "p0",
-            "t": disturbance.t,
-            "method": "=",
-            "amount": disturbance.p_mw,
-        }
-    if disturbance.kind == "setpoint":
-        return {
-            "kind": "alter",
-            "model": model,
-            "dev_idx": idx,
-            "src": str(disturbance.signal),
+            "src": str(disturbance.param),
             "t": disturbance.t,
             "method": "=",
             "amount": disturbance.value,
         }
-    return {
-        "kind": "alter",
-        "model": model,
-        "dev_idx": idx,
-        "src": str(disturbance.param),
-        "t": disturbance.t,
-        "method": "=",
-        "amount": disturbance.value,
-    }
+    ]
 
 
 def _tds_args(study: StudyDocument, engine: str) -> dict[str, Any]:
@@ -290,6 +342,29 @@ def _empty_document(engine: EngineBlock, study: StudyDocument) -> ResultsDocumen
     )
 
 
+def _run_status(payload: Any) -> Literal["completed", "aborted", "failed"]:
+    """How a run ended, from the run's own payload.
+
+    A payload that says ``status`` is believed; otherwise an ``aborted`` flag
+    means aborted and a ``completed`` flag that is false means failed. Only a
+    payload with none of these is taken as completed.
+    """
+    if isinstance(payload, dict):
+        run_status = payload.get("status")
+        if isinstance(run_status, str) and run_status in (
+            "completed",
+            "aborted",
+            "failed",
+        ):
+            return cast(Literal["completed", "aborted", "failed"], run_status)
+        if payload.get("aborted"):
+            return "aborted"
+        completed = payload.get("completed")
+        if completed is not None and not completed:
+            return "failed"
+    return "completed"
+
+
 async def _run_study(
     mgr: SessionManager, sid: str, engine: str, study: StudyDocument
 ) -> tuple[ResultsDocument, dict[str, Any] | None]:
@@ -309,8 +384,8 @@ async def _run_study(
         keys_payload = await _invoke(mgr, sid, "list_keys", {}, LOAD_CASE_TIMEOUT)
         keys: list[dict[str, Any]] = list(keys_payload.get("keys", keys_payload))
         for disturbance in study.disturbances:
-            spec = _disturbance_spec(disturbance, engine, keys)
-            await _invoke(mgr, sid, "add_disturbance", {"spec": spec}, LOAD_CASE_TIMEOUT)
+            for spec in _disturbance_specs(disturbance, engine, keys):
+                await _invoke(mgr, sid, "add_disturbance", {"spec": spec}, LOAD_CASE_TIMEOUT)
         # Both engines start a dynamic run from a solved power flow; a Sienna
         # session refuses one without it, and ANDES takes the disturbances
         # only before the power flow commits its setup, so it comes after them.
@@ -329,7 +404,11 @@ async def _run_study(
             [KeyEntrySchema.model_validate(e) for e in keys]
         )
         document, _skipped, _notes = tds_document(
-            traces, engine=block, study=study_dump, key_book=book
+            traces,
+            engine=block,
+            study=study_dump,
+            status=_run_status(payload),
+            key_book=book,
         )
         return _filter_record(document, study), None
     if study.routine == "eig":

@@ -1421,15 +1421,15 @@ class SiennaState:
                 for item in self._pending_disturbances
                 if item.neutral["kind"] == "branch_trip"
             }
-            target = str(pending.neutral["target"])
+            trip_key = str(pending.neutral["target"])
             refusal = islanding_refusal(
-                self._topology_json or {}, trips, self._topology_branch_id(target)
+                self._topology_json or {}, trips, self._topology_branch_id(trip_key)
             )
             if refusal is not None:
                 # The message names the branch by its key, not by the
                 # topology's own ends and circuit.
                 raise DisturbanceValidationError(
-                    refusal.replace(self._topology_branch_id(target), target, 1)
+                    refusal.replace(self._topology_branch_id(trip_key), trip_key, 1)
                 )
         self._pending_disturbances.append(pending)
         neutral = pending.neutral
