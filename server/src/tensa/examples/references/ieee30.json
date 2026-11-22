@@ -100,5 +100,6 @@
       "reference": "pandapower 3.5.6, runpp (Newton-Raphson, tolerance 1e-8 MVA, reactive limits not enforced) on pglib_opf_case30_ieee.m, read by matpowercaseframes; written by scripts/crosscheck_pf.py",
       "generated_by": "scripts/crosscheck_pf.py"
     }
-  ]
+  ],
+  "cross_engine": {"sienna": "pass"}
 }

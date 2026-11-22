@@ -1320,6 +1320,67 @@ def test_a_rounding_to_zero_has_no_sign(harness: ModuleType) -> None:
     assert harness.fixed(1.5, 3) == "1.500"
 
 
+def test_sienna_unavailable_adds_a_note_and_no_check(harness: ModuleType, fake: FakeApi) -> None:
+    reference = _reference(cross_engine={"engine": "sienna"})
+    result, _ = harness.verify_case(
+        fake,
+        _example(),
+        reference,
+        replace_file=True,
+        engines=["andes", "sienna"],
+        sienna_available=False,
+        sienna_reason="Julia not found",
+    )
+    assert any(
+        note
+        == "Cross-engine checks not run: Sienna is not available on this server (Julia not found)."
+        for note in result.notes
+    )
+    # No cross-engine check was added, and the ANDES checks alone decide the outcome.
+    assert not [c for c in result.checks if c.kind == "cross-engine"]
+    assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
+    # No Sienna session was opened: the fake answers every session as ANDES, and only s1 ran.
+    assert fake.log.count("POST /sessions") == 1
+
+
+def test_a_sienna_refusal_is_checked_against_the_plan(harness: ModuleType, fake: FakeApi) -> None:
+    original = fake.call
+
+    def refuse_sienna(method: str, path: str, body: Any = None, **query: Any) -> Any:
+        if method == "POST" and path == "/sessions" and (body or {}).get("engine") == "sienna":
+            fake.log.append(f"{method} {path}")
+            raise harness.ApiError(method, path, 409, "engine_unavailable: no Julia here")
+        return original(method, path, body, **query)
+
+    fake.call = refuse_sienna  # type: ignore[method-assign]
+    reference = _reference(cross_engine={"sienna": "refused"})
+    result, _ = harness.verify_case(
+        fake,
+        _example(),
+        reference,
+        replace_file=True,
+        engines=["andes", "sienna"],
+        sienna_available=True,
+    )
+    refusal = [c for c in result.checks if c.kind == "cross-engine"]
+    assert len(refusal) == 1 and refusal[0].passed
+    assert "no Julia here" in refusal[0].result
+    assert result.passed, [(c.name, c.result) for c in result.checks if not c.passed]
+    # A plan that expected a run fails on the same refusal.
+    expecting = _reference(cross_engine={"sienna": "pass"})
+    result, _ = harness.verify_case(
+        fake,
+        _example(),
+        expecting,
+        replace_file=True,
+        engines=["andes", "sienna"],
+        sienna_available=True,
+    )
+    (refusal,) = [c for c in result.checks if c.kind == "cross-engine"]
+    assert not refusal.passed and "expected a run, got a refusal" in refusal.result
+    assert not result.passed
+
+
 def test_the_server_the_script_starts_writes_utf8_and_finds_tensa_where_the_script_did(
     harness: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
