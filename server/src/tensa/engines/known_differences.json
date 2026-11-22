@@ -8,5 +8,55 @@
     "small_signal": true,
     "evidence": "Kundur, GENROU + TGOV1: ANDES with D = P_m0 reproduces Sienna's eigenvalues to four digits.",
     "check": "server/tests/integration/test_known_differences.py::test_tgov1_torque"
+  },
+  {
+    "id": "esac1a-rate-feedback",
+    "model": "ESAC1A",
+    "engines": ["andes", "sienna"],
+    "summary": "ANDES's ESAC1A computes its rate feedback (KF, TF) but never subtracts it at the summing point; Sienna subtracts it, as IEEE 421.5 does.",
+    "effect": "In ANDES KF has no effect: the exciter is Sienna's with KF = 0. On PSID's ESAC1A benchmark (KA 200, KF 0.02) ANDES has an exciter mode at 0.199 Hz, damping 0.32, where Sienna has 0.087 Hz, 0.50 and 0.839 Hz, 0.63, and rotor speed differs by 5.7e-4 pu on a swing of 1.6e-3 pu after the line trip.",
+    "small_signal": true,
+    "evidence": "Kundur with the benchmark's ESAC1A on each GENROU, and the benchmark itself: ANDES's modes are the same with KF 0.02 and KF 0, and Sienna with KF 0 gives them to four digits (the benchmark: 0.19895 Hz, damping 0.32289, and 1.37073 Hz, 0.07998, in both).",
+    "check": "server/tests/integration/test_known_differences.py::test_esac1a_rate_feedback"
+  },
+  {
+    "id": "exac1-transducer",
+    "model": "EXAC1",
+    "engines": ["andes", "sienna"],
+    "summary": "ANDES's EXAC1 computes its voltage transducer lag (TR) but takes the terminal voltage itself at the summing point; Sienna takes the lagged voltage, as IEEE 421.5 does.",
+    "effect": "In ANDES TR has no effect: the exciter is Sienna's with TR = 0. On PSID's EXAC1 benchmark (TR 0.01 s, KA 200) the modes move by up to 0.025 Hz and 0.026 in damping (1.5528 Hz, 0.750 in ANDES against 1.5277 Hz, 0.760 in Sienna), and rotor speed differs by 1.0e-4 pu on a swing of 7.1e-3 pu after the line trip.",
+    "small_signal": true,
+    "evidence": "Kundur with the benchmark's EXAC1 on each GENROU, and the benchmark itself: ANDES's modes are the same with TR 0.01 and TR 0, and Sienna with TR 0 gives them to four digits (the benchmark: to five digits, and rotor speed within 8.4e-6 pu).",
+    "check": "server/tests/integration/test_known_differences.py::test_exac1_transducer"
+  },
+  {
+    "id": "gast-torque",
+    "model": "GAST",
+    "engines": ["andes", "sienna"],
+    "summary": "Sienna hands the machine a torque of P_m / omega (GasTG); ANDES hands it P_m.",
+    "effect": "Sienna is more damped: equivalent to D raised by P_m0 (machine base) on the unit in ANDES. On PSID's GAST benchmark the 1.389 Hz mode has damping 0.0818 in Sienna and 0.0771 in ANDES.",
+    "small_signal": true,
+    "evidence": "Kundur, GENROU + the benchmark's GAST on each machine: ANDES with D raised by P_m0 reproduces Sienna's eigenvalues to four digits, and without the raise does not.",
+    "check": "server/tests/integration/test_known_differences.py::test_governor_torque[GAST]"
+  },
+  {
+    "id": "hygov-torque",
+    "model": "HYGOV",
+    "engines": ["andes", "sienna"],
+    "summary": "Sienna hands the machine a torque of P_m / omega (HydroTurbineGov); ANDES hands it P_m.",
+    "effect": "Sienna is more damped: equivalent to D raised by P_m0 (machine base) on the unit in ANDES. On PSID's HYGOV benchmark the 1.391 Hz mode has damping 0.0817 in Sienna and 0.0769 in ANDES.",
+    "small_signal": true,
+    "evidence": "Kundur, GENROU + the benchmark's HYGOV on each machine: ANDES with D raised by P_m0 reproduces Sienna's eigenvalues to four digits but for the 0.637 Hz mode, whose real part stays 1.4e-3 apart (relative; 8.5e-5 in the imaginary part), against more without the raise. That remainder is not explained.",
+    "check": "server/tests/integration/test_known_differences.py::test_governor_torque[HYGOV]"
+  },
+  {
+    "id": "exst1-output-limiter",
+    "model": "EXST1",
+    "engines": ["andes", "sienna"],
+    "summary": "ANDES's EXST1 decides whether the field voltage is at a limit from its rate feedback's washout output, not from the regulator's output, and its limits leave out the terminal voltage (VRMAX - KC*Ifd where PSS/E and Sienna have VT*VRMAX - KC*Ifd).",
+    "effect": "Inside its limits the exciter is the same in both engines. With KF = 0 the washout output is 0 throughout, so ANDES never limits the field voltage, except where a limit is 0 itself: with the benchmark's VRMIN 0 and KC 0 ANDES holds the field voltage at 0, fails its initialisation and loses synchronism at 5.5 s. With VRMIN -1, after the line trip of PSID's EXST1 benchmark Sienna's output reaches its limit and ANDES's does not: rotor speed differs by 4.5e-4 pu on a swing of 8.4e-3 pu.",
+    "small_signal": false,
+    "evidence": "Kundur with the benchmark's EXST1 on each GENROU: with VRMIN 0 the ANDES run starts from a failed initialisation and Sienna's does not; with VRMIN -1 the modes agree to four digits. On the benchmark with VRMIN -1 the modes agree to five digits and rotor speed differs by 4.5e-4 pu after the line trip; with VRMAX also raised out of reach (99) in both engines it differs by 3.3e-6 pu.",
+    "check": "server/tests/integration/test_known_differences.py::test_exst1_output_limiter"
   }
 ]

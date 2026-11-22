@@ -146,7 +146,8 @@ async def test_capabilities_carry_models(
     sienna_models = blocks["sienna"]["models"]
     assert len(sienna_models) == 14
     assert sienna_models["TGOV1"] == "known-difference:tgov1-torque"
-    assert sienna_models["GENROU"] == "unverified"
+    # GENROU agreed in its audit (model_audits.json).
+    assert sienna_models["GENROU"] == "exact"
     # The route still answers 200 with both engines listed.
     resp = await client.get("/api/engines")
     assert resp.status_code == 200, resp.text

@@ -1,1 +1,7 @@
-[]
+[
+  {"engine": "sienna", "model": "GENROU", "test": "server/tests/integration/test_model_audits.py::test_audit_modes[genrou]"},
+  {"engine": "sienna", "model": "GENCLS", "test": "server/tests/integration/test_model_audits.py::test_audit_modes[gencls]"},
+  {"engine": "sienna", "model": "SEXS", "test": "server/tests/integration/test_model_audits.py::test_audit_modes[sexs]"},
+  {"engine": "sienna", "model": "IEEEST", "test": "server/tests/integration/test_model_audits.py::test_audit_modes[ieeest]"},
+  {"engine": "sienna", "model": "ESST1A", "test": "server/tests/integration/test_model_audits.py::test_audit_modes[esst1a]"}
+]

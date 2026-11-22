@@ -313,7 +313,8 @@ def test_engine_capabilities_sienna_available(
     assert "run_tds" in caps["ops"]
     assert caps["ops"] == sorted(ENGINE_OPS["sienna"])
     assert caps["models"]["TGOV1"] == "known-difference:tgov1-torque"
-    assert caps["models"]["GENROU"] == "unverified"
+    # GENROU agreed in its audit (model_audits.json).
+    assert caps["models"]["GENROU"] == "exact"
     assert len(caps["models"]) == 14
     assert caps["editing"] is True
 

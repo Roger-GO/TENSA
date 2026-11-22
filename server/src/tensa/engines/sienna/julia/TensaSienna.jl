@@ -230,6 +230,10 @@ function _check_dyr_records(sys, records, unsupported)
         if g === nothing
             reason = "no generator at bus $(bus) with id $(id) in the case; PowerSystems skips the record"
         elseif g isa PSY.Source
+            # PowerSystems reads a GENCLS record with no inertia (H = 0, PSS/E's
+            # infinite bus) as a voltage Source, which is what that record is:
+            # it is held, not dropped. Any other model on a Source is lost.
+            model == "GENCLS" && continue
             reason = "PowerSystems models generator $(PSY.get_name(g)) as a voltage source, without a dynamic model"
         else
             dyn = PSY.get_dynamic_injector(g)

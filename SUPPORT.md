@@ -20,7 +20,7 @@ The latest release on [PyPI](https://pypi.org/project/tensa/) is the supported o
 
 TENSA does the computation with [ANDES](https://github.com/CURENT/andes) and declares the range it works with: `andes>=2.0,<3.0`. It is verified against ANDES 2.0.0. Inside the range, a later ANDES release that breaks TENSA is a bug in TENSA, and a report of it is welcome. ANDES 3 and later are not supported until TENSA has been checked against them.
 
-TENSA relies on a few parts of ANDES that ANDES does not publish as its API, such as the per-step hook of the time-domain run, so a move to a new ANDES minor release is deliberate: [`server/ANDES_VERSIONS.md`](./server/ANDES_VERSIONS.md) lists the fourteen contracts that are checked first. A problem that comes from ANDES itself (a model equation, a solver that does not converge on a case that should) belongs in [ANDES's issue tracker](https://github.com/CURENT/andes/issues), with TENSA mentioned only if it matters.
+TENSA relies on a few parts of ANDES that ANDES does not publish as its API, such as the per-step hook of the time-domain run, so a move to a new ANDES minor release is deliberate: [`server/ANDES_VERSIONS.md`](./server/ANDES_VERSIONS.md) lists the fifteen contracts that are checked first. A problem that comes from ANDES itself (a model equation, a solver that does not converge on a case that should) belongs in [ANDES's issue tracker](https://github.com/CURENT/andes/issues), with TENSA mentioned only if it matters.
 
 ## Helping the maintainer help you
 

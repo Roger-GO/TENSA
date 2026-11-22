@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from tensa.core.case_events import CaseEvent, events_in_case
 from tensa.core.codegen_cache import wait_for_background_warm
 from tensa.core.disturbance import DisturbanceSpec
+from tensa.core.dyr_columns import put_back_dyr_columns
 from tensa.core.edit_log import Op, apply_op, step_of
 from tensa.core.errors import (
     CaseLoadError,
@@ -129,11 +130,17 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
             return None
 
     @staticmethod
-    def _load_system(case_path: Path, addfiles: list[Path] | None) -> System:
+    def _load_system(
+        case_path: Path, addfiles: list[Path] | None, *, notify: bool = True
+    ) -> System:
         """Read a case into a new System, before ``setup()``.
 
         Touches nothing on the wrapper, so a caller can build a System and
         decide afterwards whether to keep it. Raises ``CaseLoadError``.
+
+        The values of the ``.dyr`` records ANDES reads in an order other than
+        PSS/E's are put back (``tensa.core.dyr_columns``); with ``notify``
+        each correction is said on ``tensa.notice``.
         """
         import andes  # heavy import — kept lazy
 
@@ -175,6 +182,7 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
 
         if ss is None:
             raise CaseLoadError(str(case_path), "andes.load returned None")
+        put_back_dyr_columns(ss, addfiles, notify=notify)
         return ss
 
     def reload_case(self) -> TopologySnapshot:
@@ -252,7 +260,8 @@ class CaseMixin(TopologyMixin, DisturbanceMixin):
         naming the entry that could not be replayed.
         """
         if self._case_path is not None:
-            ss = self._load_system(self._case_path, self._addfiles)
+            # The load said what it put back of the file when it was first read.
+            ss = self._load_system(self._case_path, self._addfiles, notify=False)
         else:
             import andes  # heavy import — kept lazy
 

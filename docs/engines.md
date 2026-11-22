@@ -115,7 +115,26 @@ Every dynamic model of a loaded case has a state for its engine:
 
 `GET /api/sessions/{id}/fidelity` lists the elements that are not `exact`, one entry per dynamic model, keyed by unit and role (`gen:1-1/governor`), sorted by key. ANDES is the reference engine for the models it has, so an ANDES session whose dynamics are all common models answers an empty list. Loading a case with `unsupported` elements fails unless the request passes `on_unsupported: "drop"`, and then the response carries the list.
 
-The known differences live in `server/src/tensa/engines/known_differences.json`, one entry each. The register has one entry today, `tgov1-torque`:
+The models both engines have were audited like for like on PowerSimulationsDynamics' own PSS/E benchmarks (one small case per model, with PSS/E's results), each run in both engines with the same disturbance and compared through `POST /compare` (`server/tests/integration/test_model_audits.py`):
+
+| Model | Outcome | Largest rotor speed difference (pu) |
+|---|---|---|
+| GENROU | `exact`; the electromechanical modes are equal | 2.0e-7 |
+| GENCLS | `exact`; modes equal | 9.3e-7 |
+| SEXS | `exact` | 8.1e-7 |
+| IEEEST | `exact` | 1.9e-7 |
+| ESST1A | `exact` | 6.0e-6 on a swing of 7.7e-3 |
+| ESAC1A | `known-difference:esac1a-rate-feedback` | 5.7e-4 |
+| EXAC1 | `known-difference:exac1-transducer` | 1.0e-4 |
+| EXST1 | `known-difference:exst1-output-limiter` (modes equal) | 4.5e-4 |
+| GAST | `known-difference:gast-torque` | 1.5e-5 |
+| HYGOV | `known-difference:hygov-torque` | 1.4e-5 |
+| TGOV1 | `known-difference:tgov1-torque` | 1.0e-5 |
+| REGCA1, REECB1, REPCA1 | `unverified` | 3.7e-8 |
+
+The converter chain stays `unverified`: its runs agree, but its case has no electromechanical mode, and the converter's own eigenvalues differ between the engines (ANDES -50.0 ± 4.40j, Sienna -45.2 ± 8.70j) for a reason not yet found. The runs were made at a step of 1/480 s in ANDES and 1/240 s in Sienna: at Sienna's default largest step of 1/30 s the step error alone is 3.0e-5 pu of rotor speed on the GENROU case.
+
+The known differences live in `server/src/tensa/engines/known_differences.json`, one entry each, and `server/tests/integration/test_known_differences.py` reproduces each one's evidence. Four are in the models of ANDES 2.0.0 (the ESAC1A rate feedback is computed and never subtracted, the EXAC1 voltage transducer is bypassed, the EXST1 limiter tests the wrong signal) and three are the torque a turbine model hands the machine (Sienna P_m / ω, ANDES P_m). The first entry, as the register holds it:
 
 ```json
 {"id": "tgov1-torque", "model": "TGOV1", "engines": ["andes", "sienna"],
@@ -125,6 +144,10 @@ The known differences live in `server/src/tensa/engines/known_differences.json`,
  "evidence": "Kundur, GENROU + TGOV1: ANDES with D = P_m0 reproduces Sienna's eigenvalues to four digits.",
  "check": "server/tests/integration/test_known_differences.py::test_tgov1_torque"}
 ```
+
+ANDES 2.0.0 reads the columns of an `ESAC1A` or `ESST1A` record of a `.dyr` file in an order other than PSS/E's. TENSA puts the file's values back when it loads the case and says so in the Messages log, so an ANDES session runs those exciters as PSS/E and Sienna do.
+
+An eigenvalue analysis in an ANDES session linearises the System as it stands: after a time-domain run, that is the state the run ended in, with its line trips. A Sienna session linearises at the power flow point every time. Compare the eigenvalues of the two engines from an analysis run before any time-domain run, as `POST /studies` does (each study runs in a session of its own).
 
 An entry needs a test that reproduces its evidence. A model only Sienna has stays `unverified` until it is checked against a published result.
 

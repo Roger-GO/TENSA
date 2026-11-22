@@ -199,9 +199,9 @@ def test_the_andes_range_the_support_pages_quote_is_the_one_declared(document: s
 
 def test_the_support_pages_count_the_andes_contracts_as_the_file_does() -> None:
     text = _read("server/ANDES_VERSIONS.md")
-    assert "## The fourteen API contracts" in text
+    assert "## The fifteen API contracts" in text
     for document in ("SUPPORT.md", "docs/support.md"):
-        assert "fourteen" in _read(document)
+        assert "fifteen" in _read(document)
 
 
 # ---- the README and the first page of the docs ---------------------------------------------------
