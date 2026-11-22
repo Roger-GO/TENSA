@@ -21,6 +21,19 @@ it never reaches the ``~N`` suffix of ``KeyBook.assign``. The elements given
 an ordinal the first time a case is keyed are counted in one problem note per
 kind. An element already in the book keeps its key.
 
+One more rule keeps a key stable across an edit and its undo (spec section
+13: a key never changes within a session). The book of a session that edited
+the case holds entries for handles the re-read topology no longer lists, and
+lacks entries for handles a rebuild brought back. Before the items of one bus
+or bus pair are matched to the file's ids, the items the book already holds
+under a key that is not a file key (elements added in this session, source
+``"ordinal"`` or ``"engine"``) are left out of the matching: they keep their
+keys, and the file's own elements then meet the file's ids with the counts
+they had at the first keying. Without this, a file element deleted and put
+back by an undo while a session-added element shares its bus would be matched
+against counts the added element distorts, and on a MATPOWER case, which has
+no by-id fallback, it would take a fresh ordinal instead of its file key.
+
 This module imports no engine: every input is a plain mapping.
 """
 
@@ -152,6 +165,29 @@ def _first_free(
     return str(ordinal)
 
 
+def _session_items(
+    book: KeyBook, items: Sequence[_Item]
+) -> tuple[list[_Item], list[_Item]]:
+    """Split ``items`` into the session's own and the file's.
+
+    A session item is one the book already holds under a key that is not a
+    file key (its entry's source is not ``"file"``): an element added in this
+    session, which keeps its key and takes no part in the matching with the
+    file's ids. Everything else, an item the book does not hold and one it
+    holds under a file key, is matched against the identity as at the first
+    keying. The pair is ``(session, file)``, each in the order of ``items``.
+    """
+    session: list[_Item] = []
+    file_items: list[_Item] = []
+    for item in items:
+        entry = book.entry_of(book.key_of(item.model, item.idx) or "")
+        if entry is not None and entry.source != "file":
+            session.append(item)
+        else:
+            file_items.append(item)
+    return session, file_items
+
+
 def _place(
     book: KeyBook,
     item: _Item,
@@ -255,7 +291,13 @@ def _assign_branches(
     for pair, pair_items in by_pair.items():
         pair_records = records.get(pair, [])
         file_ckts = [ckt for _, _, ckt in pair_records]
-        matched = _match([item for item, _ in pair_items], file_ckts, by_id_fallback)
+        # Branches the session added keep their keys and stay out of the
+        # matching, so the file's own branches meet the file's records with
+        # the counts of the first keying (spec section 13).
+        session_items, file_items = _session_items(
+            book, [item for item, _ in pair_items]
+        )
+        matched = _match(file_items, file_ckts, by_id_fallback)
         # Matched branches first, so an ordinal is written in the bus order
         # the file gives the pair.
         for item, ends in sorted(pair_items, key=lambda pair_item: pair_item[0] not in matched):
@@ -291,7 +333,11 @@ def _assign_on_buses(
     ordinals = 0
     for bus, items in items_on_bus.items():
         file_ids = file_ids_on_bus.get(bus, [])
-        matched = _match(items, file_ids, by_id_fallback)
+        # Items the session added keep their keys and stay out of the
+        # matching, so the file's own items meet the file's ids with the
+        # counts of the first keying (spec section 13).
+        _, file_items = _session_items(book, items)
+        matched = _match(file_items, file_ids, by_id_fallback)
         for item in sorted(items, key=lambda item: item not in matched):
             taken = matched.get(item)
             file_key = make_key(bus, file_ids[taken]) if taken is not None else None
@@ -426,12 +472,22 @@ def _assign_shunts(
         file_fixed = fixed_ids.get(bus, [])
         file_switched = switched_ids.get(bus, [])
         file_all = [*file_fixed, *file_switched]
+        # Shunts the session added keep their keys and stay out of the
+        # matching, so the file's own shunts meet the file's ids with the
+        # counts of the first keying (spec section 13).
+        _, file_items = _session_items(book, [item for _, _, item in shunts])
+        file_shunts = [
+            shunt for shunt in shunts if shunt[2] in set(file_items)
+        ]
         matched: dict[_Item, str] = {}
-        if len(shunts) == len(file_all):
-            matched = {item: text for (_, _, item), text in zip(shunts, file_all, strict=True)}
+        if len(file_shunts) == len(file_all):
+            matched = {
+                item: text
+                for (_, _, item), text in zip(file_shunts, file_all, strict=True)
+            }
         else:
-            fixed = [item for switched, _, item in shunts if not switched]
-            switched_items = [item for switched, _, item in shunts if switched]
+            fixed = [item for switched, _, item in file_shunts if not switched]
+            switched_items = [item for switched, _, item in file_shunts if switched]
             matched.update(zip(fixed, file_fixed, strict=False))
             matched.update(zip(switched_items, file_switched, strict=False))
         for _, _, item in sorted(shunts, key=lambda shunt: shunt[2] not in matched):

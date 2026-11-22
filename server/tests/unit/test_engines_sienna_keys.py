@@ -471,6 +471,156 @@ def test_second_switched_shunt_takes_the_first_free_ordinal() -> None:
     ]
 
 
+def _rekey_after(
+    book: KeyBook,
+    identity: CaseIdentity,
+    loads: list[Mapping[str, Any]],
+    shunts: list[Mapping[str, Any]] | None = None,
+) -> KeyBook:
+    """Key a topology of bus 7 with the given loads and shunts against the
+    book, as the state does across a rebuild: the book keeps the entries of
+    the handles the topology lists plus the ones the edit log added, minus
+    the ones it removed (``SiennaState``'s retain)."""
+    topology = _topology([7], [], shunts=shunts, loads=loads)
+    book = assign_sienna_keys(topology, identity, book)
+    handles = {
+        ("PQ", str(row["name"])) for row in topology["loads"]
+    } | {("Shunt", str(row["name"])) for row in topology["shunts"]}
+    book.retain(handles)
+    return book
+
+
+@pytest.mark.unit
+def test_file_load_keeps_its_key_through_delete_and_undo_matpower() -> None:
+    # The reproduction of the review: bus 7 has one load from the file, keyed
+    # load:7-1. A PQ added on bus 7 is load:7-2. Delete load:7-1, then undo:
+    # the rebuild lists the file load and the added one, the book holds the
+    # added one's key only, and the file load must take load:7-1 back, not an
+    # ordinal. A MATPOWER case has no by-id fallback, so before the fix the
+    # counts (2 items, 1 file id) sent it to load:7-3.
+    identity = _identity(buses=(7,), loads=(DeviceId(7, "1"),), format="matpower")
+    book = assign_sienna_keys(
+        _topology([7], [], loads=[_load("bus7", 7, "1")]), identity
+    )
+    assert book.key_of("PQ", "bus7") == "load:7-1"
+    # The add: the topology lists both loads, the added one takes load:7-2.
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+    # The delete: the topology lists the added load alone; the book drops the
+    # file load's entry.
+    book = _rekey_after(book, identity, [_load("load7-2", 7, "2")])
+    assert book.entry_of("load:7-1") is None
+    # The undo: the file load is back and must be load:7-1 again.
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    assert book.key_of("PQ", "bus7") == "load:7-1"
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+    assert all("~" not in entry.key for entry in book.entries())
+
+
+@pytest.mark.unit
+def test_file_load_keeps_its_key_through_delete_and_undo_psse() -> None:
+    # The same sequence on a PSS/E case, whose by-id fallback already gave
+    # load:7-1 back; the fix must not change that.
+    identity = _identity(buses=(7,), loads=(DeviceId(7, "1"),))
+    book = assign_sienna_keys(
+        _topology([7], [], loads=[_load("load71", 7, "1")]), identity
+    )
+    book = _rekey_after(
+        book, identity, [_load("load71", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+    book = _rekey_after(book, identity, [_load("load7-2", 7, "2")])
+    book = _rekey_after(
+        book, identity, [_load("load71", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    assert book.key_of("PQ", "load71") == "load:7-1"
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+
+
+@pytest.mark.unit
+def test_file_shunt_keeps_its_key_through_delete_and_undo_matpower() -> None:
+    # The shunt of the same shape: one fixed shunt from the file, one added,
+    # the file one deleted and put back by an undo.
+    identity = _identity(
+        buses=(7,), fixed_shunts=(DeviceId(7, "1"),), format="matpower"
+    )
+    book = assign_sienna_keys(
+        _topology([7], [], shunts=[_shunt("7-1", 7, 1, "fixed")]), identity
+    )
+    assert book.key_of("Shunt", "7-1") == "shunt:7-1"
+    book = _rekey_after(
+        book,
+        identity,
+        [],
+        [_shunt("7-1", 7, 1, "fixed"), _shunt("7-2", 7, 2, "fixed")],
+    )
+    assert book.key_of("Shunt", "7-2") == "shunt:7-2"
+    book = _rekey_after(book, identity, [], [_shunt("7-2", 7, 2, "fixed")])
+    assert book.entry_of("shunt:7-1") is None
+    book = _rekey_after(
+        book,
+        identity,
+        [],
+        [_shunt("7-1", 7, 1, "fixed"), _shunt("7-2", 7, 2, "fixed")],
+    )
+    assert book.key_of("Shunt", "7-1") == "shunt:7-1"
+    assert book.key_of("Shunt", "7-2") == "shunt:7-2"
+
+
+@pytest.mark.unit
+def test_add_after_delete_and_undo_takes_a_fresh_ordinal() -> None:
+    # After the delete and the undo, bus 7 holds load:7-1 (file) and
+    # load:7-2 (added). A load added now takes load:7-3, the first ordinal no
+    # element of the book holds, and the two present throughout keep theirs.
+    identity = _identity(buses=(7,), loads=(DeviceId(7, "1"),), format="matpower")
+    book = assign_sienna_keys(
+        _topology([7], [], loads=[_load("bus7", 7, "1")]), identity
+    )
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    book = _rekey_after(book, identity, [_load("load7-2", 7, "2")])
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    book = _rekey_after(
+        book,
+        identity,
+        [_load("bus7", 7, "1"), _load("load7-2", 7, "2"), _load("load7-3", 7, "3")],
+    )
+    assert book.key_of("PQ", "bus7") == "load:7-1"
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+    assert book.key_of("PQ", "load7-3") == "load:7-3"
+    assert all("~" not in entry.key for entry in book.entries())
+
+
+@pytest.mark.unit
+def test_redo_of_an_add_keeps_the_added_elements_key() -> None:
+    # Delete the file load, then redo the add of load:7-2 (which the undo of
+    # the add had taken back): the added element takes the key it had, and the
+    # file load keeps its own throughout.
+    identity = _identity(buses=(7,), loads=(DeviceId(7, "1"),), format="matpower")
+    book = assign_sienna_keys(
+        _topology([7], [], loads=[_load("bus7", 7, "1")]), identity
+    )
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    # Undo of the add: the added load leaves the topology and the book.
+    book = _rekey_after(book, identity, [_load("bus7", 7, "1")])
+    assert book.entry_of("load:7-2") is None
+    # Redo of the add: it is back, under the key it had.
+    book = _rekey_after(
+        book, identity, [_load("bus7", 7, "1"), _load("load7-2", 7, "2")]
+    )
+    assert book.key_of("PQ", "bus7") == "load:7-1"
+    assert book.key_of("PQ", "load7-2") == "load:7-2"
+
+
 @pytest.mark.unit
 def test_added_load_takes_the_smallest_free_ordinal() -> None:
     # Decision 28: the only load of bus 7 has id 2 in the file. A load added

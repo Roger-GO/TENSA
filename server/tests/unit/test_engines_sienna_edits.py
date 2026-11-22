@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from tensa.core.edit_log import EditStep
 from tensa.core.errors import (
     ElementNotFoundError,
     ElementValidationError,
@@ -75,7 +76,11 @@ _PFLOW: dict[str, Any] = {
 
 
 class FakeBridge:
-    """Records calls and answers the fixed JSON above."""
+    """Records calls and answers the fixed JSON above, with the edits it is
+    sent applied: the System it reports is the case file with the log applied,
+    as the Julia module's is. An add names its element as the Julia side does
+    (a load ``load<bus>-<id>``, a shunt ``<bus>-<id>``, with ``id`` the
+    ordinal the key carries)."""
 
     def __init__(self) -> None:
         self.started = True
@@ -84,16 +89,42 @@ class FakeBridge:
         self.fail_apply = False
         # A key whose edits the System refuses, as the Julia module answers one.
         self.refuse_key: str | None = None
+        self._loads: list[dict[str, Any]] = []
+        self._shunts: list[dict[str, Any]] = []
 
     def load_case(self, raw: Path, dyr: Any, scratch: Path, v_setpoints: Any, corrections: Any) -> Any:
         self.load_calls.append(raw)
+        base = json.loads(json.dumps(_TOPOLOGY))
+        self._loads = base["loads"]
+        self._shunts = base["shunts"]
         return {"case": raw.stem}
 
     def report(self, session: Any) -> dict[str, Any]:
         return dict(_REPORT)
 
     def topology(self, session: Any) -> dict[str, Any]:
-        return json.loads(json.dumps(_TOPOLOGY))
+        topology = json.loads(json.dumps(_TOPOLOGY))
+        topology["loads"] = json.loads(json.dumps(self._loads))
+        topology["shunts"] = json.loads(json.dumps(self._shunts))
+        return topology
+
+    def _apply_add(self, op: dict[str, Any]) -> None:
+        kind, _, rest = op["key"].partition(":")
+        bus, _, ordinal = rest.partition("-")
+        fields = op["fields"]
+        if kind == "load":
+            self._loads.append(
+                {"name": f"load{bus}-{ordinal}", "bus": int(bus), "id": ordinal,
+                 "sienna_type": "PowerLoad", "p_mw": fields.get("p_mw", 0.0),
+                 "q_mvar": fields.get("q_mvar", 0.0), "available": True}
+            )
+        else:
+            self._shunts.append(
+                {"name": f"{bus}-{ordinal}", "bus": int(bus), "order": int(ordinal),
+                 "kind": "fixed", "sienna_type": "FixedAdmittance",
+                 "g_mw": fields.get("g_mw", 0.0), "b_mvar": fields.get("b_mvar", 0.0),
+                 "available": True}
+            )
 
     def apply_edits(self, session: Any, edits_json: str) -> dict[str, Any]:
         if self.fail_apply:
@@ -105,17 +136,61 @@ class FakeBridge:
             for op in ops
             if op["key"] == self.refuse_key
         ]
-        return {"applied": [op for op in ops if op["key"] != self.refuse_key], "refused": refused}
+        applied = [op for op in ops if op["key"] != self.refuse_key]
+        for op in applied:
+            if op["op"] == "add":
+                self._apply_add(op)
+            elif op["op"] == "remove":
+                self._loads = [row for row in self._loads if row["name"] != op["name"]]
+                self._shunts = [row for row in self._shunts if row["name"] != op["name"]]
+        return {"applied": applied, "refused": refused}
 
     def pflow(self, session: Any, tolerance: Any = None, max_iterations: Any = None) -> dict[str, Any]:
         return dict(_PFLOW)
+
+
+# A minimal PSS/E v33 file. Only its path and suffix matter: the readers the
+# state's load calls (read_identity, read_case_facts, corrections_document)
+# are faked by the file_identity fixture below, which supplies the file ids
+# the key assignment matches against, so a file element's key has source
+# "file" and an added one "ordinal".
+_CASE_RAW = """0, 100.0, 33, 0, 0, 60.0
+TENSA test case
+two buses
+third comment line
+1,'BUS1',20.0,3,1,1,1,1.0,0.0
+7,'BUS7',230.0,1,1,1,1,1.0,0.0
+0 /
+7,'1',50.0,10.0,1,1,1,1,1
+0 /
+7,'1',0.0,20.0
+0 /
+1,'1',100.0,0.0,999.0,-999.0,1.0,0,100.0,0.0,1.0,0.0,0.0,1.0,1,100.0,999.0,-999.0,1,1.0
+0 /
+1,7,'1',0.01,0.1,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1,1,0.0,1,1.0
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+0 /
+Q
+"""
 
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / "case.raw").write_text("0, 100.0, 33, 0, 0, 60.0\n")
+    (ws / "case.raw").write_text(_CASE_RAW)
     return ws
 
 
@@ -125,7 +200,56 @@ def state(workspace: Path) -> SiennaState:
 
 
 @pytest.fixture
-def loaded(state: SiennaState, workspace: Path) -> SiennaState:
+def file_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake the three case-file readers the state's load calls.
+
+    The raw file above is only a path with a ``.raw`` suffix; what the key
+    assignment matches against is the identity this fixture hands
+    ``read_identity``: one load id "1" on bus 7, one fixed shunt id "1" on
+    bus 7, one generator id "1" on bus 1 and one branch 1-7 ckt "1", as a
+    MATPOWER case (no by-id fallback, the shape the review's reproduction
+    needs). ``corrections_document`` answers an empty document.
+    """
+    from tensa.engines.identity import BranchId, CaseIdentity, DeviceId
+
+    identity = CaseIdentity(
+        format="matpower",
+        version=None,
+        base_mva=100.0,
+        freq_hz=60.0,
+        buses=(1, 7),
+        isolated_buses=(),
+        swing_buses=(),
+        loads=(DeviceId(7, "1"),),
+        fixed_shunts=(DeviceId(7, "1"),),
+        switched_shunts=(),
+        generators=(DeviceId(1, "1"),),
+        branches=(BranchId(1, 7, "1", transformer=False),),
+        transformers3=(),
+        area_slack_buses={},
+        counts={},
+        unread_blocks=(),
+    )
+    document = {
+        "v_setpoints": {},
+        "transformers": [],
+        "line_charging": [],
+        "transformer_charging": [],
+        "notes": [],
+    }
+    monkeypatch.setattr(
+        "tensa.engines.sienna.state.read_identity", lambda path: identity
+    )
+    monkeypatch.setattr(
+        "tensa.engines.sienna.state.read_case_facts", lambda path: {}
+    )
+    monkeypatch.setattr(
+        "tensa.engines.sienna.state.corrections_document", lambda facts: document
+    )
+
+
+@pytest.fixture
+def loaded(state: SiennaState, workspace: Path, file_identity: None) -> SiennaState:
     state.load_case(workspace / "case.raw")
     return state
 
@@ -336,6 +460,62 @@ def test_key_book_retains_removed_element(loaded: SiennaState) -> None:
     assert entry is not None
 
 
+def test_file_element_keeps_its_key_through_add_delete_and_undo(
+    loaded: SiennaState,
+) -> None:
+    """The review's reproduction through the state's own edit methods: add a
+    load on bus 7 (load:7-2), delete the file load (load:7-1), undo the
+    delete. The file load must be load:7-1 again and the added one still
+    load:7-2 (spec section 13: a key never changes within a session)."""
+    assert loaded.keys().key_of("PQ", "load71") == "load:7-1"
+    loaded.add_element("load", {"bus": 7, "p_mw": 10.0, "q_mvar": 1.0})
+    assert loaded.keys().entry_of("load:7-2") is not None
+    loaded.delete_element("load:7-1")
+    assert loaded.keys().entry_of("load:7-1") is None
+    loaded.undo_last_edit()
+    book = loaded.keys()
+    entry = book.entry_of("load:7-1")
+    assert entry is not None
+    assert (entry.model, str(entry.idx)) == ("PQ", "load71")
+    assert entry.source == "file"
+    added = book.entry_of("load:7-2")
+    assert added is not None
+    assert added.source == "ordinal"
+
+
+def test_file_shunt_keeps_its_key_through_add_delete_and_undo(
+    loaded: SiennaState,
+) -> None:
+    """The shunt of the same shape, through the state's edit methods."""
+    assert loaded.keys().key_of("Shunt", "7-1") == "shunt:7-1"
+    loaded.add_element("shunt", {"bus": 7, "g_mw": 1.0, "b_mvar": 2.0})
+    assert loaded.keys().entry_of("shunt:7-2") is not None
+    loaded.delete_element("shunt:7-1")
+    assert loaded.keys().entry_of("shunt:7-1") is None
+    loaded.undo_last_edit()
+    book = loaded.keys()
+    entry = book.entry_of("shunt:7-1")
+    assert entry is not None
+    assert (entry.model, str(entry.idx)) == ("Shunt", "7-1")
+    assert book.entry_of("shunt:7-2") is not None
+
+
+def test_redo_of_an_add_keeps_the_added_elements_key(loaded: SiennaState) -> None:
+    """Add a load, undo the add, redo it: the added load is load:7-2 again,
+    and the file load is load:7-1 throughout."""
+    loaded.add_element("load", {"bus": 7, "p_mw": 10.0, "q_mvar": 1.0})
+    loaded.undo_last_edit()
+    assert loaded.keys().entry_of("load:7-2") is None
+    loaded.redo_edit()
+    book = loaded.keys()
+    added = book.entry_of("load:7-2")
+    assert added is not None
+    assert added.source == "ordinal"
+    file_entry = book.entry_of("load:7-1")
+    assert file_entry is not None
+    assert (file_entry.model, str(file_entry.idx)) == ("PQ", "load71")
+
+
 def test_no_case(state: SiennaState) -> None:
     for call in (
         lambda: state.add_element("load", {"bus": 7, "p_mw": 1.0, "q_mvar": 1.0}),
@@ -485,3 +665,42 @@ def test_undo_redo_handlers() -> None:
     _HANDLERS["undo_last_edit"](double, {})
     _HANDLERS["redo_edit"](double, {})
     assert double.calls == [("undo",), ("redo",)]
+
+
+# ---- the undo and redo a topology names (as an ANDES topology does) ----
+
+
+def test_a_fresh_case_has_nothing_to_undo_or_redo(loaded: SiennaState) -> None:
+    topology = loaded.topology()
+    assert topology.undo is None
+    assert topology.redo is None
+
+
+def test_an_edit_is_named_by_model_idx_and_andes_param(loaded: SiennaState) -> None:
+    answered = loaded.edit_element("load:7-1", "p_mw", 500.0)
+    expected = EditStep(op="edit", model="PQ", idx="load71", params=("p0",))
+    assert answered.undo == expected
+    assert answered.redo is None
+    assert loaded.topology().undo == expected
+
+
+def test_undo_and_redo_move_the_steps(loaded: SiennaState) -> None:
+    loaded.edit_element("load:7-1", "p_mw", 500.0)
+    loaded.edit_element("load:7-1", "q_mvar", 50.0)
+    after_undo = loaded.undo_last_edit()
+    assert after_undo.undo == EditStep(op="edit", model="PQ", idx="load71", params=("p0",))
+    assert after_undo.redo == EditStep(op="edit", model="PQ", idx="load71", params=("q0",))
+    after_redo = loaded.redo_edit()
+    assert after_redo.undo == EditStep(op="edit", model="PQ", idx="load71", params=("q0",))
+    assert after_redo.redo is None
+
+
+def test_a_delete_names_the_element_it_took_out(loaded: SiennaState) -> None:
+    answered = loaded.delete_element("shunt:7-1")
+    assert answered.undo is not None
+    assert answered.undo.op == "delete"
+    assert answered.undo.model == "Shunt"
+    assert answered.undo.idx == "7-1"
+    undone = loaded.undo_last_edit()
+    assert undone.undo is None
+    assert undone.redo is not None and undone.redo.op == "delete"
