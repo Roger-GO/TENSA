@@ -63,6 +63,12 @@ The Sienna-only routes:
                 "inverters": [{"target": "gen:2-1", "parameter_set": "gfl-omib"}]}}
 ```
 
+### Opening an ANDES case under Sienna
+
+Sienna reads PSS/E `.raw` and `.dyr` files and MATPOWER `.m` files, not ANDES's `.xlsx`. To open an `.xlsx` case under Sienna, open it in an ANDES session and save it as `raw` (`POST /api/sessions/{id}/save` with `"format": "raw"`, or Save system as in the UI): TENSA writes the `.raw` and, when the case has dynamic models, a `.dyr` beside it with the same name. Open the two in a Sienna session. The `.dyr` holds every dynamic model ANDES's PSS/E reader can read, in PSS/E's column order; a model PSS/E has no record for is left out and named in the save's notes.
+
+The five example cases written this way open under Sienna with power flows within 4e-6 pu of the ANDES run of the `.xlsx`. Sienna holds their machines and governors; the EXDC2 (Kundur), ESST3A (IEEE 14) and IEEEX1 (IEEE 39, NPCC) exciters are models PowerSystems has no reader for, and a Sienna session lists them as `unsupported` (load with `"on_unsupported": "drop"`).
+
 ## An op an engine lacks
 
 An op the engine's table lacks is answered by the worker's dispatch, not by the engine, so it costs nothing and cannot fail the way the op itself might: a 409 problem document whose `detail` names the op, the session's engine and the engines that have it (`'run_cpf' is not available with the sienna engine; engines that have it: andes`). A routine an engine lacks is absent from its capabilities and refused the same way.
