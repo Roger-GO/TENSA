@@ -46,7 +46,7 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "routines": ["matrices", "pflow", "eig", "tds"],
             "routine_options": {
                 "tds": {
-                    "streaming": False,
+                    "streaming": True,
                     "abort": True,
                     "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
                     "options": {"load_model": ["impedance", "power", "as-case"]},

@@ -79,7 +79,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable, Sequence
+import threading
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal
@@ -89,8 +90,12 @@ import pyarrow as pa
 import pyarrow.ipc
 from numpy.typing import NDArray
 
+from tensa.core.messages import attach_log
+
 if TYPE_CHECKING:
     from andes.system import System
+
+    from tensa.engines.base import TdsStreamPlan
 
 
 DecimationAlgorithm = Literal["none", "boxcar-mean", "boxcar-mean-best-effort"]
@@ -726,6 +731,139 @@ class TraceRecorder:
         }
 
 
+# ---- the streaming driver ---------------------------------------------------
+
+
+def run_tds_stream(
+    *,
+    plan: TdsStreamPlan,
+    run: Callable[[Callable[[float, Any], bool]], Any],
+    abort_event: Any,
+    data_pipe: Any,
+    seq: Any,
+    decimation: DecimationMode,
+    max_rate_hz: float | None,
+    fixed_step: bool,
+    final_row: Callable[[], tuple[float, Any] | None] | None = None,
+) -> Any:
+    """Drive one streaming time-domain run of any engine.
+
+    ``plan`` is the engine's column plan (``tensa.engines.base.TdsStreamPlan``).
+    ``run`` is the engine's run function: it takes the per-step callback and runs
+    to its end, calling the callback once per step with the step's time and the
+    step's row (or ``None`` when the plan's ``collect`` reads the row itself),
+    and stopping when the callback returns ``True``. It returns the run's result
+    payload, which ``run_tds_stream`` returns unchanged. ``final_row`` gives
+    the row of the step the run ended on, which no call of the callback saw
+    (ANDES's ``StepClock.end``), as ``(t, row)``, or ``None``.
+
+    The function sends the ``stream_start`` envelope before ``run`` is called,
+    then one ``stream_frame`` envelope per emitted batch, then flushes the
+    aggregator's tail. It checks ``abort_event`` on every step and reports the
+    stop through the callback's ``True`` return; it never raises for an abort.
+    A broken pipe sets the abort flag and the run stops the same way. A
+    ``ValueError`` from the aggregator's construction propagates (the worker
+    converts it to ``AndesAppError``, as before).
+    """
+    aggregator = StreamAggregator(
+        decimation=decimation,
+        max_rate_hz=max_rate_hz,
+        fixed_step=fixed_step,
+    )
+
+    # Send the stream-start metadata BEFORE the run begins so the WS sender can
+    # forward it as a text frame ahead of any binary frames. A plan that places
+    # ``var_columns`` among its own keys keeps that order (the ANDES stream's
+    # metadata is what it always was); otherwise it follows the decimation.
+    metadata: dict[str, Any] = {
+        "schema_version": "2.0",
+        "decimation": {
+            "algorithm": aggregator.algorithm,
+            "mode": aggregator.decimation,
+            "source_rate_hz": None,
+            "output_rate_hz": aggregator.output_rate_hz,
+            "fixed_step": fixed_step,
+        },
+    }
+    if "var_columns" not in plan.metadata_extra:
+        metadata["var_columns"] = plan.var_columns
+    elif plan.metadata_extra["var_columns"] != plan.var_columns:
+        raise ValueError("the plan's metadata names other columns than the plan")
+    metadata.update(plan.metadata_extra)
+    data_pipe.send({"type": "stream_start", "seq": seq, "metadata": metadata})
+
+    local_abort = threading.Event()
+
+    # Single-element list to allow mutation from inside the closure without
+    # stacking ``nonlocal`` declarations across both _emit_rows and the
+    # post-run tail-flush below.
+    frame_seq_holder = [0]
+
+    def _emit_rows(rows: list[StreamRow], *, tail: bool = False) -> None:
+        frame_seq_holder[0] += 1
+        payload = encode_batch(len(plan.var_columns), rows)
+        envelope: dict[str, Any] = {
+            "type": "stream_frame",
+            "seq": seq,
+            "frame_seq": frame_seq_holder[0],
+            "row_count": len(rows),
+            "payload": payload,
+        }
+        if tail:
+            envelope["tail"] = True
+        try:
+            # What the engine logged since the last frame goes with this one, so a
+            # long run's messages (an event applied at t = 2 s) arrive as it goes.
+            data_pipe.send(attach_log(envelope))
+        except (BrokenPipeError, OSError):
+            local_abort.set()
+
+    def _on_step(t: float, values: Any) -> bool:
+        if local_abort.is_set():
+            # Nothing can be sent any more.
+            return True
+        # An abort asks the run to stop, and every step it has solved until it
+        # does is still streamed (ANDES stops at its next hook, through its own
+        # flag): a stopped run's record holds every step it solved.
+        stop = bool(abort_event.is_set())
+        collected = plan.collect(t, values)
+        if collected is None:
+            # No new solved step (the ANDES clock's first call and its retries).
+            return stop
+        if collected is True:
+            # The plan itself asks to stop.
+            return True
+        at, row = collected
+        rows = aggregator.push(float(at), row)
+        if rows:
+            _emit_rows(rows)
+        return stop or local_abort.is_set()
+
+    result = run(_on_step)
+
+    # The step the run ended on, which no call of the hook saw: at ``tf`` when
+    # the run got there. Sent even after an abort, as the run's last state.
+    if final_row is not None and not local_abort.is_set():
+        last = final_row()
+        if last is not None:
+            rows = aggregator.push(float(last[0]), last[1])
+            if rows:
+                _emit_rows(rows)
+
+    # Drain any buffered rows that didn't reach an emit boundary before run end.
+    # A mean-decimated run keeps its last step out of the last window's mean, so
+    # there can be two rows: each goes in a frame of its own, as every window's
+    # row of such a run does.
+    tail_rows = aggregator.flush()
+    if tail_rows and aggregator.decimation == "mean":
+        for row in tail_rows:
+            _emit_rows([row], tail=True)
+    elif tail_rows:
+        _emit_rows(tail_rows, tail=True)
+
+    return result
+
+
 # ---- aggregator -------------------------------------------------------------
 
 
@@ -886,6 +1024,7 @@ __all__ = [
     "encode_batch",
     "line_idx_values_from_system",
     "pq_idx_values_from_system",
+    "run_tds_stream",
     "syngen_idx_values_from_system",
     "var_column_names",
 ]

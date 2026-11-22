@@ -289,6 +289,7 @@ async def test_engines_lists_sienna(world: World) -> None:
     assert sienna["formats"] == {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []}
     assert sienna["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert sienna["routine_options"]["tds"]["disturbances"] == ["branch_trip", "bus_fault", "gen_trip"]
+    assert sienna["routine_options"]["tds"]["streaming"] is True
     assert sienna["editing"] is False
     # Read from the project's Manifest without starting Julia.
     assert sienna["versions"]["julia"].startswith("1.")

@@ -107,24 +107,22 @@ from tensa.core.session_dirs import proc_stat_path
 from tensa.core.stream import (
     DEFAULT_VARS,
     VAR_GROUPS,
-    StreamAggregator,
     StreamCollector,
-    StreamRow,
     TraceRecorder,
     VarGroup,
     bus_idx_values_from_system,
-    encode_batch,
     line_idx_values_from_system,
     pq_idx_values_from_system,
+    run_tds_stream,
     syngen_idx_values_from_system,
     var_column_names,
 )
+from tensa.core.tds_controllers import ControllerBank, parse_controllers
 from tensa.core.tds_controllers import log_notices as log_controller_notices
-from tensa.core.tds_controllers import parse_controllers
 from tensa.core.tds_steps import StepClock, stored_step
 from tensa.core.wrapper import Wrapper, tds_fixed_step, validate_step_size
 from tensa.core.wrapper.tds import validate_integrator
-from tensa.engines.base import EngineRuntime
+from tensa.engines.base import EngineRuntime, TdsStreamPlan
 from tensa.engines.ops import ENGINE_OPS, engines_with_op
 from tensa.engines.registry import load_runtime
 
@@ -1574,29 +1572,41 @@ def _handle_run_sweep_iteration(
         abort_flag.set()
 
 
-def _handle_run_tds(
-    wrapper: Wrapper,
-    args: dict[str, Any],
-    abort_event: EventType,
-    data_pipe: Connection | None = None,
-    seq: int | None = None,
-) -> Any:
-    """Run TDS in batch or streaming mode.
+@dataclasses.dataclass(frozen=True)
+class _AndesStreamPrep:
+    """What a streaming ANDES run is made of, worked out before anything is sent.
 
-    Streaming mode is selected by ``args["stream"] == True``. When streaming,
-    each per-step state snapshot is encoded as an Arrow IPC batch and sent on
-    the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
-    <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
-    ``{"type": "stream_start", ...}`` message carrying the column names, which
-    the frames leave out (see ``tensa.core.stream`` for the frame layout).
-    The final ``{"type": "result", ...}`` message lands as usual at end of run.
+    ``plan`` is what the engine-neutral driver streams from; the handler keeps
+    the rest (the controllers, the clock, the request's checked values) for the
+    run itself and for the payload afterwards.
     """
-    # Everything the run would refuse for reasons known from the request and the
-    # System's state is checked here, before any stream metadata goes out and
-    # before the abort bridge starts: a refused run must not start a stream the
-    # client then sees fail, nor leave a bridge thread polling (a refusal sets
-    # no ``abort_flag``). The route layers validate ``h`` and the integrator
-    # too; the worker does not rely on that.
+
+    plan: TdsStreamPlan
+    controllers: ControllerBank | None
+    clock: StepClock
+    h: float | None
+    integrator_raw: Any
+    tds_config_overrides: dict[str, float] | None
+    dae_names: list[str]
+    decimation: str
+    max_rate_hz: float | None
+    fixed_step: bool
+    # The row of the step the run ended on, which no call of the hook saw.
+    final_row: Callable[[], tuple[float, Any] | None]
+
+
+def _andes_tds_stream_prep(wrapper: Wrapper, args: dict[str, Any]) -> _AndesStreamPrep:
+    """The ANDES engine's column plan for one streaming run: the groups' and
+    ``dae_vars``' columns of the loaded System, and a ``collect`` that reads the
+    step's values off the System under ``stored_step``.
+
+    Everything the run would refuse for reasons known from the request and the
+    System's state is checked here, before any stream metadata goes out and
+    before the abort bridge starts: the step size, the integrator and overrides
+    (``Wrapper.check_tds_request``), the ``dae_vars`` names against the case,
+    the controllers against their devices, and the ``vars`` selector. A refusal
+    raises before the driver sends anything.
+    """
     h = validate_step_size(args.get("h"))
 
     # Unit 16: integrator selection + adaptive-tolerance overrides.
@@ -1649,166 +1659,215 @@ def _handle_run_tds(
     # is refused like a bad variable name, before a stream starts.
     controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
 
-    abort_flag = threading.Event()
-    if abort_event.is_set():
-        abort_flag.set()
+    # Decimation config (validated at the WS layer; defaults match the
+    # current behavior of "every step is its own one-row batch").
+    decimation_raw = args.get("decimation") or "none"
+    if decimation_raw not in ("none", "mean"):
+        raise AndesAppError(
+            f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
+        )
+    max_rate_hz_raw = args.get("max_rate_hz")
+    max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
 
+    # ``vars`` selects which variable groups appear in each Arrow batch.
+    # The WS layer validates the literal set and rejects empty lists; the
+    # worker still defends against missing/empty input (other code paths
+    # may invoke streaming without the WS layer in tests).
+    vars_raw = args.get("vars")
+    if vars_raw is None:
+        var_groups: list[VarGroup] = list(DEFAULT_VARS)
+    elif isinstance(vars_raw, list) and all(
+        isinstance(v, str) for v in vars_raw
+    ):
+        unknown = [v for v in vars_raw if v not in VAR_GROUPS]
+        if unknown:
+            raise AndesAppError(
+                f"unknown var group(s): {unknown!r}; expected one of "
+                f"{list(VAR_GROUPS)!r}"
+            )
+        if not vars_raw and not dae_names:
+            raise AndesAppError(
+                "'vars' must be a non-empty list when provided"
+            )
+        # Dedupe while preserving canonical ordering (``var_column_names``
+        # also iterates VAR_GROUPS canonically, but normalize here so the
+        # metadata's ``vars`` list is stable too).
+        seen: set[str] = set()
+        var_groups = []
+        for g in VAR_GROUPS:
+            if g in vars_raw and g not in seen:
+                var_groups.append(g)
+                seen.add(g)
+    else:
+        raise AndesAppError(
+            "'vars' must be a list of variable-group names"
+        )
+
+    # Resolve the System ONCE (after load); we need its Bus model to list
+    # the columns. If the wrapper has no System loaded the run will fail
+    # later — surface the same error path as before.
+    ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
+    # Ensure setup so Bus.v exists; the wrapper would do this anyway when
+    # run_tds runs PF first.
+    wrapper._ensure_setup()  # noqa: SLF001
+    if not bool(getattr(ss.PFlow, "converged", False)):
+        ss.PFlow.run()
+
+    # Whether the run steps at a fixed size, so the algorithm label can be
+    # honest: boxcar mean over adaptive-step samples is best-effort. Read
+    # from the request, not from ``ss.TDS.config.fixt``, which ``run_tds``
+    # has not set yet and which still holds an earlier run's value.
+    fixed_step = tds_fixed_step(integrator_raw, tds_config_overrides)
+
+    # Snapshot the topology ONCE per run so each callpert tick only reads
+    # values: the collector resolves where each one lives now, and the
+    # column names list the same devices, so column order and value order
+    # line up.
+    bus_idx_values = bus_idx_values_from_system(ss)
+    syngen_idx_values = syngen_idx_values_from_system(ss)
+    line_idx_values = line_idx_values_from_system(ss)
+    pq_idx_values = pq_idx_values_from_system(ss)
+    var_columns = var_column_names(var_groups, ss, dae_names)
+    collector = StreamCollector(ss, var_groups, dae_names)
+
+    # The hook is called before the step it names is solved, so a row is the
+    # step before, under that step's time (``tensa.core.tds_steps``).
+    clock = StepClock()
+
+    def collect(t: float, values: Any) -> Any:  # noqa: ARG001 - ANDES reads the System
+        solved = clock.hook(t, ss)
+        if solved is None:
+            return None  # no new solved step; the driver skips the row
+        # As ANDES solved the step, not as an event at its time left it, and
+        # under the time of that step.
+        with stored_step(ss, solved):
+            return solved, collector.collect()
+
+    def final_row() -> tuple[float, Any] | None:
+        last = clock.end(ss)
+        if last is None:
+            return None
+        with stored_step(ss, last):
+            return last, collector.collect()
+
+    plan = TdsStreamPlan(
+        var_columns=var_columns,
+        # In the order the stream's metadata has always had.
+        metadata_extra={
+            "vars": list(var_groups),
+            "dae_vars": dae_names,
+            "var_columns": var_columns,
+            "bus_idx_values": [str(idx) for idx in bus_idx_values],
+            "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
+            "line_idx_values": [str(idx) for idx in line_idx_values],
+            "pq_idx_values": [str(idx) for idx in pq_idx_values],
+        },
+        collect=collect,
+    )
+    return _AndesStreamPrep(
+        plan=plan,
+        controllers=controllers,
+        clock=clock,
+        h=h,
+        integrator_raw=integrator_raw,
+        tds_config_overrides=tds_config_overrides,
+        dae_names=dae_names,
+        decimation=decimation_raw,
+        max_rate_hz=max_rate_hz,
+        fixed_step=fixed_step,
+        final_row=final_row,
+    )
+
+
+def _handle_run_tds(
+    wrapper: Wrapper,
+    args: dict[str, Any],
+    abort_event: EventType,
+    data_pipe: Connection | None = None,
+    seq: int | None = None,
+) -> Any:
+    """Run TDS in batch or streaming mode.
+
+    Streaming mode is selected by ``args["stream"] == True``. When streaming,
+    each per-step state snapshot is encoded as an Arrow IPC batch and sent on
+    the data Pipe as ``{"type": "stream_frame", "seq": <run_seq>, "payload":
+    <bytes>}``. The first frame of a run is preceded by a JSON-text-shaped
+    ``{"type": "stream_start", ...}`` message carrying the column names, which
+    the frames leave out (see ``tensa.core.stream`` for the frame layout).
+    The final ``{"type": "result", ...}`` message lands as usual at end of run.
+    """
+    # Everything the run would refuse for reasons known from the request and the
+    # System's state is checked here, before any stream metadata goes out and
+    # before the abort bridge starts: a refused run must not start a stream the
+    # client then sees fail, nor leave a bridge thread polling (a refusal sets
+    # no ``abort_flag``). The route layers validate ``h`` and the integrator
+    # too; the worker does not rely on that.
     stream = bool(args.get("stream"))
-    on_step: Callable[[float, Any], None] | None = None
-    # Takes the System's values as the row of the step solved at the time given.
-    record_step: Callable[[float], None] | None = None
-    aggregator: StreamAggregator | None = None
-
+    prep: _AndesStreamPrep | None = None
     if stream:
         if data_pipe is None or seq is None:
             raise AndesAppError(
                 "streaming mode requires data_pipe + seq context (worker bug)"
             )
+        prep = _andes_tds_stream_prep(wrapper, args)
+        h = prep.h
+        integrator_raw = prep.integrator_raw
+        tds_config_overrides = prep.tds_config_overrides
+        dae_names = prep.dae_names
+        controllers = prep.controllers
+    else:
+        h = validate_step_size(args.get("h"))
 
-        # Decimation config (validated at the WS layer; defaults match the
-        # current behavior of "every step is its own one-row batch").
-        decimation_raw = args.get("decimation") or "none"
-        if decimation_raw not in ("none", "mean"):
-            raise AndesAppError(
-                f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
-            )
-        max_rate_hz_raw = args.get("max_rate_hz")
-        max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
+        # Unit 16: integrator selection + adaptive-tolerance overrides.
+        integrator_raw = validate_integrator(args.get("integrator", "trapezoidal"))
 
-        # ``vars`` selects which variable groups appear in each Arrow batch.
-        # The WS layer validates the literal set and rejects empty lists; the
-        # worker still defends against missing/empty input (other code paths
-        # may invoke streaming without the WS layer in tests).
-        vars_raw = args.get("vars")
-        if vars_raw is None:
-            var_groups: list[VarGroup] = list(DEFAULT_VARS)
-        elif isinstance(vars_raw, list) and all(
-            isinstance(v, str) for v in vars_raw
-        ):
-            unknown = [v for v in vars_raw if v not in VAR_GROUPS]
-            if unknown:
+        overrides_raw = args.get("tds_config_overrides")
+        tds_config_overrides = None
+        if overrides_raw is not None:
+            if not isinstance(overrides_raw, dict):
                 raise AndesAppError(
-                    f"unknown var group(s): {unknown!r}; expected one of "
-                    f"{list(VAR_GROUPS)!r}"
+                    "'tds_config_overrides' must be a dict of "
+                    "{string → float}; keys are canonical aliases "
+                    "(rtol/atol/max_step/min_step) or real ss.TDS.config field names"
                 )
-            if not vars_raw and not dae_names:
-                raise AndesAppError(
-                    "'vars' must be a non-empty list when provided"
-                )
-            # Dedupe while preserving canonical ordering (``var_column_names``
-            # also iterates VAR_GROUPS canonically, but normalize here so the
-            # metadata's ``vars`` list is stable too).
-            seen: set[str] = set()
-            var_groups = []
-            for g in VAR_GROUPS:
-                if g in vars_raw and g not in seen:
-                    var_groups.append(g)
-                    seen.add(g)
-        else:
-            raise AndesAppError(
-                "'vars' must be a list of variable-group names"
-            )
+            coerced: dict[str, float] = {}
+            for key, value in overrides_raw.items():
+                if not isinstance(key, str):
+                    raise AndesAppError(
+                        f"'tds_config_overrides' keys must be strings, got {type(key).__name__}"
+                    )
+                try:
+                    coerced[key] = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise AndesAppError(
+                        f"'tds_config_overrides[{short_repr(key)}]' must be a float-coercible value"
+                    ) from exc
+            tds_config_overrides = coerced
 
-        # Resolve the System ONCE (after load); we need its Bus model to list
-        # the columns. If the wrapper has no System loaded the run will fail
-        # later — surface the same error path as before.
-        ss = wrapper._require_loaded()  # noqa: SLF001 — internal access by design
-        # Ensure setup so Bus.v exists; the wrapper would do this anyway when
-        # run_tds runs PF first.
-        wrapper._ensure_setup()  # noqa: SLF001
-        if not bool(getattr(ss.PFlow, "converged", False)):
-            ss.PFlow.run()
+        # QNDF on a System that has already stepped, an unknown override key, or an
+        # override value that breaks its rule: the same refusals ``Wrapper.run_tds``
+        # raises, asked for up front.
+        wrapper.check_tds_request(integrator_raw, tds_config_overrides)
 
-        # Whether the run steps at a fixed size, so the algorithm label can be
-        # honest: boxcar mean over adaptive-step samples is best-effort. Read
-        # from the request, not from ``ss.TDS.config.fixt``, which ``run_tds``
-        # has not set yet and which still holds an earlier run's value.
-        fixed_step = tds_fixed_step(integrator_raw, tds_config_overrides)
+        # The ANDES variables the run records beyond the streamed groups.
+        dae_vars_raw = args.get("dae_vars")
+        if dae_vars_raw is None:
+            dae_vars_raw = []
+        if not isinstance(dae_vars_raw, list) or not all(isinstance(v, str) for v in dae_vars_raw):
+            raise TdsRequestError("'dae_vars' must be a list of ANDES variable names")
+        dae_names = [v.name for v in resolve_dae_vars(wrapper._require_loaded(), dae_vars_raw)]  # noqa: SLF001
 
-        try:
-            aggregator = StreamAggregator(
-                decimation=decimation_raw,  # type: ignore[arg-type]
-                max_rate_hz=max_rate_hz,
-                fixed_step=fixed_step,
-            )
-        except ValueError as exc:
-            raise AndesAppError(str(exc)) from exc
+        # The run's controllers (``tensa.core.tds_controllers``).
+        controllers = wrapper.tds_controllers(parse_controllers(args.get("controllers")))
 
-        # Snapshot the topology ONCE per run so each callpert tick only reads
-        # values: the collector resolves where each one lives now, and the
-        # column names list the same devices, so column order and value order
-        # line up.
-        bus_idx_values = bus_idx_values_from_system(ss)
-        syngen_idx_values = syngen_idx_values_from_system(ss)
-        line_idx_values = line_idx_values_from_system(ss)
-        pq_idx_values = pq_idx_values_from_system(ss)
-        var_columns = var_column_names(var_groups, ss, dae_names)
-        collector = StreamCollector(ss, var_groups, dae_names)
-
-        # Send the stream-start metadata BEFORE the run begins so the WS
-        # sender can forward it as a text frame ahead of any binary frames.
-        data_pipe.send(
-            {
-                "type": "stream_start",
-                "seq": seq,
-                "metadata": {
-                    "schema_version": "2.0",
-                    "decimation": {
-                        "algorithm": aggregator.algorithm,
-                        "mode": aggregator.decimation,
-                        "source_rate_hz": None,
-                        "output_rate_hz": aggregator.output_rate_hz,
-                        "fixed_step": fixed_step,
-                    },
-                    "vars": list(var_groups),
-                    "dae_vars": dae_names,
-                    "var_columns": var_columns,
-                    "bus_idx_values": [str(idx) for idx in bus_idx_values],
-                    "syngen_idx_values": [str(idx) for idx in syngen_idx_values],
-                    "line_idx_values": [str(idx) for idx in line_idx_values],
-                    "pq_idx_values": [str(idx) for idx in pq_idx_values],
-                },
-            }
-        )
-
-        # Single-element list to allow mutation from inside the closure without
-        # stacking ``nonlocal`` declarations across both _emit_rows and the
-        # post-run tail-flush below.
-        frame_seq_holder = [0]
-
-        def _emit_rows(rows: list[StreamRow], *, tail: bool = False) -> None:
-            frame_seq_holder[0] += 1
-            payload = encode_batch(len(var_columns), rows)
-            envelope: dict[str, Any] = {
-                "type": "stream_frame",
-                "seq": seq,
-                "frame_seq": frame_seq_holder[0],
-                "row_count": len(rows),
-                "payload": payload,
-            }
-            if tail:
-                envelope["tail"] = True
-            try:
-                # What ANDES logged since the last frame goes with this one, so a
-                # long run's messages (an event applied at t = 2 s) arrive as it goes.
-                data_pipe.send(attach_log(envelope))
-            except (BrokenPipeError, OSError):
-                abort_flag.set()
-
-        def _emit(t: float) -> None:
-            assert aggregator is not None
-            # As ANDES solved the step, not as an event at its time left it.
-            with stored_step(ss, t):
-                row = collector.collect()
-            rows = aggregator.push(t, row)
-            if rows:
-                _emit_rows(rows)
-
-        record_step = _emit
+    abort_flag = threading.Event()
+    if abort_event.is_set():
+        abort_flag.set()
 
     # A batch run has no frames to carry the values it was asked to record, so it
     # keeps them and returns them with its summary.
     recorder: TraceRecorder | None = None
+    record_step: Callable[[float], None] | None = None
     if not stream and dae_names:
         loaded = wrapper._require_loaded()  # noqa: SLF001
         recorder = TraceRecorder(StreamCollector(loaded, [], dae_names), dae_names)
@@ -1822,7 +1881,8 @@ def _handle_run_tds(
 
     # The hook is called before the step it names is solved, so a row is the
     # step before, under that step's time (``tensa.core.tds_steps``).
-    clock = StepClock()
+    clock = StepClock() if prep is None else prep.clock
+    on_step: Callable[[float, Any], None] | None = None
     if record_step is not None:
 
         def _on_step(t: float, system: Any) -> None:
@@ -1845,36 +1905,61 @@ def _handle_run_tds(
     bridge_thread.start()
 
     try:
-        result = wrapper.run_tds(
-            tf=args["tf"],
-            h=h,
-            on_step=on_step,
-            abort_flag=abort_flag,
-            integrator=integrator_raw,
-            tds_config_overrides=tds_config_overrides,
-            controllers=controllers,
-        )
+        if prep is not None:
+            # The streaming branch hands the run to the engine-neutral driver
+            # (``tensa.core.stream.run_tds_stream``), which sends stream_start,
+            # encodes the frames, applies the decimation and checks the abort
+            # event. The wrapper's abort channel stays ``abort_flag`` (the
+            # bridge above mirrors the event into it), so the driver's callback
+            # only collects rows and never returns a stop to the wrapper.
+            def _run(on_step_bool: Callable[[float, Any], bool]) -> Any:
+                def _collect(t: float, system: Any) -> None:  # noqa: ARG001
+                    on_step_bool(t, None)
+
+                return wrapper.run_tds(
+                    tf=args["tf"],
+                    h=prep.h,
+                    on_step=_collect,
+                    abort_flag=abort_flag,
+                    integrator=prep.integrator_raw,
+                    tds_config_overrides=prep.tds_config_overrides,
+                    controllers=prep.controllers,
+                )
+
+            try:
+                result = run_tds_stream(
+                    plan=prep.plan,
+                    run=_run,
+                    abort_event=abort_event,
+                    data_pipe=data_pipe,
+                    seq=seq,
+                    decimation=prep.decimation,  # type: ignore[arg-type]
+                    max_rate_hz=prep.max_rate_hz,
+                    fixed_step=prep.fixed_step,
+                    final_row=prep.final_row,
+                )
+            except ValueError as exc:
+                raise AndesAppError(str(exc)) from exc
+        else:
+            result = wrapper.run_tds(
+                tf=args["tf"],
+                h=h,
+                on_step=on_step,
+                abort_flag=abort_flag,
+                integrator=integrator_raw,
+                tds_config_overrides=tds_config_overrides,
+                controllers=controllers,
+            )
     finally:
         abort_flag.set()
 
     # The step the run ended on, which no call of the hook saw: at ``tf`` when
-    # the run got there.
+    # the run got there. A streamed run emits it through the driver's
+    # ``final_step``; a batch run records it here.
     if record_step is not None:
         last = clock.end(wrapper._require_loaded())  # noqa: SLF001
         if last is not None:
             record_step(last)
-
-    # Drain any buffered rows that didn't reach an emit boundary before run end.
-    # A mean-decimated run keeps its last step out of the last window's mean, so
-    # there can be two rows: each goes in a frame of its own, as every window's
-    # row of such a run does.
-    if stream and aggregator is not None:
-        tail_rows = aggregator.flush()
-        if tail_rows and aggregator.decimation == "mean":
-            for row in tail_rows:
-                _emit_rows([row], tail=True)
-        elif tail_rows:
-            _emit_rows(tail_rows, tail=True)
 
     abort_event.clear()
     payload = _serialize_dataclass(result)

@@ -148,6 +148,7 @@ def test_happy_path_payload_and_bridge_arguments() -> None:
     state = loaded_state()
     payload = state.run_tds(tf=5.0)
     assert payload["converged"] is True
+    assert payload["status"] == "completed"
     assert payload["final_t"] == 1.0
     assert payload["callpert_count"] == 2
     assert payload["integrator"] == "ida"
@@ -223,6 +224,7 @@ def test_aborted_run_reports_not_converged() -> None:
     state = loaded_state(FakeBridge(answer))
     payload = state.run_tds(tf=5.0)
     assert payload["converged"] is False
+    assert payload["status"] == "aborted"
     assert payload["final_t"] == 0.5
     assert payload["traces"]["t"] == [0.0, 0.5]
 
@@ -234,6 +236,7 @@ def test_failed_run_reports_not_converged_without_raising() -> None:
     state = loaded_state(FakeBridge(answer))
     payload = state.run_tds(tf=5.0)
     assert payload["converged"] is False
+    assert payload["status"] == "failed"
     assert payload["final_t"] == 1.0
 
 

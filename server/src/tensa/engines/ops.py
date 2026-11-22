@@ -96,7 +96,8 @@ ENGINE_OPS: dict[str, frozenset[str]] = {
             "clear_disturbances",
             "init_tds",
             "case_document",
-            # Special-cased by the dispatch (it needs the abort event).
+            # Special-cased by the dispatch (it needs the abort event and the
+            # data pipe): a batch run or a streamed one.
             "run_tds",
         }
     ),

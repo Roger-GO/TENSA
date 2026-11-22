@@ -1014,6 +1014,7 @@ class SiennaState:
         h: float | None = None,
         load_model: str = "impedance",
         abort_event: Any = None,
+        on_step: Any = None,
         **other: Any,
     ) -> dict[str, Any]:
         """The batch time-domain run, in the shape the ANDES engine answers.
@@ -1025,6 +1026,13 @@ class SiennaState:
         ``h`` that is not a finite number of seconds above 0 and a
         ``load_model`` outside the three of spec section 6.3. Without a
         converged power flow the refusal is "solve the power flow first".
+
+        ``on_step`` is a per-step callback handed to the bridge's
+        ``tds_run``: it is called once for the initial point and once after
+        every accepted step with ``(t, values)``, and its ``False`` return
+        stops the run (the P5-A contract). The streaming driver uses it to
+        hand each row to the stream; ``abort_event`` is the other abort
+        channel, checked here on every step through the same hook.
         """
         self._require_session()
         integrator = other.pop("integrator", None)
@@ -1067,15 +1075,20 @@ class SiennaState:
 
         entries = run_json_entries(self._pending_disturbances, self._key_book)
 
-        on_step: Any = None
+        hook: Any = on_step
         if abort_event is not None:
+            user_on_step = on_step
 
-            def on_step(t: float, values: Any) -> bool:  # noqa: ARG001
+            def hook(t: float, values: Any) -> bool:
                 # The abort channel of spec section 13: False stops the run.
                 try:
-                    return not abort_event.is_set()
+                    if abort_event.is_set():
+                        return False
                 except Exception:  # noqa: BLE001 - a broken event must not kill a run
-                    return True
+                    pass
+                if user_on_step is not None:
+                    return bool(user_on_step(t, values))
+                return True
 
         bridge = self._require_bridge()
         try:
@@ -1085,7 +1098,7 @@ class SiennaState:
                 step=h,
                 disturbances=entries or None,
                 load_model=load_model,
-                on_step=on_step,
+                on_step=hook,
             )
         finally:
             # As the ANDES runs do (worker.py): an abort sent while nothing ran
@@ -1211,6 +1224,8 @@ class SiennaState:
             "final_t": final_t,
             "callpert_count": steps,
             "integrator": "ida",
+            # completed, aborted or failed: what a streamed run's end reports.
+            "status": status,
             "traces": {
                 "t": t_values,
                 "variables": variables,

@@ -254,7 +254,7 @@ def test_engine_capabilities_sienna_available(
     assert caps["routines"] == ["matrices", "pflow", "eig", "tds"]
     assert caps["routine_options"] == {
         "tds": {
-            "streaming": False,
+            "streaming": True,
             "abort": True,
             "disturbances": ["branch_trip", "bus_fault", "gen_trip"],
             "options": {"load_model": ["impedance", "power", "as-case"]},
@@ -273,7 +273,19 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
 
     runtime = sienna_runtime()
 
+    class _NullPipe:
+        def send(self, message: Any) -> None:
+            pass
+
+    class _StubBridge:
+        def dyn_plan(self, session: Any, load_model: str = "impedance") -> dict[str, Any]:
+            return {"ok": True, "ready": True, "columns": []}
+
     class _Stub:
+        def __init__(self) -> None:
+            self._session = object()
+            self._bridge = _StubBridge()
+
         def keys(self) -> Any:
             from tensa.engines.keys import KeyBook
 
@@ -287,6 +299,15 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
 
             return ({}, None, None, None, KeyBook(), None, None)
 
+        def _require_session(self) -> Any:
+            return self._session
+
+        def _require_bridge(self) -> Any:
+            return self._bridge
+
+        def run_tds(self, **kwargs: Any) -> Any:
+            return {"converged": True, "final_t": 1.0, "callpert_count": 1}
+
         def __getattr__(self, name: str) -> Any:
             if name.startswith("__"):
                 raise AttributeError(name)
@@ -297,9 +318,10 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
             return _answer
 
     # The smallest args each op's handler reads before it reaches the state.
+    # ``run_tds`` is streaming-only, so its args are a ``start_tds`` frame's.
     args_by_op: dict[str, dict[str, Any]] = {
         "load_case": {"path": "case.raw"},
-        "run_tds": {"tf": 1.0},
+        "run_tds": {"tf": 1.0, "stream": True},
         "eig_participation": {"mode_idx": "0"},
         "network_matrix": {"kind": "ptdf"},
         "add_disturbance": {
@@ -313,8 +335,12 @@ def test_every_sienna_op_has_a_dispatch_path() -> None:
             }
         },
     }
+    import threading
+
     for op in ENGINE_OPS["sienna"]:
-        runtime.dispatch(_Stub(), op, args_by_op.get(op, {}), None, None, None)
+        runtime.dispatch(
+            _Stub(), op, args_by_op.get(op, {}), threading.Event(), _NullPipe(), 1
+        )
     with pytest.raises(KeyError):
         runtime.dispatch(_Stub(), "run_cpf", {}, None, None, None)
 

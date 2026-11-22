@@ -11,22 +11,33 @@ ANDES table special-cases it: it needs the abort event.
 from __future__ import annotations
 
 import logging
+import math
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from pydantic import TypeAdapter
 
 from tensa.core.disturbance import DisturbanceSpec
-from tensa.core.errors import NoCaseLoadedError
+from tensa.core.errors import AndesAppError, NoCaseLoadedError, SetupFailedError, short_repr
 from tensa.core.messages import NOTICE_LOGGER
+from tensa.core.stream import run_tds_stream
 from tensa.core.worker import _serialize_dataclass
-from tensa.engines.base import EngineRuntime
+from tensa.engines.base import EngineRuntime, TdsStreamPlan
+from tensa.engines.series_names import build_name
 from tensa.engines.sienna.bridge import JuliaBridge
 from tensa.engines.sienna.state import SiennaState
 
 log = logging.getLogger("tensa.sienna")
+
+# The load models a dynamic run takes (spec section 6.3).
+_LOAD_MODELS = ("impedance", "power", "as-case")
+
+# The default ``vars`` the WebSocket route sends when the client named none;
+# for a Sienna session it means "not given" and is accepted and ignored.
+_WS_DEFAULT_VARS = ["bus_v", "gen_state"]
 
 
 def _handle_load_case(state: SiennaState, args: dict[str, Any]) -> Any:
@@ -108,17 +119,187 @@ def _handle_clear_disturbances(state: SiennaState, args: dict[str, Any]) -> Any:
     return None
 
 
-def _handle_run_tds(state: SiennaState, args: dict[str, Any], abort_event: Any) -> Any:
-    return state.run_tds(
-        tf=args["tf"],
-        h=args.get("h"),
-        load_model=args.get("load_model") or "impedance",
-        abort_event=abort_event,
-        integrator=args.get("integrator"),
-        tds_config_overrides=args.get("tds_config_overrides"),
-        dae_vars=args.get("dae_vars"),
-        controllers=args.get("controllers"),
+def _sienna_tds_stream_plan(state: SiennaState, args: dict[str, Any]) -> TdsStreamPlan:
+    """The Sienna engine's column plan for one streaming run: neutral names
+    (``<quantity>|<key>``), fixed when the run starts, from the bridge's
+    ``dyn_plan``; ``collect`` copies the row the Julia callback delivers.
+    """
+    load_model = args.get("load_model") or "impedance"
+    state._require_session()  # noqa: SLF001 - the runtime is the state's own layer
+    plan_answer = state._require_bridge().dyn_plan(  # noqa: SLF001
+        state._session, load_model=load_model  # noqa: SLF001
     )
+    if not plan_answer.get("ready", False):
+        raise SetupFailedError(str(plan_answer.get("reason", "the run cannot be built")))
+    columns = plan_answer.get("columns", [])
+    var_columns: list[str] = []
+    for entry in columns:
+        quantity = str(entry.get("quantity"))
+        if entry.get("kind") == "bus":
+            key = f"bus:{int(entry.get('bus', 0))}"
+        else:
+            key = f"gen:{int(entry.get('bus', 0))}-{entry.get('id', '')}"
+        var_columns.append(build_name(quantity, key))
+
+    def collect(t: float, values: Any) -> Any:
+        n = len(values)
+        if n != len(var_columns):
+            raise AndesAppError(
+                f"sienna on_step row has {n} values; the column plan has {len(var_columns)}"
+            )
+        # The Julia hook is called after the step it reports, at its time.
+        return t, np.asarray(values, dtype=np.float64)
+
+    return TdsStreamPlan(
+        var_columns=var_columns,
+        metadata_extra={"load_model": load_model, "vars": [], "dae_vars": []},
+        collect=collect,
+    )
+
+
+def _handle_run_tds(
+    state: SiennaState,
+    args: dict[str, Any],
+    abort_event: Any,
+    data: Any = None,
+    seq: Any = None,
+) -> Any:
+    """The Sienna ``run_tds``, batch or streamed.
+
+    A batch request is the state's own run (``SiennaState.run_tds``), which
+    refuses the options the engine does not have by name. A ``start_tds``
+    frame for a Sienna session takes ``tf``, ``step`` (or
+    ``h``, the wire's step field, mapped to the Julia ``dtmax``),
+    ``load_model``, ``decimation`` and ``max_rate_hz``. Every other field the
+    frame can carry (a non-default ``integrator`` or ``vars``,
+    ``tds_config_overrides``, ``dae_vars``, ``controllers``) is refused by
+    name before the run starts, so a refused run never opens a stream. The
+    route always sends ``integrator`` and ``vars``; their schema defaults
+    (``"trapezoidal"``, ``["bus_v", "gen_state"]``) mean "the client named
+    nothing" and are accepted and ignored.
+    """
+    if not args.get("stream"):
+        # The batch run is the state's own (P5-A): the dispatch passes the
+        # abort event through, as the ANDES table's special case does.
+        return _serialize_dataclass(
+            state.run_tds(
+                tf=args["tf"],
+                h=args.get("h") if args.get("h") is not None else args.get("step"),
+                load_model=args.get("load_model") or "impedance",
+                abort_event=abort_event,
+                integrator=args.get("integrator"),
+                tds_config_overrides=args.get("tds_config_overrides"),
+                dae_vars=args.get("dae_vars"),
+                controllers=args.get("controllers"),
+            )
+        )
+    if data is None or seq is None:
+        raise AndesAppError(
+            "streaming mode requires data_pipe + seq context (worker bug)"
+        )
+
+    integrator = args.get("integrator")
+    if integrator is not None and integrator != "trapezoidal":
+        raise AndesAppError(
+            "sienna tds has no integrator selection; the solver is IDA on the "
+            "ResidualModel (ext.sienna.solver in a study)"
+        )
+    if args.get("tds_config_overrides") is not None:
+        raise AndesAppError(
+            "tds_config_overrides is an ANDES feature; sienna takes ext.sienna "
+            "options in a study"
+        )
+    vars_raw = args.get("vars")
+    if vars_raw is not None and vars_raw != [] and vars_raw != _WS_DEFAULT_VARS:
+        raise AndesAppError(
+            "var groups are ANDES columns; a sienna stream always carries its "
+            "neutral column plan"
+        )
+    if args.get("dae_vars"):
+        raise AndesAppError("dae_vars are ANDES variable names; a sienna stream has none")
+    if args.get("controllers"):
+        raise AndesAppError("droop and ffr controllers are ANDES-only")
+    h = args.get("h")
+    step = args.get("step")
+    if h is not None and step is not None:
+        raise AndesAppError("name only one of 'h' and 'step'")
+    if step is None:
+        step = h
+    if step is not None:
+        if (
+            isinstance(step, bool)
+            or not isinstance(step, int | float)
+            or not math.isfinite(float(step))
+            or float(step) <= 0
+        ):
+            raise AndesAppError(
+                f"step must be a finite number of seconds above 0, got {short_repr(step)}"
+            )
+        step = float(step)
+    tf_raw = args.get("tf")
+    if (
+        isinstance(tf_raw, bool)
+        or not isinstance(tf_raw, int | float)
+        or not math.isfinite(float(tf_raw))
+        or float(tf_raw) <= 0
+    ):
+        raise AndesAppError(
+            f"tf must be a finite number of seconds above 0, got {short_repr(tf_raw)}"
+        )
+    tf = float(tf_raw)
+    load_model = args.get("load_model") or "impedance"
+    if load_model not in _LOAD_MODELS:
+        raise AndesAppError(
+            f"unknown load_model {short_repr(load_model)}; expected 'impedance', "
+            "'power' or 'as-case'"
+        )
+    decimation_raw = args.get("decimation") or "none"
+    if decimation_raw not in ("none", "mean"):
+        raise AndesAppError(
+            f"unknown decimation mode: {decimation_raw!r}; expected 'none' or 'mean'"
+        )
+    max_rate_hz_raw = args.get("max_rate_hz")
+    max_rate_hz = float(max_rate_hz_raw) if max_rate_hz_raw is not None else None
+
+    plan = _sienna_tds_stream_plan(state, args)
+
+    def _run(on_step: Any) -> Any:
+        # Polarity: the driver's callback returns True to stop; the bridge's
+        # callable must return False to Julia to stop (P5-A's contract), so the
+        # adapter negates it.
+        return state.run_tds(
+            tf=tf,
+            h=step,
+            load_model=load_model,
+            abort_event=None,
+            on_step=lambda t, values: not on_step(t, values),
+        )
+
+    try:
+        result = run_tds_stream(
+            plan=plan,
+            run=_run,
+            abort_event=abort_event,
+            data_pipe=data,
+            seq=seq,
+            decimation=decimation_raw,  # type: ignore[arg-type]
+            max_rate_hz=max_rate_hz,
+            # IDA is variable-step, so a mean decimation is honestly best-effort.
+            fixed_step=False,
+        )
+    except ValueError as exc:
+        raise AndesAppError(str(exc)) from exc
+    finally:
+        # As after a batch run: the abort is spent by the run it stopped,
+        # however the run ended.
+        abort_event.clear()
+
+    payload = _serialize_dataclass(result)
+    # The rows went out frame by frame; the end of a stream carries the summary
+    # only, as an ANDES stream's does.
+    payload.pop("traces", None)
+    payload.pop("post", None)
+    return payload
 
 
 def _handle_init_tds(state: SiennaState, args: dict[str, Any]) -> Any:
@@ -191,9 +372,11 @@ def _dispatch(
     data: Any,
     seq: Any,
 ) -> Any:
-    """Answer one op on a ``SiennaState``."""
+    """Answer one op on a ``SiennaState``. ``run_tds`` is special-cased, as the
+    worker's ANDES dispatch special-cases it: it needs the abort event, the
+    data pipe and the seq."""
     if op == "run_tds":
-        return _handle_run_tds(state, args, abort_event)
+        return _handle_run_tds(state, args, abort_event, data, seq)
     return _HANDLERS[op](state, args)
 
 
