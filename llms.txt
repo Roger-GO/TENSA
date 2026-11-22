@@ -388,7 +388,11 @@ response and needs no Arrow decoding.
 An MCP (Model Context Protocol) stdio server ships as an optional extra:
   pip install "tensa[mcp]"          (from a source checkout: pip install -e "./server[mcp]")
   tensa mcp --workspace ~/tensa-cases
-It wraps the golden workflow (create_session, load_case, run_pflow, run_tds,
-add_disturbance, get_topology, get_operating_point, list_workspace_files, list_examples,
-add_example, ...) so MCP
-clients (Claude Code, etc.) can drive simulations as native tools.
+It wraps the golden workflow (create_session with an engine argument, load_case,
+run_pflow, run_tds, add_fault/add_toggle/add_alter, get_topology, get_keys,
+get_operating_point, list_workspace_files, list_examples, add_example,
+list_engines, network_matrix, run_dispatch, convert_result, compare_results,
+add_element, edit_element, delete_element, undo_last_edit, redo_edit, ...) so MCP
+clients (Claude Code, etc.) can drive simulations as native tools. Each tool's
+description says which engines have it; an op an engine lacks answers with the
+engines that have it.

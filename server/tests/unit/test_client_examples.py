@@ -68,7 +68,7 @@ def _stand_in_server(
             self.end_headers()
             self.wfile.write(payload)
 
-        do_GET = do_POST = do_DELETE = _answer
+        do_GET = do_POST = do_DELETE = do_PUT = _answer
 
         def log_message(self, format: str, *args: Any) -> None:
             pass
@@ -976,23 +976,36 @@ def test_the_mcp_server_answers_its_tools_and_passes_on_what_the_api_refused(
     from tensa import mcp_server
 
     files = {"files": [{"path": "ieee14.raw"}]}
+    engines = {"engines": []}
     refusal = {"title": "Conflict", "detail": "no power flow", "recovery": {"kind": "run-pflow"}}
+    # What an ANDES session answers for the dispatch, which only Sienna has.
+    unsupported = {
+        "title": "Conflict",
+        "detail": "'run_dispatch' is not available with the andes engine; engines that have it: sienna",
+        "recovery": None,
+    }
 
     def answer(_method: str, path: str) -> bytes | tuple[int, bytes]:
         if path == "/api/workspace/files":
             return json.dumps(files).encode()
+        if path == "/api/engines":
+            return json.dumps(engines).encode()
+        if path == "/api/sessions/abc/dispatch":
+            return 409, json.dumps(unsupported).encode()
         return 409, json.dumps(refusal).encode()
 
     def call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"method": "tools/call", "params": {"name": name, "arguments": arguments}}
 
     with _stand_in_server(answer) as (base, seen):
-        listed, listing, refused = _mcp_conversation(
+        listed, listing, refused, engines_listing, dispatch_refused = _mcp_conversation(
             base,
             [
                 {"method": "tools/list"},
                 call("list_workspace_files", {}),
                 call("run_eig", {"session_id": "abc"}),
+                call("list_engines", {}),
+                call("run_dispatch", {"session_id": "abc"}),
             ],
             tmp_path / "mcp.log",
         )
@@ -1006,10 +1019,300 @@ def test_the_mcp_server_answers_its_tools_and_passes_on_what_the_api_refused(
     assert refused["result"]["isError"] is True
     text = refused["result"]["content"][0]["text"]
     assert "Conflict (409): no power flow Recovery: run-pflow." in text
+    assert engines_listing["result"]["isError"] is False
+    assert json.loads(engines_listing["result"]["content"][0]["text"]) == engines
+    assert dispatch_refused["result"]["isError"] is True
+    dispatch_text = dispatch_refused["result"]["content"][0]["text"]
+    assert "engines that have it: sienna" in dispatch_text
     assert [request["path"] for request in seen] == [
         "/api/workspace/files",
         "/api/sessions/abc/eig",
+        "/api/engines",
+        "/api/sessions/abc/dispatch",
     ]
+
+
+def test_the_mcp_create_session_tool_names_the_engine(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.create_session()
+    mcp_server.create_session("sienna")
+
+    andes, sienna = seen
+    # Without an engine the call is what it was before engines: no body,
+    # which the server reads as ANDES.
+    assert andes["method"] == "POST"
+    assert andes["path"] == "/api/sessions"
+    assert andes["body"] == b""
+    assert sienna["method"] == "POST"
+    assert sienna["path"] == "/api/sessions"
+    assert sienna["content_type"] == _JSON
+    assert json.loads(sienna["body"]) == {"engine": "sienna"}
+
+
+def test_the_mcp_list_engines_tool_asks_the_route(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.list_engines()
+
+    (request,) = seen
+    assert request["method"] == "GET"
+    assert request["path"] == "/api/engines"
+    assert request["body"] == b""
+
+
+def test_the_mcp_get_keys_tool_asks_the_session_route(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.get_keys("abc")
+
+    (request,) = seen
+    assert request["method"] == "GET"
+    assert request["path"] == "/api/sessions/abc/keys"
+    assert request["body"] == b""
+
+
+def test_the_mcp_network_matrix_tool_sends_the_kind_and_defaults_to_ptdf(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.network_matrix("abc")
+    mcp_server.network_matrix("abc", kind="lodf")
+
+    ptdf, lodf = seen
+    assert ptdf["path"] == "/api/sessions/abc/network-matrix?kind=ptdf"
+    assert lodf["path"] == "/api/sessions/abc/network-matrix?kind=lodf"
+
+
+def test_the_mcp_dispatch_tool_sends_the_network_model_and_duals_only_when_asked(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.run_dispatch("abc")
+    mcp_server.run_dispatch("abc", network_model="dc", duals=True)
+
+    plain, with_duals = seen
+    assert json.loads(plain["body"]) == {"network_model": "copper_plate"}
+    assert json.loads(with_duals["body"]) == {"network_model": "dc", "duals": True}
+
+
+def test_the_mcp_convert_result_tool_sends_the_result_and_the_options_it_was_given(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.convert_result("pflow", "andes", {"converged": True})
+    mcp_server.convert_result(
+        "tds",
+        "andes",
+        {"t": [0.0], "variables": []},
+        keys=[{"key": "bus:1", "bucket": "bus", "model": "Bus", "idx": "1", "source": "case"}],
+        status="completed",
+    )
+
+    pflow, tds = seen
+    assert json.loads(pflow["body"]) == {
+        "kind": "pflow",
+        "engine": "andes",
+        "result": {"converged": True},
+        "status": "completed",
+    }
+    assert "versions" not in json.loads(pflow["body"])
+    assert "study" not in json.loads(pflow["body"])
+    assert "keys" not in json.loads(pflow["body"])
+    tds_body = json.loads(tds["body"])
+    assert tds_body["keys"] == [{"key": "bus:1", "bucket": "bus", "model": "Bus", "idx": "1", "source": "case"}]
+
+
+def test_the_mcp_compare_tool_sends_the_two_documents_and_tolerances_only_when_given(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.compare_results({"tensa_results": 1}, {"tensa_results": 1})
+    mcp_server.compare_results({}, {}, tolerances={"frequency_hz": 0.01})
+
+    plain, with_tolerances = seen
+    assert json.loads(plain["body"]) == {
+        "reference": {"tensa_results": 1},
+        "comparison": {"tensa_results": 1},
+    }
+    assert "tolerances" not in json.loads(plain["body"])
+    assert json.loads(with_tolerances["body"])["tolerances"] == {"frequency_hz": 0.01}
+
+
+def test_the_mcp_element_tools_reach_the_element_routes(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.add_element("abc", "PQ", {"bus": "7", "p0": 10.0})
+    mcp_server.edit_element("abc", "PQ", "PQ_1", {"p0": 12.0})
+    mcp_server.delete_element("abc", "PQ", "PQ_1")
+    mcp_server.delete_element("abc", "Line", "Line_6", cascade=True)
+    mcp_server.undo_last_edit("abc")
+    mcp_server.redo_edit("abc")
+
+    add, edit, delete_plain, delete_cascade, undo, redo = seen
+    assert add["method"] == "POST"
+    assert add["path"] == "/api/sessions/abc/elements"
+    assert json.loads(add["body"]) == {"model": "PQ", "params": {"bus": "7", "p0": 10.0}}
+    assert edit["method"] == "PUT"
+    assert edit["path"] == "/api/sessions/abc/elements/PQ/PQ_1"
+    # The body EditElementRequest takes: the params by name.
+    assert json.loads(edit["body"]) == {"params": {"p0": 12.0}}
+    assert delete_plain["method"] == "DELETE"
+    assert delete_plain["path"] == "/api/sessions/abc/elements/PQ/PQ_1?cascade=false"
+    assert delete_cascade["method"] == "DELETE"
+    assert delete_cascade["path"] == "/api/sessions/abc/elements/Line/Line_6?cascade=true"
+    assert undo["method"] == "POST"
+    assert undo["path"] == "/api/sessions/abc/undo-last-edit"
+    assert json.loads(undo["body"]) == {}
+    assert redo["method"] == "POST"
+    assert redo["path"] == "/api/sessions/abc/redo-edit"
+    assert json.loads(redo["body"]) == {}
+
+
+def test_the_mcp_edit_tools_escape_the_model_and_the_idx(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.edit_element("abc", "PQ", "a b/1", {"p0": 1.0})
+
+    (request,) = seen
+    assert request["path"] == "/api/sessions/abc/elements/PQ/a%20b%2F1"
+
+
+def test_the_mcp_helper_passes_an_engine_refusal_on_with_its_engines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An op the session's engine lacks is a 409 whose detail names the
+    engines that have it (``EngineUnsupportedError``'s message); the agent
+    reads that detail whole."""
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+    from tensa.core.errors import EngineUnsupportedError
+
+    detail = str(EngineUnsupportedError("run_cpf", "sienna", ["andes"]))
+    problem = {"title": "Conflict", "detail": detail, "recovery": None}
+
+    def refuse(request: Any, timeout: float | None = None) -> Any:
+        body = io.BytesIO(json.dumps(problem).encode())
+        raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {}, body)
+
+    monkeypatch.setattr(mcp_server.urllib.request, "urlopen", refuse)
+
+    with pytest.raises(mcp_server._ToolError) as raised:
+        mcp_server._api("POST", "/sessions/abc/cpf", {})
+    assert str(raised.value) == (
+        "Conflict (409): 'run_cpf' is not available with the sienna engine; "
+        "engines that have it: andes"
+    )
+
+
+def test_the_mcp_run_tools_send_the_engine_options_only_when_given(
+    recorder: tuple[str, list[dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    base, seen = recorder
+    monkeypatch.setattr(mcp_server, "_BASE_URL", base)
+
+    mcp_server.load_case("abc", "kundur.raw", ["kundur_full.dyr"])
+    mcp_server.load_case("abc", "kundur.raw", ["kundur_full.dyr"], on_unsupported="drop")
+    mcp_server.run_pflow("abc")
+    mcp_server.run_pflow("abc", method="dc")
+    mcp_server.run_tds("abc", 1.0)
+    mcp_server.run_tds("abc", 1.0, load_model="power")
+
+    load, load_drop, pflow, pflow_dc, tds, tds_power = (json.loads(r["body"]) for r in seen)
+    assert load == {"primary_path": "kundur.raw", "addfiles": ["kundur_full.dyr"]}
+    assert load_drop == {
+        "primary_path": "kundur.raw",
+        "addfiles": ["kundur_full.dyr"],
+        "on_unsupported": "drop",
+    }
+    assert pflow == {}
+    assert pflow_dc == {"method": "dc"}
+    assert tds == {"tf": 1.0}
+    assert tds_power == {"tf": 1.0, "load_model": "power"}
+
+
+def test_every_mcp_tool_description_names_its_engines() -> None:
+    """Every tool's docstring names the engines that have it, except the sessionless ones."""
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    sessionless = {
+        "list_workspace_files",
+        "list_examples",
+        "add_example",
+        "list_engines",
+        "convert_result",
+        "compare_results",
+    }
+    source = Path(mcp_server.__file__).read_text(encoding="utf-8")
+    declared = re.findall(r"^@mcp\.tool\(\)\ndef (\w+)", source, flags=re.MULTILINE)
+    for name in declared:
+        func = getattr(mcp_server, name)
+        docstring = func.__doc__ or ""
+        if name not in sessionless:
+            assert "Engines:" in docstring, f"{name} does not name its engines"
+
+
+def test_the_mcp_instructions_name_both_engines() -> None:
+    pytest.importorskip("mcp")
+    from tensa import mcp_server
+
+    assert "ANDES" in mcp_server._INSTRUCTIONS
+    assert "Sienna" in mcp_server._INSTRUCTIONS
+    assert "list_engines" in mcp_server._INSTRUCTIONS
 
 
 def test_the_mcp_helper_says_so_when_the_server_does_not_answer(
