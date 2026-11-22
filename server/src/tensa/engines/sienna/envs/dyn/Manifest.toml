@@ -2,7 +2,7 @@
 
 julia_version = "1.13.4"
 manifest_format = "2.1"
-project_hash = "3495983118b280a035c66bd167a11a3b2d58fa46"
+project_hash = "b2d33c02767aa08d67e99d367ef7ec074bafff18"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -27,6 +27,13 @@ git-tree-sha1 = "344f3d221a6bee75925b5c97a30cfd870f12a138"
 registries = "General"
 uuid = "14f7f29c-3bd6-536c-9a0b-7339e30b5a3e"
 version = "0.5.4"
+
+[[deps.ASL_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "21a22cd1a6d45034933824665cfb874ec425a14b"
+registries = "General"
+uuid = "ae81ac8f-d209-56e5-92de-9978fef736f9"
+version = "0.1.5+0"
 
 [[deps.AbstractTrees]]
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
@@ -794,6 +801,24 @@ registries = "General"
 uuid = "41ab1584-1d38-5bbf-9106-f11c6c58b48f"
 version = "1.3.1"
 
+[[deps.Ipopt]]
+deps = ["Ipopt_jll", "LinearAlgebra", "OpenBLAS32_jll", "PrecompileTools"]
+git-tree-sha1 = "d5a4fb77d030c56258a33a7046195506055ce5cc"
+registries = "General"
+uuid = "b6b21f68-93f8-5de0-b562-5493be1d77c9"
+version = "1.16.0"
+weakdeps = ["MathOptInterface"]
+
+    [deps.Ipopt.extensions]
+    IpoptMathOptInterfaceExt = "MathOptInterface"
+
+[[deps.Ipopt_jll]]
+deps = ["ASL_jll", "Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "MUMPS_seq_jll", "SPRAL_jll", "libblastrampoline_jll"]
+git-tree-sha1 = "d58bb7f6393b8ec1f6fb39eb6c1a7a83b8f8b521"
+registries = "General"
+uuid = "9cc047cb-c261-5740-88fc-0cf96f7bdcc7"
+version = "300.1400.1902+0"
+
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "d22e8bdb3f03c300a103ff23c0dd5a654c6701de"
 registries = "General"
@@ -1072,6 +1097,13 @@ registries = "General"
 uuid = "5ced341a-0733-55b8-9ab6-a4889d929147"
 version = "1.11.1+0"
 
+[[deps.METIS_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "5ecd92439c60a50c49bd6e96192e9d486b24b050"
+registries = "General"
+uuid = "d00139f3-1899-568f-a2f0-47f597d42d70"
+version = "5.1.4+0"
+
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
 git-tree-sha1 = "282cadc186e7b2ae0eeadbd7a4dffed4196ae2aa"
@@ -1106,6 +1138,13 @@ git-tree-sha1 = "09a99227205419c00e734f413ee98c18bc1b02e4"
 registries = "General"
 uuid = "f1f71cc9-e9ae-5b93-9b94-4fe0e1ad3748"
 version = "5.5.7+0"
+
+[[deps.MUMPS_seq_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "METIS_jll", "libblastrampoline_jll"]
+git-tree-sha1 = "fc1daa0ab5a0d7a0a34d5168a711cbf02b2cb0cc"
+registries = "General"
+uuid = "d7ed1dd3-d0ae-5e8e-bfb4-87a502085b8d"
+version = "500.900.100+0"
 
 [[deps.MacroTools]]
 git-tree-sha1 = "1e0228a030642014fe5cfe68c2c0a818f9e3f522"
@@ -1638,6 +1677,13 @@ version = "0.5.27"
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "1.0.0"
+
+[[deps.SPRAL_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "Libdl", "METIS_jll", "libblastrampoline_jll"]
+git-tree-sha1 = "b78d602475715c9c6ea21c9650fa5dba58e9945b"
+registries = "General"
+uuid = "319450e9-13b8-58e8-aa9f-8fd1420848ab"
+version = "2025.9.18+1"
 
 [[deps.SQLite]]
 deps = ["DBInterface", "Random", "SQLite_jll", "Serialization", "Tables", "WeakRefStrings"]
