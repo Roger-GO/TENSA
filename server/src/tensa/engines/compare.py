@@ -37,7 +37,11 @@ quantity and key:
 Power flow tables compare row by row on the element key; angles compare in
 radians with no wrapping, because power flow angles of the same case from two
 engines differ by far less than pi and a wrapped comparison would hide a
-genuinely different operating point. When the power flow comparison is outside
+genuinely different operating point. Each part of the table (buses, branches,
+generators, loads) is compared with the same part only: a generator and a load
+share the quantities ``p`` and ``q`` in the same units, and matching by quantity
+and unit alone would compare a reference's loads with the comparison's
+generators. When the power flow comparison is outside
 its tolerance the result carries ``operating_point_differs``: a dynamic
 difference that starts from a different operating point is reported as that
 (section 10: "A power flow comparison is always shown first").
@@ -49,8 +53,10 @@ greedy pass can pair the two members of a close cluster the wrong way round and
 leave a third mode unmatched, and the modes of two engines on one case are
 exactly such clusters (the spike's three oscillatory modes sit at 0.64, 1.10 and
 1.13 Hz). Each conjugate pair is counted once, by its member with the
-non-negative imaginary part, because a conjugate pair is one mode. A pair
-farther apart than ``max_mode_distance`` is left unmatched on both sides. Zero
+non-negative imaginary part, because a conjugate pair is one mode. Before the
+assignment every cost past ``max_mode_distance`` is replaced by a value larger
+than it, so the assignment prefers every pair within the cap over one past it;
+pairs still past the cap afterwards are left unmatched on both sides. Zero
 eigenvalues (both parts exactly zero, the angle-reference mode) are matched
 among themselves. Unmatched modes are listed, never ignored.
 
@@ -510,7 +516,11 @@ def match_eigenvalues(
             [[abs(ref[i] - new[j]) for j in osc_new] for i in osc_ref],
             dtype=np.float64,
         )
-        for r, c in _hungarian(cost):
+        # Cap every cost at a value past max_distance: two pairs farther than
+        # the cap then cost the same, so the assignment prefers every pair
+        # within it, and the drop below still leaves the rest unmatched.
+        capped = np.minimum(cost, max_distance + 1.0)
+        for r, c in _hungarian(capped):
             matched.append((osc_ref[r], osc_new[c]))
     pairs: list[EigenvaluePair] = []
     used_ref: set[int] = set()
@@ -614,8 +624,14 @@ class ComparisonResult:
 
 def _pflow_mappings(
     table: PflowTable,
-) -> list[tuple[str, str, dict[str, float]]]:
-    """The table as ``(quantity, unit, mapping)`` per value kind."""
+) -> list[tuple[str, str, str, dict[str, float]]]:
+    """The table as ``(part, quantity, unit, mapping)`` per value kind.
+
+    ``part`` names the section of the table the mapping comes from (``buses``,
+    ``branches``, ``generators``, ``loads``): a part is only ever compared
+    with the same part, because a generator and a load share the quantities
+    ``p`` and ``q`` in the same units.
+    """
     buses_v = {row.key: row.v_pu for row in table.buses}
     buses_a = {row.key: row.angle_rad for row in table.buses}
     branches_p: dict[str, float] = {}
@@ -637,14 +653,14 @@ def _pflow_mappings(
         if load_row.q_mvar is not None:
             loads_q[load_row.key] = load_row.q_mvar
     return [
-        ("voltage", "pu", buses_v),
-        ("angle", "rad", buses_a),
-        ("p_from", "MW", branches_p),
-        ("q_from", "MVAr", branches_q),
-        ("p", "MW", gens_p),
-        ("q", "MVAr", gens_q),
-        ("p", "MW", loads_p),
-        ("q", "MVAr", loads_q),
+        ("buses", "voltage", "pu", buses_v),
+        ("buses", "angle", "rad", buses_a),
+        ("branches", "p_from", "MW", branches_p),
+        ("branches", "q_from", "MVAr", branches_q),
+        ("generators", "p", "MW", gens_p),
+        ("generators", "q", "MVAr", gens_q),
+        ("loads", "p", "MW", loads_p),
+        ("loads", "q", "MVAr", loads_q),
     ]
 
 
@@ -674,17 +690,17 @@ def compare_documents(
         missing_in_comparison: list[str] = []
         missing_in_reference: list[str] = []
         comparison_mappings = _pflow_mappings(comparison.pflow)
-        for quantity, unit, ref_map in _pflow_mappings(reference.pflow):
+        for part, quantity, unit, ref_map in _pflow_mappings(reference.pflow):
             new_map: dict[str, float] = {}
-            for q, u, m in comparison_mappings:
-                if q == quantity and u == unit:
+            for new_part, q, u, m in comparison_mappings:
+                if new_part == part and q == quantity and u == unit:
                     new_map = m
                     break
             tolerance = tolerances.get(quantity, DEFAULT_TOLERANCES.get(quantity))
-            part, unmatched = compare_rows(
+            part_rows, unmatched = compare_rows(
                 quantity, unit, ref_map, new_map, tolerance=tolerance
             )
-            rows.extend(part)
+            rows.extend(part_rows)
             missing_in_comparison.extend(unmatched.missing_in_comparison)
             missing_in_reference.extend(unmatched.missing_in_reference)
         power_flow = PflowComparison(

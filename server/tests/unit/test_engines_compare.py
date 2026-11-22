@@ -24,6 +24,8 @@ from tensa.engines.compare import (
 from tensa.engines.results_doc import (
     EngineBlock,
     PflowBusRow,
+    PflowGeneratorRow,
+    PflowLoadRow,
     PflowTable,
     ResultsDocument,
     ResultsTables,
@@ -424,6 +426,50 @@ def test_match_eigenvalues_distance_cap_leaves_both_sides_unmatched() -> None:
     assert unmatched_new == [0]
 
 
+def test_match_eigenvalues_prefers_the_pair_within_the_cap() -> None:
+    # Reference [-2, -1], comparison [-1.96, -101], cap 0.05. On uncapped
+    # distances the assignment takes (-2, -101) and (-1, -1.96), whose sum
+    # 99 + 0.96 is smaller than 0.04 + 100, and the drop past the cap then
+    # leaves all four unmatched. With the costs capped the assignment takes
+    # (-2, -1.96) at 0.04, within the cap, and the other two stay unmatched.
+    pairs, unmatched_ref, unmatched_new = match_eigenvalues(
+        [-2.0 + 0j, -1.0 + 0j],
+        [-1.96 + 0j, -101.0 + 0j],
+        max_distance=0.05,
+    )
+
+    assert len(pairs) == 1
+    assert pairs[0].index_ref == 0
+    assert pairs[0].index_new == 0
+    assert pairs[0].distance == pytest.approx(0.04)
+    assert unmatched_ref == [1]
+    assert unmatched_new == [1]
+
+
+def test_match_eigenvalues_prefers_the_pair_within_the_cap_oscillatory() -> None:
+    # The same shape with conjugate pairs, as the code counts one mode per
+    # pair by its member with the non-negative imaginary part: -2+5j against
+    # -1.96+5j is 0.04 apart, within the cap of 0.05, while -1+3j and
+    # -101+40j are far from everything. Uncapped, the assignment takes
+    # (-2+5j, -101+40j) and (-1+3j, -1.96+5j): |99+35j| + |0.96+2j| is about
+    # 105.0 + 2.2, against |0.04| + |100+37j| = 0.04 + 106.3, and the drop
+    # past the cap leaves nothing matched.
+    pairs, unmatched_ref, unmatched_new = match_eigenvalues(
+        [-2.0 + 5.0j, -2.0 - 5.0j, -1.0 + 3.0j, -1.0 - 3.0j],
+        [-1.96 + 5.0j, -1.96 - 5.0j, -101.0 + 40.0j, -101.0 - 40.0j],
+        max_distance=0.05,
+    )
+
+    assert len(pairs) == 1
+    assert pairs[0].eigenvalue_ref == -2.0 + 5.0j
+    assert pairs[0].eigenvalue_new == -1.96 + 5.0j
+    assert pairs[0].distance == pytest.approx(0.04)
+    # The representatives are the members with the non-negative imaginary
+    # part: indices 0 and 2 of the reference, 0 and 2 of the comparison.
+    assert unmatched_ref == [2]
+    assert unmatched_new == [2]
+
+
 def test_match_eigenvalues_zero_eigenvalues_matched_among_themselves() -> None:
     pairs, unmatched_ref, unmatched_new = match_eigenvalues(
         [0.0 + 0.0j, -1.0 + 5.0j],
@@ -481,6 +527,16 @@ def _pflow(v: float) -> PflowTable:
     )
 
 
+def _pflow_with_gen_and_load(gen_p: float, load_p: float) -> PflowTable:
+    return PflowTable(
+        converged=True,
+        buses=[PflowBusRow(key="bus:1", v_pu=1.0, angle_rad=0.0)],
+        branches=[],
+        generators=[PflowGeneratorRow(key="gen:1-1", p_mw=gen_p, q_mvar=10.0)],
+        loads=[PflowLoadRow(key="load:1-1", p_mw=load_p, q_mvar=5.0)],
+    )
+
+
 def test_compare_documents_power_flow_first_and_operating_point_flag() -> None:
     reference = _doc(
         [Series(quantity="voltage", of="bus:1", unit="pu", t=[0.0, 1.0], y=[1.0, 1.0])],
@@ -504,6 +560,82 @@ def test_compare_documents_same_operating_point_is_not_flagged() -> None:
     result = compare_documents(_doc([], pflow=_pflow(1.0)), _doc([], pflow=_pflow(1.0)), tolerances={})
 
     assert result.operating_point_differs is False
+
+
+def test_compare_documents_loads_compared_with_loads_not_generators() -> None:
+    # The reproduction of the defect: identical documents except load:1-1 at
+    # 100 MW in the reference against 150 MW in the comparison. Generators and
+    # loads share the quantities p and q in the same units, so a match by
+    # quantity and unit alone compared the reference's loads with the
+    # comparison's generators and reported load:1-1 and gen:1-1 as missing.
+    reference = _doc([], pflow=_pflow_with_gen_and_load(gen_p=200.0, load_p=100.0))
+    comparison = _doc([], pflow=_pflow_with_gen_and_load(gen_p=200.0, load_p=150.0))
+
+    result = compare_documents(reference, comparison, tolerances={})
+
+    assert result.power_flow is not None
+    load_rows = [row for row in result.power_flow.rows if row.key == "load:1-1"]
+    # One p row and one q row for the load; the p row carries 150 - 100 = 50.
+    load_p = next(row for row in load_rows if row.quantity == "p")
+    assert load_p.unit == "MW"
+    assert load_p.reference == pytest.approx(100.0)
+    assert load_p.value == pytest.approx(150.0)
+    assert load_p.diff == pytest.approx(50.0)
+    assert load_p.within_tolerance is False  # 50 MW over the 0.1 MW default
+    assert result.operating_point_differs is True
+    assert result.power_flow.unmatched.missing_in_comparison == []
+    assert result.power_flow.unmatched.missing_in_reference == []
+
+
+def test_compare_documents_generators_and_loads_each_in_their_own_part() -> None:
+    # Both parts present on both sides, each with a difference: the generator
+    # moves 200 to 210 (10 MW) and the load 100 to 130 (30 MW). Each must be
+    # compared within its own part, so the rows are 10 and 30, not the 70 and
+    # 80 a cross match (210 - 100 against 130 - 200 in magnitude) would give.
+    reference = _doc([], pflow=_pflow_with_gen_and_load(gen_p=200.0, load_p=100.0))
+    comparison = _doc([], pflow=_pflow_with_gen_and_load(gen_p=210.0, load_p=130.0))
+
+    result = compare_documents(reference, comparison, tolerances={})
+
+    assert result.power_flow is not None
+    by_key = {
+        (row.key, row.quantity): row for row in result.power_flow.rows
+    }
+    assert by_key[("gen:1-1", "p")].diff == pytest.approx(10.0)
+    assert by_key[("load:1-1", "p")].diff == pytest.approx(30.0)
+    assert by_key[("gen:1-1", "q")].diff == pytest.approx(0.0)
+    assert by_key[("load:1-1", "q")].diff == pytest.approx(0.0)
+    assert result.power_flow.unmatched.missing_in_comparison == []
+    assert result.power_flow.unmatched.missing_in_reference == []
+
+
+def test_compare_documents_loads_without_generators() -> None:
+    # A document with loads but no generators: the loads are still compared,
+    # and the empty generator part lists nothing missing.
+    def load_only(load_p: float) -> PflowTable:
+        return PflowTable(
+            converged=True,
+            buses=[PflowBusRow(key="bus:1", v_pu=1.0, angle_rad=0.0)],
+            branches=[],
+            generators=[],
+            loads=[PflowLoadRow(key="load:1-1", p_mw=load_p, q_mvar=5.0)],
+        )
+
+    reference = _doc([], pflow=load_only(100.0))
+    comparison = _doc([], pflow=load_only(120.0))
+
+    result = compare_documents(reference, comparison, tolerances={})
+
+    assert result.power_flow is not None
+    load_p = next(
+        row
+        for row in result.power_flow.rows
+        if row.key == "load:1-1" and row.quantity == "p"
+    )
+    assert load_p.diff == pytest.approx(20.0)  # 120 - 100
+    assert result.operating_point_differs is True
+    assert result.power_flow.unmatched.missing_in_comparison == []
+    assert result.power_flow.unmatched.missing_in_reference == []
 
 
 def test_compare_documents_unit_mismatch_raises() -> None:
