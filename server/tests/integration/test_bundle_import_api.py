@@ -513,6 +513,82 @@ async def test_import_bundle_unknown_session_returns_404(
     assert resp.status_code == 404, resp.text
 
 
+# ---- engine stamp (multi-engine unit 3.7) -----------------------------------
+
+
+def _bundle_with_engine(
+    workspace: Path, engine: str | None
+) -> bytes:
+    """Build a minimal valid bundle, stamping the manifest with ``engine``
+    (or leaving the key out when ``engine`` is None, as a pre-unit bundle)."""
+    case_bytes = (workspace / "ieee14.raw").read_bytes()
+    sha = hashlib.sha256(case_bytes).hexdigest()
+    manifest: dict[str, object] = {
+        "andes_version": "2.0.0",
+        "tensa_version": tensa.__version__,
+        "case_filename": "ieee14.raw",
+        "case_sha256": sha,
+        "case_canonical_export": False,
+        "disturbance_count": 0,
+        "exported_at": "2026-11-20T00:00:00+00:00",
+        "files": ["case/ieee14.raw", "manifest.json"],
+    }
+    if engine is not None:
+        manifest["engine"] = engine
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w") as zf:
+        zf.writestr("manifest.json", json.dumps(manifest))
+        zf.writestr("case/ieee14.raw", case_bytes)
+    return buf.getvalue()
+
+
+@pytest.mark.integration
+async def test_export_bundle_manifest_stamps_engine(
+    client: httpx.AsyncClient,
+) -> None:
+    """A bundle exported by an ANDES session stamps the manifest ``andes``."""
+    sid = await _create_session_and_load(client, addfile=None)
+    bundle_bytes = await _export_bundle(client, sid)
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+    assert manifest["engine"] == "andes"
+
+
+@pytest.mark.integration
+async def test_import_foreign_bundle_returns_409_with_pointer(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """A bundle stamped with another engine is refused with a 409 problem
+    document (not a resolvable plan) whose detail names both engines and
+    points at the case document route."""
+    sid = await _create_session(client)
+    bundle_bytes = _bundle_with_engine(workspace, "sienna")
+    resp = await _post_bundle(client, sid, bundle_bytes)
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body.get("category") == "engine-mismatch"
+    detail = body.get("detail") or ""
+    assert "written by the sienna engine" in detail
+    assert "this session runs andes" in detail
+
+
+@pytest.mark.integration
+async def test_import_pre_unit_bundle_without_engine_stamp(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """A bundle written before the engine stamp existed has no ``engine``
+    key; it reads as ``andes`` and imports as before."""
+    bundle_bytes = _bundle_with_engine(workspace, None)
+    (workspace / "ieee14.raw").unlink()
+    sid = await _create_session(client)
+    resp = await _post_bundle(client, sid, bundle_bytes)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "committed"
+    assert resp.json()["plan"]["engine"] == "andes"
+
+
 # ---- ANDES version mismatch ------------------------------------------------
 
 

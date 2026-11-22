@@ -23,6 +23,7 @@ the worker subprocess (~2-5 s each).
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -546,6 +547,86 @@ async def test_snapshot_save_without_case_returns_409(
         json={"name": "scenario-A"},
     )
     assert resp.status_code == 409, resp.text
+
+
+# ---- engine stamp (multi-engine unit 3.7) -----------------------------------
+
+
+@pytest.mark.integration
+async def test_snapshot_save_stamps_engine_and_listing_carries_it(
+    client: httpx.AsyncClient,
+) -> None:
+    """A snapshot saved by an ANDES session is stamped ``andes``; the sidecar
+    echo and the listing both carry the stamp."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot",
+        json={"name": "stamped"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["metadata"]["engine"] == "andes"
+
+    resp = await client.get(f"/api/sessions/{sid}/snapshots")
+    assert resp.status_code == 200, resp.text
+    entries = resp.json()["snapshots"]
+    assert [e["engine"] for e in entries] == ["andes"]
+
+
+@pytest.mark.integration
+async def test_restore_foreign_snapshot_returns_409_with_pointer(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """A snapshot stamped with another engine is refused with a 409 whose
+    detail names both engines and points at the case document route."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot",
+        json={"name": "foreign"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Rewrite the sidecar as a foreign-engine snapshot.
+    sidecar = workspace / "snapshots" / "ieee14" / "foreign.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    data["engine"] = "sienna"
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot/restore",
+        json={"name": "foreign"},
+    )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert "saved by the sienna engine" in detail
+    assert "this session runs andes" in detail
+
+
+@pytest.mark.integration
+async def test_restore_pre_unit_snapshot_without_engine_stamp(
+    client: httpx.AsyncClient,
+    workspace: Path,
+) -> None:
+    """A snapshot saved before the engine stamp existed has no ``engine``
+    key; it reads as ``andes`` and restores as before."""
+    sid = await _create_session_with_case(client)
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot",
+        json={"name": "legacy"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    sidecar = workspace / "snapshots" / "ieee14" / "legacy.json"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    del data["engine"]
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+
+    resp = await client.post(
+        f"/api/sessions/{sid}/snapshot/restore",
+        json={"name": "legacy"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["used_dill"] is False
 
 
 # ---- session-restart durability --------------------------------------------

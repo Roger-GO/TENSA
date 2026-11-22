@@ -108,6 +108,18 @@ class SnapshotVersionMismatchError(SnapshotError):
     """
 
 
+class SnapshotEngineMismatchError(SnapshotError):
+    """Raised when a restore is asked of a session whose engine differs from
+    the snapshot's.
+
+    Routes layer surfaces as HTTP 409. The recovery is opening the case
+    file under the engine that saved the snapshot; a later unit adds the
+    case document route (``GET /sessions/{id}/case-document``), the
+    engine-neutral way to move a case between engines, and the message
+    then points at it.
+    """
+
+
 # ---- snapshot metadata ------------------------------------------------------
 
 
@@ -129,6 +141,10 @@ class SnapshotMetadata:
     saved_at: str
     has_pflow: bool
     has_tds: bool
+    #: The engine that saved the snapshot. Defaults to ``"andes"`` so a
+    #: construction that predates the stamp (an old test, an old caller)
+    #: keeps working; ``from_dict`` applies the same default on read.
+    engine: str = "andes"
     #: The diagram's layout at the save, as the plain dict of a validated
     #: ``SidecarLayout``; ``None`` when the snapshot was saved without one.
     layout: dict[str, Any] | None = None
@@ -136,8 +152,8 @@ class SnapshotMetadata:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SnapshotMetadata:
         """Build from a parsed JSON object. Tolerant of missing optional
-        fields (defaults to ``None`` / ``False`` / ``[]``); raises
-        :class:`SnapshotMetadataError` only when required fields are
+        fields (defaults to ``None`` / ``False`` / ``[]`` / ``"andes"``);
+        raises :class:`SnapshotMetadataError` only when required fields are
         absent or not strings.
         """
         andes_version = data.get("andes_version")
@@ -155,9 +171,12 @@ class SnapshotMetadata:
                 "snapshot.json 'disturbance_log' must be a list of dicts"
             )
         disturbance_log = [d for d in disturbance_log_raw if isinstance(d, dict)]
+        engine_raw = data.get("engine")
+        engine = engine_raw if isinstance(engine_raw, str) else "andes"
         return cls(
             andes_version=andes_version,
             tensa_version=tensa_version,
+            engine=engine,
             case_filename=(
                 data.get("case_filename")
                 if isinstance(data.get("case_filename"), str)
@@ -191,6 +210,7 @@ class SnapshotMetadata:
         return {
             "andes_version": self.andes_version,
             "tensa_version": self.tensa_version,
+            "engine": self.engine,
             "case_filename": self.case_filename,
             "case_sha256": self.case_sha256,
             "disturbance_log": list(self.disturbance_log),
@@ -219,6 +239,9 @@ class SnapshotEntry:
     has_dill: bool
     andes_version: str
     disturbance_count: int
+    #: The engine that saved the snapshot; ``"andes"`` for one saved before
+    #: the stamp existed. Defaults so older constructions keep working.
+    engine: str = "andes"
 
 
 # ---- name validation --------------------------------------------------------
@@ -259,6 +282,26 @@ def validate_existing_snapshot_name(name: str) -> str:
     if problem is not None:
         raise SnapshotMetadataError(f"invalid snapshot name {name!r}; the name {problem}")
     return name
+
+
+def validate_on_disk_snapshot_name(name: str) -> str:
+    """Validate the name of a snapshot file that is already on disk.
+
+    Restore and delete use this where the listing does: a name refused only by
+    the portable-name rule (a pre-rule save such as ``aux``) is accepted, since
+    the file's presence on disk proves the platform holds it. A name refused by
+    the shape rule (a traversal vector) is still refused, so the paths built
+    from the name stay inside the snapshot directory.
+    """
+    try:
+        return validate_existing_snapshot_name(name)
+    except SnapshotMetadataError:
+        from tensa.security.names import portable_name_problem
+
+        shape_problem = user_name_problem(name, legacy=True)
+        if shape_problem is not None and shape_problem != portable_name_problem(name):
+            raise
+        return name
 
 
 # ---- version-stamp check ----------------------------------------------------
@@ -422,7 +465,19 @@ def list_snapshots_on_disk(
     entries: list[SnapshotEntry] = []
     for json_path in sorted(base.glob("*.json")):
         try:
-            validate_existing_snapshot_name(json_path.stem)
+            # The file is on disk, so a name refused only by the portable-name
+            # rules (a pre-rule save such as ``aux``) still lists: restore and
+            # delete accept it through the same fallback. A name refused by the
+            # shape rule (a traversal vector) is skipped. A file named like a
+            # Windows device is kept when it is on disk: its existence proves
+            # the platform holds it, whatever the portable-name rule says.
+            validate_on_disk_snapshot_name(json_path.stem)
+        except SnapshotError as exc:
+            log.warning(
+                "snapshot listing skipping %s: %s", json_path.name, exc
+            )
+            continue
+        try:
             meta = read_snapshot_metadata(json_path)
         except SnapshotError as exc:
             log.warning(
@@ -438,6 +493,7 @@ def list_snapshots_on_disk(
                 has_tds=meta.has_tds,
                 has_dill=dill_path.exists(),
                 andes_version=meta.andes_version,
+                engine=meta.engine,
                 disturbance_count=len(meta.disturbance_log),
             )
         )
@@ -452,7 +508,7 @@ def delete_snapshot_files(
     delete). Raises :class:`SnapshotNotFoundError` if NEITHER file
     exists — the routes layer maps that to 404.
     """
-    validate_existing_snapshot_name(name)
+    validate_on_disk_snapshot_name(name)
     dill_path, json_path = snapshot_paths(workspace, case_filename, name)
     removed = False
     for p in (dill_path, json_path):
@@ -491,6 +547,7 @@ __all__ = [
     "RestoreSnapshotResult",
     "SaveSnapshotResult",
     "SnapshotCollisionError",
+    "SnapshotEngineMismatchError",
     "SnapshotEntry",
     "SnapshotError",
     "SnapshotMetadata",
@@ -503,6 +560,7 @@ __all__ = [
     "snapshot_dir",
     "snapshot_paths",
     "validate_existing_snapshot_name",
+    "validate_on_disk_snapshot_name",
     "validate_snapshot_name",
     "versions_compatible",
     "write_snapshot_files",

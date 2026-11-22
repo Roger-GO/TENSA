@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from tensa.core.case_events import event_from_spec
 from tensa.core.disturbance import AlterSpec, DisturbanceSpec, FaultSpec, ToggleSpec
 from tensa.core.errors import NoCaseLoadedError, SetupFailedError
+from tensa.core.snapshot import SnapshotEngineMismatchError
 from tensa.core.wrapper.base import _sanitize_message
 from tensa.core.wrapper.case import CaseMixin
 
@@ -127,6 +128,7 @@ class SnapshotMixin(CaseMixin):
             metadata = SnapshotMetadata(
                 andes_version=andes_version,
                 tensa_version=str(tensa_version),
+                engine="andes",
                 case_filename=case_filename,
                 case_sha256=case_sha256,
                 disturbance_log=[
@@ -244,7 +246,7 @@ class SnapshotMixin(CaseMixin):
             SnapshotMetadataError,
             read_snapshot_metadata,
             snapshot_paths,
-            validate_existing_snapshot_name,
+            validate_on_disk_snapshot_name,
         )
 
         if self._workspace is None:
@@ -252,7 +254,7 @@ class SnapshotMixin(CaseMixin):
                 "snapshot restore requires a workspace; the substrate "
                 "was launched without one"
             )
-        validated = validate_existing_snapshot_name(name)
+        validated = validate_on_disk_snapshot_name(name)
         if self._ss is None and self._case_path is None:
             raise NoCaseLoadedError(
                 "snapshot restore requires a loaded case to scope the "
@@ -328,6 +330,16 @@ class SnapshotMixin(CaseMixin):
         # Read, bounded and parsed up front so a malformed log is refused
         # before the live System is touched.
         record = self._read_snapshot_record(name)
+        if record.metadata.engine != "andes":
+            # A later unit adds the case document route
+            # (GET /sessions/{id}/case-document), the engine-neutral way to
+            # move a case between engines; the message then points at it.
+            raise SnapshotEngineMismatchError(
+                f"snapshot {record.name!r} was saved by the "
+                f"{record.metadata.engine} engine; this session runs andes. "
+                f"Open the case file in a session of the "
+                f"{record.metadata.engine} engine to restore it there."
+            )
         validated = record.name
         dill_path = record.dill_path
         metadata = record.metadata
@@ -473,6 +485,7 @@ class SnapshotMixin(CaseMixin):
                 "has_tds": e.has_tds,
                 "has_dill": e.has_dill,
                 "andes_version": e.andes_version,
+                "engine": e.engine,
                 "disturbance_count": e.disturbance_count,
             }
             for e in entries

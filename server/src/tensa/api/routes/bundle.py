@@ -103,6 +103,13 @@ class BundleImportPlanModel(BaseModel):
     case_files: list[str] = Field(
         ..., description="Case filenames contained in the bundle (workspace-relative)."
     )
+    engine: str = Field(
+        "andes",
+        description=(
+            "Engine that wrote the bundle. ``andes`` for a bundle written "
+            "before the stamp existed."
+        ),
+    )
     conflicts: list[BundleConflictModel] = Field(
         default_factory=list,
         description="Conflicts detected between the bundle and this server/workspace.",
@@ -205,6 +212,7 @@ _BUNDLE_VALIDATION_STATUS: dict[str, int] = {
     "disturbances-malformed": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "bundle-blocked": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "unsafe-path": status.HTTP_422_UNPROCESSABLE_CONTENT,
+    "engine-mismatch": status.HTTP_409_CONFLICT,
 }
 
 
@@ -245,6 +253,7 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
     return BundleImportPlanModel(
         manifest=dict(plan_raw.get("manifest") or {}),
         case_files=[str(s) for s in (plan_raw.get("case_files") or [])],
+        engine=str(plan_raw.get("engine") or "andes"),
         conflicts=[
             BundleConflictModel(**c) for c in (plan_raw.get("conflicts") or [])
         ],
@@ -274,7 +283,9 @@ def _coerce_plan(payload: dict[str, Any]) -> BundleImportPlanModel:
                 "Conflicts detected (sha mismatch / version mismatch / "
                 "addfile missing). Body is a ``BundleImportResponse`` "
                 "with ``status='plan'`` so the UI can render the "
-                "conflict resolver."
+                "conflict resolver. OR the bundle was written by another "
+                "engine (a plain problem document; the detail points at "
+                "opening the case file under the engine that wrote it)."
             ),
         },
         413: {
