@@ -331,9 +331,8 @@ class SnapshotMixin(CaseMixin):
         # before the live System is touched.
         record = self._read_snapshot_record(name)
         if record.metadata.engine != "andes":
-            # A later unit adds the case document route
-            # (GET /sessions/{id}/case-document), the engine-neutral way to
-            # move a case between engines; the message then points at it.
+            # The case document (GET /sessions/{id}/case/neutral) cannot open
+            # a case yet (decision 41), so the recovery is the case file.
             raise SnapshotEngineMismatchError(
                 f"snapshot {record.name!r} was saved by the "
                 f"{record.metadata.engine} engine; this session runs andes. "

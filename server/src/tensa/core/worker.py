@@ -1897,7 +1897,10 @@ def _neutral_stream_columns(
                 raise TdsRequestError(f"the book does not key Bus {short_repr(idx)}")
             bus_keys.append(key)
         slack = getattr(ss, "Slack", None)
-        slack_idx = list(getattr(getattr(slack, "idx", None), "v", []))
+        # The bus of the first Slack device, not its idx: ANDES's PSS/E and
+        # MATPOWER readers number generators by a running count (IEEE 39's
+        # Slack is device 10 on bus 39).
+        slack_idx = list(getattr(getattr(slack, "bus", None), "v", []))
         if not slack_idx:
             raise TdsRequestError(
                 "names 'neutral' streams angle_rel against the reference bus, "
@@ -1934,7 +1937,11 @@ def _neutral_stream_columns(
                 )
             unit_keys.append(entry.key.partition("/")[0])
             # ANDES's M is 2H on the machine base Sn; the weight is H * Sn.
-            weights.append(float(model.M.v[model.idx2uid(idx)]) / 2.0 * float(model.Sn.v[model.idx2uid(idx)]))
+            # ANDES's M is 2H on the machine base Sn as the case gives it
+            # (``vin``); ``setup()`` puts ``v`` on the system base, so the
+            # weight H * Sn is read from ``vin``.
+            uid = model.idx2uid(idx)
+            weights.append(float(model.M.vin[uid]) / 2.0 * float(model.Sn.v[uid]))
         import numpy as np
 
         rotor = (unit_keys, np.asarray(weights, dtype=np.float64))

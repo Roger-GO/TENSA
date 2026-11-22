@@ -113,10 +113,10 @@ class SnapshotEngineMismatchError(SnapshotError):
     the snapshot's.
 
     Routes layer surfaces as HTTP 409. The recovery is opening the case
-    file under the engine that saved the snapshot; a later unit adds the
-    case document route (``GET /sessions/{id}/case-document``), the
-    engine-neutral way to move a case between engines, and the message
-    then points at it.
+    file under the engine that saved the snapshot. The case document
+    (``GET /sessions/{id}/case/neutral``) describes a case the same way for
+    every engine but cannot open one yet, so it is not a way to move a
+    snapshot between engines (decision 41).
     """
 
 

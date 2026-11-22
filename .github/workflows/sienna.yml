@@ -11,21 +11,27 @@ on:
   push:
     branches: [main, "improve/**", multiengine]
     paths:
-      - "server/src/tensa/engines/**"
-      - "server/src/tensa/core/worker.py"
-      - "server/tests/integration/test_sienna_*.py"
+      # Every test marked sienna is an integration test, and the API, the
+      # session manager and the worker all sit between it and the engine, so
+      # any change to the server's code or its integration tests runs it.
+      - "server/src/**"
+      - "server/tests/integration/**"
       - "server/tests/julia/**"
       - "server/pyproject.toml"
       - "scripts/make_sienna_samples.py"
+      - "scripts/verify_example_cases.py"
       - ".github/workflows/sienna.yml"
   pull_request:
     paths:
-      - "server/src/tensa/engines/**"
-      - "server/src/tensa/core/worker.py"
-      - "server/tests/integration/test_sienna_*.py"
+      # Every test marked sienna is an integration test, and the API, the
+      # session manager and the worker all sit between it and the engine, so
+      # any change to the server's code or its integration tests runs it.
+      - "server/src/**"
+      - "server/tests/integration/**"
       - "server/tests/julia/**"
       - "server/pyproject.toml"
       - "scripts/make_sienna_samples.py"
+      - "scripts/verify_example_cases.py"
       - ".github/workflows/sienna.yml"
   workflow_dispatch:
 

@@ -46,9 +46,12 @@ STAMP = ".tensa-sienna-ready"
 # precompile them (``JULIA_PKG_PRECOMPILE_AUTO=0`` keeps ``instantiate`` from
 # precompiling on its own, so it happens once, in the step that says so).
 INSTALL_CODE = "using Pkg; Pkg.instantiate(); Pkg.precompile()"
-# What the second runs: include the module named by the first argument and
-# print the versions it reports, as one line of JSON.
-CHECK_CODE = "include(ARGS[1]); print(TensaSienna.versions_json())"
+# What the second runs: include each module named by the arguments, in order
+# (the first is TensaSienna, which the other three import), and print the
+# versions it reports, as one line of JSON. Every module is loaded, so a
+# stamp is never written where the dynamics, network or operations module
+# would fail at its first use.
+CHECK_CODE = "foreach(include, ARGS); print(TensaSienna.versions_json())"
 
 _JULIA_VERSION_LINE = re.compile(r'^\s*julia_version\s*=\s*"(\d+)\.(\d+)(?:\.\d+)?')
 _JULIA_VERSION_OUT = re.compile(r"^julia version (\d+)\.(\d+)\.(\d+)", re.MULTILINE)
@@ -173,7 +176,12 @@ def setup_sienna(
 
     packaged = packaged_project()
     packaged_manifest = packaged / "Manifest.toml"
-    module = environment.module_path()
+    modules = [
+        environment.module_path(),
+        environment.dynamics_module_path(),
+        environment.network_module_path(),
+        environment.ops_module_path(),
+    ]
 
     resolved = manifest_julia_version(packaged_manifest)
     resolved_text = _version_text(resolved) if resolved is not None else "an unknown version"
@@ -227,7 +235,7 @@ def setup_sienna(
             "see its output above."
         )
 
-    echo("Checking that the engine's Julia module loads in the project")
+    echo("Checking that the engine's Julia modules load in the project")
     try:
         check = run(
             [
@@ -236,7 +244,7 @@ def setup_sienna(
                 "--startup-file=no",
                 "-e",
                 CHECK_CODE,
-                str(module),
+                *(str(module) for module in modules),
             ],
             check=False,
             text=True,

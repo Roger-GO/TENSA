@@ -337,6 +337,15 @@ _EDIT_PARAMS: dict[str, dict[str, tuple[str, bool]]] = {
     "Shunt": {"g": ("g_mw", True), "b": ("b_mvar", True), "u": ("in_service", False)},
 }
 
+def edit_param_of(model: str, field: str) -> str:
+    """The ANDES param a neutral ``field`` of ``model`` is edited through
+    (``p_mw`` of a ``PQ`` is ``p0``); the field itself when none maps to it."""
+    for param, (neutral, _per_unit) in _EDIT_PARAMS.get(model, {}).items():
+        if neutral == field:
+            return param
+    return field
+
+
 # The neutral kind each addable model maps to.
 _ADD_KINDS = {"PQ": "load", "Shunt": "shunt"}
 

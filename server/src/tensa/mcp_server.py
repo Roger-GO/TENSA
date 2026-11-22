@@ -226,7 +226,12 @@ def load_case(
 
 @mcp.tool()
 def reload_case(session_id: str) -> Any:
-    """Reload the current case to pre-setup state (required before adding more disturbances after a run). Engines: andes, sienna."""
+    """Read the case file again (required under ANDES before adding more disturbances after a run).
+
+    Under ANDES the session's element edits are dropped; under Sienna they are
+    applied again, since a Sienna session is always the case file with its
+    edits. Pending disturbances are dropped under both. Engines: andes, sienna.
+    """
     return _api("POST", f"/sessions/{session_id}/reload", {})
 
 
@@ -560,10 +565,11 @@ def run_dispatch(
 ) -> Any:
     """Run the one-period economic dispatch of the loaded case (Sienna only).
 
-    network_model is copper_plate (the default), dc or ptdf. The answer
-    holds objective_per_h (the solver's objective in $/h) and
-    objective_check_per_h (recomputed from the dispatch and the file's
-    gencost; the two agree), generators keyed by neutral key
+    network_model is copper_plate (the default), dc, ptdf or ac (the full
+    AC equations, solved with Ipopt). The answer holds objective_per_h (the
+    solver's objective in $/h) and objective_check_per_h (recomputed from
+    the dispatch and the file's gencost; the route's description says how
+    the two relate), generators keyed by neutral key
     (gen:<bus>-<id>) each with p_mw, bus, id and idx, slacks (every slack
     variable past 1e-6 MW), and duals only when duals is true. The case
     needs generator cost data: a PSS/E .raw carries none (422); a MATPOWER
@@ -638,7 +644,8 @@ def add_element(session_id: str, model: str, params: dict[str, Any]) -> Any:
     model is a TENSA kind (Bus, Line, PQ, PV, Slack, Shunt, GENROU, ...);
     params are its parameters (a reference to another device, "bus", "gen",
     "syn", may be sent as "5" or 5). Under Sienna the subset is: a PQ or a
-    Shunt on a bus. The answer is the topology after the add. Engines:
+    Shunt on a bus. The answer names the element created (model and idx)
+    and the job that added it; read the topology for the case after it. Engines:
     andes, sienna.
     """
     return _api("POST", f"/sessions/{session_id}/elements", {"model": model, "params": params})

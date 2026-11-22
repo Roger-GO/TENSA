@@ -80,9 +80,8 @@ class BundleMixin(CaseMixin):
         )
 
         if plan.engine != "andes":
-            # A later unit adds the case document route
-            # (GET /sessions/{id}/case-document), the engine-neutral way to
-            # move a case between engines; the message then points at it.
+            # The case document (GET /sessions/{id}/case/neutral) cannot open
+            # a case yet (decision 41), so the recovery is the case file.
             raise BundleValidationError(
                 "engine-mismatch",
                 f"bundle was written by the {plan.engine} engine; this "

@@ -174,3 +174,87 @@ def test_batch_traces_renamed_with_the_same_values(live: tuple[TestClient, str])
     assert neutral_traces["variables"][0]["name"] == f"state|{machine['key']}#omega"
     assert neutral_traces["t"] == engine_traces["t"]
     assert neutral_traces["variables"][0]["values"] == engine_traces["variables"][0]["values"]
+
+
+@pytest.fixture
+def live39(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
+    """A client and a session with IEEE 39 loaded: its Slack is device 10 on
+    bus 39, and its machines have different ratings (Sn 1040, 836, ... MVA),
+    which Kundur's four 900 MVA machines cannot tell apart."""
+    pytest.importorskip("andes")
+    case = _andes_cases_dir() / "ieee39" / "ieee39_full.xlsx"
+    if not case.exists():  # pragma: no cover
+        pytest.skip(f"IEEE 39 fixture not bundled with this ANDES install: {case}")
+    workspace = tmp_path / "ws"
+    workspace.mkdir(mode=0o700)
+    shutil.copy2(case, workspace / "ieee39_full.xlsx")
+    app = make_app(
+        workspace=workspace,
+        bind_host="127.0.0.1",
+        bind_port=8000,
+        max_sessions=2,
+        idle_timeout_seconds=180.0,
+        extra_allowed_hosts=frozenset({"testserver"}),
+        extra_allowed_origins=frozenset({"http://testserver", "http://localhost"}),
+    )
+    with TestClient(app) as client:
+        created = client.post("/api/sessions")
+        assert created.status_code == 201, created.text
+        sid = str(created.json()["session_id"])
+        loaded = client.post(f"/api/sessions/{sid}/case", json={"primary_path": "ieee39_full.xlsx"})
+        assert loaded.status_code in (200, 201), loaded.text
+        yield client, sid
+
+
+def _machine_weights(case: Path) -> dict[str, float]:
+    """H * Sn of every GENROU of ``case``, keyed by its idx as a string, read
+    from the case file's own values in this process (ANDES's ``M`` is 2H on
+    the machine base, as the file gives it)."""
+    import andes
+
+    ss = andes.load(str(case), setup=False, no_output=True, default_config=True)
+    model = ss.GENROU
+    return {
+        str(idx): float(m) / 2.0 * float(sn)
+        for idx, m, sn in zip(model.idx.v, model.M.v, model.Sn.v, strict=True)
+    }
+
+
+@pytest.mark.integration
+def test_neutral_relative_angles_on_ieee39(live39: tuple[TestClient, str]) -> None:
+    """The reference of angle_rel is the Slack's bus (39), not its device idx
+    (10), and rotor_angle_rel is weighted by H * Sn on each machine's own
+    rating."""
+    client, sid = live39
+    metadata, rows = _stream(client, sid, {"tf": 0.1, "names": "neutral"})
+    columns = [str(column) for column in metadata["var_columns"]]  # type: ignore[union-attr]
+    assert rows, "the run streamed no rows"
+
+    reference = columns.index("angle_rel|bus:39")
+    other = columns.index("angle_rel|bus:10")
+    for _t, values in rows:
+        assert values[reference] == 0.0
+    assert any(abs(values[other]) > 1e-3 for _t, values in rows)
+
+    keys = client.get(f"/api/sessions/{sid}/keys")
+    assert keys.status_code == 200, keys.text
+    unit_of_machine = {
+        str(entry["idx"]): str(entry["key"]).partition("/")[0]
+        for entry in keys.json()["keys"]
+        if entry["model"] == "GENROU"
+    }
+    weight_of_unit = {
+        unit_of_machine[idx]: weight
+        for idx, weight in _machine_weights(_andes_cases_dir() / "ieee39" / "ieee39_full.xlsx").items()
+    }
+    assert len(set(weight_of_unit.values())) > 1, "the case's machines must weigh differently"
+    rotor = [
+        (i, weight_of_unit[parse_name(column)[1]])
+        for i, column in enumerate(columns)
+        if parse_name(column)[0] == "rotor_angle_rel"
+    ]
+    assert len(rotor) == len(weight_of_unit)
+    for _t, values in rows:
+        weighted = sum(weight * values[i] for i, weight in rotor)
+        total = sum(weight for _i, weight in rotor)
+        assert abs(weighted / total) <= 1e-9

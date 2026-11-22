@@ -256,8 +256,11 @@ def test_the_steps_come_in_order_and_the_run_calls_are_exact(
         f"--project={project}",
         "--startup-file=no",
         "-e",
-        "include(ARGS[1]); print(TensaSienna.versions_json())",
+        "foreach(include, ARGS); print(TensaSienna.versions_json())",
         str(environment.module_path()),
+        str(environment.dynamics_module_path()),
+        str(environment.network_module_path()),
+        str(environment.ops_module_path()),
     ]
     # Julia's output of the install reaches the console; the check's is read.
     assert install_kwargs["check"] is False and install_kwargs["text"] is True
@@ -294,7 +297,7 @@ def test_each_step_is_announced_before_it_starts(tmp_path: Path) -> None:
     assert echoed[1].startswith("Copying Project.toml and Manifest.toml into ")
     assert echoed[2].startswith("Installing and precompiling the Sienna packages")
     assert seen_at_run[0] == 3
-    assert echoed[3].startswith("Checking that the engine's Julia module loads")
+    assert echoed[3].startswith("Checking that the engine's Julia modules load")
     assert seen_at_run[1] == 4
 
 

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from tensa.core.disturbance import DisturbanceSpec, FaultSpec, ToggleSpec
+from tensa.core.edit_log import EditStep
 from tensa.core.eig_math import (
     _ZERO_EIGENVALUE_TOL,
     _compute_damping_ratio,
@@ -86,6 +87,8 @@ from tensa.engines.sienna.edit_log import (
     AddElementOp,
     NeutralOp,
     RemoveElementOp,
+    SetFieldOp,
+    bucket_of_key,
     make_add,
     make_remove,
     make_set_field,
@@ -586,7 +589,9 @@ class SiennaState:
         for note in (document or {}).get("notes") or []:
             log.warning("%s", note)
 
-        return topology_snapshot(topology, report, book, ratings=self._ratings(log_unmatched=True))
+        return self._with_steps(
+            topology_snapshot(topology, report, book, ratings=self._ratings(log_unmatched=True))
+        )
 
     def _ratings(self, *, log_unmatched: bool = False) -> dict[str, float] | None:
         """The file's branch ratings, keyed by branch key, for the snapshot and
@@ -615,9 +620,38 @@ class SiennaState:
         assert self._topology_json is not None  # noqa: S101
         assert self._report_json is not None  # noqa: S101
         ratings = self._ratings()
-        return topology_snapshot(
-            self._topology_json, self._report_json, self._key_book, ratings=ratings
+        return self._with_steps(
+            topology_snapshot(
+                self._topology_json, self._report_json, self._key_book, ratings=ratings
+            )
         )
+
+    def _with_steps(self, snapshot: TopologySnapshot) -> TopologySnapshot:
+        """``snapshot`` with ``undo`` and ``redo`` naming the edits
+        ``undo_last_edit`` and ``redo_edit`` would act on, as the ANDES
+        wrapper's topology names them."""
+        snapshot.undo = self._edit_step(self._edit_log[-1]) if self._edit_log else None
+        snapshot.redo = self._edit_step(self._redo_log[-1]) if self._redo_log else None
+        return snapshot
+
+    def _edit_step(self, op: NeutralOp) -> EditStep:
+        """One log entry as the ANDES engine's ``EditStep``: the element's
+        model and idx (the key book's entry; for an element the log has
+        taken out, the model its key's bucket is added as and the topology
+        name the op carries), and for a set the ANDES param the field is
+        edited through (``p_mw`` is ``p0``), so a client reads one shape from
+        either engine."""
+        from tensa.engines.sienna.runtime import edit_param_of  # the runtime imports this module
+
+        entry = self._key_book.entry_of(op.key)
+        bucket_model = {"load": "PQ", "shunt": "Shunt"}.get(bucket_of_key(op.key) or "", "")
+        model = entry.model if entry is not None else bucket_model
+        if isinstance(op, SetFieldOp):
+            idx: int | str | None = entry.idx if entry is not None else op.name
+            return EditStep(op="edit", model=model, idx=idx, params=(edit_param_of(model, op.field),))
+        if isinstance(op, AddElementOp):
+            return EditStep(op="add", model=model, idx=entry.idx if entry is not None else None)
+        return EditStep(op="delete", model=model, idx=entry.idx if entry is not None else op.name)
 
     def reload_case(self) -> TopologySnapshot:
         """Load the same files again with the same ``on_unsupported`` and the
@@ -990,7 +1024,8 @@ class SiennaState:
             if self._key_book.key_of(model, idx) is None:
                 bucket = "load" if model == "PQ" else "shunt"
                 self._key_book.assign(KeyEntry(op.key, bucket, model, idx, "ordinal"))
-        return snapshot
+        # The snapshot was built before the logs moved; its steps are the new ones.
+        return self._with_steps(snapshot)
 
     def add_element(self, kind: str, fields: dict[str, Any]) -> TopologySnapshot:
         """Add a load or a shunt on an existing bus and answer the topology."""
@@ -1048,7 +1083,7 @@ class SiennaState:
         snapshot = self._reload_with(kept)
         self._edit_log = kept
         self._redo_log = redo
-        return snapshot
+        return self._with_steps(snapshot)
 
     def redo_edit(self) -> TopologySnapshot:
         """Put back the edit ``undo_last_edit`` took back last."""
@@ -1061,7 +1096,7 @@ class SiennaState:
         snapshot = self._reload_with(log_ops)
         self._edit_log = log_ops
         self._redo_log = redo
-        return snapshot
+        return self._with_steps(snapshot)
 
     # ---- run_dispatch ---------------------------------------------------------
 

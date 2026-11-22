@@ -758,6 +758,24 @@ def test_every_path_filter_of_the_sienna_workflow_matches_an_existing_file() -> 
         assert _matches_a_file(pattern), f"paths filter {pattern!r} matches no file"
 
 
+def test_every_test_marked_sienna_is_under_a_paths_filter_of_the_sienna_workflow() -> None:
+    """A test marked ``sienna`` skips in the server workflow, where Julia is not
+    set up, so the sienna workflow is the only place it runs: a change to its
+    file must start that workflow."""
+    import fnmatch
+
+    filters = _triggers(_sienna_workflow())["push"]["paths"]
+    tests = REPO_ROOT / "server" / "tests"
+    marked = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in tests.rglob("test_*.py")
+        if path.name != Path(__file__).name and "pytest.mark.sienna" in path.read_text(encoding="utf-8")
+    ]
+    assert marked, "no test is marked sienna"
+    for path in marked:
+        assert any(fnmatch.fnmatch(path, pattern) for pattern in filters), path
+
+
 def test_the_paper_draft_is_built_with_the_open_journals_action_and_kept_as_an_artifact() -> None:
     """The submission form asks the author to confirm that the paper compiles. This is the
     check that it does: the journal's own action, on a push that changes ``paper/``."""
