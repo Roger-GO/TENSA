@@ -181,6 +181,7 @@ class SiennaState:
         self._pflow_json: dict[str, Any] | None = None
         self._pflow_settings: PflowSettings | None = None
         self._document: dict[str, Any] | None = None
+        self._versions: dict[str, str] | None = None
 
     # ---- the bridge ---------------------------------------------------------
 
@@ -559,3 +560,24 @@ class SiennaState:
         """The keys of the loaded case's elements."""
         self._require_session()
         return self._key_book
+
+    def versions(self) -> dict[str, str]:
+        """The versions the running Julia reports, cached after the first call.
+
+        For the results document of a later unit (spec section 9: "The adapter
+        records the versions it ran with in every result"). They cannot change
+        while the worker lives. A bridge whose ``versions()`` raises answers an
+        empty dict, logged at warning: a version lookup must never fail an op.
+        """
+        if self._versions is None:
+            try:
+                reported = self._require_bridge().versions()
+            except Exception as exc:  # noqa: BLE001 - never fail an op for this
+                logging.getLogger("tensa.sienna").warning(
+                    "could not read the Sienna versions (%s: %s)",
+                    exc.__class__.__name__,
+                    exc,
+                )
+                reported = {}
+            self._versions = {str(k): str(v) for k, v in reported.items()}
+        return dict(self._versions)

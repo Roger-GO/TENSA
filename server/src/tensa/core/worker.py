@@ -242,21 +242,25 @@ def _warm_andes() -> None:
             importlib.import_module(name)
 
 
-def _warm_up_if_idle(ctrl: Connection, warm_up: Callable[[], None]) -> None:
+def _warm_up_if_idle(ctrl: Connection, warm_up: Callable[[], None]) -> float | None:
     """Run the engine's warm-up, unless a command is already waiting.
 
     A command that arrives before the worker is up (a script that creates a
     session and loads a case at once) pulls in what it needs itself, and a warm-up
     first would only delay it. Called before the first ``recv``, so a command
-    that arrives during the warm-up waits for it, at most a second. A worker warms
-    up only its own engine.
+    that arrives during the warm-up waits for it. A worker warms up only its own
+    engine, and at most once.
+
+    Returns the seconds the warm-up took, or ``None`` when it did not run.
     """
     try:
         if ctrl.poll(0):
-            return
+            return None
     except (EOFError, OSError):
-        return
+        return None
+    started = time.monotonic()
     warm_up()
+    return time.monotonic() - started
 
 
 def _normalized_path(path: str) -> str:
@@ -2053,7 +2057,20 @@ def worker_main(
         # Import ANDES now, before the first ``recv``, so the first load does not. This
         # runs ahead of the audit hook on purpose: it reads only library files, and the
         # hook would log some of them (the system's ``mime.types``) as strays.
-        _warm_up_if_idle(ctrl, runtime.warm_up)
+        warmed = _warm_up_if_idle(ctrl, runtime.warm_up)
+        if warmed is not None and engine == "sienna":
+            # The warm-up ran before any command existed, so the line rides on the
+            # first reply through the same log capture every op's messages use:
+            # the notice logger, which the capture listens to (``tensa.worker``
+            # is not captured, and a line logged there never reaches the user).
+            import logging
+
+            from tensa.core.messages import NOTICE_LOGGER
+
+            logging.getLogger(NOTICE_LOGGER).info(
+                "The Sienna engine was started and warmed up in %d s.",
+                round(warmed),
+            )
         _install_strict_fs_audit_hook(workspace, engine, owner_pid)
         return _serve_commands(ctrl, data, abort_event, workspace, session_id, owner_pid, engine)
     finally:

@@ -76,7 +76,13 @@ async def test_list_engines(client: httpx.AsyncClient) -> None:
     if _SIENNA_REASON is None:
         assert sienna["available"] is True
         assert sienna["unavailable_reason"] is None
-        assert sienna["versions"] == {}
+        # The Manifest of the session's project holds julia and PowerSystems.
+        assert sienna["versions"]["julia"]
+        assert sienna["versions"]["PowerSystems"]
+        assert all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in sienna["versions"].items()
+        )
         assert sienna["formats"] == {
             "read": ["psse-raw", "psse-dyr", "matpower"],
             "write": [],

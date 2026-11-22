@@ -31,11 +31,15 @@ def engine_capabilities(name: str) -> dict[str, Any]:
             "editing": False,
         }
     if name == "sienna":
+        # Imported lazily, as ``registry.engine_unavailable_reason`` imports the
+        # environment check, so this module keeps importing nothing of an engine.
+        from tensa.engines.sienna.manifest import sienna_versions
+
         return {
             "name": name,
             "available": True,
             "unavailable_reason": None,
-            "versions": {},
+            "versions": sienna_versions(),
             "formats": {"read": ["psse-raw", "psse-dyr", "matpower"], "write": []},
             "routines": ["pflow"],
             "ops": sorted(ENGINE_OPS[name]),

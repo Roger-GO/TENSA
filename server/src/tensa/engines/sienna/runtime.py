@@ -10,9 +10,13 @@ the worker before dispatch.
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from tensa.core.errors import NoCaseLoadedError
+from tensa.core.messages import NOTICE_LOGGER
 from tensa.core.worker import _serialize_dataclass
 from tensa.engines.base import EngineRuntime
 from tensa.engines.sienna.bridge import JuliaBridge
@@ -111,17 +115,49 @@ def _dispatch(
 
 
 def _warm_up() -> None:
-    """Start the bridge, so the first op does not pay for Julia's start.
+    """Start the bridge and run a small case through load, topology and power
+    flow, so the first op pays for neither Julia's start nor the compilation of
+    the code paths it uses.
 
-    Best effort: a failure only means the first op reports the real error
+    The case is ANDES's own ``kundur.raw``, found without importing ANDES and
+    copied into a temporary directory so the Julia session the warm-up opens is
+    released with it and never becomes the user's case. When the file is not
+    found, the warm-up only starts Julia, as before. Best effort: any failure
+    is logged and ends the warm-up; the first op then reports the real error
     itself, as the ANDES warm-up treats one.
     """
     try:
         bridge = JuliaBridge()
         bridge.start()
+        from tensa.core.examples import _andes_cases_dir
+
+        cases = _andes_cases_dir()
+        raw = cases / "kundur" / "kundur.raw" if cases is not None else None
+        if raw is None or not raw.is_file():
+            return
+        # The warm-up case's own notes (its slack bus, its setpoints) are about a
+        # case the user never opened, and the notice logger is what the worker's
+        # capture hands to the first reply; so it is off while the case runs.
+        # Julia can still hold a file of the folder open when it is removed,
+        # which Windows refuses; that is no reason to call the warm-up failed.
+        notices = logging.getLogger(NOTICE_LOGGER)
+        was_disabled = notices.disabled
+        notices.disabled = True
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+                copy = Path(tmp) / "kundur.raw"
+                shutil.copyfile(raw, copy)
+                state = SiennaState(
+                    workspace=tmp, session_id="warmup", owner_pid=None, bridge=bridge
+                )
+                state.load_case(copy)
+                state.topology()
+                state.run_pflow()
+        finally:
+            notices.disabled = was_disabled
     except Exception as exc:  # noqa: BLE001 — warming is an optimisation
         log.warning(
-            "could not start Julia ahead of the first op (%s: %s); "
+            "could not warm Julia ahead of the first op (%s: %s); "
             "the first op will try again",
             exc.__class__.__name__,
             exc,
