@@ -4,6 +4,7 @@
 [![server tests](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/server.yml)
 [![web tests](https://github.com/Roger-GO/TENSA/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/web.yml)
 [![docs build](https://github.com/Roger-GO/TENSA/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/Roger-GO/TENSA/actions/workflows/docs.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24451319.svg)](https://doi.org/10.5281/zenodo.24451319)
 [![Documentation](https://img.shields.io/badge/docs-roger--go.github.io%2FTENSA-0f766e)](https://roger-go.github.io/TENSA/)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](./LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776ab)](https://www.python.org/)
@@ -103,7 +104,7 @@ Conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 If you use TENSA in your work, please cite it. GitHub's "Cite this repository" button reads [CITATION.cff](./CITATION.cff). Short form:
 
-> Gracia Otalvaro, R. (2026). TENSA: an interactive web workbench for power system simulation. https://github.com/Roger-GO/TENSA
+> Gracia Otalvaro, R. (2026). TENSA: an interactive web workbench for power system simulation. https://doi.org/10.5281/zenodo.24451319
 
 The underlying computation is ANDES. Please credit the [CURENT/ANDES](https://github.com/CURENT/andes) project by Cui et al. as well.
 
