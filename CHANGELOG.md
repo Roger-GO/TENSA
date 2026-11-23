@@ -10,7 +10,7 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 **A second engine**
 
-- A session can now run on NREL's Sienna packages as well as on ANDES. Sienna is optional: `pip install "tensa[sienna]"`, then `tensa warm-cache --engine sienna`, with Julia 1.13 installed. ANDES stays the default, and an ANDES session never starts Julia.
+- TENSA now has two engines: ANDES and NREL's Sienna. Pick the engine when you start a session. Sienna runs through Julia 1.13. To set it up: `pip install "tensa[sienna]"`, then `tensa warm-cache --engine sienna`.
 - A Sienna session opens PSS/E `.raw` and `.dyr` files and MATPOWER `.m` files, and runs the power flow, the eigenvalue analysis and time-domain runs with faults and trips, streamed to the plot as with ANDES. It also has what ANDES lacks: the PTDF, LODF, admittance and incidence matrices, a DC power flow, economic dispatch, AC optimal power flow, unit commitment, and a day of unit commitment followed by a dispatch every 15 minutes.
 - Every element has a key, such as `bus:7` or `gen:1-1`, that is the same in both engines. A study can be run on both and the results compared, in the app's Compare view or with `POST /studies` and `POST /compare`. On the Kundur system with a bus fault, the rotor speeds of the two engines agree to 5e-6 pu.
 - A model that one engine runs differently from the other is never passed over in silence. `GET /sessions/{id}/fidelity` lists each one, and the six known differences between ANDES and Sienna are written down with a test that reproduces each.
