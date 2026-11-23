@@ -10,6 +10,14 @@ authors:
     affiliation: "Embry-Riddle Aeronautical University"
 repository-code: "https://github.com/Roger-GO/TENSA"
 url: "https://github.com/Roger-GO/TENSA"
+doi: "10.5281/zenodo.24451319"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24451319"
+    description: "Every version of TENSA. Resolves to the newest release."
+  - type: doi
+    value: "10.5281/zenodo.24451320"
+    description: "TENSA 0.7.0."
 license: GPL-3.0-or-later
 version: "0.7.0"
 date-released: "2026-11-22"

@@ -4,6 +4,9 @@ All notable changes to TENSA are documented here. The format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+- TENSA has a DOI on Zenodo: 10.5281/zenodo.24451319. It covers every version. `CITATION.cff`, the README and the Citing page give it, and the README has a badge for it.
+
 ## [0.7.0] - 2026-11-22
 
 ### Highlights
