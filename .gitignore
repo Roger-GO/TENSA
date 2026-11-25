@@ -53,6 +53,13 @@ server/src/tensa/workspace/
 ~/.tensa/
 *.token
 
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
 # Distribution
 *.whl
 
