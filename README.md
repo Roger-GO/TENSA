@@ -17,7 +17,7 @@ TENSA is a power system workbench that runs in your browser. You draw a network 
 
 ## What it does
 
-It's meant for teaching, for exploratory dynamic studies where seeing the system matters, and for people who drive power system tools from scripts or LLM agents. For large batch runs or for writing new models, use ANDES directly.
+It's meant for teaching, for exploratory dynamic studies where seeing the system matters, and for people who drive power system tools from scripts or LLM agents.
 
 - Power flow: steady-state voltages, angles and line flows, with the limits the solution breaks.
 - Time-domain simulation: the system's response to a fault or line trip, plotted as it computes.
