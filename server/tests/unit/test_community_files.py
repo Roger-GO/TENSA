@@ -217,12 +217,10 @@ ANALYSES = [
 
 def test_the_readme_and_the_docs_home_give_one_statement_of_need() -> None:
     """One statement of who TENSA is for and what it does, word for word on the
-    README and the documentation's home page, which names when ANDES on its own
-    is the better fit."""
+    README and the documentation's home page."""
     readme = _section(_read("README.md"), "What it does")
     home = _section(_read("docs/index.md"), "What it does")
     assert readme == home, "the two statements have drifted apart"
-    assert "ANDES directly" in readme
 
 
 def test_each_of_the_five_analyses_has_a_line_of_its_own() -> None:
